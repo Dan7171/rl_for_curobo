@@ -62,12 +62,7 @@ parser.add_argument(
     default=None,
     help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
 )
-parser.add_argument(
-    "--visualize_spheres",
-    action="store_true",
-    help="Visualize robot collision spheres",
-    default=False,
-)
+
 parser.add_argument(
     "--robot",
     type=str,
