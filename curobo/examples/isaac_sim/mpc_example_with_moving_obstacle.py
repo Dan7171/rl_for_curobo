@@ -113,7 +113,7 @@ parser.add_argument(
     "--enable_physics",
     action="store_true",
     help="Enable physical collision between obstacle and robot",
-    default=False,
+    default=True,
 )
 parser.add_argument(
     "--obstacle_mass",
@@ -203,7 +203,7 @@ def draw_points(rollouts: torch.Tensor):
     sizes = [10.0 for _ in range(b * h)]
     draw.draw_points(point_list, colors, sizes)
 
-def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=1.0, friction=0.5, restitution=0.8):
+def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=1.0):
     """
     Initialize a cube obstacle.
     
@@ -221,16 +221,14 @@ def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=
     if enable_physics:
         from omni.isaac.core.objects import DynamicCuboid
         obstacle = world.scene.add(
-            DynamicCuboid(
+            DynamicCuboid( # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.objects.DynamicCuboid:~:text=Dynamic%20cuboids%20(Cube%20shape)%20have%20collisions%20(Collider%20API)%20and%20rigid%20body%20dynamics%20(Rigid%20Body%20API) 
                 prim_path="/World/moving_obstacle",
                 name="moving_obstacle",
                 position=position,
                 size=size,
                 color=color,
                 mass=mass,
-                static_friction=friction,
-                dynamic_friction=friction,
-                restitution=restitution,
+                density=0.9
             )
         )
     else:
@@ -245,7 +243,7 @@ def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=
         )
     return obstacle
 
-def init_sphere_obstacle(world, position, size, color, enable_physics=False, mass=1.0, friction=0.5, restitution=0.8):
+def init_sphere_obstacle(world, position, size, color, enable_physics=False, mass=1.0):
     """
     Initialize a sphere obstacle.
     
@@ -257,8 +255,6 @@ def init_sphere_obstacle(world, position, size, color, enable_physics=False, mas
         enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                       If False, creates a visual-only obstacle that moves without physics.
         mass: Mass in kg (only used if enable_physics=True)
-        friction: Friction coefficient (only used if enable_physics=True)
-        restitution: Bounciness coefficient (only used if enable_physics=True)
     """
     from omni.isaac.core.objects import sphere
     if enable_physics:
@@ -271,8 +267,7 @@ def init_sphere_obstacle(world, position, size, color, enable_physics=False, mas
                 radius=size/2,
                 color=color,
                 mass=mass,
-                # friction=friction,
-                # restitution=restitution,
+                density=0.9
             )
         )
     else:
@@ -307,9 +302,9 @@ def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", co
         color = np.array([0.0, 0.0, 0.1])  # Default blue color
     
     if obstacle_type == "cuboid":
-        return init_cube_obstacle(world, position, size, color, enable_physics, mass, friction, restitution)
+        return init_cube_obstacle(world, position, size, color, enable_physics, mass)
     elif obstacle_type == "sphere":
-        return init_sphere_obstacle(world, position, size, color, enable_physics, mass, friction, restitution)
+        return init_sphere_obstacle(world, position, size, color, enable_physics, mass)
 
 def main():
     """
