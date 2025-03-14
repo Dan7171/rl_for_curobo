@@ -1,0 +1,25 @@
+{
+    "name": "CuRobo Development",
+    "image": "curobo_docker:isaac_sim_4.0.0",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/isaac-sim/python.sh",
+                "python.languageServer": "Pylance",
+                "python.analysis.typeCheckingMode": "basic",
+                "python.analysis.importFormat": "absolute",
+                "python.analysis.indexing": true,
+                "python.analysis.packageIndexDepths": [
+                    {
+                        "name": "*",
+                        "depth": 20
+                    }
+                ]
+            }
+        }
+    }
+} 
