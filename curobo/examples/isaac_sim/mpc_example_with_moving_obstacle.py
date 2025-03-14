@@ -16,11 +16,12 @@ Usage:
     omni_python mpc_example_with_moving_obstacle.py [options]
     
 Example options:
-    --obstacle_type sphere    # Use a sphere instead of cube
-    --obstacle_velocity -0.1 0.1 0.0  # Move diagonally
-    --enable_physics         # Enable physical collisions
-    --obstacle_size 0.15    # Set obstacle size
-    --obstacle_color 0.0 1.0 0.0  # Green color
+    --obstacle_type sphere    # Use a sphere instead of cube (default: cuboid)
+    --obstacle_velocity -0.1 0.1 0.0  # Move diagonally (default: [-0.1, 0.0, 0.0])
+    --enable_physics False    # Disable physical collisions (default: True)
+    --obstacle_size 0.15    # Set obstacle size (default: 0.1)
+    --obstacle_color 0.0 1.0 0.0  # Green color (default: [1.0, 0.0, 0.0])
+    --autoplay False    # Disable autoplay (default: True)
 """
 
 try:
@@ -42,17 +43,20 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-  # Default behavior (red cuboid moving at -0.1 m/s in x direction)
+  # Default behavior (red cuboid moving at -0.1 m/s in x direction, physics enabled)
   omni_python mpc_example_with_moving_obstacle.py
 
-  # Sphere obstacle moving diagonally with autoplay
-  omni_python mpc_example_with_moving_obstacle.py --obstacle_type sphere --obstacle_velocity -0.1 0.1 0.0 --obstacle_size 0.15 --autoplay
+  # Sphere obstacle moving diagonally with autoplay disabled
+  omni_python mpc_example_with_moving_obstacle.py --obstacle_type sphere --obstacle_velocity -0.1 0.1 0.0 --obstacle_size 0.15 --autoplay False
 
-  # Blue cuboid starting at specific position with physics
-  omni_python mpc_example_with_moving_obstacle.py --obstacle_type cuboid --obstacle_initial_pose 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --enable_physics --obstacle_mass 1.0 --obstacle_friction 0.5
+  # Blue cuboid starting at specific position with physics enabled
+  omni_python mpc_example_with_moving_obstacle.py --obstacle_type cuboid --obstacle_initial_pos 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --obstacle_mass 1.0
 
-  # Green sphere moving in y direction with custom size and physics
-  omni_python mpc_example_with_moving_obstacle.py --obstacle_type sphere --obstacle_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 --enable_physics --obstacle_mass 2.0 --obstacle_restitution 0.8
+  # Green sphere moving in y direction with custom size and physics disabled
+  omni_python mpc_example_with_moving_obstacle.py --obstacle_type sphere --obstacle_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 --enable_physics False
+
+  # Red cuboid with physics disabled and autoplay disabled
+  omni_python mpc_example_with_moving_obstacle.py --enable_physics False --autoplay False
 """
 )
 
@@ -90,11 +94,11 @@ parser.add_argument(
     help="Size of the obstacle (diameter for sphere, side length for cuboid) in meters",
 )
 parser.add_argument(
-    "--obstacle_initial_pose",
+    "--obstacle_initial_pos",
     type=float,
     nargs=3,
     default=[0.8, 0.0, 0.5],
-    help="Initial position of the obstacle in x, y, z (meters). Example: --obstacle_initial_pose 0.8 0.0 0.5",
+    help="Initial position of the obstacle in x, y, z (meters). Example: --obstacle_initial_pos 0.8 0.0 0.5",
 )
 parser.add_argument(
     "--obstacle_color",
@@ -105,15 +109,17 @@ parser.add_argument(
 )
 parser.add_argument(
     "--autoplay",
-    action="store_true",
     help="Start simulation automatically without requiring manual play button press",
-    default=False,
+    default="True",
+    type=str,
+    choices=["True", "False"],
 )
 parser.add_argument(
     "--enable_physics",
-    action="store_true",
     help="Enable physical collision between obstacle and robot",
-    default=True,
+    default="True",
+    type=str,
+    choices=["True", "False"],
 )
 parser.add_argument(
     "--obstacle_mass",
@@ -121,19 +127,17 @@ parser.add_argument(
     default=1.0,
     help="Mass of the obstacle in kilograms",
 )
-parser.add_argument(
-    "--obstacle_friction",
-    type=float,
-    default=0.5,
-    help="Friction coefficient of the obstacle (0-1)",
-)
-parser.add_argument(
-    "--obstacle_restitution",
-    type=float,
-    default=0.8,
-    help="Restitution (bounciness) coefficient of the obstacle (0-1)",
-)
 args = parser.parse_args()
+
+# After args = parser.parse_args(), add:
+args.enable_physics = args.enable_physics.lower() == "true"
+args.autoplay = args.autoplay.lower() == "true"
+
+# # Add debug prints
+# print(f"enable_physics argument value: {args.enable_physics}")
+# print(f"enable_physics argument type: {type(args.enable_physics)}")
+# print(f"autoplay argument value: {args.autoplay}")
+# print(f"autoplay argument type: {type(args.autoplay)}")
 
 ###########################################################
 
@@ -282,7 +286,7 @@ def init_sphere_obstacle(world, position, size, color, enable_physics=False, mas
         )
     return obstacle
 
-def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", color=None, enable_physics=False, mass=1.0, friction=0.5, restitution=0.8):
+def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", color=None, enable_physics=False, mass=1.0):
     """
     Create a moving obstacle in the simulation.
     
@@ -295,9 +299,11 @@ def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", co
         enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                       If False, creates a visual-only obstacle that moves without physics.
         mass: Mass in kg (only used if enable_physics=True)
-        friction: Friction coefficient (only used if enable_physics=True)
-        restitution: Bounciness coefficient (only used if enable_physics=True)
     """
+    # Add debug print
+    print(f"create_moving_obstacle enable_physics value: {enable_physics}")
+    print(f"create_moving_obstacle enable_physics type: {type(enable_physics)}")
+    
     if color is None:
         color = np.array([0.0, 0.0, 0.1])  # Default blue color
     
@@ -380,7 +386,11 @@ def main():
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
 
     # Create and configure moving obstacle
-    initial_pos = np.array(args.obstacle_initial_pose)
+    initial_pos = np.array(args.obstacle_initial_pos)
+    # Add debug print
+    print(f"main() enable_physics value: {args.enable_physics}")
+    print(f"main() enable_physics type: {type(args.enable_physics)}")
+    
     obstacle = create_moving_obstacle(
         my_world,
         initial_pos,
@@ -388,9 +398,7 @@ def main():
         args.obstacle_type,
         np.array(args.obstacle_color),
         args.enable_physics,
-        args.obstacle_mass,
-        args.obstacle_friction,
-        args.obstacle_restitution
+        args.obstacle_mass
     )
     
     # Set up obstacle movement
