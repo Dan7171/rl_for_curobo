@@ -33,34 +33,17 @@
         "vscode": {
             "extensions": [
                 "ms-python.python",
-                "ms-python.vscode-pylance",
-                "visualstudioexptteam.vscodeintellicode-python"
+                "ms-python.vscode-pylance"
             ],
             "settings": {
                 "python.defaultInterpreterPath": "/isaac-sim/python.sh",
                 "python.pythonPath": "/isaac-sim/python.sh",
                 "python.languageServer": "Pylance",
-                "python.analysis.extraPaths": [
-                    "/isaac-sim/",
-                    "/pkgs/curobo",
-                    "/isaac-sim/kit/exts/omni.isaac.core/omni/isaac/core",
-                    "/isaac-sim/kit/exts/omni.isaac.core_nodes/omni/isaac/core_nodes"
-                ],
+                "python.analysis.extraPaths": ["/isaac-sim/", "/pkgs/curobo"],
                 "python.analysis.typeCheckingMode": "basic",
-                "python.analysis.autoImportCompletions": true,
-                "python.analysis.indexing": true,
-                "python.analysis.packageIndexDepths": [
-                    {
-                        "name": "*",
-                        "depth": 3
-                    }
-                ],
-                "python.autoComplete.extraPaths": [
-                    "/isaac-sim/",
-                    "/pkgs/curobo"
-                ]
+                "python.analysis.autoImportCompletions": true
             }
         }
     },
     "postCreateCommand": ". /host/rl_for_curobo/rl_module/docker/guest/startup.sh && chmod +x /isaac-sim/python.sh"
-}
+} 
