@@ -127,6 +127,13 @@ parser.add_argument(
     default=1.0,
     help="Mass of the obstacle in kilograms",
 )
+parser.add_argument(
+    "--visualize_spheres",
+    action="store_true",
+    help="When True, visualizes robot spheres",
+    default=False,
+)
+
 args = parser.parse_args()
 
 # After args = parser.parse_args(), add:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Model Predictive Control (MPC) example with moving obstacles in Isaac Sim.
 
@@ -36,12 +35,20 @@ import argparse
 import os
 import carb
 import numpy as np
-import omni
-from ...rl_module.examples.isaac_sim.helper import add_extensions, add_robot_to_scene
-import omni.isaac.core as core
-from core import World
-from core.objects import cuboid
-from core.utils.types import ArticulationAction
+
+# Initialize the simulation app first (must be before "from omni.isaac.core")
+from omni.isaac.kit import SimulationApp
+simulation_app = SimulationApp({"headless": False})
+
+# Now import other Isaac Sim modules
+# https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
+from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
+from omni.isaac.core.objects import cuboid
+from omni.isaac.core.utils.types import ArticulationAction
+
+
+# Import helper from curobo examples
+from helper import add_extensions, add_robot_to_scene
 
 # CuRobo
 from curobo.geom.sdf.world import CollisionCheckerType
@@ -148,6 +155,13 @@ parser.add_argument(
     default=1.0,
     help="Mass of the obstacle in kilograms",
 )
+parser.add_argument(
+    "--visualize_spheres",
+    action="store_true",
+    help="When True, visualizes robot spheres",
+    default=False,
+)
+
 args = parser.parse_args()
 
 # Convert string arguments to boolean
@@ -155,14 +169,6 @@ args.enable_physics = args.enable_physics.lower() == "true"
 args.autoplay = args.autoplay.lower() == "true"
 
 ###########################################################
-
-simulation_app = SimulationApp(
-    {
-        "headless": args.headless_mode is not None,
-        "width": "1920",
-        "height": "1080",
-    }
-)
 
 def draw_points(rollouts: torch.Tensor):
     """
