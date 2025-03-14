@@ -9,17 +9,25 @@
     "ignore": [],
     "defineConstant": {},
     "typeCheckingMode": "basic",
-    "pythonVersion": "3.8",
+    "pythonVersion": "3.10",
     "pythonPlatform": "Linux",
     "executionEnvironments": [
         {
             "root": ".",
-            "pythonPath": "/isaac-sim/python.sh",
+            "pythonPath": "/isaac-sim/kit/python/lib/python3.10",
             "extraPaths": [
+                "/",
                 "/isaac-sim",
                 "/pkgs/curobo",
                 "/isaac-sim/kit/exts/omni.isaac.core/omni/isaac/core",
-                "/isaac-sim/kit/exts/omni.isaac.core_nodes/omni/isaac/core_nodes"
+                "/isaac-sim/kit/exts/omni.isaac.core_nodes/omni/isaac/core_nodes",
+                "/isaac-sim/kit/python/lib/python3.10/site-packages",
+                "/isaac-sim/python_packages",
+                "/isaac-sim/exts/omni.isaac.kit",
+                "/isaac-sim/exts/omni.isaac.gym",
+                "/isaac-sim/kit/kernel/py",
+                "/isaac-sim/kit/plugins/bindings-python",
+                "/workspaces/rl_for_curobo"
             ]
         }
     ]

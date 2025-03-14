@@ -2,7 +2,7 @@
     "name": "CuRobo Development",
     "image": "curobo_docker:isaac_sim_4.0.0",
     "remoteUser": "root",
-    "workspaceFolder": "/",
+    "workspaceFolder": "/host/rl_for_curobo",
     "runArgs": [
         "--gpus", "all",
         "--privileged",
