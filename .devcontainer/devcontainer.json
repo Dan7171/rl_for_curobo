@@ -38,7 +38,9 @@
                 "visualstudioexptteam.vscodeintellicode-python"
             ],
             "settings": {
+                "python.defaultInterpreterPath": "/isaac-sim/python.sh",
                 "python.interpreter.path": "/isaac-sim/python.sh",
+                "python.pythonPath": "/isaac-sim/python.sh",
                 "python.languageServer": "Pylance",
                 "python.analysis.extraPaths": [
                     "/isaac-sim/",
