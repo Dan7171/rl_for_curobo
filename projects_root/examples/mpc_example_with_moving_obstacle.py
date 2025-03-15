@@ -48,7 +48,7 @@ from omni.isaac.core.utils.types import ArticulationAction
 
 
 # Import helper from curobo examples
-from helper import add_extensions, add_robot_to_scene
+from projects_root.utils.helper import add_extensions, add_robot_to_scene
 
 # CuRobo
 from curobo.geom.sdf.world import CollisionCheckerType

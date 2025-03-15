@@ -1,3 +1,0 @@
-"""
-Example modules and utilities
-""" 
