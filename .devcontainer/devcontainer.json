@@ -9,7 +9,6 @@
         "--network=host",
         "-e", "ACCEPT_EULA=Y",
         "-e", "PRIVACY_CONSENT=Y",
-        "-e", "DISPLAY=:0",
         "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
         "-e", "XAUTHORITY=/root/.Xauthority",
         "-e", "__NV_PRIME_RENDER_OFFLOAD=1",
@@ -64,5 +63,5 @@
             }
         }
     },
-    "postCreateCommand": ". /host/rl_for_curobo/projects_root/docker/guest/startup.sh && chmod +x /isaac-sim/python.sh && ln -sf /isaac-sim/python.sh /host/rl_for_curobo/python.sh"
+    "postCreateCommand": "/host/rl_for_curobo/projects_root/docker/guest/startup.sh && bash"
 }
