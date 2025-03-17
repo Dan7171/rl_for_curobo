@@ -189,8 +189,8 @@ def is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose
     
     
     is_robot_static = np.max(np.abs(sim_js.velocities)) < 0.2
-    allow_robot_to_replan = is_robot_static or args.reactive: # robot is allowed to replan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
-    is_target_pose_changed = np.linalg.norm(cube_position - target_pose) > 1e-3 or np.linalg.norm(cube_orientation - target_orientation) > 1e-3: # cube position is the updated target pose (which has moved). target_pose is the previous target poseis the
+    allow_robot_to_replan = is_robot_static or args.reactive # robot is allowed to replan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
+    is_target_pose_changed = np.linalg.norm(cube_position - target_pose) > 1e-3 or np.linalg.norm(cube_orientation - target_orientation) > 1e-3 # cube position is the updated target pose (which has moved). target_pose is the previous target poseis the
     is_target_is_static = np.linalg.norm(past_pose - cube_position) == 0.0 and np.linalg.norm(past_orientation - cube_orientation) == 0.0 # cube po
     
     return is_robot_static and is_target_pose_changed and is_target_is_static
@@ -333,7 +333,7 @@ def main():
 
         # get the current step index
         step_index = my_world.current_time_step_index # starts from 1
-        print("step index debug ",step_index)
+        # print("step index debug ",step_index)
 
         if articulation_controller is None:
             articulation_controller = robot.get_articulation_controller() # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#module-omni.isaac.core.world
@@ -423,10 +423,14 @@ def main():
                         spheres[si].set_world_pose(position=np.ravel(s.position))
                         spheres[si].set_radius(float(s.radius))
 
+        # check if a new global plan is needed, in case the cube (representing the target pose) has moved and the robot is able to move as well (depends in the reactive mode)
         if is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose, past_orientation, target_pose, target_orientation):
+            
+            print("Replanning a new global plan - goal pose has changed!")
+            
             # Set EE teleop goals, use cube for simple non-vr init:
-            ee_translation_goal = cube_position
-            ee_orientation_teleop_goal = cube_orientation
+            ee_translation_goal = cube_position # cube position is the updated target pose (which has moved) 
+            ee_orientation_teleop_goal = cube_orientation # cube orientation is the updated target orientation (which has moved)
 
             # compute curobo solution:
             ik_goal = Pose(
@@ -434,10 +438,12 @@ def main():
                 quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
             )
             plan_config.pose_cost_metric = pose_metric
-            result = motion_gen.plan_single(cu_js.unsqueeze(0), ik_goal, plan_config)
-            # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
-
-            succ = result.success.item()  # ik_result.success.item()
+            start_state = cu_js.unsqueeze(0) # cu_js is the current joint state of the robot
+            goal_pose = ik_goal # ik_goal is the updated target pose (which has moved)
+            
+            result: MotionGenResult = motion_gen.plan_single(start_state, goal_pose, plan_config) # https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGen.plan_single:~:text=GraphResult-,plan_single,-( , https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult:~:text=class-,MotionGenResult,-(
+            succ = result.success.item()  # an attribute of this returned object that signifies whether a trajectory was successfully generated. success tensor with index referring to the batch index.
+            
             if num_targets == 1:
                 if args.constrain_grasp_approach:
                     pose_metric = PoseCostMetric.create_grasp_approach_metric()
