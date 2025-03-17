@@ -151,9 +151,25 @@ from curobo.wrap.reacher.motion_gen import (
 
 def is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose, past_orientation, target_pose, target_orientation):
     """
-    This function checks if a new global plan is needed.
+    This function checks if a new global plan is needed. Just a cosmetic change in the next code block from the original code. See below
 
-    just a cosmetic change in the next code block from the original code:
+    args:
+
+        sim_js: current joint state of the robot
+
+        # "target" - where the robot is trying to reach now
+        target_pose: the current target position which robot is trying to reach now (but it doesent necessarily the updated location of the target cube)
+        target_orientation: the current target position which robot is trying to reach now (but it doesent necessarily the updated location of the target cube)
+    
+        # "cube" - the updated target pose (maybe on the move, could be the target pose or a new target pose if it moved)
+        cube_position: current time step position of the new (in amove maybe) target pose
+        cube_orientation: current time step orientation of the new (in a move maybe) target pose
+        
+        # "past" - like cube, but one time step earlier        
+        past_pose: previous time step position of the new (in amove maybe) target pose
+        past_orientation: previous time step position of the new (in a move maybe) target pose
+        
+    REPLACED NEXT BLOXK IN OLDER CODE:
     "
     robot_static = False
     if (np.max(np.abs(sim_js.velocities)) < 0.2) or args.reactive:
@@ -174,8 +190,8 @@ def is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose
     
     is_robot_static = np.max(np.abs(sim_js.velocities)) < 0.2
     allow_robot_to_replan = is_robot_static or args.reactive: # robot is allowed to replan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
-    is_target_pose_changed = np.linalg.norm(cube_position - target_pose) > 1e-3 or np.linalg.norm(cube_orientation - target_orientation) > 1e-3:
-    is_target_is_static = np.linalg.norm(past_pose - cube_position) == 0.0 and np.linalg.norm(past_orientation - cube_orientation) == 0.0
+    is_target_pose_changed = np.linalg.norm(cube_position - target_pose) > 1e-3 or np.linalg.norm(cube_orientation - target_orientation) > 1e-3: # cube position is the updated target pose (which has moved). target_pose is the previous target poseis the
+    is_target_is_static = np.linalg.norm(past_pose - cube_position) == 0.0 and np.linalg.norm(past_orientation - cube_orientation) == 0.0 # cube po
     
     return is_robot_static and is_target_pose_changed and is_target_is_static
 
