@@ -149,6 +149,35 @@ from curobo.wrap.reacher.motion_gen import (
 
 ########### OV #################;;;;;
 
+def is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose, past_orientation, target_pose, target_orientation):
+    """
+    This function checks if a new global plan is needed.
+
+    just a cosmetic change in the next code block from the original code:
+    "
+    robot_static = False
+    if (np.max(np.abs(sim_js.velocities)) < 0.2) or args.reactive:
+        robot_static = True
+    if (
+        (
+            np.linalg.norm(cube_position - target_pose) > 1e-3
+            or np.linalg.norm(cube_orientation - target_orientation) > 1e-3
+        )
+        and np.linalg.norm(past_pose - cube_position) == 0.0
+        and np.linalg.norm(past_orientation - cube_orientation) == 0.0
+        and robot_static
+    ) 
+    "
+
+    """
+    
+    
+    is_robot_static = np.max(np.abs(sim_js.velocities)) < 0.2
+    allow_robot_to_replan = is_robot_static or args.reactive: # robot is allowed to replan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
+    is_target_pose_changed = np.linalg.norm(cube_position - target_pose) > 1e-3 or np.linalg.norm(cube_orientation - target_orientation) > 1e-3:
+    is_target_is_static = np.linalg.norm(past_pose - cube_position) == 0.0 and np.linalg.norm(past_orientation - cube_orientation) == 0.0
+    
+    return is_robot_static and is_target_pose_changed and is_target_is_static
 
 def main():
     # create a curobo motion gen instance:
@@ -174,7 +203,7 @@ def main():
     )
 
     setup_curobo_logger("warn")
-    past_pose = None
+    past_pose = None # previous (static pose) goal pose
     n_obstacle_cuboids = 30
     n_obstacle_mesh = 100
 
@@ -273,7 +302,10 @@ def main():
     
 
     while simulation_app.is_running():
-        my_world.step(render=True)
+        
+        my_world.step(render=True) # Step the physics simulation while rendering. https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#module-omni.isaac.core.world
+        
+        # wait until the play button is pressed (unless autoplay is true)
         if not my_world.is_playing():
             if args.autoplay: 
                 my_world.play() # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#module-omni.isaac.core.world
@@ -281,32 +313,31 @@ def main():
                 if i % 100 == 0:
                     print("**** Click Play to start simulation *****")
                 i += 1
-                # if step_index == 0:
-                #    my_world.play()
                 continue
 
-        step_index = my_world.current_time_step_index
+        # get the current step index
+        step_index = my_world.current_time_step_index # starts from 1
         print("step index debug ",step_index)
 
-        # print(step_index)
         if articulation_controller is None:
-            # robot.initialize()
-            articulation_controller = robot.get_articulation_controller()
-        if step_index < 2:
+            articulation_controller = robot.get_articulation_controller() # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#module-omni.isaac.core.world
+        
+        if step_index < 2: # time step only 
             my_world.reset()
             robot._articulation_view.initialize()
             idx_list = [robot.get_dof_index(x) for x in j_names]
             robot.set_joint_positions(default_config, idx_list)
-
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
-        if step_index < 20:
+
+        if step_index < 20: # TODO: why this is needed?
             continue
 
-        if step_index == 50 or step_index % 1000 == 0.0:
+        if step_index == 50 or step_index % 1000 == 0.0: # TODO: why this is needed?
+            print(f'step index: {step_index}')
             print("Updating world, reading w.r.t.", robot_prim_path)
-            obstacles = usd_help.get_obstacles_from_stage(
+            obstacles = usd_help.get_obstacles_from_stage( # reading obstacles state from stage
                 # only_paths=[obstacles_path],
                 reference_prim_path=robot_prim_path,
                 ignore_substring=[
@@ -316,29 +347,28 @@ def main():
                     "/curobo",
                 ],
             ).get_collision_check_world()
-            print(len(obstacles.objects))
-
-            motion_gen.update_world(obstacles)
+            print(f'len(obstacles.objects): {len(obstacles.objects)}')
+            motion_gen.update_world(obstacles) # update the world representation in curobo with the new info about obstacles
             print("Updated World")
             carb.log_info("Synced CuRobo world from stage.")
 
         # position and orientation of target virtual cube:
-        cube_position, cube_orientation = target.get_world_pose()
+        cube_position, cube_orientation = target.get_world_pose() # reading updated target (goal pose) state from stage
 
-        if past_pose is None:
+        if past_pose is None: # first time step
             past_pose = cube_position
-        if target_pose is None:
+        if target_pose is None: # first time step
             target_pose = cube_position
-        if target_orientation is None:
+        if target_orientation is None: # first time step
             target_orientation = cube_orientation
-        if past_orientation is None:
+        if past_orientation is None: # first time step
             past_orientation = cube_orientation
 
-        sim_js = robot.get_joints_state()
-        sim_js_names = robot.dof_names
-        if np.any(np.isnan(sim_js.positions)):
+        sim_js = robot.get_joints_state() # reading current joint state from robot
+        sim_js_names = robot.dof_names # reading current joint names from robot
+        if np.any(np.isnan(sim_js.positions)): # check if any joint position is NaN
             log_error("isaac sim has returned NAN joint position values.")
-        cu_js = JointState(
+        cu_js = JointState( # creating a joint state object for curobo
             position=tensor_args.to_device(sim_js.positions),
             velocity=tensor_args.to_device(sim_js.velocities),  # * 0.0,
             acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
@@ -346,7 +376,7 @@ def main():
             joint_names=sim_js_names,
         )
 
-        if not args.reactive:
+        if not args.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
             cu_js.velocity *= 0.0
             cu_js.acceleration *= 0.0
 
@@ -377,18 +407,7 @@ def main():
                         spheres[si].set_world_pose(position=np.ravel(s.position))
                         spheres[si].set_radius(float(s.radius))
 
-        robot_static = False
-        if (np.max(np.abs(sim_js.velocities)) < 0.2) or args.reactive:
-            robot_static = True
-        if (
-            (
-                np.linalg.norm(cube_position - target_pose) > 1e-3
-                or np.linalg.norm(cube_orientation - target_orientation) > 1e-3
-            )
-            and np.linalg.norm(past_pose - cube_position) == 0.0
-            and np.linalg.norm(past_orientation - cube_orientation) == 0.0
-            and robot_static
-        ):
+        if is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose, past_orientation, target_pose, target_orientation):
             # Set EE teleop goals, use cube for simple non-vr init:
             ee_translation_goal = cube_position
             ee_orientation_teleop_goal = cube_orientation
