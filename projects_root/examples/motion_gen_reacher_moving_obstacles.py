@@ -197,7 +197,7 @@ def is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose
 
 def main():
     # create a curobo motion gen instance:
-    num_targets = 0
+    num_targets = 0 # The number of "reachible" targets: number of the target poses which not only set to the robot to is trying to find a route to,but only the ones it succesed (to find a sucessfull global path, not yet executed in controller).
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
     stage = my_world.stage
@@ -338,7 +338,7 @@ def main():
         if articulation_controller is None:
             articulation_controller = robot.get_articulation_controller() # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#module-omni.isaac.core.world
         
-        if step_index < 2: # time step only 
+        if step_index < 2: # first iteration only 
             my_world.reset()
             robot._articulation_view.initialize()
             idx_list = [robot.get_dof_index(x) for x in j_names]
@@ -402,6 +402,7 @@ def main():
             cu_js.acceleration[:] = past_cmd.acceleration
         cu_js = cu_js.get_ordered_joint_state(motion_gen.kinematics.joint_names)
 
+        # visualize the robot as spheres
         if args.visualize_spheres and step_index % 2 == 0:
             sph_list = motion_gen.kinematics.get_robot_as_spheres(cu_js.position)
 
@@ -444,21 +445,32 @@ def main():
             result: MotionGenResult = motion_gen.plan_single(start_state, goal_pose, plan_config) # https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGen.plan_single:~:text=GraphResult-,plan_single,-( , https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult:~:text=class-,MotionGenResult,-(
             succ = result.success.item()  # an attribute of this returned object that signifies whether a trajectory was successfully generated. success tensor with index referring to the batch index.
             
-            if num_targets == 1:
+            if num_targets == 1: # it's 1 only immediately after the first time it found a successfull plan for the FIRST time (first target).
                 if args.constrain_grasp_approach:
-                    pose_metric = PoseCostMetric.create_grasp_approach_metric()
+                    # cuRobo also can enable constrained motions for part of a trajectory.
+                    # This is useful in pick and place tasks where traditionally the robot goes to an offset pose (pre-grasp pose) and then moves 
+                    # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it’s orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
+                    # https://curobo.org/advanced_examples/3_constrained_planning.html#:~:text=Grasp%20Approach%20Vector,behavior%20as%20below.
+                    # Enables moving to a pregrasp and then locked orientation movement to final grasp.
+                    # Since this is added as a cost, the trajectory will not reach the exact offset, instead it will try to take a blended path to the final grasp without stopping at the offset.
+                    # https://curobo.org/_api/curobo.rollout.cost.pose_cost.html#curobo.rollout.cost.pose_cost.PoseCostMetric.create_grasp_approach_metric
+                    pose_metric = PoseCostMetric.create_grasp_approach_metric() # 
                 if args.reach_partial_pose is not None:
+                    # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
                     reach_vec = motion_gen.tensor_args.to_device(args.reach_partial_pose)
                     pose_metric = PoseCostMetric(
                         reach_partial_pose=True, reach_vec_weight=reach_vec
                     )
                 if args.hold_partial_pose is not None:
+                    # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
                     hold_vec = motion_gen.tensor_args.to_device(args.hold_partial_pose)
                     pose_metric = PoseCostMetric(hold_partial_pose=True, hold_vec_weight=hold_vec)
-            if succ:
+            
+            if succ: 
+                print(f"target counter - targets with a reachible plan = {num_targets}") # the number of the targets which are defined by curobo (after being static and ready to plan to) and have a successfull a plan for.
                 num_targets += 1
-                cmd_plan = result.get_interpolated_plan()
-                cmd_plan = motion_gen.get_full_js(cmd_plan)
+                cmd_plan = result.get_interpolated_plan() # TODO: To clarify myself what get_interpolated_plan() is doing to the initial "result"  does. Also see https://curobo.org/get_started/2a_python_examples.html#:~:text=result%20%3D%20motion_gen.plan_single(start_state%2C%20goal_pose%2C%20MotionGenPlanConfig(max_attempts%3D1))%0Atraj%20%3D%20result.get_interpolated_plan()%20%20%23%20result.interpolation_dt%20has%20the%20dt%20between%20timesteps%0Aprint(%22Trajectory%20Generated%3A%20%22%2C%20result.success)
+                cmd_plan = motion_gen.get_full_js(cmd_plan) # get the full joint state from the interpolated plan
                 # get only joint names that are in both:
                 idx_list = []
                 common_js_names = []
@@ -479,6 +491,7 @@ def main():
         past_pose = cube_position
         past_orientation = cube_orientation
         if cmd_plan is not None:
+            print(f"debug - plan found, step_index={step_index}, cmd_idx = {cmd_idx}, num_targets = {num_targets} ")
             cmd_state = cmd_plan[cmd_idx]
             past_cmd = cmd_state.clone()
             # get full dof state
@@ -489,10 +502,10 @@ def main():
             )
             # set desired joint angles obtained from IK:
             articulation_controller.apply_action(art_action)
-            cmd_idx += 1
+            cmd_idx += 1 # the index of the next command to execute in the plan
             for _ in range(2):
                 my_world.step(render=False)
-            if cmd_idx >= len(cmd_plan.position):
+            if cmd_idx >= len(cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 cmd_idx = 0
                 cmd_plan = None
                 past_cmd = None
