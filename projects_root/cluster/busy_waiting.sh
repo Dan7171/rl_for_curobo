@@ -30,7 +30,7 @@ TIME="12:00:00"
 CPU=4
 MEM="8G"
 GPU=1
-
+# USERNAME=evrond
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -157,41 +157,81 @@ job_info=$(scontrol show job $JOBID)
 echo "$job_info"
 
 # Extract allocated partition, CPUs, memory, and GPU count
-# alloc_partition=$(echo "$job_info" | grep -oP 'Partition=\K\S+')
 alloc_cpus=$(echo "$job_info" | grep -oP 'NumCPUs=\K\S+')
 alloc_mem=$(echo "$job_info" | grep -oP 'AllocTRES=.*mem=\K[^,]+')
 alloc_gpu=$(echo "$job_info" | grep -oP 'gres/gpu=\K[0-9]+')
+alloc_gpu_type=$(echo "$job_info" | grep -oP 'gres/gpu:\K[^,]+')
 
-# Check each requested resource; if any don't match, cancel the job and exit
+# Function to validate resources
+validate_resources() {
+    local valid=true
+    
+    # CPU validation
+    if ! [[ "$alloc_cpus" =~ ^[0-9]+$ ]] || [ "$alloc_cpus" -ne "$CPU" ]; then
+        echo "Allocated CPU count ($alloc_cpus) does not match requested ($CPU)"
+        valid=false
+    fi
+    
+    # Memory validation
+    if [ "$alloc_mem" != "$MEM" ]; then
+        echo "Allocated memory ($alloc_mem) does not match requested ($MEM)"
+        valid=false
+    fi
+    
+    # GPU count validation
+    if ! [[ "$alloc_gpu" =~ ^[0-9]+$ ]] || [ "$alloc_gpu" -ne "$GPU" ]; then
+        echo "Allocated GPU count ($alloc_gpu) does not match requested ($GPU)"
+        valid=false
+    fi
+    
+    # GPU type validation
+    if [ "$alloc_gpu_type" != "rtx_3090" ]; then
+        echo "Allocated GPU type ($alloc_gpu_type) does not match requested (rtx_3090)"
+        valid=false
+    fi
+    
+    echo "$valid"
+}
 
-# if [[ "$alloc_partition" != "$PART" ]]; then
-#     echo "Allocated partition ($alloc_partition) does not match requested ($PART). Cancelling job."
-#     scancel $JOBID
-#     rm interactive.sbatch
-#     exit 1
-# fi
+# Check resources and retry if needed
+while true; do
+    validation_result=$(validate_resources)
+    if [ "$validation_result" = "true" ]; then
+        break
+    else
+        echo "Resource allocation mismatch. Cancelling current job and retrying..."
+        scancel $JOBID
+        rm -f interactive.sbatch
+        sleep 5  # Wait a bit before retrying
+        
+        # Create and submit new job
+        create_sbatch > interactive.sbatch
+        export JOBID=$(sbatch interactive.sbatch | awk '{print $4}')
+        
+        if [ -z "${JOBID}" ]; then
+            echo "Failed to submit new job. Exiting."
+            exit 1
+        fi
+        
+        # Wait for job to start
+        NODE=$(squeue -hj $JOBID -O nodelist)
+        while [[ -z "${NODE// }" ]]; do
+            echo -n "."
+            sleep 3
+            NODE=$(squeue -hj $JOBID -O nodelist)
+        done
+        
+        # Get updated job info
+        job_info=$(scontrol show job $JOBID)
+        alloc_cpus=$(echo "$job_info" | grep -oP 'NumCPUs=\K\S+')
+        alloc_mem=$(echo "$job_info" | grep -oP 'AllocTRES=.*mem=\K[^,]+')
+        alloc_gpu=$(echo "$job_info" | grep -oP 'gres/gpu=\K[0-9]+')
+        alloc_gpu_type=$(echo "$job_info" | grep -oP 'gres/gpu:\K[^,]+')
+    fi
+done
 
-if [[ "$alloc_cpus" -ne "$CPU" ]]; then
-    echo "Allocated CPU count ($alloc_cpus) does not match requested ($CPU). Cancelling job."
-    scancel $JOBID
-    rm interactive.sbatch
-    exit 1
-fi
+echo "Resource allocation validated successfully!"
 
-if [[ "$alloc_mem" != "$MEM" ]]; then
-    echo "Allocated memory ($alloc_mem) does not match requested ($MEM). Cancelling job."
-    scancel $JOBID
-    rm interactive.sbatch
-    exit 1
-fi
-
-if [[ "$alloc_gpu" -ne "$GPU" ]]; then
-    echo "Allocated GPU count ($alloc_gpu) does not match requested ($GPU). Cancelling job."
-    scancel $JOBID
-    rm interactive.sbatch
-    exit 1
-fi
-#
 ########################################
 #
 # FORMAT remaining time for display
@@ -216,7 +256,7 @@ echo "  --------------------------------------------------------------------"
 echo "  "
 echo "    TO ACCESS THIS COMPUTE NODE, USE THIS IN YOUR IDE: "
 echo "  "
-echo "    \$USER@${HOST_IP}  "
+echo "    ${USER}@${HOST_IP}"
 echo "  --------------------------------------------------------------------"
 echo "  "
 echo "    TO TERMINATE THIS SESSION ISSUE THE FOLLOWING COMMAND: "
