@@ -524,6 +524,7 @@ def main():
     init_curobo = False
     
     # Configuration for MPC
+    step_dt_traj_mpc = 0.033 # 0.02
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
         world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
@@ -537,7 +538,7 @@ def main():
         use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
         use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
         store_rollouts=True,  # Store trajectories for visualization
-        step_dt=0.02,  # Time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step.
+        step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
     )
 
     mpc = MpcSolver(mpc_config)
@@ -571,9 +572,8 @@ def main():
     
     # Main simulation loop
     
-    control_freq = time.time() # 1/ avg time between control steps
-    control_steps_cnt = 0 # ts
     
+    played_sim_start_time = -1
     while simulation_app.is_running(): # not necessarily playing, just running
         # Initialize world if needed
         if not init_world:
@@ -607,13 +607,14 @@ def main():
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
+            played_sim_start_time = time.time()
 
         if not init_curobo:
             init_curobo = True
         
         # step += 1
         # played_sim_completed_steps = step
-
+         
         # Update obstacle position
         if not args.enable_physics:
             # Manual position update for non-physical obstacles (physical objects are updated by physics engine)
@@ -704,13 +705,16 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
-        if args.print_ctrl_rate:
-            whole_step_end_time = time.time()
-            whole_step_duration = whole_step_end_time - whole_step_start_time
-            print(f"Whole step duration: {whole_step_duration:.3f} seconds")
-            print(f"Whole step rate: {1.0 / whole_step_duration:.3f} Hz")
-            print(f"NOTE! You should set the step_dt ")
-            whole_step_start_time = whole_step_end_time
+        curr_time = time.time()
+        total_played_sim_time = curr_time - played_sim_start_time
+        t = my_world.current_time_step_index  # current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+        avg_control_freq_hz = t / total_played_sim_time # Control Rate:num of completed actions / total time of actions Hz
+        avg_step_dt = total_played_sim_time / t
+        expected_ctrl_freq_hz = 1/step_dt_traj_mpc
+        ctrl_freq_ratio = expected_ctrl_freq_hz / avg_control_freq_hz
+        if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
+            print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {avg_control_freq_hz:.2f} Hz was assigned.\n\
+                    Change mpc_config.step_dt from {step_dt_traj_mpc} to {avg_step_dt})")
 
 if __name__ == "__main__":
     main()

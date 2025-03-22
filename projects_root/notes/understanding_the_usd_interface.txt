@@ -1,0 +1,77 @@
+1. What's usd???
+
+A USD (Universal Scene Description) file is a format developed by Pixar for describing 3D scenes. It's commonly used in visual effects, gaming, and robotics (e.g., in NVIDIA Omniverse and Isaac Sim).
+
+What does a USD file look like?
+USD files are typically written in ASCII (.usda) or binary (.usd, .usdc) formats.
+
+A basic ASCII .usda file looks something like this:
+
+usda
+Copy
+Edit
+#usda 1.0
+(
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def Xform "Robot"
+    {
+        def Mesh "Body"
+        {
+            float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]
+            color3f[] primvars:displayColor = [(0.8, 0.2, 0.2)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3,  4, 5, 6, 7, ...]
+            point3f[] points = [(0.5, 0.5, 0.5), (-0.5, 0.5, 0.5), ...]
+        }
+    }
+}
+Key Elements in USD
+def Xform → Defines a transformable object.
+def Mesh → Defines a 3D shape with vertices and faces.
+points → List of 3D coordinates for vertices.
+faceVertexCounts & faceVertexIndices → Define mesh topology.
+extent → Bounding box of the object.
+primvars:displayColor → Sets object color.
+Binary Format (.usd, .usdc)
+More compact and efficient for large files.
+Cannot be edited directly in a text editor like .usda.
+Why Use USD?
+Efficient: Handles large, complex 3D scenes.
+Layering: Can modify parts of a scene without rewriting everything.
+Interoperability: Used in Omniverse, Blender, Maya, Unity, Unreal Engine, etc.
+Would you like an example with a robot arm or something specific to Isaac Sim? 🚀
+
+
+2. Source: https://www.nvidia.com/en-us/omniverse/usd/
+Building Interoperable 3D Workflows With OpenUSD
+Universal Scene Description (OpenUSD) is more than just a file format. It’s an open and extensible ecosystem for describing, composing, simulating, and collaborating within 3D worlds.
+Invented by Pixar Animation Studio, OpenUSD encompasses a collection of fundamental tools and capabilities that accelerate workflows, teams, and projects, whether you’re creating assets and environments for large-scale, AI-enabled virtual worlds or building the tools to make these worlds possible.
+
+3. Source: https://curobo.org/get_started/2b_isaacsim_examples.html#:~:text=with%20Isaac%20Sim-,Usd%20Interface,-%C2%B6
+Usd Interface
+cuRobo represents the world using cuboids, meshes, and nvblox maps. 
+We provide examples for reading obstacles as meshees and cuboids from isaac sim. 
+For other geometric primitives, we convert them to meshes and use our mesh based collision checker.
+In addition to reading the world from Isaac Sim, we have some experimental code
+ to read robot kinematics from a Usd Stage in our library that can be used to read robots directly. For the examples below, we assume that the robot is being read from our configuration file and leave Usd based kinematic parsing for a future release. The interface we have developed to work with Isaac Sim can also be used with other simulators and even the real world by adding interfacing code to parse the world from your setup.
+
+Our interface with NVIDIA Isaac sim is shown in the below graph.
+We access the current stage from Isaac Sim and load this stage into our
+curobo.util.usd_helper.UsdHelper. We leverage usd-core to parse the obstacles in the stage and create a curobo.geom.types.WorldConfig. We pass this WorldConfig to our collision checker, which then becomes aware of obstacles in the simulation. We run this world parsing at a fixed rate of 0.1hz to keep track of pose of the obstacles and also be aware any new obstacles in the scene. We also trigger a world update when we interact with the scene and change the state of obstacles, e.g., when performing pick and place tasks.
+
+
+
+4. Source: https://curobo.org/notes/05_usd_api.html
+USD for Robot and World Representation
+We have an experimental USD wrapper that can read the kinematic chain 
+of a robot and also obstacles represented either as cuboids or meshes. Look at examples/usd_example.py for some possible applications of this api. We additionally leverage this wrapper to write robot animations to usd, which can then be rendered in NVIDIA Omniverse.
+
+Reading World from USD
+To read a world from the USD, we assume that all obstacles are either under a
+sub path or have a substring (e.g, collision) to avoid accidentally loading the robot prims as an obstacle. cuRobo represents all obstacles in the robot base frame and hence we transform each prim into the world coordinates using xform.ComputeLocalToWorldTransform https://docs.omniverse.nvidia.com/prod_kit/prod_kit/programmer_ref/usd/transforms/get-world-transforms.html#usd-api (w_T_o) and also read the world coordinates of the robot base frame (w_T_r). We then compute the
+relative transform and transform all obstacles. 
+(r_T_o = w_T_r^(-1) * w_T_o). We additionally allow for reading the poses from a timecode (by default it’s at 0.0).

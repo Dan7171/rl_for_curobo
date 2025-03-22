@@ -10,8 +10,8 @@ from curobo.types.robot import JointState
 from curobo.geom.types import WorldConfig, Cuboid
 from curobo.util.logger import setup_curobo_logger
 from curobo.wrap.reacher.mpc import MpcSolver
-
-from .....rl_algs_api.ActorCritic import ActorCritic, ActorCriticConfig
+from curobo.geom.sdf.world import CollisionQueryBuffer
+from projects_root.utils.rl_algs_api.ActorCritic import ActorCritic, ActorCriticConfig
 
 @dataclass
 class RLMPCConfig:
@@ -69,51 +69,95 @@ class RLMPCAgent:
         self.rl_algorithm = ActorCritic(ac_config)
         
     def get_robot_state(self, joint_state: JointState) -> torch.Tensor:
-        """Extract robot state features from joint state."""
-        state_list = []
+        """Extract robot state features from joint state.
         
-        # Position
-        state_list.append(torch.tensor(joint_state.position, device=self.config.device))
+        Returns a tensor of shape (robot_state_dim,) containing:
+        - Position (7)
+        - Velocity (7)
+        - Acceleration (7)
+        - Jerk (7)
+        Total: 28 features
+        """
+        # Initialize full state with zeros
+        full_state = torch.zeros(self.config.robot_state_dim, device=self.config.device)
         
-        # Velocity
-        state_list.append(torch.tensor(joint_state.velocity, device=self.config.device))
+        # Get number of joints
+        n_joints = 7  # Assuming 7-DOF robot
         
-        # Acceleration
-        state_list.append(torch.tensor(joint_state.acceleration, device=self.config.device))
-        
-        # Jerk
-        state_list.append(torch.tensor(joint_state.jerk, device=self.config.device))
-        
-        return torch.cat(state_list)
+        # Position (first 7 elements)
+        if joint_state.position is not None:
+            pos = torch.as_tensor(joint_state.position, device=self.config.device)
+            full_state[:n_joints] = pos[:n_joints]
+            
+        # Velocity (next 7 elements)
+        if joint_state.velocity is not None:
+            vel = torch.as_tensor(joint_state.velocity, device=self.config.device)
+            full_state[n_joints:2*n_joints] = vel[:n_joints]
+            
+        # Acceleration (next 7 elements)
+        if joint_state.acceleration is not None:
+            acc = torch.as_tensor(joint_state.acceleration, device=self.config.device)
+            full_state[2*n_joints:3*n_joints] = acc[:n_joints]
+            
+        # Jerk (final 7 elements)
+        if joint_state.jerk is not None:
+            jerk = torch.as_tensor(joint_state.jerk, device=self.config.device)
+            full_state[3*n_joints:4*n_joints] = jerk[:n_joints]
+            
+        return full_state
 
     def get_world_state_debug(self, world: WorldConfig) -> torch.Tensor:
         """Get world state representation using precise object information."""
         state_list = []
         max_objects = self.config.world_state_dim // 10  # 10 features per object
         
-        # Get obstacles through the obstacles list
-        for i, obstacle in enumerate(world.obstacles):
+        # Get obstacles through the world config
+        obstacles = []
+        if world.cuboid is not None:
+            obstacles.extend(world.cuboid)
+        if world.mesh is not None:
+            obstacles.extend(world.mesh)
+        if world.sphere is not None:
+            obstacles.extend(world.sphere)
+        
+        # Initialize full state with zeros
+        full_state = torch.zeros(self.config.world_state_dim, device=self.config.device)
+        current_idx = 0
+        
+        for i, obstacle in enumerate(obstacles):
             if i >= max_objects:
                 break
                 
+            if obstacle.pose is None:
+                continue
+                
+            # Each obstacle takes 10 features:
+            # Position (3) + Orientation (4) + Dimensions (3) = 10 total
+            features = []
+            
             # Position (3)
-            state_list.append(torch.tensor(obstacle.pose[:3], device=self.config.device))
+            pos = torch.tensor(obstacle.pose[:3], device=self.config.device)
+            features.extend(pos.tolist())
             
             # Orientation (4)
-            state_list.append(torch.tensor(obstacle.pose[3:7], device=self.config.device))
+            quat = torch.tensor(obstacle.pose[3:7], device=self.config.device)
+            features.extend(quat.tolist())
             
-            # Dimensions for cuboids or radius for spheres (1-3)
+            # Dimensions (3)
             if isinstance(obstacle, Cuboid):
-                state_list.append(torch.tensor(obstacle.dims, device=self.config.device))
-            else:  # Sphere
-                state_list.append(torch.tensor([obstacle.radius, 0, 0], device=self.config.device))
-                
-        # Pad if needed
-        if len(state_list) < max_objects:
-            padding = torch.zeros(max_objects - len(state_list), 10, device=self.config.device)
-            state_list.append(padding)
+                dims = torch.tensor(obstacle.dims, device=self.config.device)
+            elif hasattr(obstacle, 'radius'):
+                dims = torch.tensor([obstacle.radius, 0, 0], device=self.config.device)
+            else:
+                dims = torch.tensor([0.1, 0.1, 0.1], device=self.config.device)
+            features.extend(dims.tolist())
             
-        return torch.cat(state_list)
+            # Add to full state
+            if current_idx + 10 <= self.config.world_state_dim:
+                full_state[current_idx:current_idx + 10] = torch.tensor(features, device=self.config.device)
+                current_idx += 10
+        
+        return full_state
 
     def get_world_state_camera(self, depth_image: torch.Tensor) -> torch.Tensor:
         """Get world state representation using depth camera information."""
@@ -133,19 +177,19 @@ class RLMPCAgent:
         
         # 1. Robot state
         robot_features = self.get_robot_state(robot_state)
-        state_components.append(robot_features)
+        state_components.append(robot_features.flatten())  # Ensure 1D
         
-        # 2. Original goal pose
-        state_components.append(torch.cat([
-            torch.tensor(original_goal.position, device=self.config.device),
-            torch.tensor(original_goal.quaternion, device=self.config.device)
-        ]))
+        # 2. Original goal pose - handle position and quaternion separately
+        orig_pos = original_goal.position.clone().detach().to(device=self.config.device)
+        orig_quat = original_goal.quaternion.clone().detach().to(device=self.config.device)
+        state_components.append(orig_pos.flatten())  # Ensure 1D
+        state_components.append(orig_quat.flatten())  # Ensure 1D
         
-        # 3. Current goal pose
-        state_components.append(torch.cat([
-            torch.tensor(current_goal.position, device=self.config.device),
-            torch.tensor(current_goal.quaternion, device=self.config.device)
-        ]))
+        # 3. Current goal pose - handle position and quaternion separately
+        curr_pos = current_goal.position.clone().detach().to(device=self.config.device)
+        curr_quat = current_goal.quaternion.clone().detach().to(device=self.config.device)
+        state_components.append(curr_pos.flatten())  # Ensure 1D
+        state_components.append(curr_quat.flatten())  # Ensure 1D
         
         # 4. World state
         if self.config.use_debug_mode:
@@ -153,29 +197,70 @@ class RLMPCAgent:
         else:
             assert depth_image is not None, "Depth image required in camera mode"
             world_features = self.get_world_state_camera(depth_image)
-        state_components.append(world_features)
+        state_components.append(world_features.flatten())  # Ensure 1D
         
-        return torch.cat(state_components)
+        # Concatenate all components and ensure result is 1D
+        state = torch.cat(state_components).flatten()
+        
+        # Verify state dimension matches expected
+        expected_dim = (self.config.robot_state_dim + 
+                       self.config.goal_pose_dim * 2 +  # Original goal + current goal
+                       self.config.world_state_dim)
+        assert state.shape[0] == expected_dim, f"State dimension mismatch. Expected {expected_dim}, got {state.shape[0]}"
+        
+        return state.unsqueeze(0)  # Add batch dimension
 
     def compute_reward(self,
                       robot_state: JointState,
                       original_goal: Pose,
                       current_goal: Pose,
-                      collision_checker: Any,
+                      collision_checker: Any,  # Not used, kept for compatibility
                       done: bool) -> float:
         """Compute reward based on goal progress and collisions."""
         reward = self.config.time_penalty  # Base time penalty
+        distance_to_goal = float('inf')
         
-        # Check for collisions
-        collision_cost = collision_checker.get_collision_cost()
-        if collision_cost > 0:
-            reward += self.config.collision_penalty * collision_cost
+        # Check for collisions using world collision checker
+        if (self.mpc_solver.world_collision is not None and 
+            hasattr(robot_state, 'position') and 
+            robot_state.position is not None):
+            # Create query spheres for collision checking
+            pos_tensor = torch.tensor(robot_state.position, device=self.config.device)
+            radius_tensor = torch.tensor([0.1], device=self.config.device)
+            query_spheres = torch.cat([pos_tensor, radius_tensor]).unsqueeze(0)  # Shape: [1, 4]
             
+            collision_buffer = CollisionQueryBuffer()
+            collision_buffer.update_buffer_shape(query_spheres.shape, self.tensor_args, self.mpc_solver.world_collision.collision_types)
+            
+            collision_cost = self.mpc_solver.world_collision.get_sphere_distance(
+                query_spheres,
+                collision_buffer,
+                weight=torch.tensor([1.0], device=self.config.device),
+                activation_distance=torch.tensor([0.0], device=self.config.device)
+            )
+            if collision_cost > 0:
+                reward += self.config.collision_penalty * collision_cost.item()
+        
         # Distance to goal reward
         # Get end-effector pose through forward kinematics
-        current_pose = self.mpc_solver.get_ee_pose(robot_state)
-        distance_to_goal = torch.norm(current_pose.position - original_goal.position).item()
-        reward -= self.config.distance_scale * distance_to_goal
+        if (hasattr(robot_state, 'position') and 
+            robot_state.position is not None and 
+            hasattr(self.mpc_solver, 'rollout_fn')):
+            kinematics_state = self.mpc_solver.rollout_fn.compute_kinematics(robot_state)
+            if (kinematics_state is not None and 
+                hasattr(kinematics_state, 'ee_pos_seq') and 
+                kinematics_state.ee_pos_seq is not None and
+                hasattr(kinematics_state, 'ee_quat_seq') and
+                kinematics_state.ee_quat_seq is not None):
+                # Get the last position and quaternion if sequence, or use as is if single state
+                ee_pos = kinematics_state.ee_pos_seq[-1] if isinstance(kinematics_state.ee_pos_seq, torch.Tensor) and kinematics_state.ee_pos_seq.dim() > 1 else kinematics_state.ee_pos_seq
+                ee_quat = kinematics_state.ee_quat_seq[-1] if isinstance(kinematics_state.ee_quat_seq, torch.Tensor) and kinematics_state.ee_quat_seq.dim() > 1 else kinematics_state.ee_quat_seq
+                
+                current_pose = Pose(position=ee_pos, quaternion=ee_quat)
+                if (original_goal.position is not None and 
+                    current_pose.position is not None):
+                    distance_to_goal = torch.norm(current_pose.position - original_goal.position).item()
+                    reward -= self.config.distance_scale * distance_to_goal
         
         # Goal achievement reward
         if done and distance_to_goal < 0.05:  # 5cm threshold

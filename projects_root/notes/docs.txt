@@ -1,0 +1,6 @@
+
+omni.isaac.core:
+https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#
+1. classArticulationController: PD Controller of all degrees of freedom of an articulation, can apply position targets, velocity targets and efforts.
+2. my_world.step(render=True) # Step the physics simulation while rendering or without. https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=play#module-omni.isaac.core.world
+3. 

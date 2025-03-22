@@ -272,6 +272,8 @@ def main():
             continue
 
         step_index = my_world.current_time_step_index
+        print("step index debug ",step_index)
+
         # print(step_index)
         if articulation_controller is None:
             # robot.initialize()
