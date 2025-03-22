@@ -19,6 +19,7 @@ World:
         stage units in meters = 0.01 (i.e in cms),
         rendering_dt = 1.0 / 60.0,#  dt between rendering steps. Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed with this dt as well if running non-headless. Defaults to None.
         gravity = -9.81 m / s ccd_enabled, stabilization_enabled, gpu dynamics turned off, broadcast type is MBP, solver type is TGS].
+    - world.current_time_step_index: # current number of physics steps that have elapsed since the simulation was *played*(play button pressed) https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=current_time_step_index
 
 Scene: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#world:~:text=from%20different%20extensions.-,Scene,thus%20providing%20an%20easy%20way%20to%20set/%20get%20its%20common%20properties.,-Task
 Articulation: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#world:~:text=Articulation%23,an%20easy%20way.
@@ -396,7 +397,6 @@ def main():
     """
     # Initialize Isaac Sim world with 1 meter units
     my_world = World(stage_units_in_meters=1.0) 
-    print(f"my_world time deltas: physics_dt {my_world.get_physics_dt()} rendering_dt {my_world.get_rendering_dt()}")
     
     # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
@@ -410,8 +410,24 @@ def main():
             my_world_physics_context.enable_gpu_dynamics(True)
             assert my_world_physics_context.is_gpu_dynamics_enabled()
             print("debug- experimental: GPU dynamics is enabled")
-    
-    # world.set_physics_step_size(step_size) 
+
+    print(f"my_world time deltas: physics_dt {my_world.get_physics_dt()} rendering_dt {my_world.get_rendering_dt()}") # 0.166666 (1/60)
+
+    # TUNE PHYSICS AND RENDERING DT - OPTIONAL (originally was disabled, default values are 1/60)
+    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
+    # See docs of isaac-sim 4.0.0: 
+    # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world
+    # It is recommended that the two values be divisible, with the rendering_dt being equal to or greater than the physics_dt
+
+    tune_physics_and_renderring_dt = True
+    if tune_physics_and_renderring_dt:
+        new_rendering_dt = 1/2 
+        new_physics_dt = 1/2
+        is_devisble = new_rendering_dt / new_physics_dt == int(new_rendering_dt / new_physics_dt)
+        is_rend_dt_goe_phys_dt = new_rendering_dt >= new_physics_dt
+        assert (is_devisble and is_rend_dt_goe_phys_dt), "warning: new_rendering_dt and new_physics_dt are not divisible or new_rendering_dt is less than new_physics_dt. Read docs for more inf:https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world"            
+        my_world.set_simulation_dt(new_physics_dt, new_rendering_dt) 
+
 
 
     stage = my_world.stage
@@ -521,7 +537,7 @@ def main():
         use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
         use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
         store_rollouts=True,  # Store trajectories for visualization
-        step_dt=0.02,  # Time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than than the compute time for a single step.
+        step_dt=0.02,  # Time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step.
     )
 
     mpc = MpcSolver(mpc_config)
@@ -555,36 +571,38 @@ def main():
     
     # Main simulation loop
     
-    whole_step_start_time = time.time() if args.print_ctrl_rate else None
+    control_freq = time.time() # 1/ avg time between control steps
+    control_steps_cnt = 0 # ts
     
-    while simulation_app.is_running():
+    while simulation_app.is_running(): # not necessarily playing, just running
         # Initialize world if needed
         if not init_world:
             for _ in range(10):
-                my_world.step(render=True) # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
+                my_world.step(render=True) 
             init_world = True
             if args.autoplay:
                 my_world.play()
                 
         # Visualize planned trajectories
-        print_rate_decorator(lambda: draw_points(mpc.get_visual_rollouts()), args.print_ctrl_rate, "draw_points")()
+        print_rate_decorator(lambda: draw_points(mpc.get_visual_rollouts()), args.print_ctrl_rate, "draw_points")() 
         
-        # Step simulation
-        print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")()
-        if not my_world.is_playing(): 
+        # Try stepping simulation (steps will be skipped if the simulation is not playing)
+        print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
+        print("my_world.current_time_step_index: ", my_world.current_time_step_index) # stays 0 until the play button is pressed
+
+        if not my_world.is_playing(): # if the play button is not pressed yet
             if args.autoplay: # if autoplay is enabled, play the simulation immediately
                 my_world.play()
-            continue
+            continue # skip the rest of the loop
+        
+        # NOW PLAYING
 
-        step_index = my_world.current_time_step_index # get the current time step index
-        print("step index debug ",step_index)
-
+        # Here the control step starts
         # Reset robot to initial configuration
-        if step_index <= 2:
+        if my_world.current_time_step_index <= 2:
             my_world.reset()
             idx_list = [robot.get_dof_index(x) for x in j_names]
             robot.set_joint_positions(default_config, idx_list)
-
             # Set maximum joint efforts
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
@@ -592,8 +610,9 @@ def main():
 
         if not init_curobo:
             init_curobo = True
-        step += 1
-        step_index = step
+        
+        # step += 1
+        # played_sim_completed_steps = step
 
         # Update obstacle position
         if not args.enable_physics:
@@ -674,9 +693,9 @@ def main():
             joint_indices=idx_list,
         )
         
-        # Print metrics periodically
-        if step_index % 1000 == 0:
-            print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
+        # # Print metrics periodically
+        # if step_index % 1000 == 0:
+        #     print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
 
         # Execute planned motion
         if succ:
