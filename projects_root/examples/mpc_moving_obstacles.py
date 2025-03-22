@@ -1,4 +1,36 @@
 """
+
+# Prior reccomended reading:
+https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/core_api_overview.html 
+https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/manual_standalone_python.html
+https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/manual_standalone_python.html
+https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/index.html
+https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#isaac-sim-glossary-world
+World:
+    - https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#world:~:text=World%23,from%20different%20extensions.
+    -https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
+    - https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World:~:text=.clear_render_callbacks()-,World,-%23
+    - Rendering:
+        - rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed with this dt as well if running non-headless. Defaults to None.
+        - see: https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
+    - physics_dt and rendering_dt:
+        - World is initialized with set_defaults (bool, optional, defaults to True): defaults settings are applied: 
+        [physics_dt = 1.0/ 60.0: dt between physics steps.
+        stage units in meters = 0.01 (i.e in cms),
+        rendering_dt = 1.0 / 60.0,#  dt between rendering steps. Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed with this dt as well if running non-headless. Defaults to None.
+        gravity = -9.81 m / s ccd_enabled, stabilization_enabled, gpu dynamics turned off, broadcast type is MBP, solver type is TGS].
+
+Scene: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#world:~:text=from%20different%20extensions.-,Scene,thus%20providing%20an%20easy%20way%20to%20set/%20get%20its%20common%20properties.,-Task
+Articulation: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#world:~:text=Articulation%23,an%20easy%20way.
+Application: (SimulationApp) https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#application
+Cheat sheet: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#re
+Extensions: Extensions are plug-ins to Omniverse Kit that extend its capabilities. They are offered with complete source code to help developers easily create, add, and modify the tools and workflows they need to be productive. Extensions are the core building blocks of Omniverse Kit based applications. https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#real-time-render-mode:~:text=Extensions%23,for%20more%20details.
+Stage: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#real-time-render-mode:~:text=specifies%20material%20parameters.-,Stage,See%20the%20USD%20Glossary%20of%20Terms%20%26%20Concepts%20for%20more%20details.,-Prim
+Prim: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#real-time-render-mode:~:text=for%20more%20details.-,Prim,See%20the%20USD%20Glossary%20of%20Terms%20%26%20Concepts%20for%20more%20details.,-Mesh
+Mesh: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#real-time-render-mode:~:text=Mesh%23,a%20UseGeomMesh%20class.
+Docs API (isaac sim and omniverse) https://docs.isaacsim.omniverse.nvidia.com/latest/reference_python_api.html
+
+
 Model Predictive Control (MPC) example with moving obstacles in Isaac Sim.
 
 This example demonstrates:
@@ -37,8 +69,10 @@ import os
 import carb
 import numpy as np
 
+
 # Initialize the simulation app first (must be before "from omni.isaac.core")
-from omni.isaac.kit import SimulationApp
+
+from omni.isaac.kit import SimulationApp  
 simulation_app = SimulationApp({"headless": False})
 
 # Now import other Isaac Sim modules
@@ -65,7 +99,7 @@ from curobo.util_file import get_robot_configs_path, get_world_configs_path, joi
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 
 # Initialize CUDA device
-a = torch.zeros(4, device="cuda:0")
+a = torch.zeros(4, device="cuda:0") 
 
 parser = argparse.ArgumentParser(
     description="CuRobo MPC example with moving obstacle in Isaac Sim",
@@ -162,6 +196,13 @@ parser.add_argument(
     help="When True, visualizes robot spheres",
     default=False,
 )
+parser.add_argument(
+    "--print_ctrl_rate",
+    default="False",
+    type=str,
+    choices=["True", "False"],
+    help="When True, prints the control rate",
+)
 # parser.add_argument(
 #     "--allow_low_level_debugger",
 #     action="store_true",
@@ -174,7 +215,7 @@ args = parser.parse_args()
 # Convert string arguments to boolean
 args.enable_physics = args.enable_physics.lower() == "true"
 args.autoplay = args.autoplay.lower() == "true"
-
+args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
 # use_cuda_graph = not args.allow_low_level_debugger  # Disable CUDA graph
 # use_cuda_graph_metrics= not args.allow_low_level_debugger  # Disable metrics CUDA graph
 # use_cuda_graph_full_step= True
@@ -291,6 +332,26 @@ def init_sphere_obstacle(world, position, size, color, enable_physics=False, mas
         )
     return obstacle
 
+
+
+def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
+    def wrapper(*args, **kwargs):
+        duration, rate = None, None
+        if print_ctrl_rate:
+            start = time.time()
+        result = func(*args, **kwargs)
+        if print_ctrl_rate:
+            end = time.time()
+            duration = end - start
+            print(f"{rate_name} Duration: {duration:.3f} seconds") 
+            rate = 1.0 / duration
+            print(f"{rate_name} Rate: {rate:.3f} Hz")
+        if return_stats:
+            return result, (duration, rate)
+        else:
+            return result
+    return wrapper
+
 def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", color=None, enable_physics=False, mass=1.0):
     """
     Create a moving obstacle in the simulation.
@@ -334,7 +395,25 @@ def main():
         Isaac Sim Core API: https://docs.isaacsim.omniverse.nvidia.com/4.5.0/py/source/extensions/isaacsim.core.api/docs/index.html#python-api
     """
     # Initialize Isaac Sim world with 1 meter units
-    my_world = World(stage_units_in_meters=1.0)
+    my_world = World(stage_units_in_meters=1.0) 
+    print(f"my_world time deltas: physics_dt {my_world.get_physics_dt()} rendering_dt {my_world.get_rendering_dt()}")
+    
+    # GPU DYNAMICS - OPTIONAL (originally was disabled)
+    # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
+    # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
+    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
+    enable_gpu_dynamics = True
+    if enable_gpu_dynamics:
+        my_world_physics_context = my_world.get_physics_context()
+        if not my_world_physics_context.is_gpu_dynamics_enabled():
+            print("GPU dynamics is disabled")
+            my_world_physics_context.enable_gpu_dynamics(True)
+            assert my_world_physics_context.is_gpu_dynamics_enabled()
+            print("debug- experimental: GPU dynamics is enabled")
+    
+    # world.set_physics_step_size(step_size) 
+
+
     stage = my_world.stage
 
     # Set up the world hierarchy
@@ -428,20 +507,21 @@ def main():
     # Initialize MPC solver
     init_curobo = False
     
+    # Configuration for MPC
     mpc_config = MpcSolverConfig.load_from_robot_config(
-        robot_cfg,
-        world_cfg,
-        use_cuda_graph=True,
-        use_cuda_graph_metrics=True,
-        use_cuda_graph_full_step=False,
-        self_collision_check=True,
-        collision_checker_type=CollisionCheckerType.MESH,
+        robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
+        world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+        use_cuda_graph=True, # Use CUDA graph for the optimization step.
+        use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
+        use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
+        self_collision_check=True, # Enable self-collision check during MPC optimization.
+        collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
         collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
         use_mppi=True,  # Use Model Predictive Path Integral for optimization
-        use_lbfgs=False,
-        use_es=False,
+        use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
+        use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
         store_rollouts=True,  # Store trajectories for visualization
-        step_dt=0.02,  # MPC timestep
+        step_dt=0.02,  # Time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than than the compute time for a single step.
     )
 
     mpc = MpcSolver(mpc_config)
@@ -474,22 +554,23 @@ def main():
     add_extensions(simulation_app, args.headless_mode)
     
     # Main simulation loop
-    ctrl_rate_prev = time.time()
+    
+    whole_step_start_time = time.time() if args.print_ctrl_rate else None
     
     while simulation_app.is_running():
         # Initialize world if needed
         if not init_world:
             for _ in range(10):
-                my_world.step(render=True)
+                my_world.step(render=True) # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
             init_world = True
             if args.autoplay:
                 my_world.play()
                 
         # Visualize planned trajectories
-        draw_points(mpc.get_visual_rollouts())
-
+        print_rate_decorator(lambda: draw_points(mpc.get_visual_rollouts()), args.print_ctrl_rate, "draw_points")()
+        
         # Step simulation
-        my_world.step(render=True)
+        print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")()
         if not my_world.is_playing(): 
             if args.autoplay: # if autoplay is enabled, play the simulation immediately
                 my_world.play()
@@ -518,17 +599,17 @@ def main():
         if not args.enable_physics:
             # Manual position update for non-physical obstacles (physical objects are updated by physics engine)
             current_position = current_position + obstacle_velocity * dt
-            obstacle.set_world_pose(current_position)
+            print_rate_decorator(lambda: obstacle.set_world_pose(current_position), args.print_ctrl_rate, "set_world_pose for obstacle (in disable physics mode)")()
         else:
             # Get current position from physics engine
-            current_position = obstacle.get_world_pose()[0]
+            current_position = print_rate_decorator(lambda: obstacle.get_world_pose()[0], args.print_ctrl_rate, "get_world_pose of obstacle (in enable physics mode)")()
 
         # Update obstacle in collision checker
         moving_obstacle.pose = [current_position[0], current_position[1], current_position[2], 1.0, 0.0, 0.0, 0.0]
-        mpc.world_coll_checker.load_collision_model(world_cfg) # Load the world obstacles for collision checking 
+        print_rate_decorator(lambda: mpc.world_coll_checker.load_collision_model(world_cfg), args.print_ctrl_rate, "load_collision_model")()
 
         # Get target position and orientation
-        cube_position, cube_orientation = target.get_world_pose() # goal pose
+        cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "get_world_pose of target")() # goal pose
 
         # Update goal if target has moved
         if past_pose is None:
@@ -572,7 +653,7 @@ def main():
         current_state.copy_(cu_js)
 
         # Run MPC step
-        mpc_result = mpc.step(current_state, max_attempts=2)
+        mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
         # Process MPC result
         succ = True
@@ -603,13 +684,14 @@ def main():
                 articulation_controller.apply_action(art_action)
         else:
             carb.log_warn("No action is being taken.")
-        print_ctrl_rate = True
-        if print_ctrl_rate:
-            ctrl_rate_next = time.time()
-            ctrl_rate = 1.0 / (ctrl_rate_next - ctrl_rate_prev)
-            ctrl_rate_prev = ctrl_rate_next
-            print(f"Control rate: {ctrl_rate:.2f} Hz")
 
+        if args.print_ctrl_rate:
+            whole_step_end_time = time.time()
+            whole_step_duration = whole_step_end_time - whole_step_start_time
+            print(f"Whole step duration: {whole_step_duration:.3f} seconds")
+            print(f"Whole step rate: {1.0 / whole_step_duration:.3f} Hz")
+            print(f"NOTE! You should set the step_dt ")
+            whole_step_start_time = whole_step_end_time
 
 if __name__ == "__main__":
     main()
