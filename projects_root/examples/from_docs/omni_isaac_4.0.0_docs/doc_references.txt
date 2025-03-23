@@ -1,0 +1,23 @@
+######################## Vocabulary #########################
+1. "Articulated" := having two or more sections connected by a flexible joint. Articulated robots are defined as robots containing rotary joints
+Articulated robots are robotic arms with multiple joints (or rotary axes), similar to a human arm. These robots are highly flexible and used for precision tasks in manufacturing, assembly, welding, and even surgery.
+
+
+
+######################## files hello_robot*.py - navigation in 2d (jetson robot) ########################
+
+class Articulation:  https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html#articulation:~:text=High%20level%20wrapper%20to%20deal%20with%20an%20articulation%20prim%20(only%20one%20articulation%20prim)%20and%20its%20attributes/properties.
+class ArticulationAction: https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html#omni.isaac.core.utils.types.ArticulationAction
+class DifferentialController: https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.wheeled_robots/docs/index.html?highlight=differentialcontroller 
+class DynamicCuboid
+
+################# files maipulator*.py - manipulation with franks ####################
+
+"Task",class BaseTask: https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_adding_manipulator.html#:~:text=return-,What%20is%20a%20Task%3F,%EF%83%81,-The%20Task%20class
+
+class Franka (#Franka robot): https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.franka/docs/index.html?highlight=franka
+
+IsaacPickPlaceController: 
+    1. Intro https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.examples_nodes/docs/index.html?highlight=pickplacecontroller
+    2. All results: 
+    3. Franka: https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.franka/docs/index.html?highlight=pickplacecontroller#omni.isaac.franka.controllers.PickPlaceController:~:text=end%20effector%20frame.-,Franka%20Controllers,%EF%83%81,-class

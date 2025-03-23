@@ -11,8 +11,8 @@ from omni.isaac.core import World
 from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.robots import Robot
-from omni.isaac.wheeled_robots.robots import WheeledRobot
-from omni.isaac.core.utils.types import ArticulationAction
+from omni.isaac.wheeled_robots.robots import WheeledRobot # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.wheeled_robots/docs/index.html?highlight=wheelbaseposecontroller#:~:text=%EF%83%81-,Wheeled%20Robot,%EF%83%81,-class
+from omni.isaac.core.utils.types import ArticulationAction # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html#omni.isaac.core.utils.types.ArticulationAction
 from omni.isaac.core.controllers import BaseController
 import numpy as np
 import carb
@@ -56,7 +56,7 @@ add_reference_to_stage(usd_path=asset_path, prim_path="/World/Fancy_Robot")
 # physics handles needed..etc.
 # Note: this call doesn't create the Jetbot in the stage window, it was already
 # created with the add_reference_to_stage
-jetbot_robot = world.scene.add(WheeledRobot(
+jetbot_robot = world.scene.add(WheeledRobot( # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.wheeled_robots/docs/index.html?highlight=wheelbaseposecontroller#:~:text=%EF%83%81-,Wheeled%20Robot,%EF%83%81,-class
                 prim_path="/World/Fancy_Robot",
                 name="fancy_robot",
                 wheel_dof_names=["left_wheel_joint", "right_wheel_joint"],
