@@ -1,5 +1,6 @@
 """
 https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_adding_manipulator.html#:~:text=return-,Using%20the%20PickAndPlace%20Controller,%EF%83%81,-Add%20a%20pickBasic pick and place example
+Simple pick and place example.
 Setting a cube, Navigate to the cube, pick it up, and place it in the goal position.
 
 """
@@ -34,7 +35,7 @@ controller = PickPlaceController( # https://docs.isaacsim.omniverse.nvidia.com/4
             robot_articulation=franka,
         )
 # Resetting the world needs to be called before querying anything related to an articulation specifically.
-world.reset()
+world.reset() # NOTE: it replaces the call to await self._world.play_async() from the original example, as we are not using the simulation app but in a standalone app.
 # open ee fingers
 franka.gripper.set_joint_positions(franka.gripper.joint_opened_positions) # NOTE :reset world before calling that.
 # add a cube for franka to pick up
