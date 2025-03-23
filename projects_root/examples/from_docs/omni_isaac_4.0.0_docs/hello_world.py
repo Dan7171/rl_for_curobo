@@ -1,3 +1,7 @@
+"""
+See 
+"""
+
 import isaacsim
 from omni.isaac.kit import SimulationApp
 simulation_app = SimulationApp({"headless": False})   # https://docs.omniverse.nvidia.com/isaacsim/latest/manual_standalone_python.html#simulationapp
@@ -18,7 +22,7 @@ fancy_cube =  world.scene.add(
 # Resetting the world needs to be called before querying anything related to an articulation specifically.
 # Its recommended to always do a reset after adding your assets, for physics handles to be propagated properly
 world.reset()
-for i in range(500):
+while True:
     position, orientation = fancy_cube.get_world_pose()
     linear_velocity = fancy_cube.get_linear_velocity()
     # will be shown on terminal

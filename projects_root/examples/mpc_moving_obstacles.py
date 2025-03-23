@@ -421,8 +421,8 @@ def main():
 
     tune_physics_and_renderring_dt = True
     if tune_physics_and_renderring_dt:
-        new_rendering_dt = 1/2 
-        new_physics_dt = 1/2
+        new_rendering_dt = 1/60 # originally 1/60 
+        new_physics_dt = 1/60 # originally 1/60
         is_devisble = new_rendering_dt / new_physics_dt == int(new_rendering_dt / new_physics_dt)
         is_rend_dt_goe_phys_dt = new_rendering_dt >= new_physics_dt
         assert (is_devisble and is_rend_dt_goe_phys_dt), "warning: new_rendering_dt and new_physics_dt are not divisible or new_rendering_dt is less than new_physics_dt. Read docs for more inf:https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world"            
@@ -589,7 +589,7 @@ def main():
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
         print("my_world.current_time_step_index: ", my_world.current_time_step_index) # stays 0 until the play button is pressed
-
+        print("my_world.current_time: ", my_world.current_time) # stays 0 until the play button is pressed
         if not my_world.is_playing(): # if the play button is not pressed yet
             if args.autoplay: # if autoplay is enabled, play the simulation immediately
                 my_world.play()
