@@ -1,6 +1,6 @@
 """
-https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_hello_robot.html"""
-
+https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_adding_controller.html
+"""
 ############## STANDARD INIIATION IN ALL STGANDALONE PY APPS - DO NOT MODIFY ##############
 import isaacsim
 from omni.isaac.kit import SimulationApp
@@ -13,12 +13,30 @@ from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.robots import Robot
 from omni.isaac.wheeled_robots.robots import WheeledRobot
 from omni.isaac.core.utils.types import ArticulationAction
-
-
+from omni.isaac.core.controllers import BaseController
 import numpy as np
 import carb
 
+###################### IMLEMENT CUSTOM CONTROLLER #######################
+class CoolController(BaseController):
+    def __init__(self):
+        super().__init__(name="my_cool_controller")
+        # An open loop controller that uses a unicycle model
+        self._wheel_radius = 0.03
+        self._wheel_base = 0.1125
+        return
+
+    def forward(self, command):
+        # command will have two elements, first element is the forward velocity
+        # second element is the angular velocity (yaw only).
+        joint_velocities = [0.0, 0.0]
+        joint_velocities[0] = ((2 * command[0]) - (command[1] * self._wheel_base)) / (2 * self._wheel_radius)
+        joint_velocities[1] = ((2 * command[0]) + (command[1] * self._wheel_base)) / (2 * self._wheel_radius)
+        # A controller has to return an ArticulationAction
+        return ArticulationAction(joint_velocities=joint_velocities)
+
 ####################### Setup world ##########################
+
 world = World()
 world.scene.add_default_ground_plane()
 
@@ -57,26 +75,9 @@ print("Num of degrees of freedom after first reset: " + str(jetbot_robot.num_dof
 print("Joint Positions after first reset: " + str(jetbot_robot.get_joint_positions()))
 
 ######################## Main Loop - moving the robot #########################
+controller = CoolController()
 while simulation_app.is_running():
     world.step(render=True) # execute one physics step and one rendering step
-    
-    # In Omniverse Isaac Sim, Robots are constructed of physically accurate articulated joints.
-    # Applying actions to these articulations make them move.
-    # Next, apply random velocities to the Jetbot articulation controller to get it moving.
-    # Every articulation controller has apply_action method
-    # which takes in ArticulationAction with joint_positions, joint_efforts and joint_velocities
-    # as optional args. It accepts numpy arrays of floats OR lists of floats and None
-    # None means that nothing is applied to this dof index in this step
-    # ALTERNATIVELY, same method is called from self._jetbot.apply_action(...)
-
-    # Both next 2 forms are ok. 
-    # This is the more general but less simple form:    
-    # jetbot_robot.get_articulation_controller().apply_action(ArticulationAction(joint_positions=None,
-    #                                                                         joint_efforts=None,
-    #                                                                         joint_velocities=5 * np.random.rand(2,)))
-
-    # This is the simpler form for wheeled robots:
-    # Omniverse Isaac Sim also has robot-specific extensions that provide further customized functions and access to other controllers and tasks (more on this later). Now you’ll re-write the previous code using the WheeledRobot class to make it simpler.
-    jetbot_robot.apply_wheel_actions(ArticulationAction(joint_positions=None,joint_efforts=None,joint_velocities=5 * np.random.rand(2,)))
-
+    #apply the actions calculated by the controller
+    jetbot_robot.apply_action(controller.forward(command=[0.20, np.pi / 4])) # moving in circle
 simulation_app.close() # close Isaac Sim
