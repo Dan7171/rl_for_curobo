@@ -1,4 +1,14 @@
 """
+
+https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_adding_multiple_robots.html
+
+This tutorial integrates two different types of robot into the same simulation. It details how to build program logic to switch between subtasks. 
+After this tutorial, you will have experience building more complex simulations of robots interacting.
+
+"""
+
+
+"""
 https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_adding_manipulator.html#what-is-a-task
 
 Similar to the previous example (manpulilator.py, Setting a cube, Navigate to the cube, pick it up, and place it in the goal position.) 
