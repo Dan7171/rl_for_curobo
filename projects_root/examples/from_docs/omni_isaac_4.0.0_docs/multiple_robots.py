@@ -79,7 +79,7 @@ class RobotsPlaying(BaseTask):
         }
         # add the subtask's observations as well
         observations.update(self._pick_place_task.get_observations()) # update the dict (from jetson task) with the the pick place task's observations
-        return observations
+        return observations 
 
     def get_params(self):
         # To avoid hard coding names..etc.
@@ -165,7 +165,10 @@ while simulation_app.is_running():
             picking_position=current_observations[cube_name]["position"],
             placing_position=current_observations[cube_name]["target_position"],
             current_joint_positions=current_observations[franka.name]["joint_positions"])
+        franka.apply_action(actions)
     # Pause once the controller is done
+    print(f"task event: {current_observations['task_event']}")
     if franka_controller.is_done():
+        print("franka controller is done")
         world.pause()
 simulation_app.close()
