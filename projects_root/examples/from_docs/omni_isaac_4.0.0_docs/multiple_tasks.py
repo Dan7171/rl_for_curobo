@@ -1,12 +1,11 @@
 """
-
+See: https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_multiple_tasks.html#scaling-to-many-tasks
 
 """
 
 
 
 ############## STANDARD INIIATION IN ALL STGANDALONE PY APPS - DO NOT MODIFY ##############
-import time
 import isaacsim
 from omni.isaac.kit import SimulationApp
 simulation_app = SimulationApp({"headless": False})   # https://docs.omniverse.nvidia.com/isaacsim/latest/manual_standalone_python.html#simulationapp
