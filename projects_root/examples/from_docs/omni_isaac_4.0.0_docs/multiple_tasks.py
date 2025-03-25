@@ -1,6 +1,13 @@
 """
 See: https://docs.isaacsim.omniverse.nvidia.com/4.0.0/core_api_tutorials/tutorial_core_multiple_tasks.html#scaling-to-many-tasks
-
+In this example, 3 tasks are added to the world.
+Each task has its own jetbot and franka.
+The tasks are added to the world in the scene_setup method.
+The setup_post_load method defines the controllers for each task.
+The setup_post_reset method resets the controllers for each task.
+The physics_step method applies the actions for each task.
+The tasks are seperated by the offset parameter in the RobotsPlaying class.
+In the main loop, the physics_step method is called for each task by it's turn.
 """
 
 
@@ -181,8 +188,7 @@ class HelloWorld:
             # Reset all controllers
             self._franka_controllers[i].reset()
             self._jetbot_controllers[i].reset()
-        self._world.reset()
-        # await self._world.play_async()
+        self._world.reset() # await self._world.play_async()
         return
 
     def physics_step(self, step_size):
