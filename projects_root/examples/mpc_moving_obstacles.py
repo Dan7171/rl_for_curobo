@@ -262,8 +262,19 @@ def draw_points(rollouts: torch.Tensor):
         colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
     sizes = [10.0 for _ in range(b * h)]
     draw.draw_points(point_list, colors, sizes)
+def disable_gravity(prim_stage_path,stage):
+    """
+    Disabling gravity for a given object using Python API, Without disabling physics.
+    source: https://forums.developer.nvidia.com/t/how-do-i-disable-gravity-for-a-given-object-using-python-api/297501
 
-def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=1.0, gravity_enabled=True):
+    Args:
+        prim_stage_path (_type_): like "/World/box"
+    """
+    from pxr import PhysxSchema
+    prim = stage.GetPrimAtPath(prim_stage_path)
+    physx_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
+    physx_api.CreateDisableGravityAttr(True)
+def init_cube_obstacle(world, position, size, color, enable_physics=True, mass=1.0, gravity_enabled=True,linear_velocity:np.array=np.nan, angular_velocity:np.array=np.nan):
     """
     Initialize a cube obstacle.
     
@@ -277,74 +288,20 @@ def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=
         mass: Mass in kg (only used if enable_physics=True)
         gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
     """
-    if enable_physics:
-        from omni.isaac.core.objects import DynamicCuboid
-        obstacle = world.scene.add(
-            DynamicCuboid(
-                prim_path="/World/moving_obstacle",
-                name="moving_obstacle",
-                position=position,
-                size=size,
-                color=color,
-                mass=mass,
-                density=0.9
-            )
-        )
-        if not gravity_enabled:
-            obstacle.disable_gravity()
-    else:
-        obstacle = world.scene.add(
-            cuboid.VisualCuboid(
-                prim_path="/World/moving_obstacle",
-                name="moving_obstacle",
-                position=position,
-                size=size,
-                color=color,
-            )
-        )
-    return obstacle
+    from omni.isaac.core.objects import DynamicCuboid
+    obstacle_name = "dynamic_cuboid1"
+    prim = DynamicCuboid(prim_path=f"/World/{obstacle_name}",name=obstacle_name, position=position,size=size,color=color,mass=mass,density=0.9)         
 
-def init_sphere_obstacle(world, position, size, color, enable_physics=False, mass=1.0, gravity_enabled=True):
-    """
-    Initialize a sphere obstacle.
-    
-    Args:
-        world: Isaac Sim world instance
-        position: Initial position [x, y, z]
-        size: Diameter of sphere
-        color: RGB color array
-        enable_physics: If True, creates a physical obstacle that can collide and follow physics.
-                      If False, creates a visual-only obstacle that moves without physics.
-        mass: Mass in kg (only used if enable_physics=True)
-        gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
-    """
-    from omni.isaac.core.objects import sphere
-    if enable_physics:
-        from omni.isaac.core.objects import DynamicSphere
-        obstacle = world.scene.add(
-            DynamicSphere(
-                prim_path="/World/moving_obstacle",
-                name="moving_obstacle",
-                position=position,
-                radius=size/2,
-                color=color,
-                mass=mass,
-                density=0.9
-            )
-        )
-        if not gravity_enabled:
-            obstacle.disable_gravity()
-    else:
-        obstacle = world.scene.add(
-            sphere.VisualSphere(
-                prim_path="/World/moving_obstacle",
-                name="moving_obstacle",
-                position=position,
-                radius=size/2,
-                color=color,
-            )
-        )
-    return obstacle
+    if linear_velocity is not np.nan:
+        prim.set_linear_velocity(linear_velocity)
+    if angular_velocity is not np.nan:
+        prim.set_angular_velocity(angular_velocity)
+    if not gravity_enabled:
+        disable_gravity(f"/World/{obstacle_name}", world.stage)
+    world.scene.add(prim)
+    return prim
+
+
 
 
 
@@ -385,10 +342,29 @@ def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", co
         color = np.array([0.0, 0.0, 0.1])  # Default blue color
     
     if obstacle_type == "cuboid":
-        return init_cube_obstacle(world, position, size, color, enable_physics, mass, gravity_enabled)
+        obstacle = init_cube_obstacle(world, position, size, color, enable_physics, mass, gravity_enabled)
     elif obstacle_type == "sphere":
-        return init_sphere_obstacle(world, position, size, color, enable_physics, mass, gravity_enabled)
-
+        obstacle = init_sphere_obstacle(world, position, size, color, enable_physics, mass, gravity_enabled)
+        
+    if args.enable_physics:
+        # For physical obstacles, use Isaac Sim's physics engine
+        obstacle.set_linear_velocity(np.array(args.obstacle_velocity))
+    
+    # Add obstacle to CuRobo's collision checker
+    if args.obstacle_type == "cuboid":
+        moving_obstacle = Cuboid(
+            name="moving_obstacle",
+            pose=[position[0], position[1], position[2], 1.0, 0.0, 0.0, 0.0],
+            dims=[args.obstacle_size, args.obstacle_size, args.obstacle_size],
+        )
+    else:  # sphere
+        from curobo.geom.types import Sphere
+        moving_obstacle = Sphere(
+            name="moving_obstacle",
+            pose=[position[0], position[1], position[2], 1.0, 0.0, 0.0, 0.0],
+            radius=args.obstacle_size/2,
+        )
+    return moving_obstacle
 def main():
     """
     Main simulation loop that demonstrates Model Predictive Control (MPC) with moving obstacles.
@@ -459,6 +435,7 @@ def main():
 
     # Configure CuRobo logging and parameters
     setup_curobo_logger("warn")
+    
     past_pose = None
     n_obstacle_cuboids = 30  # Number of collision boxes for obstacle approximation
     n_obstacle_mesh = 10     # Number of mesh triangles for obstacle approximation
@@ -492,43 +469,7 @@ def main():
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
 
     # Create and configure moving obstacle
-    initial_pos = np.array(args.obstacle_initial_pos)
-    obstacle = create_moving_obstacle(
-        my_world,
-        initial_pos,
-        args.obstacle_size,
-        args.obstacle_type,
-        np.array(args.obstacle_color),
-        args.enable_physics,
-        args.obstacle_mass,
-        args.gravity_enabled.lower() == "true"
-    )
-    
-    # Set up obstacle movement
-    obstacle_velocity = np.array(args.obstacle_velocity)
-    
-    if args.enable_physics:
-        # For physical obstacles, use Isaac Sim's physics engine
-        obstacle.set_linear_velocity(obstacle_velocity)
-    else:
-        # For non-physical obstacles, manually update position
-        current_position = initial_pos
-        dt = 1.0/60.0  # Simulation timestep (60 Hz)
-
-    # Add obstacle to CuRobo's collision checker
-    if args.obstacle_type == "cuboid":
-        moving_obstacle = Cuboid(
-            name="moving_obstacle",
-            pose=[initial_pos[0], initial_pos[1], initial_pos[2], 1.0, 0.0, 0.0, 0.0],
-            dims=[args.obstacle_size, args.obstacle_size, args.obstacle_size],
-        )
-    else:  # sphere
-        from curobo.geom.types import Sphere
-        moving_obstacle = Sphere(
-            name="moving_obstacle",
-            pose=[initial_pos[0], initial_pos[1], initial_pos[2], 1.0, 0.0, 0.0, 0.0],
-            radius=args.obstacle_size/2,
-        )
+    moving_obstacle = create_moving_obstacle(my_world, np.array(args.obstacle_initial_pos),args.obstacle_size, args.obstacle_type, np.array(args.obstacle_color),args.enable_physics, args.obstacle_mass, args.gravity_enabled.lower() == "true")
     world_cfg.add_obstacle(moving_obstacle)
 
     # Initialize MPC solver
@@ -627,22 +568,13 @@ def main():
         if not init_curobo:
             init_curobo = True
         
-        # step += 1
-        # played_sim_completed_steps = step
-         
-        # Update obstacle position
-        if not args.enable_physics:
-            # Manual position update for non-physical obstacles (physical objects are updated by physics engine)
-            current_position = current_position + obstacle_velocity * dt
-            print_rate_decorator(lambda: obstacle.set_world_pose(current_position), args.print_ctrl_rate, "set_world_pose for obstacle (in disable physics mode)")()
-        else:
-            # Get current position from physics engine
-            current_position = print_rate_decorator(lambda: obstacle.get_world_pose()[0], args.print_ctrl_rate, "get_world_pose of obstacle (in enable physics mode)")()
-
-        # Update obstacle in collision checker
-        moving_obstacle.pose = [current_position[0], current_position[1], current_position[2], 1.0, 0.0, 0.0, 0.0]
-        print_rate_decorator(lambda: mpc.world_coll_checker.load_collision_model(world_cfg), args.print_ctrl_rate, "load_collision_model")()
-
+        # obstacles = usd_help.get_obstacles_from_stage(
+        #         # only_paths=[obstacles_path],
+        #         reference_prim_path="/World",
+        #         ignore_substring=["/World/target", "/World/defaultGroundPlane"]
+        #     ).get_collision_check_world()
+        # mpc.update_world(obstacles)
+        
         # Get target position and orientation
         cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "get_world_pose of target")() # goal pose
 
