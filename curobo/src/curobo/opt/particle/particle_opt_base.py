@@ -213,7 +213,7 @@ class ParticleOptBase(Optimizer, ParticleOptConfig):
             curr_action_seq = self._run_opt_iters(
                 init_act, n_iters=n_iters, shift_steps=shift_steps
             )
-
+        
         self.num_steps += 1
         if self.calculate_value:
             trajectories = self.generate_rollouts(init_act)

@@ -275,7 +275,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         if self.cost_cfg.primitive_collision_cfg is not None:
             self.primitive_collision_cost = PrimitiveCollisionCost(
                 self.cost_cfg.primitive_collision_cfg
-            )
+            ) 
             if self.dynamics_model.robot_model.total_spheres == 0:
                 self.primitive_collision_cost.disable_cost()
 
