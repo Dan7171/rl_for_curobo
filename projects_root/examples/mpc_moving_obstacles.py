@@ -181,7 +181,7 @@ parser.add_argument(
 parser.add_argument(
     "--enable_physics",
     help="Enable physical collision between obstacle and robot",
-    default="False",
+    default="True",
     type=str,
     choices=["True", "False"],
 )
@@ -190,6 +190,13 @@ parser.add_argument(
     type=float,
     default=1.0,
     help="Mass of the obstacle in kilograms",
+)
+parser.add_argument(
+    "--gravity_enabled",
+    help="Enable gravity for the obstacle (only used if enable_physics=True)",
+    default="False",
+    type=str,
+    choices=["True", "False"],
 )
 parser.add_argument(
     "--visualize_spheres",
@@ -256,7 +263,7 @@ def draw_points(rollouts: torch.Tensor):
     sizes = [10.0 for _ in range(b * h)]
     draw.draw_points(point_list, colors, sizes)
 
-def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=1.0):
+def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=1.0, gravity_enabled=True):
     """
     Initialize a cube obstacle.
     
@@ -268,6 +275,7 @@ def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=
         enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                       If False, creates a visual-only obstacle that moves without physics.
         mass: Mass in kg (only used if enable_physics=True)
+        gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
     """
     if enable_physics:
         from omni.isaac.core.objects import DynamicCuboid
@@ -282,6 +290,8 @@ def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=
                 density=0.9
             )
         )
+        if not gravity_enabled:
+            obstacle.disable_gravity()
     else:
         obstacle = world.scene.add(
             cuboid.VisualCuboid(
@@ -294,7 +304,7 @@ def init_cube_obstacle(world, position, size, color, enable_physics=False, mass=
         )
     return obstacle
 
-def init_sphere_obstacle(world, position, size, color, enable_physics=False, mass=1.0):
+def init_sphere_obstacle(world, position, size, color, enable_physics=False, mass=1.0, gravity_enabled=True):
     """
     Initialize a sphere obstacle.
     
@@ -306,6 +316,7 @@ def init_sphere_obstacle(world, position, size, color, enable_physics=False, mas
         enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                       If False, creates a visual-only obstacle that moves without physics.
         mass: Mass in kg (only used if enable_physics=True)
+        gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
     """
     from omni.isaac.core.objects import sphere
     if enable_physics:
@@ -321,6 +332,8 @@ def init_sphere_obstacle(world, position, size, color, enable_physics=False, mas
                 density=0.9
             )
         )
+        if not gravity_enabled:
+            obstacle.disable_gravity()
     else:
         obstacle = world.scene.add(
             sphere.VisualSphere(
@@ -353,7 +366,7 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
             return result
     return wrapper
 
-def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", color=None, enable_physics=False, mass=1.0):
+def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", color=None, enable_physics=False, mass=1.0, gravity_enabled=True):
     """
     Create a moving obstacle in the simulation.
     
@@ -366,14 +379,15 @@ def create_moving_obstacle(world, position, size=0.1, obstacle_type="cuboid", co
         enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                       If False, creates a visual-only obstacle that moves without physics.
         mass: Mass in kg (only used if enable_physics=True)
+        gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
     """
     if color is None:
         color = np.array([0.0, 0.0, 0.1])  # Default blue color
     
     if obstacle_type == "cuboid":
-        return init_cube_obstacle(world, position, size, color, enable_physics, mass)
+        return init_cube_obstacle(world, position, size, color, enable_physics, mass, gravity_enabled)
     elif obstacle_type == "sphere":
-        return init_sphere_obstacle(world, position, size, color, enable_physics, mass)
+        return init_sphere_obstacle(world, position, size, color, enable_physics, mass, gravity_enabled)
 
 def main():
     """
@@ -441,13 +455,7 @@ def main():
     my_world.scene.add_default_ground_plane()
 
     # Create a target cube for the robot to follow
-    target = cuboid.VisualCuboid(
-        "/World/target",
-        position=np.array([0.5, 0, 0.5]),
-        orientation=np.array([0, 1, 0, 0]),
-        color=np.array([0, 1, 0]),
-        size=0.05,
-    )
+    target = create_target_pose_hologram()
 
     # Configure CuRobo logging and parameters
     setup_curobo_logger("warn")
@@ -492,7 +500,8 @@ def main():
         args.obstacle_type,
         np.array(args.obstacle_color),
         args.enable_physics,
-        args.obstacle_mass
+        args.obstacle_mass,
+        args.gravity_enabled.lower() == "true"
     )
     
     # Set up obstacle movement
@@ -721,6 +730,22 @@ def main():
         if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
             print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {avg_control_freq_hz:.2f} Hz was assigned.\n\
                     Change mpc_config.step_dt from {step_dt_traj_mpc} to {avg_step_dt})")
+
+def create_target_pose_hologram():
+    """ 
+    Create a target pose "hologram" in the simulation. By "hologram", 
+    we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
+    In isaac-sim they call holograms viual objects (like visual coboid and visual spheres...)
+    """
+    target = cuboid.VisualCuboid(
+        "/World/target",
+        position=np.array([0.5, 0, 0.5]),
+        orientation=np.array([0, 1, 0, 0]),
+        color=np.array([0, 1, 0]),
+        size=0.05,
+    )
+    
+    return target
 
 if __name__ == "__main__":
     main()
