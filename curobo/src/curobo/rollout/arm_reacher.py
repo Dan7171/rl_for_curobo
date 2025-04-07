@@ -464,6 +464,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         for p in pose_costs:
             p.update_metric(metric, update_offset_waypoint=False)
 
+    def set_dynamic_obs_checker(self, checker):
+        self._dynamic_obs_checker = checker
+    
+    def get_dynamic_obs_checker(self):
+        return self._dynamic_obs_checker
+
 
 @get_torch_jit_decorator()
 def cat_sum_reacher(tensor_list: List[torch.Tensor]):

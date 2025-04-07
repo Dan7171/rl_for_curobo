@@ -685,7 +685,7 @@ class SdfSweptSphereOBB(torch.autograd.Function):
         return_loss: bool = False,
         sum_collisions: bool = True,
     ):
-        r = geom_cu.swept_closest_point(
+        r = geom_cu.swept_closest_point( # can't step into this function (cuda kernel)
             query_sphere,
             out_buffer,
             grad_out_buffer,

@@ -48,7 +48,6 @@ Usage:
     omni_python mpc_example_with_moving_obstacle.py [options]
     
 Example options:
-    --obstacle_type DynamicCuboid    # Use a sphere instead of cube (default: cuboid)
     --obstacle_linear_velocity -0.1 0.1 0.0  # Move diagonally (default: [-0.1, 0.0, 0.0])
     --enable_physics False    # Disable physical collisions (default: True)
     --obstacle_size 0.15    # Set obstacle size (default: 0.1)
@@ -64,12 +63,14 @@ except ImportError:
 
 # Third Party
 import time
+from typing import List
+from curobo.geom.sdf.world_mesh import WorldMeshCollision
 import torch
 import argparse
 import os
 import carb
 import numpy as np
-
+import copy
 
 # Initialize the simulation app first (must be before "from omni.isaac.core")
 
@@ -81,6 +82,7 @@ simulation_app = SimulationApp({"headless": False})
 from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
 from omni.isaac.core.objects import cuboid
 from omni.isaac.core.utils.types import ArticulationAction
+from omni.isaac.core.objects import DynamicCuboid
 
 
 # Import helper from curobo examples
@@ -98,7 +100,7 @@ from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
-
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollChecker
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
 
@@ -111,13 +113,13 @@ Examples:
   omni_python mpc_example_with_moving_obstacle.py
 
   # Sphere obstacle moving diagonally with autoplay disabled
-  omni_python mpc_example_with_moving_obstacle.py --obstacle_type sphere --obstacle_linear_velocity -0.1 0.1 0.0 --obstacle_size 0.15 --autoplay False
+  omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity -0.1 0.1 0.0 --obstacle_size 0.15 --autoplay False
 
   # Blue cuboid starting at specific position with physics enabled
-  omni_python mpc_example_with_moving_obstacle.py --obstacle_type DynamicCuboid --obstacle_initial_pos 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --obstacle_mass 1.0
+  omni_python mpc_example_with_moving_obstacle.py  --obstacle_initial_pos 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --obstacle_mass 1.0
 
   # Green sphere moving in y direction with custom size and physics disabled
-  omni_python mpc_example_with_moving_obstacle.py --obstacle_type sphere --obstacle_linear_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 --enable_physics False
+  omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 --enable_physics False
 
   # Red cuboid with physics disabled and autoplay disabled
   omni_python mpc_example_with_moving_obstacle.py --enable_physics False --autoplay False
@@ -141,16 +143,10 @@ parser.add_argument(
     "--obstacle_linear_velocity",
     type=float,
     nargs=3,
-    default=[-0.1, 0.0, 0.0],
+    default=[-0.15, 0.0, 0.0],
     help="Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
 )
-parser.add_argument(
-    "--obstacle_type",
-    type=str,
-    choices=["DynamicCuboid", "sphere"],
-    default="DynamicCuboid",
-    help="Type of obstacle to create (cuboid or sphere)",
-)
+ 
 parser.add_argument(
     "--obstacle_size",
     type=float,
@@ -206,31 +202,36 @@ parser.add_argument(
 )
 parser.add_argument(
     "--print_ctrl_rate",
-    default="False",
+    default="True",
     type=str,
     choices=["True", "False"],
     help="When True, prints the control rate",
 )
-# parser.add_argument(
-#     "--allow_low_level_debugger",
-#     action="store_true",
-#     help="When True, removes the cuda graph improvements to allow debugging with a debugger in a lower level (experimental)", 
-#     default=True, # TODO find a way to make it false
-# )
-
+ 
 args = parser.parse_args()
 
 # Convert string arguments to boolean
 args.enable_physics = args.enable_physics.lower() == "true"
 args.autoplay = args.autoplay.lower() == "true"
 args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
-# use_cuda_graph = not args.allow_low_level_debugger  # Disable CUDA graph
-# use_cuda_graph_metrics= not args.allow_low_level_debugger  # Disable metrics CUDA graph
-# use_cuda_graph_full_step= True
-# if args.allow_low_level_debugger:
-#     print("WARNING: DEBUGGER MODE IS SLOWING KERNELS DOWN")
+
 
 ###########################################################
+def create_target_pose_hologram():
+    """ 
+    Create a target pose "hologram" in the simulation. By "hologram", 
+    we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
+    In isaac-sim they call holograms viual objects (like visual coboid and visual spheres...)
+    """
+    target = cuboid.VisualCuboid(
+        "/World/target",
+        position=np.array([0.5, 0, 0.5]),
+        orientation=np.array([0, 1, 0, 0]),
+        color=np.array([0, 1, 0]),
+        size=0.05,
+    )
+    
+    return target
 
 def draw_points(rollouts: torch.Tensor):
     """
@@ -278,21 +279,39 @@ def disable_gravity(prim_stage_path,stage):
 
 
 class Obstacle:
-    def __init__(self, name, pose, dims, obstacle_type, color, mass,  gravity_enabled, world):
+    def __init__(self, name, pose, dims, obstacle_type, color, mass,  gravity_enabled, world, world_cfg):
+        """_summary_
+        See https://curobo.org/get_started/2c_world_collision.html
+
+        Args:
+            name (_type_): _description_
+            pose (_type_): _description_
+            dims (_type_): _description_
+            obstacle_type (_type_): _description_
+            color (_type_): _description_
+            mass (_type_): _description_
+            gravity_enabled (_type_): _description_
+            world (_type_): issac sim world instance (related to the simulator)
+            world_cfg (_type_): curobo world config instance (related to the collision checker of curobo)
+        """
         self.name = name
         self.path = f'/World/new_obstacles/{name}'
         self.initial_pose = pose
         self.dims = dims
         self.prim_type = obstacle_type
+        self.tensor_args = TensorDeviceType()  # Add this to handle device placement
+        self.world_cfg = world_cfg
+        #initialize the obstacle in the simulation and the curobo representation of the obstacle in its collision checker
         self.simulation_representation = self._init_obstacle_in_simulation(world, self.initial_pose[:3], self.dims, obstacle_type, color, mass, gravity_enabled)
         self.curobo_representation = self._init_curobo_obstacle() # initialize the curobo representation of the obstacle based on the simulation representation
-        self.tensor_args = TensorDeviceType()  # Add this to handle device placement
+        self.cur_pos = self.initial_pose[:3]
+
 
     
     def set_simulation_refernce(self, simulation_refernce):
         self.simulation_refernce = simulation_refernce
     
-    def _init_obstacle_in_simulation(self, world, position, dims, obstacle_type="DynamicCuboid", color=None,  mass=1.0, gravity_enabled=True):
+    def _init_obstacle_in_simulation(self, world, position, dims, obstacle_type, color=None,  mass=1.0, gravity_enabled=True):
         """
         Create a moving obstacle in the simulation.
         
@@ -300,7 +319,6 @@ class Obstacle:
             world: Isaac Sim world instance
             position: Initial position [x, y, z]
             size: Size of obstacle (diameter for sphere, side length for cube)
-            obstacle_type: "DynamicCuboid" or "sphere"
             color: RGB color array (defaults to blue if None)
             enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                         If False, creates a visual-only obstacle that moves without physics.
@@ -310,7 +328,7 @@ class Obstacle:
         if color is None:
             color = np.array([0.0, 0.0, 0.1])  # Default blue color
         
-        if obstacle_type == "DynamicCuboid":
+        if obstacle_type == DynamicCuboid:
             obstacle = self._init_DynamicCuboid_for_simulation(world, position, dims, color, mass, gravity_enabled, np.array(args.obstacle_linear_velocity))
 
         return obstacle
@@ -329,7 +347,6 @@ class Obstacle:
             mass: Mass in kg (only used if enable_physics=True)
             gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
         """
-        from omni.isaac.core.objects import DynamicCuboid
         prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,size=size,color=color,mass=mass,density=0.9)         
 
         if linear_velocity is not np.nan:
@@ -341,15 +358,17 @@ class Obstacle:
         world.scene.add(prim)
         return prim
     
-    def upadte(self,mpc):
-        self._update_curobo_obstacle_pose(mpc)
-        # obstacle_world = WorldConfig(
-        #         cuboid=[self.curobo_representation]
-        #     )
-        # mpc.update_world(obstacle_world)
+    # def update(self,mpc):
+    #     # get the updated pose of the obstacle in the simulation
+    #     position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose()
+    #     # update the current position of the obstacle
+    #     self.cur_pos = position_isaac_dynamic_prim
+    #     # update the curobo representation of the obstacle in its collision checker
+    #     self._update_curobo_obstacle_pose(mpc, position_isaac_dynamic_prim, orient_isaac_dynamic_prim)
+        
         
 
-    def _update_curobo_obstacle_pose(self,mpc):
+    def _update_curobo_obstacle_pose(self,mpc, position_isaac_dynamic_prim, orient_isaac_dynamic_prim):
         """
 
         Args:
@@ -359,23 +378,43 @@ class Obstacle:
         Returns:
             _type_: _description_
         """
-        # get the updated pose of the obstacle in the simulation
-        position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose() # specified in world frame
-        print(f"debug- position_isaac_dynamic_prim: {position_isaac_dynamic_prim}, orient_isaac_dynamic_prim: {orient_isaac_dynamic_prim}")
+ 
         # convert isaac simulation pose representation to curobo pose representation
         pos_tensor = self.tensor_args.to_device(torch.from_numpy(position_isaac_dynamic_prim))
         rot_tensor = self.tensor_args.to_device(torch.from_numpy(orient_isaac_dynamic_prim))
         w_obj_pose = Pose(pos_tensor, rot_tensor)
-        print(f"debug- w_obj_pose: {w_obj_pose}")
         # update the obstacle pose in the curobo collision checker
         mpc.world_coll_checker.update_obstacle_pose(self.name, w_obj_pose)
+
         # self.world_ccheck.update_obstacle_pose_in_world_model(self.name, w_obj_pose)
 
         
     def _init_curobo_obstacle(self):
+        """
+        Initialize the curobo representation of the obstacle in its collision checker.
+        https://curobo.org/_api/curobo.types.math.html#curobo.types.math.Pose
+        https://curobo.org/get_started/2c_world_collision.html
+        
+        # Here we initialize the curobo representation of the obstacle in its collision checker.
+        # For every type of obstacle, we need to define the curobo representation of the obstacle in its collision checker.
+        # Valid options are:
+        # - Cuboid
+        # - Sphere
+        # - Mesh
+        # - Capsule
+        # - Cylinder
+        # - Cone
+
+        # More info: https://curobo.org/get_started/2c_world_collision.html 
+        
+        """
+        curobo_obstacle = None
         position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose() # specified in world frame
         w_obj_pose = Pose(torch.from_numpy(position_isaac_dynamic_prim), torch.from_numpy(orient_isaac_dynamic_prim))
-        if self.prim_type == "DynamicCuboid":
+        
+        
+        # Here we initialize the curobo representation of the obstacle in its collision checker.
+        if self.prim_type == DynamicCuboid:
             cube_edge_len = self.simulation_representation.get_size()
             curobo_obstacle = Cuboid(
                 name=self.name,
@@ -383,7 +422,11 @@ class Obstacle:
                 dims=[cube_edge_len, cube_edge_len, cube_edge_len]
             )
         
+        
+        # register the curobo representation of the obstacle in the curobo collision checker
+        self.world_cfg.add_obstacle(curobo_obstacle) 
         return curobo_obstacle
+    
         
 
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
@@ -407,29 +450,29 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
 
 
    
+         
 
-
-def curobo_check_collision(mpc,world, query_spheres, collision_buffer, act_distance, weight):
-    """https://curobo.org/get_started/2c_world_collision.html
+# def curobo_check_collision(mpc,world, query_spheres, collision_buffer, act_distance, weight):
+#     """https://curobo.org/get_started/2c_world_collision.html
     
-    Args:
-        mpc (_type_): _description_
-        query_spheres (_type_): _description_
-        collision_buffer (_type_): _description_
-        act_distance (_type_): activation distance
-        weight (_type_): _description_
-    """
-    dynamic_prims = ["dynamic_cuboid1"]
-    world_ccheck = mpc.world_coll_checker
+#     Args:
+#         mpc (_type_): _description_
+#         query_spheres (_type_): _description_
+#         collision_buffer (_type_): _description_
+#         act_distance (_type_): activation distance
+#         weight (_type_): _description_
+#     """
+    # dynamic_prims = ["dynamic_cuboid1"]
+    # world_ccheck = mpc.world_coll_checker
     
-    for prim_name in dynamic_prims:
-        object_prim = world.scene.get_object(f'/World/{prim_name}') # [x,y,z]
-        position, orientation = object_prim.get_world_pose() # [w, x, y, z]
-        object_pose_curobo = Pose(np.array(position), np.array(orientation)) # Pose.from_list([0,0,0.1,1,0,0,0], tensor_args=tensor_args)
-        world_ccheck.update_obstacle_pose(object_pose_curobo, name=prim_name)
+    # for prim_name in dynamic_prims:
+    #     object_prim = world.scene.get_object(f'/World/{prim_name}') # [x,y,z]
+    #     position, orientation = object_prim.get_world_pose() # [w, x, y, z]
+    #     object_pose_curobo = Pose(np.array(position), np.array(orientation)) # Pose.from_list([0,0,0.1,1,0,0,0], tensor_args=tensor_args)
+    #     world_ccheck.update_obstacle_pose(object_pose_curobo, name=prim_name)
 
-        out = world_ccheck.get_sphere_distance(query_spheres, collision_buffer, act_distance, weight)
-        out = out.view(-1)
+    #     out = world_ccheck.get_sphere_distance(query_spheres, collision_buffer, act_distance, weight)
+    #     out = out.view(-1)
 
 def main():
     """
@@ -534,14 +577,28 @@ def main():
 
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
     
-    # Create and configure moving obstacle
-    dynamic_cuboid1 = Obstacle("dynamic_cuboid1", np.array(args.obstacle_initial_pos), args.obstacle_size, args.obstacle_type, np.array(args.obstacle_color), args.obstacle_mass, args.gravity_enabled.lower() == "true", my_world)    
-    world_cfg.add_obstacle(dynamic_cuboid1.curobo_representation)
+    # Create and configure obstacles 
+    
+    # obstacle_list = []
+    # for obj in world_cfg.objects:
+    #     obstacle = Obstacle(obj.name, obj.pose, obj.dims, type(obj), obj.color, obj.mass, obj.gravity_enabled, my_world, world_cfg, )
+    #     obstacle_list.append(obstacle)
+    worlf_cfg_dynamic_obs = WorldConfig() # representation of the world for use in curobo
+
+    dynamic_obstacles = [
+        Obstacle("dynamic_cuboid1", np.array(args.obstacle_initial_pos), args.obstacle_size, DynamicCuboid, np.array(args.obstacle_color), args.obstacle_mass, args.gravity_enabled.lower() == "true", my_world, worlf_cfg_dynamic_obs)  
+        # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
+        # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
+        # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
+    ]
+    collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
+    step_dt_traj_mpc = 0.033 # 0.02
+    dynamic_obs_ccheck = DynamicObsCollChecker(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
+    
+    
     # Initialize MPC solver
     init_curobo = False
-    
     # Configuration for MPC
-    step_dt_traj_mpc = 0.033 # 0.02
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
         world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
@@ -550,19 +607,21 @@ def main():
         use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
         self_collision_check=True, # Enable self-collision check during MPC optimization.
         collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
-        collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
+        collision_cache=collision_cache,
         use_mppi=True,  # Use Model Predictive Path Integral for optimization
         use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
         use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
         store_rollouts=True,  # Store trajectories for visualization
         step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
+        dynamic_obs_checker=dynamic_obs_ccheck  # Add this line
+
     )
 
     mpc = MpcSolver(mpc_config)
-    # world_ccheck = mpc.world_coll_checker # https://curobo.org/get_started/2c_world_collision.html    
+  
+    # world_ccheck = mpc.world_coll_checker     
     
-
-
+     
     # Set up initial robot state and goal
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
     joint_names = mpc.rollout_fn.joint_names
@@ -582,6 +641,7 @@ def main():
     goal_buffer = mpc.setup_solve_single(goal, 1)
     mpc.update_goal(goal_buffer)
     mpc_result = mpc.step(current_state, max_attempts=2)
+
 
     # Load stage and initialize simulation
     usd_help.load_stage(my_world.stage)
@@ -619,11 +679,12 @@ def main():
         while not my_world.is_playing():
             print("Waiting for play button to be pressed...")
             time.sleep(0.1)
-        # NOW PLAYING
         
+        # NOW PLAYING!
+
         # Here the control step starts
         # Reset robot to initial configuration
-        if world_step_calls_count == 1:
+        if world_step_calls_count == 1: # number of simulation steps since the play button was pressed
             my_world.reset()
             idx_list = [robot.get_dof_index(x) for x in j_names]
             robot.set_joint_positions(default_config, idx_list)
@@ -635,30 +696,21 @@ def main():
 
         if not init_curobo:
             init_curobo = True
-        # update a cuboid obstacle pose
 
-
+        # ######### Update obstacle poses in the curobo collision checker #########    
+        # for obstacle in obstacle_list:
+        #     obstacle.update(mpc)
         
-        # new_pose = Pose.from_list([0,0,0.1,1,0,0,0], tensor_args=tensor_args)
-        # w_obj_pose = dynamic_cuboid1.get_world_pose()  # https://curobo.org/_api/curobo.geom.sdf.world.html#curobo.geom.sdf.world.WorldPrimitiveCollision.update_obstacle_pose
-        # print(f"debug w_obj_pose: {w_obj_pose}")
-        # world_ccheck.update_obstacle_pose("dynamic_cuboid1", w_obj_pose)
+        print_rate_decorator(lambda: dynamic_obs_ccheck.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_ccheck.update_predictive_collision_checkers")()
         
-        # obstacles = usd_help.get_obstacles_from_stage(
-        #         # only_paths=[obstacles_path],
-        #         reference_prim_path="/World",
-        #         ignore_substring=["/World/target", "/World/defaultGroundPlane"]
-        #     ).get_collision_check_world()
-        # mpc.update_world(obstacles)
-        dynamic_cuboid1.upadte(mpc)
-        
+        ######## UPDATE TARGET POSE IF NEEDED (IN CASE IT MOVES) ########
         # Get target position and orientation
         cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "get_world_pose of target")() # goal pose
 
         # Update goal if target has moved
         if past_pose is None:
             past_pose = cube_position + 1.0
-
+        
         if np.linalg.norm(cube_position - past_pose) > 1e-3: # if the target has moved
             # Set new end-effector goal based on target position
             ee_translation_goal = cube_position
@@ -670,6 +722,7 @@ def main():
             goal_buffer.goal_pose.copy_(ik_goal)
             mpc.update_goal(goal_buffer)
             past_pose = cube_position
+        ###################################################################
 
         # Get current robot state
         sim_js = robot.get_joints_state() # get the current joint state of the robot
@@ -684,7 +737,10 @@ def main():
             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
             joint_names=sim_js_names,
         )
+
         cu_js = cu_js.get_ordered_joint_state(mpc.rollout_fn.joint_names)
+        robot_as_spheres = mpc.kinematics.get_robot_as_spheres(cu_js.position)[0]
+
         if cmd_state_full is None:
             current_state.copy_(cu_js)
         else:
@@ -696,6 +752,18 @@ def main():
         common_js_names = []
         current_state.copy_(cu_js)
 
+        ############## Predict moving obstacles path ##################
+        # Get current obstacle poses
+        # obstacle_xyzr = []
+        # for h in range(H):
+        #     for obstacle in obstacle_list:
+        #         H_world_cchecks[h].update_obstacle_pose(obstacle.cur_pos, name=obstacle.name)
+        
+        # # Predict moving obstacles path
+        # H_obj_ = predict_moving_obstacles_horizon(obstacle_xyzr)
+
+
+        
         # Run MPC step
         mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
@@ -718,10 +786,6 @@ def main():
             joint_indices=idx_list,
         )
         
-        # # Print metrics periodically
-        # if step_index % 1000 == 0:
-        #     print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
-
         # Execute planned motion
         if succ:
             for _ in range(3):
@@ -729,9 +793,11 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
+        ####  Print info related to the control frequency: #####
         curr_time = time.time()
         total_played_sim_time = curr_time - played_sim_start_time
         t = my_world.current_time_step_index  # current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+        print("debug: t", t)
         avg_control_freq_hz = t / total_played_sim_time # Control Rate:num of completed actions / total time of actions Hz
         avg_step_dt = total_played_sim_time / t
         expected_ctrl_freq_hz = 1/step_dt_traj_mpc
@@ -740,21 +806,6 @@ def main():
             print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {avg_control_freq_hz:.2f} Hz was assigned.\n\
                     Change mpc_config.step_dt from {step_dt_traj_mpc} to {avg_step_dt})")
 
-def create_target_pose_hologram():
-    """ 
-    Create a target pose "hologram" in the simulation. By "hologram", 
-    we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
-    In isaac-sim they call holograms viual objects (like visual coboid and visual spheres...)
-    """
-    target = cuboid.VisualCuboid(
-        "/World/target",
-        position=np.array([0.5, 0, 0.5]),
-        orientation=np.array([0, 1, 0, 0]),
-        color=np.array([0, 1, 0]),
-        size=0.05,
-    )
-    
-    return target
 
 if __name__ == "__main__":
     main()
