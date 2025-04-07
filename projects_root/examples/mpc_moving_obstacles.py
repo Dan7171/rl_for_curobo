@@ -592,7 +592,7 @@ def main():
         # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
     ]
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
-    step_dt_traj_mpc = 0.033 # 0.02
+    step_dt_traj_mpc = 0.02 # 0.02
     dynamic_obs_ccheck = DynamicObsCollChecker(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
     

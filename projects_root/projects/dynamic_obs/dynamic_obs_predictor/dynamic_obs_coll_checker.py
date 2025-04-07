@@ -164,8 +164,10 @@ class DynamicObsCollChecker:
                 robot_sphere_max_pen_depth = act_rad_max_pen_depth - self.act_distance
                 rollouts_with_col = torch.any(robot_sphere_max_pen_depth >= 0, dim=1) # vector in length of n_rollouts, for each rollout, checks if for that rollout at the current time step any collision spheres are in collision
                 ans[:, h] = rollouts_with_col.float() # convert bool to float (collision is 1, no collision is 0.  now ans[i,j] is 1 <=> there is some collision for the ith rollout at the jth time step.
-        ans *= self.cost_weight 
+        ans *= self.cost_weight
+        print("debug: sum of weighted collision costs over n_rollouts x H = ", torch.sum(ans)) 
         return ans 
+        
         # # Create ans_causing to detect transitions from no-collision to collision
         # ans_causing = torch.zeros_like(ans)
         # # For all timesteps except the first one (since we need to look at previous timestep)
