@@ -602,7 +602,7 @@ def main():
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
         world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-        use_cuda_graph=True, # Use CUDA graph for the optimization step.
+        use_cuda_graph=False, # Use CUDA graph for the optimization step.
         use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
         use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
         self_collision_check=True, # Enable self-collision check during MPC optimization.
@@ -613,8 +613,8 @@ def main():
         use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
         store_rollouts=True,  # Store trajectories for visualization
         step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
-        dynamic_obs_checker=dynamic_obs_ccheck  # Add this line
-
+        dynamic_obs_checker=dynamic_obs_ccheck,  # Add this line
+        override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml'
     )
 
     mpc = MpcSolver(mpc_config)
