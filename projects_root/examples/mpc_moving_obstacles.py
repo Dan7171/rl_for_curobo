@@ -593,7 +593,7 @@ def main():
     ]
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
     step_dt_traj_mpc = 0.02 # 0.02
-    dynamic_obs_ccheck = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
+    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
     
     # Initialize MPC solver
@@ -613,8 +613,8 @@ def main():
         use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
         store_rollouts=True,  # Store trajectories for visualization
         step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
-        dynamic_obs_checker=dynamic_obs_ccheck,  # Add this line
-        override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml'
+        dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
+        override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
     )
 
     mpc = MpcSolver(mpc_config)
@@ -701,7 +701,7 @@ def main():
         # for obstacle in obstacle_list:
         #     obstacle.update(mpc)
         
-        print_rate_decorator(lambda: dynamic_obs_ccheck.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_ccheck.update_predictive_collision_checkers")()
+        print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
         
         ######## UPDATE TARGET POSE IF NEEDED (IN CASE IT MOVES) ########
         # Get target position and orientation

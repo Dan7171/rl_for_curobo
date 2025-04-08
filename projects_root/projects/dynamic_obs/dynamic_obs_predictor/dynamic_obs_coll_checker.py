@@ -45,10 +45,10 @@ class DynamicObsCollPredictor:
         self.H_collision_buffers = []
         self.H_world_cchecks = [] # list of collision checkers for each time step
         for _ in range(self.H):
-            world_config = copy.deepcopy(world_collision_config_base)
-            col_checker = WorldMeshCollision(world_config)
+            world_config = copy.deepcopy(world_collision_config_base) # NOTE: I use copies to avoid side effects.
+            col_checker = WorldMeshCollision(world_config) # Initiate a single collision checker for each time step over the horizon.
             self.H_world_cchecks.append(col_checker)
-            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types))
+            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for
         
     # def update_obstacle_pose_in_cchecker(self, obstacle_name, obstacle_pose, obstacle_vel, obstacle_acceleration):
     #     obstacle_path = self.predict_obstacle_path(obstacle_pose, obstacle_vel, obstacle_acceleration)
