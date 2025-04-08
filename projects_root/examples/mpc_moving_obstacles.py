@@ -602,7 +602,7 @@ def main():
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
         world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-        use_cuda_graph=False, # Use CUDA graph for the optimization step.
+        use_cuda_graph=True, # Use CUDA graph for the optimization step.
         use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
         use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
         self_collision_check=True, # Enable self-collision check during MPC optimization.

@@ -11,7 +11,9 @@ from curobo.geom.sdf.world import WorldCollisionConfig
 class DynamicObsCollChecker:
     """
     This class is used to check the collision of the dynamic obstacles in the world.
-    see https://curobo.org/get_started/2c_world_collision.html
+    It also contains the functionality to compute costs.
+    Inspired by: https://curobo.org/get_started/2c_world_collision.html
+    
     """
     
 
@@ -27,7 +29,7 @@ class DynamicObsCollChecker:
             robot_collision_sphere_num = The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
             
             """
-        
+        self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging  
         world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
         self.tensor_args = tensor_args
         self.H = H # Horizon length
@@ -111,7 +113,7 @@ class DynamicObsCollChecker:
             predictions = obs_pos_preds[:, h, :] # predicted positions of all obstacles at time step h
             self._update_ccheck(ccheck, predictions, obs_names) # update the collision checker with the predicted positions of the obstacles
 
-    def cost_fn(self, robot_spheres, env_query_idx=None, method='distance'):
+    def cost_fn(self, robot_spheres, env_query_idx=None, method='distance',collision_threshold=0.2):
         """
         Compute the collision cost for the robot spheres.
         Args:
@@ -123,12 +125,17 @@ class DynamicObsCollChecker:
         Returns:
             tensor of shape [n_rollouts, horizon] containing collision costs
         """
+        
+        if not torch.cuda.is_current_stream_capturing():
+            self._init_counter += 1
+            print(f"Initialization iteration {self._init_counter}")
+            if torch.cuda.is_current_stream_capturing():
+                print("During graph capture")
+
         # Initialize cost tensor
         ans = torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
-        
         # Make input contiguous and ensure proper shape
         robot_spheres = robot_spheres.contiguous()
-        
         for h in range(self.H):
             buffer_step_h = self.H_collision_buffers[h]
             
@@ -161,11 +168,14 @@ class DynamicObsCollChecker:
                 #  - => Additionaly, the exact penetration depth *into the jth sphere's itself (not the activation radius)* is act_rad_max_pen_depth[i, j] - self.act_distance. And of course that if its non negative, there is a collision.
                 # For more info check https://curobo.org/get_started/2c_world_collision.html
 
-                robot_sphere_max_pen_depth = act_rad_max_pen_depth - self.act_distance
-                rollouts_with_col = torch.any(robot_sphere_max_pen_depth >= 0, dim=1) # vector in length of n_rollouts, for each rollout, checks if for that rollout at the current time step any collision spheres are in collision
+                robot_spheres_max_pen_depth = act_rad_max_pen_depth - self.act_distance
+                robot_spheres_min_dist_to_obstacles = - robot_spheres_max_pen_depth # for each sphere, the minimum distance to the nearest obstacle.
+                # rollouts_with_col = torch.any(robot_spheres_max_pen_depth >= 0, dim=1) # vector in length of n_rollouts, for each rollout, checks if for that rollout at the current time step any collision spheres are in collision
+                rollouts_with_col = torch.any(robot_spheres_min_dist_to_obstacles <= collision_threshold, dim=1) # vector in length of n_rollouts, for each rollout, checks if for that rollout at the current time step any collision spheres are in collision
                 ans[:, h] = rollouts_with_col.float() # convert bool to float (collision is 1, no collision is 0.  now ans[i,j] is 1 <=> there is some collision for the ith rollout at the jth time step.
+                
         ans *= self.cost_weight
-        print("debug: sum of weighted collision costs over n_rollouts x H = ", torch.sum(ans)) 
+        # ans = torch.rand_like(ans) * self.cost_weight # DEBUG
         return ans 
         
         # # Create ans_causing to detect transitions from no-collision to collision

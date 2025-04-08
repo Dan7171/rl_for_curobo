@@ -259,7 +259,6 @@ class ParticleOptBase(Optimizer, ParticleOptConfig):
         for _ in range(n_iters):
             # generate random simulated trajectories
             trajectory = self.generate_rollouts()
-            print("debug: costs shape ", trajectory.costs.shape)
             trajectory.actions = trajectory.actions.view(
                 self.n_problems, self.particles_per_problem, self.action_horizon, self.d_action
             )
