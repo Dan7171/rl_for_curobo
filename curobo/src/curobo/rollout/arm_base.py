@@ -235,13 +235,13 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
         self._init_after_config_load()
-        self._dynamic_obs_checker: Any[None, DynamicObsCollPredictor] = None
+        self._dynamic_obs_coll_predictor: Any[None, DynamicObsCollPredictor] = None
 
-    def set_dynamic_obs_checker(self, checker: DynamicObsCollPredictor):
-        self._dynamic_obs_checker = checker
+    def set_dynamic_obs_coll_predictor(self, checker: DynamicObsCollPredictor):
+        self._dynamic_obs_coll_predictor = checker
     
-    def get_dynamic_obs_cchecker(self) -> DynamicObsCollPredictor:
-        return self._dynamic_obs_checker
+    def get_dynamic_obs_coll_predictor(self) -> DynamicObsCollPredictor:
+        return self._dynamic_obs_coll_predictor
     
     @profiler.record_function("arm_base/init_after_config_load")
     def _init_after_config_load(self):
@@ -382,7 +382,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 cost_list.append(coll_cost)
         
         # Dynamic obs collision checking
-        dynamic_obs_col_checker = self.get_dynamic_obs_cchecker()
+        dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor()
         if dynamic_obs_col_checker is not None:
             is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
             if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step

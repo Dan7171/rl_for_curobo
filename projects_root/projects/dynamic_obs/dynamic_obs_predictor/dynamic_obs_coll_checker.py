@@ -68,7 +68,7 @@ class DynamicObsCollPredictor:
         
         return path
     
-    def _update_ccheck(self, ccheker, new_positions, obs_names):
+    def _update_cchecker(self, cchecker, new_positions, obs_names):
         """
         Update the collision checker with the predicted positions of the obstacles.
         """
@@ -79,8 +79,8 @@ class DynamicObsCollPredictor:
             new_pose = Pose(pos_tensor, rot_tensor) 
             # NOTE: I added update_obstacle_pose_in_world_model before update_obstacle_pose only after I realized that there is a chance that update_obstacle_pose is not working, or at least not updating the CPU. I dont know if they are both neede, but now the pose in the cpu is updated too.
             # TODO: After I manage to give rise to awarness to obstacles in the cost and see change in behaviour, I should remove one of the next two calls, if redundant. For now they are here only to be on the safe side.
-            ccheker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx]) 
-            ccheker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
+            cchecker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx]) 
+            cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
     
     def update_predictive_collision_checkers(self, obstacles:List[Obstacle]):
         """
@@ -113,9 +113,9 @@ class DynamicObsCollPredictor:
 
         # 3) Update each collision checker with the predicted positions of the obstacles in its time step.
         for h in range(self.H): # NOTE: We can parallelize this loop.
-            ccheck = self.H_world_cchecks[h] # h'th collision checker
+            cchecker = self.H_world_cchecks[h] # h'th collision checker
             predictions = obs_pos_preds[:, h, :] # predicted positions of all obstacles at time step h
-            self._update_ccheck(ccheck, predictions, obs_names) # update the collision checker with the predicted positions of the obstacles
+            self._update_cchecker(cchecker, predictions, obs_names) # update the collision checker with the predicted positions of the obstacles
 
     def cost_fn(self, robot_spheres, env_query_idx=None, method='distance',collision_threshold=0.2):
         """
