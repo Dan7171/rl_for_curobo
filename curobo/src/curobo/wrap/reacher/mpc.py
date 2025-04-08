@@ -384,10 +384,10 @@ class MpcSolver(MpcSolverConfig):
 
         # self.rollout_fn.set_dynamic_obs_checker(config.dynamic_obs_checker)
          # Set the dynamic obstacle checker in all rollout functions
-        self.rollout_fn.set_dynamic_obs_checker(self.dynamic_obs_checker)
-        self.solver.safety_rollout.set_dynamic_obs_checker(self.dynamic_obs_checker)
+        self.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        self.solver.safety_rollout.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
         for optimizer in self.solver.optimizers:
-            optimizer.rollout_fn.set_dynamic_obs_checker(self.dynamic_obs_checker)
+            optimizer.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
         
     def setup_solve_single(self, goal: Goal, num_seeds: Optional[int] = None) -> Goal:
         """Creates a goal buffer to solve for a robot to reach target pose or joint configuration.

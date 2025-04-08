@@ -10,7 +10,7 @@
 #
 # Standard Library
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Third Party
 import torch
@@ -32,6 +32,8 @@ from curobo.util.helpers import list_idx_if_not_none
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import cat_max
 from curobo.util.torch_utils import get_torch_jit_decorator
+
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
 # Local Folder
 from .arm_base import ArmBase, ArmBaseConfig, ArmCostConfig
@@ -464,11 +466,11 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         for p in pose_costs:
             p.update_metric(metric, update_offset_waypoint=False)
 
-    def set_dynamic_obs_checker(self, checker):
-        self._dynamic_obs_checker = checker
+    def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
+        self._dynamic_obs_coll_predictor = predictor
     
-    def get_dynamic_obs_checker(self):
-        return self._dynamic_obs_checker
+    def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
+        return self._dynamic_obs_coll_predictor
 
 
 @get_torch_jit_decorator()

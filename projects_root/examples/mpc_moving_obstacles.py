@@ -202,7 +202,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--print_ctrl_rate",
-    default="True",
+    default="False",
     type=str,
     choices=["True", "False"],
     help="When True, prints the control rate",
@@ -679,7 +679,8 @@ def main():
         while not my_world.is_playing():
             print("Waiting for play button to be pressed...")
             time.sleep(0.1)
-        
+        if my_world.current_time_step_index == 73:
+            print("debug- experimental: my_world.current_time_step_index == 73")
         # NOW PLAYING!
 
         # Here the control step starts
@@ -702,7 +703,10 @@ def main():
         #     obstacle.update(mpc)
         
         print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
-        
+        ######
+        print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
+        ######
+
         ######## UPDATE TARGET POSE IF NEEDED (IN CASE IT MOVES) ########
         # Get target position and orientation
         cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "get_world_pose of target")() # goal pose

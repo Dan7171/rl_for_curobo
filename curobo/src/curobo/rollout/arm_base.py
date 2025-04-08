@@ -235,12 +235,12 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
         self._init_after_config_load()
-        self._dynamic_obs_coll_predictor: Any[None, DynamicObsCollPredictor] = None
+        self._dynamic_obs_coll_predictor: Optional[DynamicObsCollPredictor] = None
 
-    def set_dynamic_obs_coll_predictor(self, checker: DynamicObsCollPredictor):
-        self._dynamic_obs_coll_predictor = checker
+    def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
+        self._dynamic_obs_coll_predictor = predictor
     
-    def get_dynamic_obs_coll_predictor(self) -> DynamicObsCollPredictor:
+    def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
         return self._dynamic_obs_coll_predictor
     
     @profiler.record_function("arm_base/init_after_config_load")
