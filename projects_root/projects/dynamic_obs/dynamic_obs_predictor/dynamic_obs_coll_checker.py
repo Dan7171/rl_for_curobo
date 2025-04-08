@@ -77,7 +77,10 @@ class DynamicObsCollPredictor:
             pos_tensor = self.tensor_args.to_device(torch.from_numpy(new_positions[obs_idx]))
             rot_tensor = self.tensor_args.to_device(torch.from_numpy(new_quaterion))
             new_pose = Pose(pos_tensor, rot_tensor) 
-            ccheker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx])
+            # NOTE: I added update_obstacle_pose_in_world_model before update_obstacle_pose only after I realized that there is a chance that update_obstacle_pose is not working, or at least not updating the CPU. I dont know if they are both neede, but now the pose in the cpu is updated too.
+            # TODO: After I manage to give rise to awarness to obstacles in the cost and see change in behaviour, I should remove one of the next two calls, if redundant. For now they are here only to be on the safe side.
+            ccheker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx]) 
+            ccheker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
     
     def update_predictive_collision_checkers(self, obstacles:List[Obstacle]):
         """

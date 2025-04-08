@@ -11,7 +11,7 @@
 # Standard Library
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 # Third Party
 import torch
@@ -44,7 +44,8 @@ from curobo.types.state import JointState
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import cat_sum, cat_sum_horizon
 
-        
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+
 @dataclass
 class ArmCostConfig:
     bound_cfg: Optional[BoundCostConfig] = None
@@ -234,12 +235,12 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
         self._init_after_config_load()
-        self._dynamic_obs_checker = None
+        self._dynamic_obs_checker: Any[None, DynamicObsCollPredictor] = None
 
-    def set_dynamic_obs_checker(self, checker):
+    def set_dynamic_obs_checker(self, checker: DynamicObsCollPredictor):
         self._dynamic_obs_checker = checker
     
-    def get_dynamic_obs_cchecker(self):
+    def get_dynamic_obs_cchecker(self) -> DynamicObsCollPredictor:
         return self._dynamic_obs_checker
     
     @profiler.record_function("arm_base/init_after_config_load")
