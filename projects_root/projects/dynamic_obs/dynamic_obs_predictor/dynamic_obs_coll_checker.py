@@ -8,7 +8,7 @@ import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
         
-class DynamicObsCollChecker:
+class DynamicObsCollPredictor:
     """
     This class is used to check the collision of the dynamic obstacles in the world.
     It also contains the functionality to compute costs.

@@ -90,7 +90,7 @@ class MpcSolverConfig:
     #: Capture full step in MPC as a single CUDA graph. This is not supported currently.
     use_cuda_graph_full_step: bool = False
 
-    #: Instance of DynamicObsCollChecker to use for MPC.    
+    #: Instance of DynamicObsCollPredictor to use for MPC.    
     dynamic_obs_checker: Optional[object] = None  # Add this field
     @staticmethod
     def load_from_robot_config(
@@ -170,7 +170,7 @@ class MpcSolverConfig:
             project_pose_to_goal_frame: Project pose to goal frame when calculating distance
                 between reached and goal pose. Use this to constrain motion to specific axes
                 either in the global frame or the goal frame.
-            dynamic_obs_checker: Instance of DynamicObsCollChecker to use for MPC.
+            dynamic_obs_checker: Instance of DynamicObsCollPredictor to use for MPC.
 
         Returns:
             MpcSolverConfig: Configuration for the MPC solver.

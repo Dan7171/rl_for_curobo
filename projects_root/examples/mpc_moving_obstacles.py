@@ -100,7 +100,7 @@ from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollChecker
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
 
@@ -583,8 +583,8 @@ def main():
     # for obj in world_cfg.objects:
     #     obstacle = Obstacle(obj.name, obj.pose, obj.dims, type(obj), obj.color, obj.mass, obj.gravity_enabled, my_world, world_cfg, )
     #     obstacle_list.append(obstacle)
-    worlf_cfg_dynamic_obs = WorldConfig() # representation of the world for use in curobo
-
+    
+    worlf_cfg_dynamic_obs = WorldConfig() # curobo collision checker world config for dynamic obstacles. Should be pased to all obstacles.
     dynamic_obstacles = [
         Obstacle("dynamic_cuboid1", np.array(args.obstacle_initial_pos), args.obstacle_size, DynamicCuboid, np.array(args.obstacle_color), args.obstacle_mass, args.gravity_enabled.lower() == "true", my_world, worlf_cfg_dynamic_obs)  
         # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
@@ -593,7 +593,7 @@ def main():
     ]
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
     step_dt_traj_mpc = 0.02 # 0.02
-    dynamic_obs_ccheck = DynamicObsCollChecker(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
+    dynamic_obs_ccheck = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
     
     # Initialize MPC solver
@@ -751,17 +751,6 @@ def main():
             current_state.joint_names = current_state_partial.joint_names
         common_js_names = []
         current_state.copy_(cu_js)
-
-        ############## Predict moving obstacles path ##################
-        # Get current obstacle poses
-        # obstacle_xyzr = []
-        # for h in range(H):
-        #     for obstacle in obstacle_list:
-        #         H_world_cchecks[h].update_obstacle_pose(obstacle.cur_pos, name=obstacle.name)
-        
-        # # Predict moving obstacles path
-        # H_obj_ = predict_moving_obstacles_horizon(obstacle_xyzr)
-
 
         
         # Run MPC step

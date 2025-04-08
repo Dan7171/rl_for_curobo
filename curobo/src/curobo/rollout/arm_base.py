@@ -28,7 +28,6 @@ from curobo.rollout.cost.primitive_collision_cost import (
     PrimitiveCollisionCost,
     PrimitiveCollisionCostConfig,
 )
-# from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollChecker
  
 
 from curobo.rollout.cost.self_collision_cost import SelfCollisionCost, SelfCollisionCostConfig
