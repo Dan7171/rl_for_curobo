@@ -7,7 +7,9 @@ import numpy as np
 import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
-        
+
+SPHERE_DIM = 4 # The values which are required to define a sphere: x,y,z,radius. That's fixed in all curobo coll checkers
+
 class DynamicObsCollPredictor:
     """
     This class is used to check the collision of the dynamic obstacles in the world.
@@ -31,12 +33,11 @@ class DynamicObsCollPredictor:
             """
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging  
         world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
-        self.tensor_args = tensor_args
+        self.tensor_args = tensor_args 
         self.H = H # Horizon length
         self.collision_sphere_num = robot_collision_sphere_num # The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
-        self.sphere_dim = 4 # The values which are required to define a sphere: x,y,z,radius
         self.n_rollouts = n_rollouts # The number of rollouts
-        query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, self.sphere_dim), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, self.sphere_dim]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
+        query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
         self.step_dt_traj_mpc = step_dt_traj_mpc # time passes between each step in the trajectory.
         self.act_distance = tensor_args.to_device([act_distance]) # activation distance for collision checking (below this distance, consider collision)
         self.weight_col_check = tensor_args.to_device([1]) # weight for curobo collision checking. Not sure why we need this but in all examples its 1. See https://curobo.org/get_started/2c_world_collision.html
@@ -71,12 +72,12 @@ class DynamicObsCollPredictor:
         """
         Update the collision checker with the predicted positions of the obstacles.
         """
-        new_quaterion = np.array([0,0,0,1])
+        new_quaterion = np.array([0,0,0,1]) # TODO: This is temporary. We need to get the correct orientation of the obstacle.
         for obs_idx in range(len(obs_names)): # NOTE: could be parallelized
             pos_tensor = self.tensor_args.to_device(torch.from_numpy(new_positions[obs_idx]))
             rot_tensor = self.tensor_args.to_device(torch.from_numpy(new_quaterion))
             new_pose = Pose(pos_tensor, rot_tensor) 
-            ccheker.update_obstacle_pose(w_obj_pose=new_pose, name=obs_names[obs_idx])
+            ccheker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx])
     
     def update_predictive_collision_checkers(self, obstacles:List[Obstacle]):
         """
@@ -140,7 +141,7 @@ class DynamicObsCollPredictor:
             buffer_step_h = self.H_collision_buffers[h]
             
             # Extract and reshape spheres for current timestep
-            robot_spheres_step_h = robot_spheres[:, h].contiguous().reshape(self.n_rollouts, 1, self.collision_sphere_num, self.sphere_dim)
+            robot_spheres_step_h = robot_spheres[:, h].contiguous().reshape(self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM)
             
             if method == 'distance':
                     
