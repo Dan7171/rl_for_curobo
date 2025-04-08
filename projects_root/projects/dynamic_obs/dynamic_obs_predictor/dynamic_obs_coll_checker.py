@@ -183,43 +183,14 @@ class DynamicObsCollPredictor:
                 safety_margin_violation_rollouts = torch.any(spheres_curobo_coll_costs > 0, dim=1).float() # vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).
                 dynamic_coll_cost_matrix[:, h] = safety_margin_violation_rollouts 
 
-                # robot_spheres_max_pen_depth = activation_radius_max_pen_depth - self.activation_distance # The maximum depth of penetration to a robot sphere from an obstacle, over all obstacles. (in step h, over all rollouts)
-                # robot_spheres_min_dist_to_obstacles = - robot_spheres_max_pen_depth # for each sphere, the minimum distance to the nearest obstacle. (in step h, over all rollouts)
-                # rollouts_with_col = torch.any(robot_spheres_min_dist_to_obstacles <= collision_threshold, dim=1) # vector in length of n_rollouts, for each rollout, checks if for that rollout at the current time step any collision spheres are in collision. (in step h, over all rollouts)
-                # cost_matrix[:, h] = rollouts_with_col.float() # convert bool to float (collision is 1, no collision is 0.  now cost_matrix[i,j] is 1 <=> there is some collision for the ith rollout at the jth time step.
-                # #### debug ####
-                # min_dist_sphere_to_obs_per_rollout = robot_spheres_min_dist_to_obstacles.min(axis=1)[0] # vector in range (400). minimum distance (over all spheres)between any sphere and any obstacle, over all rollouts, at the h'th step. 
                 
-                # avg_col_dist_over_all_rollouts = min_dist_sphere_to_obs_per_rollout.mean().item()
+                # #### debug ####
                 # if h % 7 == 0:
                 #     print(f"step {h}: col_checker obs estimated pose: {self.H_world_cchecks[h].world_model.objects[0].pose}")
-                #     print(f"'min sphere-to-obs distance' (collision distance), averaged over rollouts: {avg_col_dist_over_all_rollouts}")
                 # ############### 
+
         dynamic_coll_cost_matrix *= self.cost_weight
         # cost_matrix = torch.rand_like(cost_matrix) * self.cost_weight # DEBUG
         return dynamic_coll_cost_matrix 
         
-        # # Create cost_matrix_causing to detect transitions from no-collision to collision
-        # ans_causing = torch.zeros_like(cost_matrix)
-        # # For all timesteps except the first one (since we need to look at previous timestep)
-        # ans_causing[:, :-1] = (cost_matrix[:, 1:] == 1) & (cost_matrix[:, :-1] == 0)
-        # return ans_causing
-            
-            # elif method == 'collision':
-            #     out = self.H_world_cchecks[h].get_sphere_collision(
-            #         robot_spheres_step_h,
-            #         buffer_step_h,
-            #         self.activation_distance,
-            #         self.weight
-            #     )
-            # elif method == 'swept_distance':
-            #     out = self.H_world_cchecks[h].get_swept_sphere_distance(
-            #         robot_spheres_step_h,
-            #         buffer_step_h,
-            #         self.activation_distance,
-            #         self.weight
-                # )
-            
-            # Sum the collision costs across spheres to get one cost per rollout
-            # cost_matrix[:, h] = out.sum(dim=1).reshape(self.n_rollouts)
-
+       

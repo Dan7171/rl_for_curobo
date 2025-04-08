@@ -679,8 +679,10 @@ def main():
         while not my_world.is_playing():
             print("Waiting for play button to be pressed...")
             time.sleep(0.1)
+        
         if my_world.current_time_step_index == 73:
             print("debug- experimental: my_world.current_time_step_index == 73")
+        
         # NOW PLAYING!
 
         # Here the control step starts
