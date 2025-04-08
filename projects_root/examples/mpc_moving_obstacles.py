@@ -619,8 +619,7 @@ def main():
 
     mpc = MpcSolver(mpc_config)
   
-    # world_ccheck = mpc.world_coll_checker     
-    
+     
      
     # Set up initial robot state and goal
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
@@ -650,9 +649,12 @@ def main():
     step = 0
     add_extensions(simulation_app, args.headless_mode)
     
-    # Main simulation loop
     world_step_calls_count = 0
-    played_sim_start_time = -1
+    cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
+    cfm_start_step_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
+    cfm_min_start_step_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
+    
+    # Main simulation loo
     while simulation_app.is_running(): # not necessarily playing, just running
         # Initialize world if needed
         if not init_world:
@@ -680,8 +682,6 @@ def main():
             print("Waiting for play button to be pressed...")
             time.sleep(0.1)
         
-        if my_world.current_time_step_index == 73:
-            print("debug- experimental: my_world.current_time_step_index == 73")
         
         # NOW PLAYING!
 
@@ -695,15 +695,18 @@ def main():
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
-            played_sim_start_time = time.time()
 
         if not init_curobo:
             init_curobo = True
 
-        # ######### Update obstacle poses in the curobo collision checker #########    
-        # for obstacle in obstacle_list:
-        #     obstacle.update(mpc)
-        
+        # Start measuring control frequency if not already started
+        cfm_is_initialized = np.isnan(cfm_start_time) # is the control frequency measurement already initialized?
+        cfm_can_be_initialized = world_step_calls_count >= cfm_min_start_step_idx # is it valid to start measuring control frequency now?
+        if not cfm_is_initialized and cfm_can_be_initialized:
+            cfm_start_time = time.time()
+            cfm_start_step_idx = my_world.current_time_step_index # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+
+
         print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
         ######
         print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
@@ -789,18 +792,18 @@ def main():
             carb.log_warn("No action is being taken.")
 
         ####  Print info related to the control frequency: #####
-        curr_time = time.time()
-        total_played_sim_time = curr_time - played_sim_start_time
-        t = my_world.current_time_step_index  # current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
-        print("debug: t", t)
-        avg_control_freq_hz = t / total_played_sim_time # Control Rate:num of completed actions / total time of actions Hz
-        avg_step_dt = total_played_sim_time / t
-        expected_ctrl_freq_hz = 1/step_dt_traj_mpc
-        ctrl_freq_ratio = expected_ctrl_freq_hz / avg_control_freq_hz
-        if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
-            print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {avg_control_freq_hz:.2f} Hz was assigned.\n\
-                    Change mpc_config.step_dt from {step_dt_traj_mpc} to {avg_step_dt})")
-
+        if cfm_is_initialized:
+            cfm_total_steps = my_world.current_time_step_index - cfm_start_step_idx
+            cfm_total_time = time.time() - cfm_start_time
+            cfm_avg_control_freq_hz = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
+            cfm_avg_step_dt = 1 / cfm_avg_control_freq_hz # Average measured control step duration in seconds
+            expected_ctrl_freq_hz = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.
+            ctrl_freq_ratio = expected_ctrl_freq_hz / cfm_avg_step_dt # What the mpc thinks the control frequency should be / what is actually measured.
+            if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
+                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {avg_control_freq_hz:.2f} Hz was assigned.\n\
+                        Change mpc_config.step_dt from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
+                
+            # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION.
 
 if __name__ == "__main__":
     main()
