@@ -800,7 +800,7 @@ def main():
             expected_ctrl_freq_hz = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.
             ctrl_freq_ratio = expected_ctrl_freq_hz / cfm_avg_step_dt # What the mpc thinks the control frequency should be / what is actually measured.
             if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
-                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {avg_control_freq_hz:.2f} Hz was assigned.\n\
+                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {cfm_avg_step_dt:.2f} Hz was assigned.\n\
                         Change mpc_config.step_dt from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
                 
             # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION.
