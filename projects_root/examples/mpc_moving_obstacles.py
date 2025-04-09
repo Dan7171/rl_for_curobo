@@ -113,7 +113,7 @@ simulation_app = SimulationApp({"headless": False})
 # Now import other Isaac Sim modules
 # https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
 from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
-from omni.isaac.core.objects import cuboid
+from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.objects import DynamicCuboid
 
@@ -135,6 +135,13 @@ from curobo.util_file import get_robot_configs_path, get_world_configs_path, joi
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
+
+from curobo.wrap.reacher.motion_gen import ( # For visualizing robot spheres
+    MotionGen,
+    MotionGenConfig,
+    MotionGenPlanConfig,
+    PoseCostMetric,
+)
 
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
@@ -244,7 +251,8 @@ parser.add_argument(
     choices=["True", "False"],
     help="When True, prints the control rate",
 )
- 
+
+
 args = parser.parse_args()
 
 # Convert string arguments to boolean
@@ -321,8 +329,64 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
             return result
     return wrapper
 
+def visualize_spheres(motion_gen, spheres, cu_js):
+    """
+    Render collision spheres of the robot for visualization purposes only.
+    Took from examples like motion_gen_reacher.py.
 
+    Args:
+        motion_gen (_type_): _description_
+        spheres (_type_): _description_
+        cu_js (_type_): _description_
+    """
+    
+    sph_list = motion_gen.kinematics.get_robot_as_spheres(cu_js.position)
 
+    if spheres is None:
+        spheres = []
+                # create spheres:
+
+        for si, s in enumerate(sph_list[0]):
+            sp = sphere.VisualSphere(
+                        prim_path="/curobo/robot_sphere_" + str(si),
+                        position=np.ravel(s.position),
+                        radius=float(s.radius),
+                        color=np.array([0, 0.8, 0.2]),
+                    )
+            spheres.append(sp)
+    else:
+        for si, s in enumerate(sph_list[0]):
+            if not np.isnan(s.position[0]):
+                spheres[si].set_world_pose(position=np.ravel(s.position))
+                spheres[si].set_radius(float(s.radius))
+
+def init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cache):
+    """
+    Initialize the robot spheres visualizer.
+    """
+    trajopt_dt = None
+    optimize_dt = True
+    trajopt_tsteps = 32
+    trim_steps = None
+    interpolation_dt = 0.05
+    motion_gen_config = MotionGenConfig.load_from_robot_config(
+        robot_cfg,
+        world_cfg,
+    tensor_args,
+    collision_checker_type=CollisionCheckerType.MESH,
+    num_trajopt_seeds=12,
+    num_graph_seeds=12,
+    interpolation_dt=interpolation_dt,
+    collision_cache=collision_cache,
+    optimize_dt=optimize_dt,
+    trajopt_dt=trajopt_dt,
+    trajopt_tsteps=trajopt_tsteps,
+    trim_steps=trim_steps,
+)
+    motion_gen = MotionGen(motion_gen_config)
+    print("warming up motion gen...")
+    motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
+    return motion_gen
 
 def main():
     """
@@ -489,6 +553,13 @@ def main():
     usd_help.load_stage(my_world.stage)
     init_world = False
     cmd_state_full = None
+
+
+    # Initialize motion gen
+    
+    if args.visualize_spheres:
+        motion_gen, spheres = init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cache), None
+
     add_extensions(simulation_app, args.headless_mode)
     
     if not SIMULATING:
@@ -496,7 +567,10 @@ def main():
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
         real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
     
+    
+
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
+    
     # Main simulation loop
     while simulation_app.is_running(): # not necessarily playing, just running
         # Initialize world if needed
@@ -527,6 +601,8 @@ def main():
 
         # Here the control step starts
         # Reset robot to initial configuration
+
+        
         if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
             idx_list = [robot.get_dof_index(x) for x in j_names]
@@ -556,9 +632,9 @@ def main():
                 dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
             
 
-
+        
         # ######
-        print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
+        # print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
         # ######
 
         ######## UPDATE TARGET POSE IF NEEDED (IN CASE IT MOVES) ########
@@ -640,7 +716,10 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
-        # CONTROL STEP DONE! We can update the time step index.
+        if t_idx % 2 == 0 and args.visualize_spheres:
+            visualize_spheres(motion_gen, spheres, cu_js)
+
+        # CONTROL STEP FINISHED! We can update the time step index.
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
         print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
         print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')

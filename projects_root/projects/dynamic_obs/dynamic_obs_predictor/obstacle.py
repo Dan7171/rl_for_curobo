@@ -16,6 +16,7 @@ import numpy as np
 # Now import other Isaac Sim modules
 # https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
 from omni.isaac.core.objects import DynamicCuboid
+from omni.isaac.core.materials import PhysicsMaterial
 from pxr import PhysxSchema
 
 # Import helper from curobo examples
@@ -100,7 +101,13 @@ class Obstacle:
             gravity_enabled: If False, disables gravity for the obstacle
         """
         prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,size=size,color=color,mass=mass,density=0.9)         
-
+        material = PhysicsMaterial( # https://www.youtube.com/watch?v=tHOM-OCnBLE
+            prim_path=self.path+"/aluminum",  # path to the material prim to create
+            dynamic_friction=0,
+            static_friction=0,
+            restitution=0
+        )
+        prim.apply_physics_material(material)
         if linear_velocity is not np.nan:
             prim.set_linear_velocity(linear_velocity)
         if angular_velocity is not np.nan:
