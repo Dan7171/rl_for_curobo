@@ -49,15 +49,16 @@ Usage:
     
 Example options:
     --obstacle_linear_velocity -0.1 0.1 0.0  # Move diagonally (default: [-0.1, 0.0, 0.0])
-    --enable_physics False    # Disable physical collisions (default: True)
     --obstacle_size 0.15    # Set obstacle size (default: 0.1)
     --obstacle_color 0.0 1.0 0.0  # Green color (default: [1.0, 0.0, 0.0])
     --autoplay False    # Disable autoplay (default: True)
 """
+
 # Simulation settings:
-RENDER_DT = 1/120 # original 1/60
-PHYSICS_STEP_DT = 1/30 #The time elapses on every call to my_world.step(). originally 1/60 
-# NOTE:
+RENDER_DT = 0.03 # original 1/60
+PHYSICS_STEP_DT = 0.03 # original 1/60
+SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
+REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 
 # From emperical experiments!:
 # On every call call to my_world.step():
@@ -145,10 +146,10 @@ Examples:
   omni_python mpc_example_with_moving_obstacle.py  --obstacle_initial_pos 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --obstacle_mass 1.0
 
   # Green sphere moving in y direction with custom size and physics disabled
-  omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 --enable_physics False
+  omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 
 
   # Red cuboid with physics disabled and autoplay disabled
-  omni_python mpc_example_with_moving_obstacle.py --enable_physics False --autoplay False
+  omni_python mpc_example_with_moving_obstacle.py  --autoplay False
 """
 )
 
@@ -200,13 +201,7 @@ parser.add_argument(
     type=str,
     choices=["True", "False"],
 )
-parser.add_argument(
-    "--enable_physics",
-    help="Enable physical collision between obstacle and robot",
-    default="True",
-    type=str,
-    choices=["True", "False"],
-)
+
 parser.add_argument(
     "--obstacle_mass",
     type=float,
@@ -215,7 +210,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--gravity_enabled",
-    help="Enable gravity for the obstacle (only used if enable_physics=True)",
+    help="Enable gravity for the obstacle  ",
     default="False",
     type=str,
     choices=["True", "False"],
@@ -237,7 +232,6 @@ parser.add_argument(
 args = parser.parse_args()
 
 # Convert string arguments to boolean
-args.enable_physics = args.enable_physics.lower() == "true"
 args.autoplay = args.autoplay.lower() == "true"
 args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
 
@@ -346,10 +340,9 @@ class Obstacle:
             position: Initial position [x, y, z]
             size: Size of obstacle (diameter for sphere, side length for cube)
             color: RGB color array (defaults to blue if None)
-            enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                         If False, creates a visual-only obstacle that moves without physics.
-            mass: Mass in kg (only used if enable_physics=True)
-            gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
+            mass: Mass in kg
+            gravity_enabled: If False, disables gravity for the obstacle 
         """
         if color is None:
             color = np.array([0.0, 0.0, 0.1])  # Default blue color
@@ -368,10 +361,9 @@ class Obstacle:
             position: Initial position [x, y, z]
             size: Side length of cube
             color: RGB color array
-            enable_physics: If True, creates a physical obstacle that can collide and follow physics.
                         If False, creates a visual-only obstacle that moves without physics.
-            mass: Mass in kg (only used if enable_physics=True)
-            gravity_enabled: If False, disables gravity for the obstacle (only used if enable_physics=True)
+            mass: Mass in kg  
+            gravity_enabled: If False, disables gravity for the obstacle
         """
         prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,size=size,color=color,mass=mass,density=0.9)         
 
@@ -475,30 +467,6 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
 
 
 
-   
-         
-
-# def curobo_check_collision(mpc,world, query_spheres, collision_buffer, act_distance, weight):
-#     """https://curobo.org/get_started/2c_world_collision.html
-    
-#     Args:
-#         mpc (_type_): _description_
-#         query_spheres (_type_): _description_
-#         collision_buffer (_type_): _description_
-#         act_distance (_type_): activation distance
-#         weight (_type_): _description_
-#     """
-    # dynamic_prims = ["dynamic_cuboid1"]
-    # world_ccheck = mpc.world_coll_checker
-    
-    # for prim_name in dynamic_prims:
-    #     object_prim = world.scene.get_object(f'/World/{prim_name}') # [x,y,z]
-    #     position, orientation = object_prim.get_world_pose() # [w, x, y, z]
-    #     object_pose_curobo = Pose(np.array(position), np.array(orientation)) # Pose.from_list([0,0,0.1,1,0,0,0], tensor_args=tensor_args)
-    #     world_ccheck.update_obstacle_pose(object_pose_curobo, name=prim_name)
-
-    #     out = world_ccheck.get_sphere_distance(query_spheres, collision_buffer, act_distance, weight)
-    #     out = out.view(-1)
 
 def main():
     """
@@ -616,7 +584,10 @@ def main():
         # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
     ]
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
-    step_dt_traj_mpc = 0.02 # 0.02
+    if SIMULATING:
+        step_dt_traj_mpc = RENDER_DT 
+    else:
+        step_dt_traj_mpc = REAL_TIME_EXPECTED_CTRL_FREQ
     expected_ctrl_freq = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.            
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
@@ -818,7 +789,7 @@ def main():
         print(f'sim time elapsed: {(time.time() - sim_start_time):.5f}')
         print(f'my_world.current_time_step_index: {my_world.current_time_step_index}')
         print(f'my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')
-        if cfm_is_initialized:
+        if cfm_is_initialized and args.print_ctrl_rate:
             cfm_total_steps = t_idx - cfm_start_t_idx
             cfm_total_time = time.time() - cfm_start_time
             cfm_avg_control_freq = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
