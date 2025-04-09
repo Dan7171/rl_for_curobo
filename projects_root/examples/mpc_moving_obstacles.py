@@ -54,6 +54,32 @@ Example options:
     --obstacle_color 0.0 1.0 0.0  # Green color (default: [1.0, 0.0, 0.0])
     --autoplay False    # Disable autoplay (default: True)
 """
+# Simulation settings:
+RENDER_DT = 1/120 # original 1/60
+PHYSICS_STEP_DT = 1/30 #The time elapses on every call to my_world.step(). originally 1/60 
+# NOTE:
+
+# From emperical experiments!:
+# On every call call to my_world.step():
+# NOTE: * RULE 1: RENDER_DT controls the average pose change of an object.* 
+# If an object has a (constant) linear velocity of V[m/s], then if before the my_world.step() call the object was at position P, then after the my_world.step() call the object will be at position P+V*RENDER_DT on average*. Example: if RENDER_DT = 1/30, then if object is at pose xyz =(1[m],0[m],2[m]) and has a constant linear velocity of (0.15,0,0) [m/s], then after the my_world.step() call the object will be at pose (1+0.15*1/30,0,2)*[m]= (1.005[m],0[m],2[m]) on average(see exact definition below).
+
+# NOTE: * RULE 2: RENDER_DT/PHYSICS_DT controls the time step index of the simulation: "my_world.current_time_step_index" *
+# RENDER_DT/PHYSICS_DT is the number of time steps *on average* that are added to the time step counter of the simulation (my_world.current_time_step_index) on every call to my_world.step(). Example: if before the my_world.step() call the time step counter was 10, and RENDER_DT/PHYSICS_DT = 2, then after the my_world.step() call the time step counter will be 10+2=12. In different words, the simulator takes REDNER_DT/PHYSICS_DT physics steps for every 1 rendering step on every call to my_world.step().
+
+# NOTE: * RULE 3: Internal simulation time is determined by my_world.current_time_step_index*PHYSICS_DT.
+# The furmula is my_world.current_time = my_world.current_time_step_index*PHYSICS_DT
+
+# NOTE: * RULE 4: *
+# my_world.current_time_step_index and my_world.current_time not necesarilly updated on every call to my_world.step(), but if they do, they are updated together (meaning that they are synchronized).
+
+# NOTE: * RULE 5: *
+# the call to my_world.step() can perform 0, 1 or more than one physics steps.
+
+# Additional notes:
+# - "on average" means that the updated depends on the ratio: PHYSICS_DT/RENDER_DT. For example if the ratio = 4, then the update will be applied only every 4th call to my_world.step(). However if ths ratio is <=1, then the update will be applied every call to my_world.step().
+# - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
+# - all info above referse to calls to my_world.step(render=True) (i.e. calls to my_world.step() with rendering=True)
 
 try:
     # Third Party
@@ -510,7 +536,7 @@ def main():
             assert my_world_physics_context.is_gpu_dynamics_enabled()
             print("debug- experimental: GPU dynamics is enabled")
 
-    print(f"my_world time deltas: physics_dt {my_world.get_physics_dt()} rendering_dt {my_world.get_rendering_dt()}") # 0.166666 (1/60)
+    # print(f"my_world time deltas: physics_dt {my_world.get_physics_dt()} rendering_dt {my_world.get_rendering_dt()}") # 0.166666 (1/60)
 
     # TUNE PHYSICS AND RENDERING DT - OPTIONAL (originally was disabled, default values are 1/60)
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -518,16 +544,14 @@ def main():
     # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world
     # It is recommended that the two values be divisible, with the rendering_dt being equal to or greater than the physics_dt
 
-    tune_physics_and_renderring_dt = True
-    if tune_physics_and_renderring_dt:
-
-        new_rendering_dt = 1/60 # 1/60 # originally 1/60 
-        new_physics_dt = 1/60 # originally 1/60
-        
+    override_physics_and_renderring_dt = True
+    if override_physics_and_renderring_dt:
+        render_dt = RENDER_DT
+        physics_dt = PHYSICS_STEP_DT
         # is_devisble = new_rendering_dt / new_physics_dt == int(new_rendering_dt / new_physics_dt)
         # is_rend_dt_goe_phys_dt = new_rendering_dt >= new_physics_dt
         # assert (is_devisble and is_rend_dt_goe_phys_dt), "warning: new_rendering_dt and new_physics_dt are not divisible or new_rendering_dt is less than new_physics_dt. Read docs for more inf:https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world"            
-        my_world.set_simulation_dt(new_physics_dt, new_rendering_dt) 
+        my_world.set_simulation_dt(physics_dt, render_dt) 
 
 
 
@@ -593,6 +617,7 @@ def main():
     ]
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
     step_dt_traj_mpc = 0.02 # 0.02
+    expected_ctrl_freq = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.            
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
     
@@ -646,15 +671,14 @@ def main():
     usd_help.load_stage(my_world.stage)
     init_world = False
     cmd_state_full = None
-    step = 0
     add_extensions(simulation_app, args.headless_mode)
     
-    world_step_calls_count = 0
+    t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
-    cfm_start_step_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
-    cfm_min_start_step_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
+    cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
+    cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
     
-    # Main simulation loo
+    # Main simulation loop
     while simulation_app.is_running(): # not necessarily playing, just running
         # Initialize world if needed
         if not init_world:
@@ -669,10 +693,7 @@ def main():
         
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
-        world_step_calls_count += 1
-        print("my_world.current_time_step_index (simulation physics steps count): ", my_world.current_time_step_index) # stays 0 until the play button is pressed
-        print("my_world.current_time (physics steps count * physics_dt = total simulation time from simulator's perspective): ", my_world.current_time) # stays 0 until the play button is pressed
-        print("world_step_calls_count: (loop iteration count) ", world_step_calls_count)
+        
         if not my_world.is_playing(): # if the play button is not pressed yet
             if args.autoplay: # if autoplay is enabled, play the simulation immediately
                 my_world.play()
@@ -687,7 +708,7 @@ def main():
 
         # Here the control step starts
         # Reset robot to initial configuration
-        if world_step_calls_count == 1: # number of simulation steps since the play button was pressed
+        if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
             idx_list = [robot.get_dof_index(x) for x in j_names]
             robot.set_joint_positions(default_config, idx_list)
@@ -695,22 +716,23 @@ def main():
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
+            sim_start_time = time.time()
 
         if not init_curobo:
             init_curobo = True
 
         # Start measuring control frequency if not already started
-        cfm_is_initialized = np.isnan(cfm_start_time) # is the control frequency measurement already initialized?
-        cfm_can_be_initialized = world_step_calls_count >= cfm_min_start_step_idx # is it valid to start measuring control frequency now?
+        cfm_is_initialized = not np.isnan(cfm_start_time) # is the control frequency measurement already initialized?
+        cfm_can_be_initialized = t_idx > cfm_min_start_t_idx # is it valid to start measuring control frequency now?
         if not cfm_is_initialized and cfm_can_be_initialized:
             cfm_start_time = time.time()
-            cfm_start_step_idx = my_world.current_time_step_index # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+            cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
 
 
         print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
-        ######
+        # ######
         print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
-        ######
+        # ######
 
         ######## UPDATE TARGET POSE IF NEEDED (IN CASE IT MOVES) ########
         # Get target position and orientation
@@ -791,19 +813,30 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
-        ####  Print info related to the control frequency: #####
+
+        print("t_idx: (current time step in real world) ", t_idx)    
+        print(f'sim time elapsed: {(time.time() - sim_start_time):.5f}')
+        print(f'my_world.current_time_step_index: {my_world.current_time_step_index}')
+        print(f'my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')
         if cfm_is_initialized:
-            cfm_total_steps = my_world.current_time_step_index - cfm_start_step_idx
+            cfm_total_steps = t_idx - cfm_start_t_idx
             cfm_total_time = time.time() - cfm_start_time
-            cfm_avg_control_freq_hz = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
-            cfm_avg_step_dt = 1 / cfm_avg_control_freq_hz # Average measured control step duration in seconds
-            expected_ctrl_freq_hz = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.
-            ctrl_freq_ratio = expected_ctrl_freq_hz / cfm_avg_step_dt # What the mpc thinks the control frequency should be / what is actually measured.
+            cfm_avg_control_freq = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
+            cfm_avg_step_dt = 1 / cfm_avg_control_freq # Average measured control step duration in seconds
+            ctrl_freq_ratio = expected_ctrl_freq / cfm_avg_control_freq # What the mpc thinks the control frequency should be / what is actually measured.
+            print(f"expected_ctrl_freq_hz: {expected_ctrl_freq:.5f}")    
+            print(f"cfm_avg_control_freq: {cfm_avg_control_freq:.5f}")    
+            print(f"cfm_avg_step_dt: {cfm_avg_step_dt:.5f}")    
+            
             if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
-                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.2f}. Expected {expected_ctrl_freq_hz:.2f} Hz, but {cfm_avg_step_dt:.2f} Hz was assigned.\n\
-                        Change mpc_config.step_dt from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
+                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.5f}. Expected {expected_ctrl_freq:.5f} Hz, but {cfm_avg_control_freq:.5f} Hz was assigned.\n\
+                        You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
                 
             # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION.
+        # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION
+    
+        t_idx += 1
+
 
 if __name__ == "__main__":
     main()
