@@ -183,7 +183,7 @@ parser.add_argument(
     "--obstacle_linear_velocity",
     type=float,
     nargs=3,
-    default=[-0.02, 0.0, 0.0],
+    default=[-0.2, 0.0, 0.0],
     help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
 )
 
@@ -318,9 +318,8 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
         if print_ctrl_rate:
             end = time.time()
             duration = end - start
-            print(f"{rate_name} Duration: {duration:.3f} seconds") 
+            print(f"{rate_name} duration: {duration:.3f} seconds, {rate_name} frequency: {rate:.3f} Hz") 
             rate = 1.0 / duration
-            print(f"{rate_name} Rate: {rate:.3f} Hz")
         if return_stats:
             return result, (duration, rate)
         else:
