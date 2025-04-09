@@ -318,8 +318,8 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
         if print_ctrl_rate:
             end = time.time()
             duration = end - start
-            print(f"{rate_name} duration: {duration:.3f} seconds, {rate_name} frequency: {rate:.3f} Hz") 
             rate = 1.0 / duration
+            print(f"{rate_name} duration: {duration:.3f} seconds, {rate_name} frequency: {rate:.3f} Hz") 
         if return_stats:
             return result, (duration, rate)
         else:
