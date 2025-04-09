@@ -60,6 +60,7 @@ SIMULATING = True # if False, then we are running the robot in real time (i.e. t
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True
 MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
 
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
@@ -535,7 +536,7 @@ def main():
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
         world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-        use_cuda_graph=True, # Use CUDA graph for the optimization step.
+        use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
         use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
         use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
         self_collision_check=True, # Enable self-collision check during MPC optimization.

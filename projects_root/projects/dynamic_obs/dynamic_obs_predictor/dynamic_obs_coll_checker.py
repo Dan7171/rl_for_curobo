@@ -19,7 +19,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, dynamic_obs_world_cfg, cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=5000):
+    def __init__(self, tensor_args, dynamic_obs_world_cfg, cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000):
         """_summary_
 
         Args:
@@ -130,15 +130,15 @@ class DynamicObsCollPredictor:
             step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :] # predicted positions of all obstacles at time step h
             self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names) # update the collision checker with the predicted positions of the obstacles
 
-    def cost_fn(self, robot_spheres, env_query_idx=None, method='distance',collision_threshold=0.2):
+    def cost_fn(self, robot_spheres, env_query_idx=None, method='curobo_prim_coll_cost_fn'):
         """
-        Compute the collision cost for the robot spheres.
+        Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
         Args:
             robot_spheres: tensor of shape [n_rollouts, horizon, n_spheres, 4]
             env_query_idx: optional index for querying specific environments
             method: collision checking method ('distance', 'collision', or 'swept_distance')
             NOTE: 
-                1. cuRobo’s signed distance queries return a positive value when the sphere is inside an obstacle or within activation distance. If outside this range, the distance value will be zero. https://curobo.org/get_started/2c_world_collision.html#:~:text=cuRobo%E2%80%99s%20signed%20distance%20queries%20return%20a%20positive%20value%20when%20the%20sphere%20is%20inside%20an%20obstacle%20or%20within%20activation%20distance.%20If%20outside%20this%20range%2C%20the%20distance%20value%20will%20be%20zero.
+                1. cuRobo's signed distance queries return a positive value when the sphere is inside an obstacle or within activation distance. If outside this range, the distance value will be zero. https://curobo.org/get_started/2c_world_collision.html#:~:text=cuRobo's%20signed%20distance%20queries%20return%20a%20positive%20value%20when%20the%20sphere%20is%20inside%20an%20obstacle%20or%20within%20activation%20distance.%20If%20outside%20this%20range%2C%20the%20distance%20value%20will%20be%20zero.
         Returns:
             tensor of shape [n_rollouts, horizon] containing collision costs
         """
@@ -160,7 +160,7 @@ class DynamicObsCollPredictor:
             robot_spheres_step_h = robot_spheres[:, h].contiguous() # From [n_rollouts, H, n_spheres, SPHERE_DIM] to [n_rollouts, n_spheres, SPHERE_DIM]. We now focus on rollouts only from the time step "t+h" over the horizon (horizon starts at t, meaning h=0).
             robot_spheres_step_h = robot_spheres_step_h.reshape(self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM) # From [n_rollouts, n_spheres, SPHERE_DIM] to [n_rollouts, 1, n_spheres, SPHERE_DIM] 
             
-            if method == 'distance':
+            if method == 'curobo_prim_coll_cost_fn': # NOTE: currently the only method implemented. There is an option to use the sdfs but I failed to make it work, I suspect there is a bug there
                     
                 spheres_curobo_coll_costs = self.H_world_cchecks[h].get_sphere_distance(
                     query_sphere=robot_spheres_step_h, 
@@ -179,7 +179,8 @@ class DynamicObsCollPredictor:
                 # [n_rollouts # number of rollouts, 1 # horizon length is 1 because we check collision for each time step separately, n_spheres # number of spheres in the robot (65 for franka)  
                 # We don't need the horizon dimension, so we squeezed it out.
                 
-                safety_margin_violation_rollouts = torch.any(spheres_curobo_coll_costs > 0, dim=1).float() # vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).
+                safety_margin_violation_rollouts = torch.any(spheres_curobo_coll_costs > 0, dim=1) # sets True for rollout if any of the robot spheres are too close to an obstacle (i.e, their "safety zone" is violated). Its a vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). 
+                safety_margin_violation_rollouts = safety_margin_violation_rollouts.float() # The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).                
                 dynamic_coll_cost_matrix[:, h] = safety_margin_violation_rollouts 
 
 
@@ -187,7 +188,15 @@ class DynamicObsCollPredictor:
                 # if h % 7 == 0:
                 #     print(f"step {h}: col_checker obs estimated pose: {self.H_world_cchecks[h].world_model.objects[0].pose}")
                 # ############### 
-
+        
+        mask_to_keep_first_violaion_only = False # If True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
+        if mask_to_keep_first_violaion_only:
+            dynamic_coll_cost_matrix = torch.where(
+                (dynamic_coll_cost_matrix == 1) & (torch.cumsum(dynamic_coll_cost_matrix, dim=1) == 1),
+                torch.ones_like(dynamic_coll_cost_matrix),
+                torch.zeros_like(dynamic_coll_cost_matrix)
+            )
+            
         dynamic_coll_cost_matrix *= self.cost_weight
         # cost_matrix = torch.rand_like(cost_matrix) * self.cost_weight # DEBUG
         return dynamic_coll_cost_matrix 
