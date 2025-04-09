@@ -139,8 +139,6 @@ from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Ob
 from curobo.wrap.reacher.motion_gen import ( # For visualizing robot spheres
     MotionGen,
     MotionGenConfig,
-    MotionGenPlanConfig,
-    PoseCostMetric,
 )
 
 # Initialize CUDA device
@@ -388,6 +386,35 @@ def init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cach
     motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
     return motion_gen
 
+def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc):
+    """Prints information about the control loop frequncy (desired vs measured) and warns if it's too different.
+    Args:
+        t_idx (_type_): _description_   
+        real_robot_cfm_start_time (_type_): _description_
+        real_robot_cfm_start_t_idx (_type_): _description_
+        expected_ctrl_freq_at_mpc (_type_): _description_
+        step_dt_traj_mpc (_type_): _description_
+    """
+    if SIMULATING: 
+        cfm_total_steps = t_idx # number of control steps we actually executed.
+        cfm_total_time = t_idx * RENDER_DT # NOTE: Unless I have a bug, this should be the formula for the total time simulation think passed.
+
+    else:
+        cfm_total_steps = t_idx - real_robot_cfm_start_t_idx # offset by the number of steps since the control frequency measurement has started.
+        cfm_total_time = time.time() - real_robot_cfm_start_time # offset by the time since the control frequency measurement has started.
+        
+    cfm_avg_control_freq = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
+    cfm_avg_step_dt = 1 / cfm_avg_control_freq # Average measured control step duration in seconds
+    ctrl_freq_ratio = expected_ctrl_freq_at_mpc / cfm_avg_control_freq # What the mpc thinks the control frequency should be / what is actually measured.
+    print(f"expected_ctrl_freq_hz: {expected_ctrl_freq_at_mpc:.5f}")    
+    print(f"cfm_avg_control_freq: {cfm_avg_control_freq:.5f}")    
+    print(f"cfm_avg_step_dt: {cfm_avg_step_dt:.5f}")    
+    if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
+        print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.5f}. \
+            But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
+                You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
+
+
 def main():
     """
     Main simulation loop that demonstrates Model Predictive Control (MPC) with moving obstacles.
@@ -617,13 +644,15 @@ def main():
             init_curobo = True
 
         # Start measuring control frequency if not already started
-        if not SIMULATING:
+        if SIMULATING:
+            real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
+        else:
             real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
             real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
             if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
-
+        
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
         if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
@@ -724,32 +753,10 @@ def main():
         print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
         print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
         print(f'Sim stats: my_world.current_time_step_index: {my_world.current_time_step_index}')
-        print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')
-        
-        if args.print_ctrl_rate:
-            if SIMULATING: 
-                cfm_total_steps = t_idx # number of control steps we actually executed.
-                cfm_total_time = t_idx * RENDER_DT # NOTE: Unless I have a bug, this should be the formula for the total time simulation think passed.
-
-            else:
-                if real_robot_cfm_is_initialized:
-                    cfm_total_steps = t_idx - real_robot_cfm_start_t_idx # offset by the number of steps since the control frequency measurement has started.
-                    cfm_total_time = time.time() - real_robot_cfm_start_time # offset by the time since the control frequency measurement has started.
-                else: 
-                    break
+        print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')  
+        if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
+            print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
             
-            cfm_avg_control_freq = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
-            cfm_avg_step_dt = 1 / cfm_avg_control_freq # Average measured control step duration in seconds
-            ctrl_freq_ratio = expected_ctrl_freq_at_mpc / cfm_avg_control_freq # What the mpc thinks the control frequency should be / what is actually measured.
-            print(f"expected_ctrl_freq_hz: {expected_ctrl_freq_at_mpc:.5f}")    
-            print(f"cfm_avg_control_freq: {cfm_avg_control_freq:.5f}")    
-            print(f"cfm_avg_step_dt: {cfm_avg_step_dt:.5f}")    
-            if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
-                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.5f}. \
-                    But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
-                        You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
-
-
     
      
 
