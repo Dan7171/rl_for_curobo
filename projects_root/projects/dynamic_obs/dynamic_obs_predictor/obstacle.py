@@ -110,17 +110,17 @@ class Obstacle:
         world.scene.add(prim)
         return prim
     
-    # def update(self,mpc):
-    #     # get the updated pose of the obstacle in the simulation
-    #     position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose()
-    #     # update the current position of the obstacle
-    #     self.cur_pos = position_isaac_dynamic_prim
-    #     # update the curobo representation of the obstacle in its collision checker
-    #     self._update_curobo_obstacle_pose(mpc, position_isaac_dynamic_prim, orient_isaac_dynamic_prim)
+    def update_world_coll_checker_with_sim_pose(self,world_coll_checker):
+        # get the updated pose of the obstacle in the simulation
+        position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose()
+        # update the current position of the obstacle
+        self.cur_pos = position_isaac_dynamic_prim
+        # update the curobo representation of the obstacle in its collision checker
+        self._update_curobo_obstacle_pose(world_coll_checker, position_isaac_dynamic_prim, orient_isaac_dynamic_prim)
         
         
 
-    def _update_curobo_obstacle_pose(self,mpc, position_isaac_dynamic_prim, orient_isaac_dynamic_prim):
+    def _update_curobo_obstacle_pose(self,world_coll_checker, position_isaac_dynamic_prim, orient_isaac_dynamic_prim):
         """
 
         Args:
@@ -136,7 +136,7 @@ class Obstacle:
         rot_tensor = self.tensor_args.to_device(torch.from_numpy(orient_isaac_dynamic_prim))
         w_obj_pose = Pose(pos_tensor, rot_tensor)
         # update the obstacle pose in the curobo collision checker
-        mpc.world_coll_checker.update_obstacle_pose(self.name, w_obj_pose)
+        world_coll_checker.update_obstacle_pose(self.name, w_obj_pose)
 
         # self.world_ccheck.update_obstacle_pose_in_world_model(self.name, w_obj_pose)
 

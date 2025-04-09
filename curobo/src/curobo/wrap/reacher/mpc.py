@@ -383,7 +383,7 @@ class MpcSolver(MpcSolverConfig):
         self._cu_result = None
 
         # self.rollout_fn.set_dynamic_obs_checker(config.dynamic_obs_checker)
-         # Set the dynamic obstacle checker in all rollout functions
+        # Set the dynamic obstacle checker in all rollout functions
         self.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
         self.solver.safety_rollout.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
         for optimizer in self.solver.optimizers:

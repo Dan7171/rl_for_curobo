@@ -54,33 +54,39 @@ Example options:
     --autoplay False    # Disable autoplay (default: True)
 """
 
-# Simulation settings:
-RENDER_DT = 0.03 # original 1/60
-PHYSICS_STEP_DT = 0.03 # original 1/60
+# ############################## Run settings ##############################
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
+ENABLE_GPU_DYNAMICS = True
+MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 
-# From emperical experiments!:
+###################### RENDER_DT and PHYSICS_STEP_DT ########################
+RENDER_DT = 0.03 # original 1/60
+PHYSICS_STEP_DT = 0.03 # original 1/60
+# NOTE: RENDER_DT and PHYSICS_STEP_DT guide from emperical experiments!:
+
 # On every call call to my_world.step():
-# NOTE: * RULE 1: RENDER_DT controls the average pose change of an object.* 
+#  * RULE 1: RENDER_DT controls the average pose change of an object.* 
 # If an object has a (constant) linear velocity of V[m/s], then if before the my_world.step() call the object was at position P, then after the my_world.step() call the object will be at position P+V*RENDER_DT on average*. Example: if RENDER_DT = 1/30, then if object is at pose xyz =(1[m],0[m],2[m]) and has a constant linear velocity of (0.15,0,0) [m/s], then after the my_world.step() call the object will be at pose (1+0.15*1/30,0,2)*[m]= (1.005[m],0[m],2[m]) on average(see exact definition below).
 
-# NOTE: * RULE 2: RENDER_DT/PHYSICS_DT controls the time step index of the simulation: "my_world.current_time_step_index" *
+# * RULE 2: RENDER_DT/PHYSICS_DT controls the time step index of the simulation: "my_world.current_time_step_index" *
 # RENDER_DT/PHYSICS_DT is the number of time steps *on average* that are added to the time step counter of the simulation (my_world.current_time_step_index) on every call to my_world.step(). Example: if before the my_world.step() call the time step counter was 10, and RENDER_DT/PHYSICS_DT = 2, then after the my_world.step() call the time step counter will be 10+2=12. In different words, the simulator takes REDNER_DT/PHYSICS_DT physics steps for every 1 rendering step on every call to my_world.step().
 
-# NOTE: * RULE 3: Internal simulation time is determined by my_world.current_time_step_index*PHYSICS_DT.
+#  * RULE 3: Internal simulation time is determined by my_world.current_time_step_index*PHYSICS_DT.
 # The furmula is my_world.current_time = my_world.current_time_step_index*PHYSICS_DT
 
-# NOTE: * RULE 4: *
+#  * RULE 4: *
 # my_world.current_time_step_index and my_world.current_time not necesarilly updated on every call to my_world.step(), but if they do, they are updated together (meaning that they are synchronized).
 
-# NOTE: * RULE 5: *
+# * RULE 5: *
 # the call to my_world.step() can perform 0, 1 or more than one physics steps.
 
 # Additional notes:
 # - "on average" means that the updated depends on the ratio: PHYSICS_DT/RENDER_DT. For example if the ratio = 4, then the update will be applied only every 4th call to my_world.step(). However if ths ratio is <=1, then the update will be applied every call to my_world.step().
 # - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
 # - all info above referse to calls to my_world.step(render=True) (i.e. calls to my_world.step() with rendering=True)
+
 
 try:
     # Third Party
@@ -172,7 +178,7 @@ parser.add_argument(
     "--obstacle_linear_velocity",
     type=float,
     nargs=3,
-    default=[-0.15, 0.0, 0.0],
+    default=[-0.02, 0.0, 0.0],
     help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
 )
 
@@ -345,33 +351,17 @@ def main():
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-    enable_gpu_dynamics = True
-    if enable_gpu_dynamics:
+    
+    if ENABLE_GPU_DYNAMICS:
         my_world_physics_context = my_world.get_physics_context()
         if not my_world_physics_context.is_gpu_dynamics_enabled():
             print("GPU dynamics is disabled")
             my_world_physics_context.enable_gpu_dynamics(True)
             assert my_world_physics_context.is_gpu_dynamics_enabled()
             print("debug- experimental: GPU dynamics is enabled")
-
-    # print(f"my_world time deltas: physics_dt {my_world.get_physics_dt()} rendering_dt {my_world.get_rendering_dt()}") # 0.166666 (1/60)
-
-    # TUNE PHYSICS AND RENDERING DT - OPTIONAL (originally was disabled, default values are 1/60)
-    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-    # See docs of isaac-sim 4.0.0: 
-    # https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world
-    # It is recommended that the two values be divisible, with the rendering_dt being equal to or greater than the physics_dt
-
-    override_physics_and_renderring_dt = True
-    if override_physics_and_renderring_dt:
-        render_dt = RENDER_DT
-        physics_dt = PHYSICS_STEP_DT
-        # is_devisble = new_rendering_dt / new_physics_dt == int(new_rendering_dt / new_physics_dt)
-        # is_rend_dt_goe_phys_dt = new_rendering_dt >= new_physics_dt
-        # assert (is_devisble and is_rend_dt_goe_phys_dt), "warning: new_rendering_dt and new_physics_dt are not divisible or new_rendering_dt is less than new_physics_dt. Read docs for more inf:https://docs.isaacsim.omniverse.nvidia.com/4.0.0/py/source/extensions/omni.isaac.core/docs/index.html?highlight=world#module-omni.isaac.core.world"            
-        my_world.set_simulation_dt(physics_dt, render_dt) 
-
-
+    
+    # Set the simulation dt to the desired values.
+    my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT) 
 
     stage = my_world.stage
 
@@ -416,32 +406,38 @@ def main():
     ).get_mesh_world()
     world_cfg1.mesh[0].name += "_mesh"
     world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
-
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
     
     # Create and configure obstacles 
-    
-    # obstacle_list = []
-    # for obj in world_cfg.objects:
-    #     obstacle = Obstacle(obj.name, obj.pose, obj.dims, type(obj), obj.color, obj.mass, obj.gravity_enabled, my_world, world_cfg, )
-    #     obstacle_list.append(obstacle)
-    
-    worlf_cfg_dynamic_obs = WorldConfig() # curobo collision checker world config for dynamic obstacles. Should be pased to all obstacles.
-    dynamic_obstacles = [
-        Obstacle("dynamic_cuboid1", np.array(args.obstacle_initial_pos), args.obstacle_size, DynamicCuboid, np.array(args.obstacle_color), args.obstacle_mass, args.obstacle_linear_velocity, args.obstacle_angular_velocity, args.gravity_enabled.lower() == "true", my_world, worlf_cfg_dynamic_obs)  
-        # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
-        # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
-        # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
-    ]
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
     else:
-        step_dt_traj_mpc = REAL_TIME_EXPECTED_CTRL_DT
-    
+        step_dt_traj_mpc = REAL_TIME_EXPECTED_CTRL_DT    
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.            
-    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
+    
+    # Set the world config for the dynamic obstacle collision checker.
+    # If modifying cost (adding new cost term for dynamic obstacles), we pass a new instance of WorldConfig which will include only the dynamic obstacles, ignoring the static obstacles.
+    # Else, we pass the original world config instance which will include both static and dynamic obstacles (as that's how the MPC would address this).
+    if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
+        world_cfg_dynamic_obs = WorldConfig() # curobo collision checker world config for dynamic obstacles. note: this instance should be pased to all obstacles. Will only be used as a template for the dynamic obstacle collision checker.
+    else:
+        world_cfg_dynamic_obs = world_cfg # Use MPCs original world config instance to include both static and dynamic obstacles.
+
+    # Initialize the dynamic obstacles.
+    dynamic_obstacles = [
+            Obstacle("dynamic_cuboid1", np.array(args.obstacle_initial_pos), args.obstacle_size, DynamicCuboid, np.array(args.obstacle_color), args.obstacle_mass, args.obstacle_linear_velocity, args.obstacle_angular_velocity, args.gravity_enabled.lower() == "true", my_world, world_cfg_dynamic_obs)  
+            # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
+            # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
+            # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
+        ]
+    
+    # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:    
+        dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
+    else:
+        dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
     
     # Initialize MPC solver
     init_curobo = False
@@ -552,8 +548,15 @@ def main():
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
 
+        # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
+        if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
+            print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
+        else:
+            for obs_index in range(len(dynamic_obstacles)):
+                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
+            
 
-        print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
+
         # ######
         print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
         # ######
@@ -668,8 +671,6 @@ def main():
                         You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
 
 
-            # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION.
-        # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION
     
      
 

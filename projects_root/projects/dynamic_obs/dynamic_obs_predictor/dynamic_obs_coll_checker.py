@@ -50,12 +50,11 @@ class DynamicObsCollPredictor:
             world_config = copy.deepcopy(world_collision_config_base) # NOTE: I use copies to avoid side effects.
             col_checker = WorldMeshCollision(world_config) # Initiate a single collision checker for each time step over the horizon.
             self.H_world_cchecks.append(col_checker)
-            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for
-            
+            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for 
             # enable for collision checking all objects in the collision checker. Just a verification step beacuse I am not sure if all objects are automatically enabled when initiating the collision checker.
             # TODO: May be redundant. Remove if not needed.
-            for obj in col_checker.world_model.objects:
-                col_checker.enable_obb(name=obj.name) 
+            # for obj in col_checker.world_model.objects:
+            #     col_checker.enable_obb(name=obj.name) 
     
 
     def predict_obstacle_path(self, cur_obstacle_pos:np.ndarray, cur_obstacle_lin_vel:np.ndarray, cur_obstacle_lin_acceleration:np.ndarray, cur_obstacle_orientation:np.ndarray, cur_obstacle_angular_vel:np.ndarray, cur_obstacle_angular_acceleration:np.ndarray):
@@ -183,7 +182,7 @@ class DynamicObsCollPredictor:
                 safety_margin_violation_rollouts = torch.any(spheres_curobo_coll_costs > 0, dim=1).float() # vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).
                 dynamic_coll_cost_matrix[:, h] = safety_margin_violation_rollouts 
 
-                
+
                 # #### debug ####
                 # if h % 7 == 0:
                 #     print(f"step {h}: col_checker obs estimated pose: {self.H_world_cchecks[h].world_model.objects[0].pose}")
