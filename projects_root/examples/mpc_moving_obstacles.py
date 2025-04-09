@@ -223,7 +223,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--print_ctrl_rate",
-    default="False",
+    default="True",
     type=str,
     choices=["True", "False"],
     help="When True, prints the control rate",
@@ -587,8 +587,9 @@ def main():
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
     else:
-        step_dt_traj_mpc = REAL_TIME_EXPECTED_CTRL_FREQ
-    expected_ctrl_freq = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.            
+        step_dt_traj_mpc = REAL_TIME_EXPECTED_CTRL_DT
+    
+    expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.            
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, worlf_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     
     
@@ -644,11 +645,12 @@ def main():
     cmd_state_full = None
     add_extensions(simulation_app, args.headless_mode)
     
-    t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
-    cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
-    cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
+    if not SIMULATING:
+        real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
+        real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
+        real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
     
+    t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     # Main simulation loop
     while simulation_app.is_running(): # not necessarily playing, just running
         # Initialize world if needed
@@ -687,17 +689,18 @@ def main():
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
-            sim_start_time = time.time()
+            ctrl_loop_start_time = time.time()
 
         if not init_curobo:
             init_curobo = True
 
         # Start measuring control frequency if not already started
-        cfm_is_initialized = not np.isnan(cfm_start_time) # is the control frequency measurement already initialized?
-        cfm_can_be_initialized = t_idx > cfm_min_start_t_idx # is it valid to start measuring control frequency now?
-        if not cfm_is_initialized and cfm_can_be_initialized:
-            cfm_start_time = time.time()
-            cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+        if not SIMULATING:
+            real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
+            real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
+            if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
+                real_robot_cfm_start_time = time.time()
+                real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
 
 
         print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
@@ -784,29 +787,41 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
+        # CONTROL STEP DONE! We can update the time step index.
+        t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
+        print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
+        print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
+        print(f'Sim stats: my_world.current_time_step_index: {my_world.current_time_step_index}')
+        print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')
+        
+        if args.print_ctrl_rate:
+            if SIMULATING: 
+                cfm_total_steps = t_idx # number of control steps we actually executed.
+                cfm_total_time = t_idx * RENDER_DT # NOTE: Unless I have a bug, this should be the formula for the total time simulation think passed.
 
-        print("t_idx: (current time step in real world) ", t_idx)    
-        print(f'sim time elapsed: {(time.time() - sim_start_time):.5f}')
-        print(f'my_world.current_time_step_index: {my_world.current_time_step_index}')
-        print(f'my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')
-        if cfm_is_initialized and args.print_ctrl_rate:
-            cfm_total_steps = t_idx - cfm_start_t_idx
-            cfm_total_time = time.time() - cfm_start_time
+            else:
+                if real_robot_cfm_is_initialized:
+                    cfm_total_steps = t_idx - real_robot_cfm_start_t_idx # offset by the number of steps since the control frequency measurement has started.
+                    cfm_total_time = time.time() - real_robot_cfm_start_time # offset by the time since the control frequency measurement has started.
+                else: 
+                    break
+            
             cfm_avg_control_freq = cfm_total_steps / cfm_total_time # Average  measured Control Frequency. num of completed actions / total time of actions Hz
             cfm_avg_step_dt = 1 / cfm_avg_control_freq # Average measured control step duration in seconds
-            ctrl_freq_ratio = expected_ctrl_freq / cfm_avg_control_freq # What the mpc thinks the control frequency should be / what is actually measured.
-            print(f"expected_ctrl_freq_hz: {expected_ctrl_freq:.5f}")    
+            ctrl_freq_ratio = expected_ctrl_freq_at_mpc / cfm_avg_control_freq # What the mpc thinks the control frequency should be / what is actually measured.
+            print(f"expected_ctrl_freq_hz: {expected_ctrl_freq_at_mpc:.5f}")    
             print(f"cfm_avg_control_freq: {cfm_avg_control_freq:.5f}")    
             print(f"cfm_avg_step_dt: {cfm_avg_step_dt:.5f}")    
-            
             if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
-                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.5f}. Expected {expected_ctrl_freq:.5f} Hz, but {cfm_avg_control_freq:.5f} Hz was assigned.\n\
+                print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.5f}. \
+                    But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
                         You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
-                
+
+
             # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION.
         # TODO: INTEGRATE ADDAPTIVE CONTROL FREQUENCY IN BOTH THE MPC AND THE DYNAMIC OBSTACLE COLLISION CHECKER, BASED ON THE TRUE CONTROL FREQUENCY WHICH CAN CHANGE DURING THE SIMULATION
     
-        t_idx += 1
+     
 
 
 if __name__ == "__main__":
