@@ -59,7 +59,7 @@ Example options:
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True
-MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -638,12 +638,7 @@ def main():
             init_world = True
             if args.autoplay:
                 my_world.play()
-                
-        # Visualize planned trajectories
-        if VISUALIZE_MPC_ROLLOUTS:
-            rollouts_for_visualization = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
-            point_visualzer_inputs.append(rollouts_for_visualization)
-        
+
         
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
@@ -698,24 +693,18 @@ def main():
             # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
             
-            # Render predicted paths of dynamic obstacles            
-            if VISUALIZE_PREDICTED_OBS_PATHS:
-                visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
-                point_visualzer_inputs.extend(visualization_points_per_obstacle)
+            # if VISUALIZE_PREDICTED_OBS_PATHS:
+            #     visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
+            #     point_visualzer_inputs.extend(visualization_points_per_obstacle)
                         
         else:
             for obs_index in range(len(dynamic_obstacles)):
                 dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
             
 
-        
-        # ######
-        # print("debug: real obstacle poses: ", dynamic_obstacles[0].simulation_representation.get_world_pose())
-        # ######
-
-        ######## UPDATE TARGET POSE IF NEEDED (IN CASE IT MOVES) ########
+        ############ UPDATE TARGET (GOAL) POSE IF NEEDED (IN CASE IT MOVES) ############
         # Get target position and orientation
-        cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "get_world_pose of target")() # goal pose
+        cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
 
         # Update goal if target has moved
         if past_pose is None:
@@ -732,22 +721,15 @@ def main():
             goal_buffer.goal_pose.copy_(ik_goal)
             mpc.update_goal(goal_buffer)
             past_pose = cube_position
-        ###################################################################
 
+        ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
         sim_js = robot.get_joints_state() # get the current joint state of the robot
         js_names = robot.dof_names # get the joint names of the robot
         sim_js_names = robot.dof_names # get the joint names of the robot
         
         # Convert to CuRobo joint state format
-        cu_js = JointState(
-            position=tensor_args.to_device(sim_js.positions), 
-            velocity=tensor_args.to_device(sim_js.velocities) * 0.0,
-            acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
-            jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
-            joint_names=sim_js_names,
-        )
-
+        cu_js = JointState(position=tensor_args.to_device(sim_js.positions), velocity=tensor_args.to_device(sim_js.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js.velocities) * 0.0, jerk=tensor_args.to_device(sim_js.velocities) * 0.0, joint_names=sim_js_names,)
         cu_js = cu_js.get_ordered_joint_state(mpc.rollout_fn.joint_names)
         robot_as_spheres = mpc.kinematics.get_robot_as_spheres(cu_js.position)[0]
 
@@ -763,9 +745,11 @@ def main():
         current_state.copy_(cu_js)
 
         
+        ############ MPC ROLLOUTS ############
         # Run MPC step
         mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
+        ####### APPLY CONTROLLER COMMAND TO ROBOT #######
         # Process MPC result
         cmd_state_full = mpc_result.js_action
         common_js_names = []
@@ -774,25 +758,37 @@ def main():
             if x in cmd_state_full.joint_names:
                 idx_list.append(robot.get_dof_index(x))
                 common_js_names.append(x)
-
         cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
         cmd_state_full = cmd_state
-
-        ####### Apply robot action #######
         # Create and apply robot action
         art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list,)
         # Execute planned motion
         for _ in range(3):
             articulation_controller.apply_action(art_action)
         
+        ############ VISUALIZATIONS ############
         
-        # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed)
-        if t_idx % 2 == 0 and VISUALIZE_ROBOT_COL_SPHERES:
+        # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
+        if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
             visualize_spheres(motion_gen, spheres, cu_js)
-        if VISUALIZE_ROBOT_COL_SPHERES or VISUALIZE_PREDICTED_OBS_PATHS:
+        
+        if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS:
+            
+            # collect the points for visualization
+            # collect the rollouts
+            if VISUALIZE_MPC_ROLLOUTS:
+                rollouts_for_visualization = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
+                point_visualzer_inputs.append(rollouts_for_visualization)
+
+            # collect the predicted paths of dynamic obstacles
+            if VISUALIZE_PREDICTED_OBS_PATHS:
+                    visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
+                    point_visualzer_inputs.extend(visualization_points_per_obstacle)
+            
+            # render the points
             print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
-        # CONTROL STEP FINISHED! We can update the time step index.
+        ############### UPDATE TIME STEP INDEX  ###############
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
         print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
         print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
