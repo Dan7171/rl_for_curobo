@@ -59,9 +59,9 @@ Example options:
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True
-MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
-
+MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
+FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
@@ -184,10 +184,9 @@ parser.add_argument(
     "--obstacle_linear_velocity",
     type=float,
     nargs=3,
-    default=[-0.2, 0.0, 0.0],
+    default=[-0.09, 0.0, 0.0],
     help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
 )
-
 parser.add_argument(
     "--obstacle_angular_velocity",
     type=float,
@@ -195,7 +194,6 @@ parser.add_argument(
     default=[0.0, 0.0, 0.0],
     help="Angular Velocity of the obstacle in wx, wy, wz.  Example: --obstacle_angular_velocity 0.0 0.0 0.0",
 )
- 
 parser.add_argument(
     "--obstacle_size",
     type=float,
@@ -223,7 +221,6 @@ parser.add_argument(
     type=str,
     choices=["True", "False"],
 )
-
 parser.add_argument(
     "--obstacle_mass",
     type=float,
@@ -652,6 +649,12 @@ def main():
             if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+        
+        # Maintain dynamic obstacle velocities to ovecome the phenomenon that the dynamic obstacle is slowing down over time.
+        if FORCE_CONSTANT_VELOCITIES:
+            for obs_index in range(len(dynamic_obstacles)):
+                dynamic_obstacles[obs_index].simulation_representation.set_linear_velocity(dynamic_obstacles[obs_index].linear_velocity)
+                dynamic_obstacles[obs_index].simulation_representation.set_angular_velocity(dynamic_obstacles[obs_index].angular_velocity)
         
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
         if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
