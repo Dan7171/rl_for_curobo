@@ -59,7 +59,7 @@ Example options:
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True
-MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -171,23 +171,19 @@ Examples:
   omni_python mpc_example_with_moving_obstacle.py  --autoplay False
 """
 )
-
+################### Read arguments ########################
 parser.add_argument(
     "--headless_mode",
     type=str,
     default=None,
     help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
 )
-
 parser.add_argument(
     "--robot",
     type=str,
     default="franka.yml",
     help="Robot configuration file to load (e.g., franka.yml)",
 )
- 
-
-
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
@@ -215,7 +211,6 @@ parser.add_argument(
     choices=["True", "False"],
     help="When True, prints the control rate",
 )
-
 
 args = parser.parse_args()
 
@@ -301,8 +296,6 @@ def draw_points(points_dicts: List[dict], color='green'):
     
     draw.draw_points(unified_points, unified_colors, unified_sizes)
         
-            
-
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     def wrapper(*args, **kwargs):
         duration, rate = None, None
@@ -548,7 +541,7 @@ def main():
             obstacle_type=DynamicCuboid, 
             color=np.array([0,0,1]),# blue 
             mass=args.obstacle_mass,
-            linear_velocity=[-0.1, -0.1, 0.05],
+            linear_velocity=[-0.15, -0.15, 0.05],
             angular_velocity=[0,0,0],
             gravity_enabled=args.gravity_enabled.lower() == "true",
             world=my_world,
@@ -774,7 +767,6 @@ def main():
         mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
         # Process MPC result
-        succ = True
         cmd_state_full = mpc_result.js_action
         common_js_names = []
         idx_list = []
@@ -786,24 +778,21 @@ def main():
         cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
         cmd_state_full = cmd_state
 
+        ####### Apply robot action #######
         # Create and apply robot action
-        art_action = ArticulationAction(
-            cmd_state.position.cpu().numpy(),
-            joint_indices=idx_list,
-        )
-        
+        art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list,)
         # Execute planned motion
-        if succ:
-            for _ in range(3):
-                articulation_controller.apply_action(art_action)
-        else:
-            carb.log_warn("No action is being taken.")
-
+        for _ in range(3):
+            articulation_controller.apply_action(art_action)
+        
+        
+        # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed)
         if t_idx % 2 == 0 and VISUALIZE_ROBOT_COL_SPHERES:
             visualize_spheres(motion_gen, spheres, cu_js)
+        if VISUALIZE_ROBOT_COL_SPHERES or VISUALIZE_PREDICTED_OBS_PATHS:
+            print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
         # CONTROL STEP FINISHED! We can update the time step index.
-        
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
         print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
         print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
@@ -811,12 +800,8 @@ def main():
         print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')  
         if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
-            
-    
-        print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
-
-
-
+        
+        
 if __name__ == "__main__":
     main()
     simulation_app.close() 
