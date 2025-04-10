@@ -185,40 +185,9 @@ parser.add_argument(
     default="franka.yml",
     help="Robot configuration file to load (e.g., franka.yml)",
 )
-# parser.add_argument(
-#     "--obstacle_linear_velocity",
-#     type=float,
-#     nargs=3,
-#     default=[-0.25, 0.0, 0.0],  
-#     help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
-# )
-parser.add_argument(
-    "--obstacle_angular_velocity",
-    type=float,
-    nargs=3,
-    default=[0.0, 0.0, 0.0],
-    help="Angular Velocity of the obstacle in wx, wy, wz.  Example: --obstacle_angular_velocity 0.0 0.0 0.0",
-)
-parser.add_argument(
-    "--obstacle_size",
-    type=float,
-    default=0.1,
-    help="Size of the obstacle (diameter for sphere, side length for cuboid) in meters",
-)
-parser.add_argument(
-    "--obstacle_initial_pos",
-    type=float,
-    nargs=3,
-    default=[0.8, 0.0, 0.5],
-    help="Initial position of the obstacle in x, y, z (meters). Example: --obstacle_initial_pos 0.8 0.0 0.5",
-)
-parser.add_argument(
-    "--obstacle_color",
-    type=float,
-    nargs=3,
-    default=[1.0, 0.0, 0.0],
-    help="RGB color of the obstacle (values between 0 and 1). Example: --obstacle_color 1.0 0.0 0.0 for red",
-)
+ 
+
+
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
@@ -239,7 +208,6 @@ parser.add_argument(
     type=str,
     choices=["True", "False"],
 )
-
 parser.add_argument(
     "--print_ctrl_rate",
     default="True",
@@ -567,7 +535,7 @@ def main():
             color=np.array([1,0,0]), # red 
             mass=args.obstacle_mass,
             linear_velocity=[-0.25, 0.0, 0.0],
-            angular_velocity=[1,0,0],
+            angular_velocity=[1,1,1],
             gravity_enabled=args.gravity_enabled.lower() == "true",
             world=my_world,
             world_cfg=world_cfg_dynamic_obs
@@ -580,7 +548,7 @@ def main():
             obstacle_type=DynamicCuboid, 
             color=np.array([0,0,1]),# blue 
             mass=args.obstacle_mass,
-            linear_velocity=[-0.1, -0.1,0.05],
+            linear_velocity=[-0.1, -0.1, 0.05],
             angular_velocity=[0,0,0],
             gravity_enabled=args.gravity_enabled.lower() == "true",
             world=my_world,
@@ -740,7 +708,6 @@ def main():
             # Render predicted paths of dynamic obstacles            
             if VISUALIZE_PREDICTED_OBS_PATHS:
                 visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
-                # predicted_paths = {'points': predicted_poses, 'color': 'black'}
                 point_visualzer_inputs.extend(visualization_points_per_obstacle)
                         
         else:
