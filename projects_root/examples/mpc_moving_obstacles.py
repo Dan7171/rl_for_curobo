@@ -62,7 +62,10 @@ ENABLE_GPU_DYNAMICS = True
 MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
-RENDER_PREDICTED_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
+VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
+VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
+VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
+
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
@@ -236,12 +239,7 @@ parser.add_argument(
     type=str,
     choices=["True", "False"],
 )
-parser.add_argument(
-    "--visualize_spheres",
-    action="store_true",
-    help="When True, visualizes robot spheres",
-    default=False,
-)
+
 parser.add_argument(
     "--print_ctrl_rate",
     default="True",
@@ -279,13 +277,15 @@ def create_target_pose_hologram():
 
 def draw_points(points_dicts: List[dict], color='green'):
     """
-    Visualize] MPC rollouts in the simulation.
+    Visualize points in the simulation.
     _debug_draw docs: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.debug_draw/docs/index.html?highlight=draw_point
     color docs:
         1.  https://docs.omniverse.nvidia.com/kit/docs/kit-manual/106.3.0/carb/carb.ColorRgba.html
         2. rgba (rgb + alpha (transparency)) https://www.w3schools.com/css/css_colors_rgb.asp
     Args:
-        rollouts: Tensor of shape [batch_size, horizon, 3] containing trajectory points
+        points_dicts: List of dictionaries with keys 'points' and 'color'
+            points: Tensor of point sequences of shape [num of point-sequences (batch size), num of points per sequence, 3] # 3 is for x,y,z
+            color: Color of the points in tensor
     """
     unified_points = []
     unified_colors = []
@@ -343,6 +343,18 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
         else:
             return result
     return wrapper
+
+def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic_obs_coll_predictor):
+    """
+    Get the predicted poses of the dynamic obstacles for visualization purposes.
+    """
+    predicted_poses = torch.zeros((len(dynamic_obstacles),30, 3)) 
+    for obs_index in range(len(dynamic_obstacles)):
+        obs_name = dynamic_obstacles[obs_index].name
+        predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)
+        predicted_path = predicted_path[:,:3]
+        predicted_poses[obs_index] = torch.tensor(predicted_path)
+    return predicted_poses
 
 def visualize_spheres(motion_gen, spheres, cu_js):
     """
@@ -601,7 +613,7 @@ def main():
 
     # Initialize motion gen
     
-    if args.visualize_spheres:
+    if VISUALIZE_ROBOT_COL_SPHERES:
         motion_gen, spheres = init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cache), None
 
     add_extensions(simulation_app, args.headless_mode)
@@ -617,6 +629,9 @@ def main():
     
     # Main simulation loop
     while simulation_app.is_running(): # not necessarily playing, just running
+        
+        point_visualzer_inputs = []
+
         # Initialize world if needed
         if not init_world:
             for _ in range(10):
@@ -626,11 +641,10 @@ def main():
                 my_world.play()
                 
         # Visualize planned trajectories
-        points_drawer_inputs = []
-        points_rollouts = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
-        points_drawer_inputs.append(points_rollouts)
+        if VISUALIZE_MPC_ROLLOUTS:
+            rollouts_for_visualization = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
+            point_visualzer_inputs.append(rollouts_for_visualization)
         
-        # print_rate_decorator(lambda: draw_points(mpc.get_visual_rollouts()), args.print_ctrl_rate, "draw_points")() 
         
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
@@ -686,17 +700,10 @@ def main():
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
             
             # Render predicted paths of dynamic obstacles            
-            if RENDER_PREDICTED_PATHS:
-                predicted_poses = torch.zeros((len(dynamic_obstacles),30, 3)) 
-                for obs_index in range(len(dynamic_obstacles)):
-                    obs_name = dynamic_obstacles[obs_index].name
-                    predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)
-                    predicted_path = predicted_path[:,:3]
-                    predicted_poses[obs_index] = torch.tensor(predicted_path)
-                
+            if VISUALIZE_PREDICTED_OBS_PATHS:
+                predicted_poses = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
                 predicted_paths = {'points': predicted_poses, 'color': 'black'}
-                points_drawer_inputs.append(predicted_paths)
-                # draw_points(predicted_poses,clear=True,color='black')
+                point_visualzer_inputs.append(predicted_paths)
                         
         else:
             for obs_index in range(len(dynamic_obstacles)):
@@ -787,7 +794,7 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
-        if t_idx % 2 == 0 and args.visualize_spheres:
+        if t_idx % 2 == 0 and VISUALIZE_ROBOT_COL_SPHERES:
             visualize_spheres(motion_gen, spheres, cu_js)
 
         # CONTROL STEP FINISHED! We can update the time step index.
@@ -801,7 +808,7 @@ def main():
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
             
     
-        print_rate_decorator(lambda: draw_points(points_drawer_inputs), args.print_ctrl_rate, "draw_points")() 
+        print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
 
 
