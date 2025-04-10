@@ -190,7 +190,7 @@ parser.add_argument(
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
-    default="True",
+    default="False",
     type=str,
     choices=["True", "False"],
 )
@@ -626,8 +626,8 @@ def main():
         for _ in range(10):
             my_world.step(render=True) 
         init_world = True
-        if args.autoplay:
-            my_world.play()
+        # if args.autoplay:
+        #     my_world.play()
 
     while simulation_app.is_running(): # not necessarily playing, just running        
         
