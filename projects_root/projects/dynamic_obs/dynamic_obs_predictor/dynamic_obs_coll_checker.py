@@ -195,6 +195,13 @@ class DynamicObsCollPredictor:
                 #     print(f"step {h}: col_checker obs estimated pose: {self.H_world_cchecks[h].world_model.objects[0].pose}")
                 # ############### 
         
+        # Now we have the full cost matrix, which is of shape [n_rollouts, horizon].
+        # Some post-processing if needed:
+
+        # Keep the first violation only:
+
+        # TODO: Commit if entirely removing this:
+        # git commit -m "removed the masking option in the dynamic obs cost_fn (which when was on,set  dynamic_coll_cost_matrix[r,h] to 1 only at the FIRST step in horizon (i.e the first column in the rth row) to 1 and the rest of the row (i.e the r'th rollout to 0). In simpler words, it aimed to charge a rollout in the cost fn only for the first step it was in a cofllison, i.e the state that it was entered into a collision, and if its already in collision after that, not charging it. I removed that because altough it has good potential to work better than the 'charge for every state you are in a collision', the second option for now seems to work better"
         mask_to_keep_first_violaion_only = False # If True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
         if mask_to_keep_first_violaion_only:
             dynamic_coll_cost_matrix = torch.where(
@@ -202,10 +209,18 @@ class DynamicObsCollPredictor:
                 torch.ones_like(dynamic_coll_cost_matrix),
                 torch.zeros_like(dynamic_coll_cost_matrix)
             )
-            
-
+        
+        # Shift the cost matrix left by one (to charge for the action that leads to the collision, and not for the state you are in collision):
+        shift_cost_matrix_left = True
+        if shift_cost_matrix_left:
+            # Create a new tensor with zeros
+            shifted = torch.zeros_like(dynamic_coll_cost_matrix)
+            # Copy all columns except the last one, shifted left by one
+            shifted[:, :-1] = dynamic_coll_cost_matrix[:, 1:]
+            dynamic_coll_cost_matrix = shifted
+        # Scale the cost matrix by the cost weight:
         dynamic_coll_cost_matrix *= self.cost_weight
-        # cost_matrix = torch.rand_like(cost_matrix) * self.cost_weight # DEBUG
+        
         return dynamic_coll_cost_matrix 
         
        
