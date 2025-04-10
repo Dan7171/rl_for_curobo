@@ -8,19 +8,22 @@ import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
 from projects_root.utils.quaternion import integrate_quat
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 SPHERE_DIM = 4 # The values which are required to define a sphere: x,y,z,radius. That's fixed in all curobo coll checkers
 
 class DynamicObsCollPredictor:
     """
-    This class is used to check the collision of the dynamic obstacles in the world.
-    It also contains the functionality to compute costs.
-    Inspired by: https://curobo.org/get_started/2c_world_collision.html
     
+    This class is used to predict and compute costs for the collision of the dynamic obstacles in the world.
+    You can think of this class as a collection of H collision checkers, one for each time step in the horizon + functionality to compute costs for the MPC (see cost_fn function).
+    Each individual collision checker which it contains, is inspired by: https://curobo.org/get_started/2c_world_collision.html
     """
     
 
-    def __init__(self, tensor_args, dynamic_obs_world_cfg, cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000):
-        """_summary_
+    def __init__(self, tensor_args, dynamic_obs_world_cfg, cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+        """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
+        as well as setting the cost function parameters for the dynamic obstacle cost function.
+
 
         Args:
             tensor_args: pytorch tensor arguments.
@@ -32,6 +35,9 @@ class DynamicObsCollPredictor:
             robot_collision_sphere_num: The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
             activation_distance:  The distance in meters between a robot sphere and an obstacle over all obstacles, at which the collision cost starts to be "active" (positive). Denoted as "etha" or "activation distance" in the paper section 3.3.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
+            shift_cost_matrix_left: if True, the cost matrix will be shifted left by one (to charge for the action that leads to the collision, and not for the state you are in collision).
+            mask_decreasing_cost_entries: if True, the cost matrix will be modified so that only actions which take the robot closer to collision (i.e, the curobo cost function is increasing or distance to obstacle is decreasing) are considered and be charged at the dynamic cost function, and if an action is taking it away from a collision, it is not charged.
+            mask_decreasing_cost_entries: if True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
             """
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.weight_col_check = tensor_args.to_device([1]) # Leave 1. This is the weight for curobo collision checking. Explained in the paper. Since we are only interested at wether there is a collision or not (i.e. cost is positive in collision and 0 else), this is not important. See https://curobo.org/get_started/2c_world_collision.html        
@@ -41,7 +47,9 @@ class DynamicObsCollPredictor:
         self.n_rollouts = n_rollouts 
         self.step_dt_traj_mpc = step_dt_traj_mpc 
         self.activation_distance = tensor_args.to_device([activation_distance]) 
-        self.cost_weight = cost_weight 
+        self.cost_weight = cost_weight
+        self.shift_cost_matrix_left = shift_cost_matrix_left
+        self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
         
         # Initialize the collision H buffers and H collision checkers:
         world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
@@ -176,7 +184,7 @@ class DynamicObsCollPredictor:
                 # To make things simple, let's call it "curobo collision cost".
                 # If that cost is positive, even if by a small margin, it means the minimal actual distance between the sphere and any of the obstacles (over all obstacles) is less than the the "activation distance" etha.
                 # So one should set the activation distance to be the safety margin, i.e. the distance between some robot sphere and the nearest obstacle, in which if an obstacle is present (meaning that its somwhere in an imaginary sphere with radius etha around the robot sphere (approximating some rigid part of the robot)), you want to consider collision.
-                
+                # Another thing to know: if you want to know if there is an actuall collision (real contact, not just a safety margin violation), you can know that by checking if the "curobo collision cost" is greater or equal to  0.5 * self.activation_distance. See the paper section 3.3.
                 spheres_curobo_coll_costs = spheres_curobo_coll_costs.squeeze(1) # from [n_rollouts, 1, n_spheres] to [n_rollouts, n_spheres]. the second dimension is squeezed out because it's 1 (representing only the  h'th step over the horizon).
                 # NOTE: 2 "spheres_curobo_coll_costs" is a 3d tensor of shape:
                 # [n_rollouts # number of rollouts, 1 # horizon length is 1 because we check collision for each time step separately, n_spheres # number of spheres in the robot (65 for franka)  
@@ -195,29 +203,17 @@ class DynamicObsCollPredictor:
                 #     print(f"step {h}: col_checker obs estimated pose: {self.H_world_cchecks[h].world_model.objects[0].pose}")
                 # ############### 
         
-        # Now we have the full cost matrix, which is of shape [n_rollouts, horizon].
+        # Now that we have the full cost matrix, which is of shape [n_rollouts, horizon].
         # Some post-processing if needed:
 
-        # Keep the first violation only:
-
-        # TODO: Commit if entirely removing this:
-        # git commit -m "removed the masking option in the dynamic obs cost_fn (which when was on,set  dynamic_coll_cost_matrix[r,h] to 1 only at the FIRST step in horizon (i.e the first column in the rth row) to 1 and the rest of the row (i.e the r'th rollout to 0). In simpler words, it aimed to charge a rollout in the cost fn only for the first step it was in a cofllison, i.e the state that it was entered into a collision, and if its already in collision after that, not charging it. I removed that because altough it has good potential to work better than the 'charge for every state you are in a collision', the second option for now seems to work better"
-        mask_to_keep_first_violaion_only = False # If True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
-        if mask_to_keep_first_violaion_only:
-            dynamic_coll_cost_matrix = torch.where(
-                (dynamic_coll_cost_matrix == 1) & (torch.cumsum(dynamic_coll_cost_matrix, dim=1) == 1),
-                torch.ones_like(dynamic_coll_cost_matrix),
-                torch.zeros_like(dynamic_coll_cost_matrix)
-            )
+        # For each rollout, if a cost entry is less than the previous entry, set it to 0. The idea is to avoid charging for actions which take the robot out of collision. For those actions, we set a cost of 0.
+        if self.mask_decreasing_cost_entries:
+            dynamic_coll_cost_matrix = mask_decreasing_values(dynamic_coll_cost_matrix)
         
         # Shift the cost matrix left by one (to charge for the action that leads to the collision, and not for the state you are in collision):
-        shift_cost_matrix_left = True
-        if shift_cost_matrix_left:
-            # Create a new tensor with zeros
-            shifted = torch.zeros_like(dynamic_coll_cost_matrix)
-            # Copy all columns except the last one, shifted left by one
-            shifted[:, :-1] = dynamic_coll_cost_matrix[:, 1:]
-            dynamic_coll_cost_matrix = shifted
+        if self.shift_cost_matrix_left:
+            dynamic_coll_cost_matrix = shift_tensor_left(dynamic_coll_cost_matrix)
+        
         # Scale the cost matrix by the cost weight:
         dynamic_coll_cost_matrix *= self.cost_weight
         

@@ -19,6 +19,8 @@ def shift_tensor_left(tensor):
     
     return shifted
 
+
+
 # Example usage:
 if __name__ == "__main__":
     # Create example tensor
@@ -29,9 +31,11 @@ if __name__ == "__main__":
     ])
     
     # Shift the tensor
-    result = shift_tensor_left(example)
+    shifted = shift_tensor_left(example)
+    
     
     print("Original tensor:")
     print(example)
     print("\nShifted tensor:")
-    print(result) 
+    print(shifted)
+ 
