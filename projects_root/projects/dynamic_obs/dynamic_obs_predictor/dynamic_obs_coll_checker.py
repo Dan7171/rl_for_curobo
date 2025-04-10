@@ -142,7 +142,7 @@ class DynamicObsCollPredictor:
         Returns:
             tensor of shape [n_rollouts, horizon] containing collision costs
         """
-        
+        binary = False
         if not torch.cuda.is_current_stream_capturing():
             self._init_counter += 1
             print(f"Initialization iteration {self._init_counter} (ignore this printing if not use_cuda_graph is False. Intializtion refers to the cuda graph capture. TODO: If use_cuda_graph is False, this should not be printed.)")
@@ -178,9 +178,12 @@ class DynamicObsCollPredictor:
                 # NOTE: 2 "spheres_curobo_coll_costs" is a 3d tensor of shape:
                 # [n_rollouts # number of rollouts, 1 # horizon length is 1 because we check collision for each time step separately, n_spheres # number of spheres in the robot (65 for franka)  
                 # We don't need the horizon dimension, so we squeezed it out.
+                if binary:
+                    safety_margin_violation_rollouts = torch.any(spheres_curobo_coll_costs > 0, dim=1) # sets True for rollout if any of the robot spheres are too close to an obstacle (i.e, their "safety zone" is violated). Its a vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). 
+                    safety_margin_violation_rollouts = safety_margin_violation_rollouts.float() # The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).                
+                else:
+                    safety_margin_violation_rollouts = torch.sum(spheres_curobo_coll_costs, dim=1) # sum of collisioncosts over all spheres.
                 
-                safety_margin_violation_rollouts = torch.any(spheres_curobo_coll_costs > 0, dim=1) # sets True for rollout if any of the robot spheres are too close to an obstacle (i.e, their "safety zone" is violated). Its a vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). 
-                safety_margin_violation_rollouts = safety_margin_violation_rollouts.float() # The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).                
                 dynamic_coll_cost_matrix[:, h] = safety_margin_violation_rollouts 
 
 
@@ -197,6 +200,7 @@ class DynamicObsCollPredictor:
                 torch.zeros_like(dynamic_coll_cost_matrix)
             )
             
+
         dynamic_coll_cost_matrix *= self.cost_weight
         # cost_matrix = torch.rand_like(cost_matrix) * self.cost_weight # DEBUG
         return dynamic_coll_cost_matrix 
