@@ -58,7 +58,10 @@ Example options:
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
-ENABLE_GPU_DYNAMICS = True
+ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
+    # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
+    # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
+    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
@@ -417,6 +420,9 @@ def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_
                 You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
 
 
+#############################################
+# MAIN SIMULATION LOOP
+#############################################
 def main():
     """
     Main simulation loop that demonstrates Model Predictive Control (MPC) with moving obstacles.
@@ -437,25 +443,17 @@ def main():
     References:
         Isaac Sim Core API: https://docs.isaacsim.omniverse.nvidia.com/4.5.0/py/source/extensions/isaacsim.core.api/docs/index.html#python-api
     """
+    ###########################################################
+    ################  SIMULATION INITIALIZATION ###############
+    ###########################################################
+
     # Initialize Isaac Sim world with 1 meter units
     my_world = World(stage_units_in_meters=1.0) 
-    
-    # GPU DYNAMICS - OPTIONAL (originally was disabled)
-    # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
-    # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
-    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-    
+    # Enable GPU dynamics if enabled
     if ENABLE_GPU_DYNAMICS:
-        my_world_physics_context = my_world.get_physics_context()
-        if not my_world_physics_context.is_gpu_dynamics_enabled():
-            print("GPU dynamics is disabled")
-            my_world_physics_context.enable_gpu_dynamics(True)
-            assert my_world_physics_context.is_gpu_dynamics_enabled()
-            print("debug- experimental: GPU dynamics is enabled")
-    
+        activate_gpu_dynamics(my_world)
     # Set the simulation dt to the desired values.
     my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT) 
-    
     stage = my_world.stage
 
     # Set up the world hierarchy
@@ -464,7 +462,7 @@ def main():
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     my_world.scene.add_default_ground_plane()
 
-    # Create a target cube for the robot to follow
+    # Create a hologram  of the target cube for the robot to follow (for visualization purposes)
     target = create_target_pose_hologram()
 
     # Configure CuRobo logging and parameters
@@ -608,9 +606,6 @@ def main():
     usd_help.load_stage(my_world.stage)
     init_world = False
     cmd_state_full = None
-
-
-    # Initialize motion gen
     
     if VISUALIZE_ROBOT_COL_SPHERES:
         motion_gen, spheres = init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cache), None
@@ -623,34 +618,39 @@ def main():
         real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
     
     
-
+    #######################################
+    # MAIN SIMULATION LOOP
+    #######################################
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    
-    # Main simulation loop
-    while simulation_app.is_running(): # not necessarily playing, just running
-        
-        point_visualzer_inputs = []
+    if not init_world:
+        for _ in range(10):
+            my_world.step(render=True) 
+        init_world = True
+        if args.autoplay:
+            my_world.play()
 
+    while simulation_app.is_running(): # not necessarily playing, just running        
+        
+        ############ INITIALIZE WORLD IF NEEDED ############
         # Initialize world if needed
-        if not init_world:
-            for _ in range(10):
-                my_world.step(render=True) 
-            init_world = True
-            if args.autoplay:
-                my_world.play()
-
         
+        ######### TRY ADVANCING SIMULATION BY ONE STEP #########
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
-        print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
+        print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
         
+        ############ VERIFY SIMULATION IS PLAYING BEFORE MOVING ON. PLAY IT IF AUTO PLAY IS ENABLED OR KEEP LOOPING UNTIL BUTTON IS PRESSED ############
         if not my_world.is_playing(): # if the play button is not pressed yet
             if args.autoplay: # if autoplay is enabled, play the simulation immediately
                 my_world.play()
-            continue # skip the rest of the loop
+                while not my_world.is_playing():
+                    print("blocking until playing is confirmed...")
+                    time.sleep(0.1)
+            else:
+                print("Waiting for play button to be pressed...")
+                time.sleep(0.1)
+                continue # skip the rest of the loop
         
-        while not my_world.is_playing():
-            print("Waiting for play button to be pressed...")
-            time.sleep(0.1)
+        
         
         
         # NOW PLAYING!
@@ -692,11 +692,7 @@ def main():
         if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
             # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
-            
-            # if VISUALIZE_PREDICTED_OBS_PATHS:
-            #     visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
-            #     point_visualzer_inputs.extend(visualization_points_per_obstacle)
-                        
+
         else:
             for obs_index in range(len(dynamic_obstacles)):
                 dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
@@ -767,24 +763,19 @@ def main():
             articulation_controller.apply_action(art_action)
         
         ############ VISUALIZATIONS ############
-        
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
             visualize_spheres(motion_gen, spheres, cu_js)
-        
-        if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS:
-            
-            # collect the points for visualization
+        if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS: # rendering using draw_points()
+            point_visualzer_inputs = [] # collect the different points sequences for visualization
             # collect the rollouts
             if VISUALIZE_MPC_ROLLOUTS:
                 rollouts_for_visualization = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
-
             # collect the predicted paths of dynamic obstacles
             if VISUALIZE_PREDICTED_OBS_PATHS:
                     visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
                     point_visualzer_inputs.extend(visualization_points_per_obstacle)
-            
             # render the points
             print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
@@ -796,6 +787,17 @@ def main():
         print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')  
         if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
+
+def activate_gpu_dynamics(my_world):
+    """
+    Activates GPU dynamics for the given world.
+    """
+    my_world_physics_context = my_world.get_physics_context()
+    if not my_world_physics_context.is_gpu_dynamics_enabled():
+        print("GPU dynamics is disabled. Initializing GPU dynamics...")
+        my_world_physics_context.enable_gpu_dynamics(True)
+        assert my_world_physics_context.is_gpu_dynamics_enabled()
+        print("GPU dynamics is enabled")
         
         
 if __name__ == "__main__":
