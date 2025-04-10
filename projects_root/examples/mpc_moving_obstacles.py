@@ -419,6 +419,16 @@ def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_
             But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
                 You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
 
+def activate_gpu_dynamics(my_world):
+    """
+    Activates GPU dynamics for the given world.
+    """
+    my_world_physics_context = my_world.get_physics_context()
+    if not my_world_physics_context.is_gpu_dynamics_enabled():
+        print("GPU dynamics is disabled. Initializing GPU dynamics...")
+        my_world_physics_context.enable_gpu_dynamics(True)
+        assert my_world_physics_context.is_gpu_dynamics_enabled()
+        print("GPU dynamics is enabled")
 
 #############################################
 # MAIN SIMULATION LOOP
@@ -613,12 +623,17 @@ def main():
         init_world = True
     
     
-    #######################################
-    # MAIN SIMULATION LOOP
-    #######################################
+    ######################################
+    ########### SIMULATION LOOP ##########
+    ######################################
 
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     while simulation_app.is_running(): # not necessarily playing, just running                
+        
+        ########################################################
+        ############# WAITING FOR SIMULATION TO START ##########
+        ########################################################
+        
         ######### TRY ADVANCING SIMULATION BY ONE STEP #########
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
@@ -634,9 +649,12 @@ def main():
                 print("Waiting for play button to be pressed...")
                 time.sleep(0.1)
                 continue # skip the rest of the loop
-        
+
+        ######################################################
         ######### IF GOT HERE, SIMULATION IS PLAYING #########
-        
+        ######################################################
+
+        ########## INITIALIZATION BEFORE FIRST STEP ##########
         if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
             idx_list = [robot.get_dof_index(x) for x in j_names]
@@ -645,42 +663,45 @@ def main():
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
+            if args.print_ctrl_rate and SIMULATING:
+                real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
             ctrl_loop_start_time = time.time()
 
-        # Start measuring control frequency if not already started
-        if SIMULATING:
-            real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
-        else:
+        ########################################################
+        ################## SIMULATION STEP #####################
+        ########################################################
+        
+        #### START MEASURING CTRL FREQ IF NEEDED AND CAN #######    
+        if args.print_ctrl_rate and not SIMULATING:
             real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
             real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
             if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
         
+        #### MAINTAIN DYNAMIC OBSTACLE VELOCITIES IF NEEDED #####
         # Maintain dynamic obstacle velocities to ovecome the phenomenon that the dynamic obstacle is slowing down over time.
         if FORCE_CONSTANT_VELOCITIES:
             for obs_index in range(len(dynamic_obstacles)):
                 dynamic_obstacles[obs_index].simulation_representation.set_linear_velocity(dynamic_obstacles[obs_index].linear_velocity)
                 dynamic_obstacles[obs_index].simulation_representation.set_angular_velocity(dynamic_obstacles[obs_index].angular_velocity)
         
+        ############ UPDATE COLLISION CHECKERS ##################
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
         if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
             # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
-
         else:
             for obs_index in range(len(dynamic_obstacles)):
                 dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
             
 
-        ############ UPDATE TARGET (GOAL) POSE IF NEEDED (IN CASE IT MOVES) ############
+        ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
         cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-
         # Update goal if target has moved
         if past_pose is None:
             past_pose = cube_position + 1.0
-        
         if np.linalg.norm(cube_position - past_pose) > 1e-3: # if the target has moved
             # Set new end-effector goal based on target position
             ee_translation_goal = cube_position
@@ -715,12 +736,11 @@ def main():
         common_js_names = []
         current_state.copy_(cu_js)
 
-        
-        ############ MPC ROLLOUTS ############
-        # Run MPC step
+        ############### RUN MPC ROLLOUTS ###############
         mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
-        ####### APPLY CONTROLLER COMMAND TO ROBOT #######
+        ####### APPLY CONTROL COMMAND TO ROBOT #######
+        
         # Process MPC result
         cmd_state_full = mpc_result.js_action
         common_js_names = []
@@ -731,13 +751,15 @@ def main():
                 common_js_names.append(x)
         cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
         cmd_state_full = cmd_state
+        
         # Create and apply robot action
         art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list,)
+        
         # Execute planned motion
         for _ in range(3):
             articulation_controller.apply_action(art_action)
         
-        ############ VISUALIZATIONS ############
+        ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
             visualize_spheres(motion_gen, spheres, cu_js)
@@ -763,16 +785,7 @@ def main():
         if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
 
-def activate_gpu_dynamics(my_world):
-    """
-    Activates GPU dynamics for the given world.
-    """
-    my_world_physics_context = my_world.get_physics_context()
-    if not my_world_physics_context.is_gpu_dynamics_enabled():
-        print("GPU dynamics is disabled. Initializing GPU dynamics...")
-        my_world_physics_context.enable_gpu_dynamics(True)
-        assert my_world_physics_context.is_gpu_dynamics_enabled()
-        print("GPU dynamics is enabled")
+
         
         
 if __name__ == "__main__":
