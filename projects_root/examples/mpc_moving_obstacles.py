@@ -185,13 +185,13 @@ parser.add_argument(
     default="franka.yml",
     help="Robot configuration file to load (e.g., franka.yml)",
 )
-parser.add_argument(
-    "--obstacle_linear_velocity",
-    type=float,
-    nargs=3,
-    default=[-0.25, 0.0, 0.0],  
-    help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
-)
+# parser.add_argument(
+#     "--obstacle_linear_velocity",
+#     type=float,
+#     nargs=3,
+#     default=[-0.25, 0.0, 0.0],  
+#     help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
+# )
 parser.add_argument(
     "--obstacle_angular_velocity",
     type=float,
@@ -309,11 +309,19 @@ def draw_points(points_dicts: List[dict], color='green'):
             point_list += [
                 (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
             ]
-            if color == 'green':
-                colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
-            elif color == 'black':
-                colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
-        
+            if type(color) == str:
+                if color == 'green':
+                    colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
+                elif color == 'black':
+                    colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
+            
+            elif type(color) == np.ndarray:
+                color = list(color) # rgb
+                for step_idx in range(h):
+                    color_copy = color.copy()
+                    color_copy.append(1 - (0.5 * step_idx/h)) # decay alpha (decay transparency)
+                    colors.append(color_copy)
+
         sizes = [10.0 for _ in range(b * h)]
 
         for p in point_list:
@@ -344,17 +352,21 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
             return result
     return wrapper
 
-def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic_obs_coll_predictor):
+def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic_obs_coll_predictor,horizon=30):
     """
     Get the predicted poses of the dynamic obstacles for visualization purposes.
     """
-    predicted_poses = torch.zeros((len(dynamic_obstacles),30, 3)) 
+    # predicted_poses = torch.zeros((len(dynamic_obstacles),30, 3))
+    obs_for_visualization = [] 
     for obs_index in range(len(dynamic_obstacles)):
+        obs_predicted_poses = torch.zeros((1 ,horizon, 3))
         obs_name = dynamic_obstacles[obs_index].name
         predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)
         predicted_path = predicted_path[:,:3]
-        predicted_poses[obs_index] = torch.tensor(predicted_path)
-    return predicted_poses
+        obs_predicted_poses[0] = torch.tensor(predicted_path)
+        obs_color = dynamic_obstacles[obs_index].simulation_representation.get_applied_visual_material().get_color()
+        obs_for_visualization.append({"points": obs_predicted_poses, "color": obs_color})
+    return obs_for_visualization
 
 def visualize_spheres(motion_gen, spheres, cu_js):
     """
@@ -482,7 +494,7 @@ def main():
     
     # Set the simulation dt to the desired values.
     my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT) 
-
+    
     stage = my_world.stage
 
     # Set up the world hierarchy
@@ -547,10 +559,36 @@ def main():
 
     # Initialize the dynamic obstacles.
     dynamic_obstacles = [
-            Obstacle("dynamic_cuboid1", np.array(args.obstacle_initial_pos), args.obstacle_size, DynamicCuboid, np.array(args.obstacle_color), args.obstacle_mass, args.obstacle_linear_velocity, args.obstacle_angular_velocity, args.gravity_enabled.lower() == "true", my_world, world_cfg_dynamic_obs)  
-            # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
-            # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
-            # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
+        Obstacle( 
+            name="dynamic_cuboid1", 
+            initial_pos=np.array(args.obstacle_initial_pos), 
+            dims=0.1, 
+            obstacle_type=DynamicCuboid, 
+            color=np.array([1,0,0]), # red 
+            mass=args.obstacle_mass,
+            linear_velocity=[-0.25, 0.0, 0.0],
+            angular_velocity=[1,0,0],
+            gravity_enabled=args.gravity_enabled.lower() == "true",
+            world=my_world,
+            world_cfg=world_cfg_dynamic_obs
+        )
+        ,  
+        Obstacle(
+            name="dynamic_cuboid2",
+            initial_pos=np.array([0.8,0.8,0.3]), 
+            dims=0.1, 
+            obstacle_type=DynamicCuboid, 
+            color=np.array([0,0,1]),# blue 
+            mass=args.obstacle_mass,
+            linear_velocity=[-0.1, -0.1,0.05],
+            angular_velocity=[0,0,0],
+            gravity_enabled=args.gravity_enabled.lower() == "true",
+            world=my_world,
+            world_cfg=world_cfg_dynamic_obs
+        )  
+        # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
+        # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
+        # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
         ]
     
     # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
@@ -701,9 +739,9 @@ def main():
             
             # Render predicted paths of dynamic obstacles            
             if VISUALIZE_PREDICTED_OBS_PATHS:
-                predicted_poses = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
-                predicted_paths = {'points': predicted_poses, 'color': 'black'}
-                point_visualzer_inputs.append(predicted_paths)
+                visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
+                # predicted_paths = {'points': predicted_poses, 'color': 'black'}
+                point_visualzer_inputs.extend(visualization_points_per_obstacle)
                         
         else:
             for obs_index in range(len(dynamic_obstacles)):

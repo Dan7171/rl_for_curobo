@@ -32,24 +32,26 @@ from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_c
 a = torch.zeros(4, device="cuda:0") 
 
 class Obstacle:
-    def __init__(self, name, pose, dims, obstacle_type, color, mass, linear_velocity, angular_velocity, gravity_enabled, world, world_cfg):
+    def __init__(self, name, initial_pos, dims, obstacle_type, color, mass, linear_velocity, angular_velocity, gravity_enabled, world, world_cfg):
         """_summary_
         See https://curobo.org/get_started/2c_world_collision.html
 
         Args:
-            name (_type_): _description_
-            pose (_type_): _description_
-            dims (_type_): _description_
-            obstacle_type (_type_): _description_
-            color (_type_): _description_
-            mass (_type_): _description_
-            gravity_enabled (_type_): _description_
+            name (str): object name. Must be unique.
+            initial_pos (_type_): initial position of the obstacle in the world frame ([x,y,z]).
+            dims (_type_): if cuboid, scalar (side length (m)).
+            obstacle_type (np.array): [r,g,b]
+            color (_type_): 
+            mass (_type_): kg
+            linear_velocity (_type_): vx, vy, vz (m/s)
+            angular_velocity (_type_):wx, wy, wz (rad/s)
+            gravity_enabled (bool): enable/disable gravity for the obstacle. If False, the obstacle will not be affected by gravity.
             world (_type_): issac sim world instance (related to the simulator)
             world_cfg (_type_): curobo world config instance (related to the collision checker of curobo)
         """
         self.name = name
         self.path = f'/World/new_obstacles/{name}'
-        self.initial_pose = pose
+        self.initial_pose = initial_pos
         self.dims = dims
         self.prim_type = obstacle_type
         self.tensor_args = TensorDeviceType()  # Add this to handle device placement
