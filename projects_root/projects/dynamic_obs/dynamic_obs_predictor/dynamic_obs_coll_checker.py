@@ -23,39 +23,37 @@ class DynamicObsCollPredictor:
         """_summary_
 
         Args:
-            tensor_args (_type_): _description_
-            world_cfg (_type_): _description_
-            cache (_type_): _description_
-            step_dt_traj_mpc (_type_): time passes between each step in the trajectory.
-            H (int, optional): _description_. Defaults to 30.
-            robot_collision_sphere_num = The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
-            activation_distance = The distance in meters between a robot sphere and an obstacle over all obstacles, at which the collision cost starts to be "active" (positive). Denoted as "etha" in the paper.
+            tensor_args: pytorch tensor arguments.
+            dynamic_obs_world_cfg: World config template for the dynamic obstacles.
+            cache (dict): collision checker cache for the pre-defined dynamic primitives.
+            step_dt_traj_mpc (float): Time passes between each step in the trajectory. This is what the mpc assumes time delta between steps in horizon is.
+            H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.
+            n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
+            robot_collision_sphere_num: The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
+            activation_distance:  The distance in meters between a robot sphere and an obstacle over all obstacles, at which the collision cost starts to be "active" (positive). Denoted as "etha" or "activation distance" in the paper section 3.3.
+            cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
             """
-        self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging  
-        world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
+        self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
+        self.weight_col_check = tensor_args.to_device([1]) # Leave 1. This is the weight for curobo collision checking. Explained in the paper. Since we are only interested at wether there is a collision or not (i.e. cost is positive in collision and 0 else), this is not important. See https://curobo.org/get_started/2c_world_collision.html        
         self.tensor_args = tensor_args 
-        self.H = H # Horizon length
-        self.collision_sphere_num = robot_collision_sphere_num # The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
-        self.n_rollouts = n_rollouts # The number of rollouts
-        query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
-        self.step_dt_traj_mpc = step_dt_traj_mpc # time passes between each step in the trajectory.
-        self.activation_distance = tensor_args.to_device([activation_distance]) # activation distance for collision checking (below this distance, consider collision)
-        self.weight_col_check = tensor_args.to_device([1]) # Leave 1. This is the weight for curobo collision checking. Explained in the paper. Since we are only interested at wether there is a collision or not (i.e. cost is positive in collision and 0 else), this is not important. See https://curobo.org/get_started/2c_world_collision.html
-        self.cost_weight = cost_weight # weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1.
+        self.H = H 
+        self.collision_sphere_num = robot_collision_sphere_num 
+        self.n_rollouts = n_rollouts 
+        self.step_dt_traj_mpc = step_dt_traj_mpc 
+        self.activation_distance = tensor_args.to_device([activation_distance]) 
+        self.cost_weight = cost_weight 
         
-        # Initialize the collision buffers and collision checkers
-        self.H_collision_buffers = []
-        self.H_world_cchecks = [] # list of collision checkers for each time step
+        # Initialize the collision H buffers and H collision checkers:
+        world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
+        query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
+        self.H_collision_buffers = [] # not sure what they are for but they are needed.
+        self.H_world_cchecks = [] # list of collision checkers (one checker for each time step in the horizon)
         for _ in range(self.H):
             world_config = copy.deepcopy(world_collision_config_base) # NOTE: I use copies to avoid side effects.
             col_checker = WorldMeshCollision(world_config) # Initiate a single collision checker for each time step over the horizon.
             self.H_world_cchecks.append(col_checker)
             self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for 
-            # enable for collision checking all objects in the collision checker. Just a verification step beacuse I am not sure if all objects are automatically enabled when initiating the collision checker.
-            # TODO: May be redundant. Remove if not needed.
-            # for obj in col_checker.world_model.objects:
-            #     col_checker.enable_obb(name=obj.name) 
-    
+        
 
     def predict_obstacle_path(self, cur_obstacle_pos:np.ndarray, cur_obstacle_lin_vel:np.ndarray, cur_obstacle_lin_acceleration:np.ndarray, cur_obstacle_orientation:np.ndarray, cur_obstacle_angular_vel:np.ndarray, cur_obstacle_angular_acceleration:np.ndarray):
         """
@@ -130,19 +128,25 @@ class DynamicObsCollPredictor:
             step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :] # predicted positions of all obstacles at time step h
             self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names) # update the collision checker with the predicted positions of the obstacles
 
-    def cost_fn(self, robot_spheres, env_query_idx=None, method='curobo_prim_coll_cost_fn'):
+    def cost_fn(self, robot_spheres, env_query_idx=None, method='curobo_prim_coll_cost_fn', binary=False):
         """
         Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
         Args:
-            robot_spheres: tensor of shape [n_rollouts, horizon, n_spheres, 4]
-            env_query_idx: optional index for querying specific environments
-            method: collision checking method ('distance', 'collision', or 'swept_distance')
-            NOTE: 
-                1. cuRobo's signed distance queries return a positive value when the sphere is inside an obstacle or within activation distance. If outside this range, the distance value will be zero. https://curobo.org/get_started/2c_world_collision.html#:~:text=cuRobo's%20signed%20distance%20queries%20return%20a%20positive%20value%20when%20the%20sphere%20is%20inside%20an%20obstacle%20or%20within%20activation%20distance.%20If%20outside%20this%20range%2C%20the%20distance%20value%20will%20be%20zero.
+            robot_spheres: tensor of shape [n_rollouts, horizon, n_spheres, 4]. Collision spheres of the robot. This is the standard structure of the input to the cost function.
+            
+            env_query_idx: optional index for querying specific environments. If None, the collision cost will be computed for the one and only environment in the collision checker.
+            
+            method: the way to compute the collision cost. Currently only curobo_prim_coll_cost_fn is implemented. By curobo_prim_coll_cost_fn, we mean the collision cost function implemented in curobo, which broadlly discussed at https://curobo.org/get_started/2c_world_collision.html#:~:text=process%20is%20illustrated.-,Collision%20Metric,-%C2%B6 (and in the technical report https://curobo.org/reports/curobo_report.pdf at section 3.3).
+            NOTE: at this point, the method using signed distance is not used, since I failed to make it work.
+
+            binary: if True, cost[r,h] will be self.cost_weight if any of the robot spheres are too close to an obstacle (i.e, their "safety zone" is violated). Otherwise it will be 0.
+            If False, cost[r,h] will be the sum of the collision costs over all spheres. For now it seems that when its False, the overall performance is better, so I kept it as that.
+        
         Returns:
-            tensor of shape [n_rollouts, horizon] containing collision costs
+            tensor of shape [n_rollouts, horizon] containing collision costs (we denot the returned tensor by the matrix named "dynamic_coll_cost_matrix" 
+            where dynamic_coll_cost_matrix[r,h] is the  predictrive collision cost for the robot for rollout r and time step h, where r is the rollout index and h is the time step index)
         """
-        binary = False
+        
         if not torch.cuda.is_current_stream_capturing():
             self._init_counter += 1
             print(f"Initialization iteration {self._init_counter} (ignore this printing if not use_cuda_graph is False. Intializtion refers to the cuda graph capture. TODO: If use_cuda_graph is False, this should not be printed.)")
@@ -161,8 +165,7 @@ class DynamicObsCollPredictor:
             robot_spheres_step_h = robot_spheres_step_h.reshape(self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM) # From [n_rollouts, n_spheres, SPHERE_DIM] to [n_rollouts, 1, n_spheres, SPHERE_DIM] 
             
             if method == 'curobo_prim_coll_cost_fn': # NOTE: currently the only method implemented. There is an option to use the sdfs but I failed to make it work, I suspect there is a bug there
-                    
-                spheres_curobo_coll_costs = self.H_world_cchecks[h].get_sphere_distance(
+                spheres_curobo_coll_costs = self.H_world_cchecks[h].get_sphere_distance( # NOTE: although the method is called get_sphere_distance, it actually returns the "curobo collision cost" (see section 3.3 in paper).
                     query_sphere=robot_spheres_step_h, 
                     collision_query_buffer=buffer_step_h,
                     activation_distance=self.activation_distance,
