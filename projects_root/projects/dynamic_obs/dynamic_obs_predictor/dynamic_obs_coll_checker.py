@@ -50,6 +50,7 @@ class DynamicObsCollPredictor:
         self.cost_weight = cost_weight
         self.shift_cost_matrix_left = shift_cost_matrix_left
         self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
+        self._obstacles_predicted_paths = {} # dictionary of predicted paths for each obstacle
         
         # Initialize the collision H buffers and H collision checkers:
         world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
@@ -96,6 +97,12 @@ class DynamicObsCollPredictor:
             cchecker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx]) 
             cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
     
+    def _get_predicted_pose_at_step_h(self, h:int, obstacle_name:str):
+        """
+        Get the pose of the obstacle in the collision checker.
+        """
+        return self.H_world_cchecks[h].world_model.objects[obstacle_name].pose
+    
     def update_predictive_collision_checkers(self, obstacles:List[Obstacle]):
         """
         First, For each object, predict its path (future positions) over the next H time steps.
@@ -129,7 +136,8 @@ class DynamicObsCollPredictor:
             
             # Store the predicted positions of the obstacle in the tensor
             obs_pose_preds[ob_idx] = predicted_obstacle_path
-
+            self._obstacles_predicted_paths[obstacle.name] = predicted_obstacle_path # store the predicted path for the obstacle in the dictionary. This is used for debugging.
+        
         # 3) Update each collision checker with the predicted positions of the obstacles in its time step.
         for h in range(self.H): # NOTE: We can parallelize this loop.
             step_h_cchecker = self.H_world_cchecks[h] # h'th collision checker
@@ -218,5 +226,12 @@ class DynamicObsCollPredictor:
         dynamic_coll_cost_matrix *= self.cost_weight
         
         return dynamic_coll_cost_matrix 
+    
+    def get_predicted_path(self, obstacle_name:str):
+        """
+        Get the predicted path of the obstacle over the next H time steps.
+        """
+        return self._obstacles_predicted_paths[obstacle_name]
         
+         
        

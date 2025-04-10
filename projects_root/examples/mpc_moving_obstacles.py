@@ -59,9 +59,10 @@ Example options:
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True
-MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
+RENDER_PREDICTED_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
@@ -117,6 +118,7 @@ from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot
 from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.objects import DynamicCuboid
+from omni.isaac.debug_draw import _debug_draw
 
 
 # Import helper from curobo examples
@@ -184,7 +186,7 @@ parser.add_argument(
     "--obstacle_linear_velocity",
     type=float,
     nargs=3,
-    default=[-0.09, 0.0, 0.0],
+    default=[-0.25, 0.0, 0.0],  
     help="Linear Velocity of the obstacle in x, y, z (m/s). Example: --obstacle_linear_velocity -0.1 0.0 0.0",
 )
 parser.add_argument(
@@ -275,37 +277,55 @@ def create_target_pose_hologram():
     
     return target
 
-def draw_points(rollouts: torch.Tensor):
+def draw_points(points_dicts: List[dict], color='green'):
     """
-    Visualize MPC rollouts in the simulation.
-    
+    Visualize] MPC rollouts in the simulation.
+    _debug_draw docs: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.debug_draw/docs/index.html?highlight=draw_point
+    color docs:
+        1.  https://docs.omniverse.nvidia.com/kit/docs/kit-manual/106.3.0/carb/carb.ColorRgba.html
+        2. rgba (rgb + alpha (transparency)) https://www.w3schools.com/css/css_colors_rgb.asp
     Args:
         rollouts: Tensor of shape [batch_size, horizon, 3] containing trajectory points
     """
-    if rollouts is None:
-        return
-    # Standard Library
-    import random
+    unified_points = []
+    unified_colors = []
+    unified_sizes = []
 
-    # Third Party
-    from omni.isaac.debug_draw import _debug_draw
-
-    draw = _debug_draw.acquire_debug_draw_interface()
-    N = 100
-    draw.clear_points()
-    cpu_rollouts = rollouts.cpu().numpy()
-    b, h, _ = cpu_rollouts.shape
-    point_list = []
-    colors = []
-    for i in range(b):
-        # get list of points:
-        point_list += [
-            (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
-        ]
-        colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
-    sizes = [10.0 for _ in range(b * h)]
-    draw.draw_points(point_list, colors, sizes)
+    for points_dict in points_dicts:
+        rollouts = points_dict['points']
+        color = points_dict['color']
+        if rollouts is None:
+            return
         
+        draw = _debug_draw.acquire_debug_draw_interface()
+        draw.clear_points()
+        
+        cpu_rollouts = rollouts.cpu().numpy()
+        b, h, _ = cpu_rollouts.shape
+        point_list = []
+        colors = []
+        for i in range(b):
+            # get list of points:
+            point_list += [
+                (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
+            ]
+            if color == 'green':
+                colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
+            elif color == 'black':
+                colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
+        
+        sizes = [10.0 for _ in range(b * h)]
+
+        for p in point_list:
+            unified_points.append(p)
+        for c in colors:
+            unified_colors.append(c)
+        for s in sizes:
+            unified_sizes.append(s)
+    
+    draw.draw_points(unified_points, unified_colors, unified_sizes)
+        
+            
 
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     def wrapper(*args, **kwargs):
@@ -526,7 +546,7 @@ def main():
         dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
-    
+ 
     # Initialize MPC solver
     init_curobo = False
     # Configuration for MPC
@@ -606,7 +626,11 @@ def main():
                 my_world.play()
                 
         # Visualize planned trajectories
-        print_rate_decorator(lambda: draw_points(mpc.get_visual_rollouts()), args.print_ctrl_rate, "draw_points")() 
+        points_drawer_inputs = []
+        points_rollouts = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
+        points_drawer_inputs.append(points_rollouts)
+        
+        # print_rate_decorator(lambda: draw_points(mpc.get_visual_rollouts()), args.print_ctrl_rate, "draw_points")() 
         
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World
@@ -658,7 +682,22 @@ def main():
         
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
         if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
+            # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
+            
+            # Render predicted paths of dynamic obstacles            
+            if RENDER_PREDICTED_PATHS:
+                predicted_poses = torch.zeros((len(dynamic_obstacles),30, 3)) 
+                for obs_index in range(len(dynamic_obstacles)):
+                    obs_name = dynamic_obstacles[obs_index].name
+                    predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)
+                    predicted_path = predicted_path[:,:3]
+                    predicted_poses[obs_index] = torch.tensor(predicted_path)
+                
+                predicted_paths = {'points': predicted_poses, 'color': 'black'}
+                points_drawer_inputs.append(predicted_paths)
+                # draw_points(predicted_poses,clear=True,color='black')
+                        
         else:
             for obs_index in range(len(dynamic_obstacles)):
                 dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
@@ -752,6 +791,7 @@ def main():
             visualize_spheres(motion_gen, spheres, cu_js)
 
         # CONTROL STEP FINISHED! We can update the time step index.
+        
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
         print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
         print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
@@ -761,7 +801,8 @@ def main():
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
             
     
-     
+        print_rate_decorator(lambda: draw_points(points_drawer_inputs), args.print_ctrl_rate, "draw_points")() 
+
 
 
 if __name__ == "__main__":
