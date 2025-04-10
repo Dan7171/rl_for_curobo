@@ -529,7 +529,7 @@ def main():
     dynamic_obstacles = [
         Obstacle( 
             name="dynamic_cuboid1", 
-            initial_pos=np.array(args.obstacle_initial_pos), 
+            initial_pos=np.array([0.8,0.0,0.5]), 
             dims=0.1, 
             obstacle_type=DynamicCuboid, 
             color=np.array([1,0,0]), # red 
