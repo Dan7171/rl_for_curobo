@@ -190,7 +190,7 @@ parser.add_argument(
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
-    default="False",
+    default="True",
     type=str,
     choices=["True", "False"],
 )
@@ -555,9 +555,6 @@ def main():
         dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
- 
-    # Initialize MPC solver
-    init_curobo = False
     # Configuration for MPC
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
@@ -576,31 +573,24 @@ def main():
         dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
         override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
     )
-
+    
+    # Initialize MPC solver
     mpc = MpcSolver(mpc_config)
-  
-     
-     
-    # Set up initial robot state and goal
+    
+    # Set up initial robot state
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
     joint_names = mpc.rollout_fn.joint_names
-
-    state = mpc.rollout_fn.compute_kinematics(
-        JointState.from_position(retract_cfg, joint_names=joint_names)
-    )
+    state = mpc.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
     current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
     retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
-    goal = Goal(
-        current_state=current_state,
-        goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
-        goal_pose=retract_pose,
-    )
+    
+    # Set up goal pose (target position and orientation)
+    goal = Goal(current_state=current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
 
     # Initialize MPC solver with goal
     goal_buffer = mpc.setup_solve_single(goal, 1)
     mpc.update_goal(goal_buffer)
     mpc_result = mpc.step(current_state, max_attempts=2)
-
 
     # Load stage and initialize simulation
     usd_help.load_stage(my_world.stage)
@@ -616,24 +606,19 @@ def main():
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
         real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
+
+    if not init_world:
+        for _ in range(10):
+            my_world.step(render=True) 
+        init_world = True
     
     
     #######################################
     # MAIN SIMULATION LOOP
     #######################################
-    t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    if not init_world:
-        for _ in range(10):
-            my_world.step(render=True) 
-        init_world = True
-        # if args.autoplay:
-        #     my_world.play()
 
-    while simulation_app.is_running(): # not necessarily playing, just running        
-        
-        ############ INITIALIZE WORLD IF NEEDED ############
-        # Initialize world if needed
-        
+    t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
+    while simulation_app.is_running(): # not necessarily playing, just running                
         ######### TRY ADVANCING SIMULATION BY ONE STEP #########
         # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
@@ -650,14 +635,7 @@ def main():
                 time.sleep(0.1)
                 continue # skip the rest of the loop
         
-        
-        
-        
-        # NOW PLAYING!
-
-        # Here the control step starts
-        # Reset robot to initial configuration
-
+        ######### IF GOT HERE, SIMULATION IS PLAYING #########
         
         if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
@@ -668,9 +646,6 @@ def main():
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
             ctrl_loop_start_time = time.time()
-
-        if not init_curobo:
-            init_curobo = True
 
         # Start measuring control frequency if not already started
         if SIMULATING:
