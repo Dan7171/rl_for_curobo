@@ -419,6 +419,7 @@ def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_
             But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
                 You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
 
+
 def activate_gpu_dynamics(my_world):
     """
     Activates GPU dynamics for the given world.
@@ -429,7 +430,53 @@ def activate_gpu_dynamics(my_world):
         my_world_physics_context.enable_gpu_dynamics(True)
         assert my_world_physics_context.is_gpu_dynamics_enabled()
         print("GPU dynamics is enabled")
+ 
+class FrankaMpc:
+    def __init__(self, world):
+        self.target = create_target_pose_hologram()
+        # Load and configure robot
+        self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
+        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
+        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
+        self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
+        
+        # Add robot to scene and get controller
+        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, world)
+        self.articulation_controller = self.robot.get_articulation_controller()
+    
 
+    def init_solver(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
+        """Initialize the MPC solver.
+
+        Args:
+            world_cfg (_type_): _description_
+            collision_cache (_type_): _description_
+            step_dt_traj_mpc (_type_): _description_
+            dynamic_obs_coll_predictor (_type_): _description_
+        """
+        mpc_config = MpcSolverConfig.load_from_robot_config(
+            self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
+            world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+            use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
+            use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
+            use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
+            self_collision_check=True, # Enable self-collision check during MPC optimization.
+            collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
+            collision_cache=collision_cache,
+            use_mppi=True,  # Use Model Predictive Path Integral for optimization
+            use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
+            use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
+            store_rollouts=True,  # Store trajectories for visualization
+            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
+            dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
+            override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        )
+        self.solver = MpcSolver(mpc_config)
+        return self.solver
+
+    
+class FrankaCumotion:
+    pass
 
 #############################################
 # MAIN SIMULATION LOOP
@@ -474,7 +521,7 @@ def main():
     my_world.scene.add_default_ground_plane()
 
     # Create a hologram  of the target cube for the robot to follow (for visualization purposes)
-    target = create_target_pose_hologram()
+    # target = create_target_pose_hologram()
 
     # Configure CuRobo logging and parameters
     setup_curobo_logger("warn")
@@ -488,15 +535,17 @@ def main():
     target_pose = None
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
 
-    # Load and configure robot
-    robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-    j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
-    default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-    robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
+    # # Load and configure robot
+    # robot1_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
+    # j_names = robot1_cfg["kinematics"]["cspace"]["joint_names"]
+    # default_config = robot1_cfg["kinematics"]["cspace"]["retract_config"]
+    # robot1_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
 
-    # Add robot to scene and get controller
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
-    articulation_controller = robot.get_articulation_controller()
+    # # Add robot to scene and get controller
+    # robot, robot_prim_path = add_robot_to_scene(robot1_cfg, my_world)
+    # articulation_controller = robot.get_articulation_controller()
+
+    avoider = FrankaMpc(my_world)
 
     # Load world configuration for collision checking
     world_cfg_table = WorldConfig.from_dict(
@@ -567,28 +616,28 @@ def main():
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
     # Configuration for MPC
-    mpc_config = MpcSolverConfig.load_from_robot_config(
-        robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
-        world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-        use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
-        use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
-        use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
-        self_collision_check=True, # Enable self-collision check during MPC optimization.
-        collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
-        collision_cache=collision_cache,
-        use_mppi=True,  # Use Model Predictive Path Integral for optimization
-        use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
-        use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
-        store_rollouts=True,  # Store trajectories for visualization
-        step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
-        dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
-        override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
-    )
-    
-    # Initialize MPC solver
-    mpc = MpcSolver(mpc_config)
-    
+    # mpc_config = MpcSolverConfig.load_from_robot_config(
+    #     robot1_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
+    #     world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+    #     use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
+    #     use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
+    #     use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
+    #     self_collision_check=True, # Enable self-collision check during MPC optimization.
+    #     collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
+    #     collision_cache=collision_cache,
+    #     use_mppi=True,  # Use Model Predictive Path Integral for optimization
+    #     use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
+    #     use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
+    #     store_rollouts=True,  # Store trajectories for visualization
+    #     step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
+    #     dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
+    #     override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+    # )
+    # mpc_config = avoider.init_config(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    # mpc = MpcSolver(mpc_config)
+    mpc = avoider.init_solver(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
     # Set up initial robot state
+    
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
     joint_names = mpc.rollout_fn.joint_names
     state = mpc.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
@@ -609,7 +658,7 @@ def main():
     cmd_state_full = None
     
     if VISUALIZE_ROBOT_COL_SPHERES:
-        motion_gen, spheres = init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cache), None
+        motion_gen, spheres = init_robot_spheres_visualizer(avoider.robot_cfg,world_cfg,tensor_args,collision_cache), None
 
     add_extensions(simulation_app, args.headless_mode)
     
@@ -658,10 +707,10 @@ def main():
         ########## INITIALIZATION BEFORE FIRST STEP ##########
         if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
-            idx_list = [robot.get_dof_index(x) for x in j_names]
-            robot.set_joint_positions(default_config, idx_list)
+            idx_list = [avoider.robot.get_dof_index(x) for x in avoider.j_names]
+            avoider.robot.set_joint_positions(avoider.default_config, idx_list)
             # Set maximum joint efforts
-            robot._articulation_view.set_max_efforts(
+            avoider.robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
             if args.print_ctrl_rate and SIMULATING:
@@ -699,7 +748,7 @@ def main():
 
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
-        cube_position, cube_orientation = print_rate_decorator(lambda: target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        cube_position, cube_orientation = print_rate_decorator(lambda: avoider.target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         # Update goal if target has moved
         if past_pose is None:
             past_pose = cube_position + 1.0
@@ -717,9 +766,9 @@ def main():
 
         ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
-        sim_js = robot.get_joints_state() # get the current joint state of the robot
-        js_names = robot.dof_names # get the joint names of the robot
-        sim_js_names = robot.dof_names # get the joint names of the robot
+        sim_js = avoider.robot.get_joints_state() # get the current joint state of the robot
+        js_names = avoider.robot.dof_names # get the joint names of the robot
+        sim_js_names = avoider.robot.dof_names # get the joint names of the robot
         
         # Convert to CuRobo joint state format
         cu_js = JointState(position=tensor_args.to_device(sim_js.positions), velocity=tensor_args.to_device(sim_js.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js.velocities) * 0.0, jerk=tensor_args.to_device(sim_js.velocities) * 0.0, joint_names=sim_js_names,)
@@ -748,7 +797,7 @@ def main():
         idx_list = []
         for x in sim_js_names:
             if x in cmd_state_full.joint_names:
-                idx_list.append(robot.get_dof_index(x))
+                idx_list.append(avoider.robot.get_dof_index(x))
                 common_js_names.append(x)
         cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
         cmd_state_full = cmd_state
@@ -758,7 +807,7 @@ def main():
         
         # Execute planned motion
         for _ in range(3):
-            articulation_controller.apply_action(art_action)
+            avoider.articulation_controller.apply_action(art_action)
         
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
