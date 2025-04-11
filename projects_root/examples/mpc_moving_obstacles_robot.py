@@ -430,6 +430,7 @@ def activate_gpu_dynamics(my_world):
         assert my_world_physics_context.is_gpu_dynamics_enabled()
         print("GPU dynamics is enabled")
 
+
 #############################################
 # MAIN SIMULATION LOOP
 #############################################
