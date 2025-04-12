@@ -225,18 +225,18 @@ args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
 ###########################################################
 ######################### HELPER ##########################
 ###########################################################
-def create_target_pose_hologram():
+def create_target_pose_hologram(path="/World/target", position=np.array([0.5, 0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
     Create a target pose "hologram" in the simulation. By "hologram", 
     we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
     In isaac-sim they call holograms viual objects (like visual coboid and visual spheres...)
     """
     target = cuboid.VisualCuboid(
-        "/World/target",
-        position=np.array([0.5, 0, 0.5]),
-        orientation=np.array([0, 1, 0, 0]),
-        color=np.array([0, 1, 0]),
-        size=0.05,
+        path,
+        position=position,
+        orientation=orientation,
+        color=color,
+        size=size,
     )
     
     return target
@@ -476,7 +476,50 @@ class FrankaMpc:
 
     
 class FrankaCumotion:
-    pass
+    def __init__(self, tensor_args, robot_cfg_yml_path='/home/dan/rl_for_curobo/projects_root/projects/dynamic_obs/dynamic_obs_predictor/V2_two_frankas/franka2.yml',
+                 ):
+        self.target = create_target_pose_hologram('/World/target2', position=np.array([0.5, 0.5, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 0.5, 0]), size=0.05)
+        self.robot_cfg = load_yaml(robot_cfg_yml_path)["robot_cfg"]
+        self.tensor_args = tensor_args
+        self.motion_gen = None
+        
+    def init_solver(self, world_cfg, collision_cache,reactive=False):
+        trajopt_dt = None
+        optimize_dt = True
+        trajopt_tsteps = 32
+        trim_steps = None
+        max_attempts = 4
+        interpolation_dt = 0.05
+        enable_finetune_trajopt = True
+        if reactive:
+            trajopt_tsteps = 40
+            trajopt_dt = 0.04
+            optimize_dt = False
+            max_attempts = 1
+            trim_steps = [1, None]
+            interpolation_dt = trajopt_dt
+            enable_finetune_trajopt = False
+
+        motion_gen_config = MotionGenConfig.load_from_robot_config(
+            self.robot_cfg,
+            world_cfg,
+            self.tensor_args,
+            collision_checker_type=CollisionCheckerType.MESH,
+            num_trajopt_seeds=12,
+            num_graph_seeds=12,
+            interpolation_dt=interpolation_dt,
+            collision_cache=collision_cache,
+            optimize_dt=optimize_dt,
+            trajopt_dt=trajopt_dt,
+            trajopt_tsteps=trajopt_tsteps,
+            trim_steps=trim_steps,
+        )
+        motion_gen = MotionGen(motion_gen_config)
+        if not reactive:
+            print("warming up...")
+            motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
+        
+        print("Curobo is Ready")
 
 #############################################
 # MAIN SIMULATION LOOP
@@ -535,17 +578,9 @@ def main():
     target_pose = None
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
 
-    # # Load and configure robot
-    # robot1_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-    # j_names = robot1_cfg["kinematics"]["cspace"]["joint_names"]
-    # default_config = robot1_cfg["kinematics"]["cspace"]["retract_config"]
-    # robot1_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
 
-    # # Add robot to scene and get controller
-    # robot, robot_prim_path = add_robot_to_scene(robot1_cfg, my_world)
-    # articulation_controller = robot.get_articulation_controller()
-
-    avoider = FrankaMpc(my_world)
+    avoider = FrankaMpc(my_world) # 
+    interferer = FrankaCumotion(tensor_args)
 
     # Load world configuration for collision checking
     world_cfg_table = WorldConfig.from_dict(
@@ -626,10 +661,10 @@ def main():
     retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
     
     # Set up goal pose (target position and orientation)
-    goal = Goal(current_state=current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
+    goal_mpc = Goal(current_state=current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
 
     # Initialize MPC solver with goal
-    goal_buffer = mpc.setup_solve_single(goal, 1)
+    goal_buffer = mpc.setup_solve_single(goal_mpc, 1)
     mpc.update_goal(goal_buffer)
     mpc_result = mpc.step(current_state, max_attempts=2)
 
