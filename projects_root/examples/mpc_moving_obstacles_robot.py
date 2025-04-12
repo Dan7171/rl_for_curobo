@@ -615,26 +615,7 @@ def main():
         dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
-    # Configuration for MPC
-    # mpc_config = MpcSolverConfig.load_from_robot_config(
-    #     robot1_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
-    #     world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-    #     use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
-    #     use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
-    #     use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
-    #     self_collision_check=True, # Enable self-collision check during MPC optimization.
-    #     collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
-    #     collision_cache=collision_cache,
-    #     use_mppi=True,  # Use Model Predictive Path Integral for optimization
-    #     use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
-    #     use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
-    #     store_rollouts=True,  # Store trajectories for visualization
-    #     step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
-    #     dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
-    #     override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
-    # )
-    # mpc_config = avoider.init_config(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
-    # mpc = MpcSolver(mpc_config)
+ 
     mpc = avoider.init_solver(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
     # Set up initial robot state
     
@@ -658,7 +639,7 @@ def main():
     cmd_state_full = None
     
     if VISUALIZE_ROBOT_COL_SPHERES:
-        motion_gen, spheres = init_robot_spheres_visualizer(avoider.robot_cfg,world_cfg,tensor_args,collision_cache), None
+        motion_gen_mock_for_visualization, spheres = init_robot_spheres_visualizer(avoider.robot_cfg,world_cfg,tensor_args,collision_cache), None
 
     add_extensions(simulation_app, args.headless_mode)
     
@@ -790,7 +771,6 @@ def main():
         mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
         ####### APPLY CONTROL COMMAND TO ROBOT #######
-        
         # Process MPC result
         cmd_state_full = mpc_result.js_action
         common_js_names = []
@@ -801,10 +781,8 @@ def main():
                 common_js_names.append(x)
         cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
         cmd_state_full = cmd_state
-        
         # Create and apply robot action
         art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list,)
-        
         # Execute planned motion
         for _ in range(3):
             avoider.articulation_controller.apply_action(art_action)
@@ -812,7 +790,7 @@ def main():
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-            visualize_spheres(motion_gen, spheres, cu_js)
+            visualize_spheres(motion_gen_mock_for_visualization, spheres, cu_js)
         if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS: # rendering using draw_points()
             point_visualzer_inputs = [] # collect the different points sequences for visualization
             # collect the rollouts
