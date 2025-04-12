@@ -436,6 +436,14 @@ def activate_gpu_dynamics(my_world):
  
 class FrankaMpc:
     def __init__(self, world, robot_name, base_position=np.array([0.0,0.0,0.0])):
+        """
+        Spawns a franka robot in the scene andd setting the target for the robot to follow.
+
+        Args:
+            world (_type_): _description_
+            robot_name (_type_): _description_
+            base_position (_type_): _description_
+        """
         self.target = create_target_pose_hologram()
         # Load and configure robot
         self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
@@ -448,7 +456,7 @@ class FrankaMpc:
         self.articulation_controller = self.robot.get_articulation_controller()
     
 
-    def init_solver(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
+    def init_mpc(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
         """Initialize the MPC solver.
 
         Args:
@@ -474,21 +482,55 @@ class FrankaMpc:
             dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
             override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
         )
-        self.solver = MpcSolver(mpc_config)
-        return self.solver
+        self.mpc = MpcSolver(mpc_config)
+        retract_cfg = self.mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
+        joint_names = self.mpc.rollout_fn.joint_names
+        state = self.mpc.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
+        self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
+        retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        
+        # Set up goal pose (target position and orientation)
+        goal_mpc = Goal(current_state=self.current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
+
+        # Initialize MPC solver with goal
+        goal_buffer = self.mpc.setup_solve_single(goal_mpc, 1)
+        self.goal_buffer = goal_buffer
+        self.mpc.update_goal(self.goal_buffer)
+        mpc_result = self.mpc.step(self.current_state, max_attempts=2)
+
+        # return self.mpc
 
     
 class FrankaCumotion:
-    def __init__(self, tensor_args, world, robot_name, base_position,reactive=False):
+    def __init__(self, world, robot_name, base_position,reactive=False):
+        """
+        Spawns a franka robot in the scene andd setting the target for the robot to follow.
+
+        Args:
+            world (_type_): _description_
+            robot_name (_type_): _description_
+            base_position (_type_): _description_
+            reactive (bool, optional): _description_. Defaults to False.
+        """
         self.target = create_target_pose_hologram('/World/target2', position=np.array([0.5, 0.5, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 0.5, 0]), size=0.05)
         self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-        self.tensor_args = tensor_args
+        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
+        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] 
         self.motion_gen = None
         self.reactive = reactive
         self.max_attempts = 4 if not self.reactive else 1
         self.enable_finetune_trajopt = True if not self.reactive else False
         self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg,world,robot_name=robot_name,position=base_position)
-    def init_motion_gen(self, world_cfg, collision_cache,):
+    
+    def init_motion_gen(self, world_cfg, collision_cache,tensor_args):
+        """Initialize the motion generator (cumotion global planner).
+
+        Args:
+            world_cfg (_type_): _description_
+            collision_cache (_type_): _description_
+            tensor_args (_type_): _description_
+        """
+        
         trajopt_dt = None
         optimize_dt = True
         trajopt_tsteps = 32
@@ -505,7 +547,7 @@ class FrankaCumotion:
         motion_gen_config = MotionGenConfig.load_from_robot_config(
             self.robot_cfg,
             world_cfg,
-            self.tensor_args,
+            tensor_args,
             collision_checker_type=CollisionCheckerType.MESH,
             num_trajopt_seeds=12,
             num_graph_seeds=12,
@@ -590,8 +632,10 @@ def main():
     target_pose = None
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
 
-    avoider = FrankaMpc(my_world, "franka1", np.array([0.0,0.0,0.0])) 
-    interferer = FrankaCumotion(tensor_args,my_world, "franka2", np.array([1.0,0.0,0.0])) 
+    # Adding two frankas to the scene
+    # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
+    robot1 = FrankaMpc(my_world, "franka1", np.array([0.0,0.0,0.0])) # MPC robot - avoider
+    robot2 = FrankaCumotion(my_world, "franka2", np.array([1.0,0.0,0.0])) # cumotion robot - interferer
 
     # Load world configuration for collision checking
     world_cfg_table = WorldConfig.from_dict(
@@ -609,7 +653,7 @@ def main():
     # Create and configure obstacles 
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
     
-    interferer.init_motion_gen(world_cfg, collision_cache)
+    robot2.init_motion_gen(world_cfg, collision_cache,tensor_args)
 
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
@@ -666,36 +710,23 @@ def main():
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
  
-    mpc = avoider.init_solver(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
-    # Set up initial robot state
+    robot1.init_mpc(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
     
-    retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
-    joint_names = mpc.rollout_fn.joint_names
-    state = mpc.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
-    current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
-    retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
-    
-    # Set up goal pose (target position and orientation)
-    goal_mpc = Goal(current_state=current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
-
-    # Initialize MPC solver with goal
-    goal_buffer = mpc.setup_solve_single(goal_mpc, 1)
-    mpc.update_goal(goal_buffer)
-    mpc_result = mpc.step(current_state, max_attempts=2)
 
     # Load stage and initialize simulation
     usd_help.load_stage(my_world.stage)
-    usd_help.add_world_to_stage(world_cfg, base_frame="/World")
+    # usd_help.add_world_to_stage(world_cfg, base_frame="/World")
 
     init_world = False
-    cmd_state_full = None
+    cmd_state_full_robot1 = None
     
     if VISUALIZE_ROBOT_COL_SPHERES:
-        motion_gen_mock_for_visualization, spheres = init_robot_spheres_visualizer(avoider.robot_cfg,world_cfg,tensor_args,collision_cache), None
-
+        motion_gen_mock_for_visualization, spheres_robot1 = init_robot_spheres_visualizer(robot1.robot_cfg,world_cfg,tensor_args,collision_cache), None
+        motion_gen_mock_for_visualization, spheres_robot2 = init_robot_spheres_visualizer(robot2.robot_cfg,world_cfg,tensor_args,collision_cache), None
     add_extensions(simulation_app, args.headless_mode)
     
-    plan_config = interferer.init_plan_config()
+    robot2.init_plan_config()
+    robot2_cmd_plan = None
 
     if not SIMULATING:
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
@@ -742,15 +773,25 @@ def main():
         ########## INITIALIZATION BEFORE FIRST STEP ##########
         if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
-            idx_list = [avoider.robot.get_dof_index(x) for x in avoider.j_names]
-            avoider.robot.set_joint_positions(avoider.default_config, idx_list)
+            idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
+            robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1)
             # Set maximum joint efforts
-            avoider.robot._articulation_view.set_max_efforts(
-                values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
+            robot1.robot._articulation_view.set_max_efforts(
+                values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
             )
             if args.print_ctrl_rate and SIMULATING:
                 real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
+            
             ctrl_loop_start_time = time.time()
+
+            idx_list_robot2 = [robot2.robot.get_dof_index(x) for x in robot2.j_names]
+            robot2.robot.set_joint_positions(robot2.default_config, idx_list_robot2)
+
+            robot2.robot._articulation_view.set_max_efforts(
+                values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
+            )
+
+            
 
         ########################################################
         ################## SIMULATION STEP #####################
@@ -778,12 +819,12 @@ def main():
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
         else:
             for obs_index in range(len(dynamic_obstacles)):
-                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(mpc.world_coll_checker)
+                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.mpc.world_coll_checker)
             
 
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
-        cube_position, cube_orientation = print_rate_decorator(lambda: avoider.target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        cube_position, cube_orientation = print_rate_decorator(lambda: robot1.target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         # Update goal if target has moved
         if past_pose is None:
             past_pose = cube_position + 1.0
@@ -795,61 +836,63 @@ def main():
                 position=tensor_args.to_device(ee_translation_goal),
                 quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
             )
-            goal_buffer.goal_pose.copy_(ik_goal)
-            mpc.update_goal(goal_buffer)
+            robot1.goal_buffer.goal_pose.copy_(ik_goal)
+            robot1.mpc.update_goal(robot1.goal_buffer)
             past_pose = cube_position
 
         ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
-        sim_js = avoider.robot.get_joints_state() # get the current joint state of the robot
-        js_names = avoider.robot.dof_names # get the joint names of the robot
-        sim_js_names = avoider.robot.dof_names # get the joint names of the robot
+        sim_js_robot1 = robot1.robot.get_joints_state() # get the current joint state of the robot
+        js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
+        sim_js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
         
         # Convert to CuRobo joint state format
-        cu_js = JointState(position=tensor_args.to_device(sim_js.positions), velocity=tensor_args.to_device(sim_js.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js.velocities) * 0.0, jerk=tensor_args.to_device(sim_js.velocities) * 0.0, joint_names=sim_js_names,)
-        cu_js = cu_js.get_ordered_joint_state(mpc.rollout_fn.joint_names)
-        robot_as_spheres = mpc.kinematics.get_robot_as_spheres(cu_js.position)[0]
+        cu_js_robot1 = JointState(position=tensor_args.to_device(sim_js_robot1.positions), velocity=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, jerk=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, joint_names=sim_js_names_robot1,)
+        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.mpc.rollout_fn.joint_names)
+        robot1_as_spheres = robot1.mpc.kinematics.get_robot_as_spheres(cu_js_robot1.position)[0]
 
-        if cmd_state_full is None:
-            current_state.copy_(cu_js)
+        if cmd_state_full_robot1 is None:
+            robot1.current_state.copy_(cu_js_robot1)
         else:
-            current_state_partial = cmd_state_full.get_ordered_joint_state(
-                mpc.rollout_fn.joint_names
+            current_state_partial = cmd_state_full_robot1.get_ordered_joint_state(
+                robot1.mpc.rollout_fn.joint_names
             )
-            current_state.copy_(current_state_partial)
-            current_state.joint_names = current_state_partial.joint_names
+            robot1.current_state.copy_(current_state_partial)
+            robot1.current_state.joint_names = current_state_partial.joint_names
         common_js_names = []
-        current_state.copy_(cu_js)
+        robot1.current_state.copy_(cu_js_robot1)
 
         ############### RUN MPC ROLLOUTS ###############
-        mpc_result = print_rate_decorator(lambda: mpc.step(current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        mpc_result = print_rate_decorator(lambda: robot1.mpc.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
         ####### APPLY CONTROL COMMAND TO ROBOT #######
         # Process MPC result
-        cmd_state_full = mpc_result.js_action
+        cmd_state_full_robot1 = mpc_result.js_action
         common_js_names = []
-        idx_list = []
-        for x in sim_js_names:
-            if x in cmd_state_full.joint_names:
-                idx_list.append(avoider.robot.get_dof_index(x))
+        idx_list_robot1 = []
+        for x in sim_js_names_robot1:
+            if x in cmd_state_full_robot1.joint_names:
+                idx_list_robot1.append(robot1.robot.get_dof_index(x))
                 common_js_names.append(x)
-        cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
-        cmd_state_full = cmd_state
+        cmd_state = cmd_state_full_robot1.get_ordered_joint_state(common_js_names)
+        cmd_state_full_robot1 = cmd_state
         # Create and apply robot action
-        art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list,)
+        art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list_robot1,)
         # Execute planned motion
         for _ in range(3):
-            avoider.articulation_controller.apply_action(art_action)
+            robot1.articulation_controller.apply_action(art_action)
         
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-            visualize_spheres(motion_gen_mock_for_visualization, spheres, cu_js)
+            visualize_spheres(motion_gen_mock_for_visualization, spheres_robot1, cu_js_robot1)
+            visualize_spheres(motion_gen_mock_for_visualization, spheres_robot2, cu_js_robot2)
+        
         if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS: # rendering using draw_points()
             point_visualzer_inputs = [] # collect the different points sequences for visualization
             # collect the rollouts
             if VISUALIZE_MPC_ROLLOUTS:
-                rollouts_for_visualization = {'points': mpc.get_visual_rollouts(), 'color': 'green'}
+                rollouts_for_visualization = {'points': robot1.mpc.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
             # collect the predicted paths of dynamic obstacles
             if VISUALIZE_PREDICTED_OBS_PATHS:
