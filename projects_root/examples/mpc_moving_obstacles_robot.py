@@ -145,9 +145,12 @@ from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
 
-from curobo.wrap.reacher.motion_gen import ( # For visualizing robot spheres
+
+from curobo.wrap.reacher.motion_gen import (
     MotionGen,
     MotionGenConfig,
+    MotionGenPlanConfig,
+    PoseCostMetric,
 )
 
 # Initialize CUDA device
@@ -432,7 +435,7 @@ def activate_gpu_dynamics(my_world):
         print("GPU dynamics is enabled")
  
 class FrankaMpc:
-    def __init__(self, world):
+    def __init__(self, world, robot_name, base_position=np.array([0.0,0.0,0.0])):
         self.target = create_target_pose_hologram()
         # Load and configure robot
         self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
@@ -441,7 +444,7 @@ class FrankaMpc:
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
         
         # Add robot to scene and get controller
-        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, world)
+        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, world, robot_name="franka1", position=base_position)
         self.articulation_controller = self.robot.get_articulation_controller()
     
 
@@ -476,29 +479,28 @@ class FrankaMpc:
 
     
 class FrankaCumotion:
-    def __init__(self, tensor_args, robot_cfg_yml_path='/home/dan/rl_for_curobo/projects_root/projects/dynamic_obs/dynamic_obs_predictor/V2_two_frankas/franka2.yml',
-                 ):
+    def __init__(self, tensor_args, world, robot_name, base_position,reactive=False):
         self.target = create_target_pose_hologram('/World/target2', position=np.array([0.5, 0.5, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 0.5, 0]), size=0.05)
-        self.robot_cfg = load_yaml(robot_cfg_yml_path)["robot_cfg"]
+        self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
         self.tensor_args = tensor_args
         self.motion_gen = None
-        
-    def init_solver(self, world_cfg, collision_cache,reactive=False):
+        self.reactive = reactive
+        self.max_attempts = 4 if not self.reactive else 1
+        self.enable_finetune_trajopt = True if not self.reactive else False
+        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg,world,robot_name=robot_name,position=base_position)
+    def init_motion_gen(self, world_cfg, collision_cache,):
         trajopt_dt = None
         optimize_dt = True
         trajopt_tsteps = 32
         trim_steps = None
-        max_attempts = 4
+        
         interpolation_dt = 0.05
-        enable_finetune_trajopt = True
-        if reactive:
+        if self.reactive:
             trajopt_tsteps = 40
             trajopt_dt = 0.04
             optimize_dt = False
-            max_attempts = 1
             trim_steps = [1, None]
             interpolation_dt = trajopt_dt
-            enable_finetune_trajopt = False
 
         motion_gen_config = MotionGenConfig.load_from_robot_config(
             self.robot_cfg,
@@ -514,12 +516,22 @@ class FrankaCumotion:
             trajopt_tsteps=trajopt_tsteps,
             trim_steps=trim_steps,
         )
-        motion_gen = MotionGen(motion_gen_config)
-        if not reactive:
+        self.motion_gen = MotionGen(motion_gen_config)
+        if not self.reactive:
             print("warming up...")
-            motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
+            self.motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
         
         print("Curobo is Ready")
+
+    def init_plan_config(self):
+        self.plan_config = MotionGenPlanConfig(
+            enable_graph=False,
+            enable_graph_attempt=2,
+            max_attempts=self.max_attempts,
+            enable_finetune_trajopt=self.enable_finetune_trajopt,
+            time_dilation_factor=0.5 if not self.reactive else 1.0,
+        )
+        
 
 #############################################
 # MAIN SIMULATION LOOP
@@ -578,9 +590,8 @@ def main():
     target_pose = None
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
 
-
-    avoider = FrankaMpc(my_world) # 
-    interferer = FrankaCumotion(tensor_args)
+    avoider = FrankaMpc(my_world, "franka1", np.array([0.0,0.0,0.0])) 
+    interferer = FrankaCumotion(tensor_args,my_world, "franka2", np.array([1.0,0.0,0.0])) 
 
     # Load world configuration for collision checking
     world_cfg_table = WorldConfig.from_dict(
@@ -592,10 +603,14 @@ def main():
     ).get_mesh_world()
     world_cfg1.mesh[0].name += "_mesh"
     world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
+    
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
     
     # Create and configure obstacles 
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
+    
+    interferer.init_motion_gen(world_cfg, collision_cache)
+
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
     else:
@@ -670,6 +685,8 @@ def main():
 
     # Load stage and initialize simulation
     usd_help.load_stage(my_world.stage)
+    usd_help.add_world_to_stage(world_cfg, base_frame="/World")
+
     init_world = False
     cmd_state_full = None
     
@@ -678,6 +695,8 @@ def main():
 
     add_extensions(simulation_app, args.headless_mode)
     
+    plan_config = interferer.init_plan_config()
+
     if not SIMULATING:
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
