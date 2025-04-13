@@ -488,6 +488,7 @@ def main():
                 carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             target_pose = cube_position
             target_orientation = cube_orientation
+            
         past_pose = cube_position
         past_orientation = cube_orientation
         if cmd_plan is not None:
