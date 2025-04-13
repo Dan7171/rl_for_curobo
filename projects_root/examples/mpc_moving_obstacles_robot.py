@@ -72,7 +72,7 @@ VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres 
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
-# NOTE: RENDER_DT and PHYSICS_STEP_DT guide from emperical experiments!:
+# NOTE: RENDER_DT and PHYSICS_DT guide from emperical experiments!:
 
 # On every call call to my_world.step():
 #  * RULE 1: RENDER_DT controls the average pose change of an object.* 
@@ -112,6 +112,7 @@ import os
 import carb
 import numpy as np
 import copy
+from abc import abstractmethod
 
 # Initialize the simulation app first (must be before "from omni.isaac.core")
 
@@ -184,12 +185,12 @@ parser.add_argument(
     default=None,
     help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
 )
-parser.add_argument(
-    "--robot",
-    type=str,
-    default="franka.yml",
-    help="Robot configuration file to load (e.g., franka.yml)",
-)
+# parser.add_argument(
+#     "--robot",
+#     type=str,
+#     default="franka.yml",
+#     help="Robot configuration file to load (e.g., franka.yml)",
+# )
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
@@ -228,7 +229,7 @@ args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
 ###########################################################
 ######################### HELPER ##########################
 ###########################################################
-def create_target_pose_hologram(path="/World/target", position=np.array([0.5, 0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
+def create_target_pose_hologram(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
     Create a target pose "hologram" in the simulation. By "hologram", 
     we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
@@ -433,8 +434,41 @@ def activate_gpu_dynamics(my_world):
         my_world_physics_context.enable_gpu_dynamics(True)
         assert my_world_physics_context.is_gpu_dynamics_enabled()
         print("GPU dynamics is enabled")
- 
-class FrankaMpc:
+
+
+
+class AutonomousFranka:
+    def __init__(self, world, robot_name, base_position=np.array([0.0,0.0,0.0]), target_position=np.array([0.5,0.0,0.5]), target_orientation=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+        """
+        Spawns a franka robot in the scene andd setting the target for the robot to follow.
+
+        Args:
+            world (_type_): _description_ 
+        """
+        self.world = world
+        self.robot_name = robot_name
+        self.target = create_target_pose_hologram(f'/World/targets/{self.robot_name}',target_position, target_orientation, target_color, target_size)
+        self.target_past_pose = None
+        self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"]
+        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
+        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
+        self.base_position = base_position
+
+    def add_robot_to_scene(self):
+        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.base_position)
+
+    @abstractmethod
+    def sync_target_pose(self, cur_target_position, cur_target_orientation, tensor_args):
+        pass
+    
+    def _post_init_solver(self):
+        return None
+
+    @abstractmethod
+    def init_solver(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
+        pass
+
+class FrankaMpc(AutonomousFranka):
     def __init__(self, world, robot_name, base_position=np.array([0.0,0.0,0.0])):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
@@ -444,19 +478,40 @@ class FrankaMpc:
             robot_name (_type_): _description_
             base_position (_type_): _description_
         """
-        self.target = create_target_pose_hologram()
+        super().__init__(world, robot_name, base_position)
+
         # Load and configure robot
-        self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
-        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
+        # self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
+        # self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
+        # self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
+
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
-        
         # Add robot to scene and get controller
-        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, world, robot_name="franka1", position=base_position)
+        # self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, world, robot_name="franka1", position=base_position)
+        self.add_robot_to_scene()
+
         self.articulation_controller = self.robot.get_articulation_controller()
     
+    # def _post_init_solver(self):
+    #     """
+    #     This function is called after the solver is initialized.
+    #     """
+    #     retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
+    #     joint_names = self.solver.rollout_fn.joint_names
+    #     state = self.solver.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
+    #     self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
+    #     retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        
+    #     # Set up goal pose (target position and orientation)
+    #     goal_mpc = Goal(current_state=self.current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
 
-    def init_mpc(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
+    #     # Initialize MPC solver with goal
+    #     goal_buffer = self.solver.setup_solve_single(goal_mpc, 1)
+    #     self.goal_buffer = goal_buffer
+    #     self.solver.update_goal(self.goal_buffer)
+    #     mpc_result = self.solver.step(self.current_state, max_attempts=2)
+
+    def init_solver(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
         """Initialize the MPC solver.
 
         Args:
@@ -478,14 +533,16 @@ class FrankaMpc:
             use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
             store_rollouts=True,  # Store trajectories for visualization
-            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.mpc.html
+            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
             dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
             override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
         )
-        self.mpc = MpcSolver(mpc_config)
-        retract_cfg = self.mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
-        joint_names = self.mpc.rollout_fn.joint_names
-        state = self.mpc.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
+        
+        self.solver = MpcSolver(mpc_config)
+        self._post_init_solver()
+        retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
+        joint_names = self.solver.rollout_fn.joint_names
+        state = self.solver.rollout_fn.compute_kinematics(JointState.from_position(retract_cfg, joint_names=joint_names))
         self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
         retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
         
@@ -493,16 +550,32 @@ class FrankaMpc:
         goal_mpc = Goal(current_state=self.current_state, goal_state=JointState.from_position(retract_cfg, joint_names=joint_names), goal_pose=retract_pose,)
 
         # Initialize MPC solver with goal
-        goal_buffer = self.mpc.setup_solve_single(goal_mpc, 1)
+        goal_buffer = self.solver.setup_solve_single(goal_mpc, 1)
         self.goal_buffer = goal_buffer
-        self.mpc.update_goal(self.goal_buffer)
-        mpc_result = self.mpc.step(self.current_state, max_attempts=2)
+        self.solver.update_goal(self.goal_buffer)
+        mpc_result = self.solver.step(self.current_state, max_attempts=2)
 
-        # return self.mpc
+  
 
-    
-class FrankaCumotion:
-    def __init__(self, world, robot_name, base_position,reactive=False):
+    def sync_target_pose(self, cur_target_position, cur_target_orientation, tensor_args):
+        # Update goal if target has moved
+        if self.target_past_pose is None:
+            self.target_past_pose = cur_target_position + 1.0
+        if np.linalg.norm(cur_target_position - self.target_past_pose) > 1e-3: # if the target has moved
+            # Set new end-effector goal based on target position
+            ee_translation_goal = cur_target_position
+            ee_orientation_teleop_goal = cur_target_orientation
+            ik_goal = Pose(
+                position=tensor_args.to_device(ee_translation_goal),
+                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+            )
+            self.goal_buffer.goal_pose.copy_(ik_goal)
+            self.solver.update_goal(self.goal_buffer)
+            self.target_past_pose = cur_target_position
+
+
+class FrankaCumotion(AutonomousFranka):
+    def __init__(self, world, robot_name, base_position,target_position=np.array([0.5, 0.5, 0.5]), target_orientation=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -512,17 +585,20 @@ class FrankaCumotion:
             base_position (_type_): _description_
             reactive (bool, optional): _description_. Defaults to False.
         """
-        self.target = create_target_pose_hologram('/World/target2', position=np.array([0.5, 0.5, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 0.5, 0]), size=0.05)
-        self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
-        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] 
-        self.motion_gen = None
+        super().__init__(world, robot_name, base_position,target_position, target_orientation, target_color, target_size)
+        # self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
+        # self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
+        #self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] 
+        
+        self.solver = None
         self.reactive = reactive
         self.max_attempts = 4 if not self.reactive else 1
         self.enable_finetune_trajopt = True if not self.reactive else False
-        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg,world,robot_name=robot_name,position=base_position)
-    
-    def init_motion_gen(self, world_cfg, collision_cache,tensor_args):
+        
+        # self.robot, self.robot_prim_path = self.add_robot_to_scene(self.robot_cfg,world,robot_name=robot_name,position=base_position)
+        self.add_robot_to_scene()
+        
+    def init_solver(self, world_cfg, collision_cache,tensor_args):
         """Initialize the motion generator (cumotion global planner).
 
         Args:
@@ -544,7 +620,7 @@ class FrankaCumotion:
             trim_steps = [1, None]
             interpolation_dt = trajopt_dt
 
-        motion_gen_config = MotionGenConfig.load_from_robot_config(
+        motion_gen_config = MotionGenConfig.load_from_robot_config( # solver config
             self.robot_cfg,
             world_cfg,
             tensor_args,
@@ -558,10 +634,10 @@ class FrankaCumotion:
             trajopt_tsteps=trajopt_tsteps,
             trim_steps=trim_steps,
         )
-        self.motion_gen = MotionGen(motion_gen_config)
+        self.solver = MotionGen(motion_gen_config)
         if not self.reactive:
             print("warming up...")
-            self.motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
+            self.solver.warmup(enable_graph=True, warmup_js_trajopt=False)
         
         print("Curobo is Ready")
 
@@ -573,8 +649,128 @@ class FrankaCumotion:
             enable_finetune_trajopt=self.enable_finetune_trajopt,
             time_dilation_factor=0.5 if not self.reactive else 1.0,
         )
-        
+    
 
+    def _is_new_global_plan_needed(self,sim_js, cube_position, cube_orientation, past_pose, past_orientation, target_pose, target_orientation):
+        """
+        This function checks if a new global plan is needed. Just a cosmetic change in the next code block from the original code. See below
+
+        args:
+
+            sim_js: current joint state of the robot
+
+            # "target" - where the robot is trying to reach now
+            target_pose: the current target position which robot is trying to reach now (but it doesent necessarily the updated location of the target cube)
+            target_orientation: the current target position which robot is trying to reach now (but it doesent necessarily the updated location of the target cube)
+        
+            # "cube" - the updated target pose (maybe on the move, could be the target pose or a new target pose if it moved)
+            cube_position: current time step position of the new (in amove maybe) target pose
+            cube_orientation: current time step orientation of the new (in a move maybe) target pose
+            
+            # "past" - like cube, but one time step earlier        
+            past_pose: previous time step position of the new (in amove maybe) target pose
+            past_orientation: previous time step position of the new (in a move maybe) target pose
+            
+        REPLACED NEXT BLOXK IN OLDER CODE:
+        "
+        robot_static = False
+        if (np.max(np.abs(sim_js.velocities)) < 0.2) or args.reactive:
+            robot_static = True
+        if (
+            (
+                np.linalg.norm(cube_position - target_pose) > 1e-3
+                or np.linalg.norm(cube_orientation - target_orientation) > 1e-3
+            )
+            and np.linalg.norm(past_pose - cube_position) == 0.0
+            and np.linalg.norm(past_orientation - cube_orientation) == 0.0
+            and robot_static
+        ) 
+        "
+
+        """
+    
+    
+        is_robot_static = np.max(np.abs(sim_js.velocities)) < 0.2
+        allow_robot_to_replan = is_robot_static or args.reactive # robot is allowed to replan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
+        is_target_pose_changed = np.linalg.norm(cube_position - target_pose) > 1e-3 or np.linalg.norm(cube_orientation - target_orientation) > 1e-3 # cube position is the updated target pose (which has moved). target_pose is the previous target poseis the
+        is_target_is_static = np.linalg.norm(past_pose - cube_position) == 0.0 and np.linalg.norm(past_orientation - cube_orientation) == 0.0 # cube po
+        
+        return is_robot_static and is_target_pose_changed and is_target_is_static
+
+    
+    def sync_target_pose(self, cur_target_position, cur_target_orientation, tensor_args):
+        
+        if self._is_new_global_plan_needed(sim_js, cube_position, cube_orientation, past_pose, past_orientation, target_pose, target_orientation):
+            
+            print("Replanning a new global plan - goal pose has changed!")
+            
+            # Set EE teleop goals, use cube for simple non-vr init:
+            ee_translation_goal = cube_position # cube position is the updated target pose (which has moved) 
+            ee_orientation_teleop_goal = cube_orientation # cube orientation is the updated target orientation (which has moved)
+
+            # compute curobo solution:
+            ik_goal = Pose(
+                position=tensor_args.to_device(ee_translation_goal),
+                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+            )
+            plan_config.pose_cost_metric = pose_metric
+            start_state = cu_js.unsqueeze(0) # cu_js is the current joint state of the robot
+            goal_pose = ik_goal # ik_goal is the updated target pose (which has moved)
+            
+            result: MotionGenResult = self.solver.plan_single(start_state, goal_pose, plan_config) # https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGen.plan_single:~:text=GraphResult-,plan_single,-( , https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult:~:text=class-,MotionGenResult,-(
+            succ = result.success.item()  # an attribute of this returned object that signifies whether a trajectory was successfully generated. success tensor with index referring to the batch index.
+            
+            if num_targets == 1: # it's 1 only immediately after the first time it found a successfull plan for the FIRST time (first target).
+                if args.constrain_grasp_approach:
+                    # cuRobo also can enable constrained motions for part of a trajectory.
+                    # This is useful in pick and place tasks where traditionally the robot goes to an offset pose (pre-grasp pose) and then moves 
+                    # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it’s orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
+                    # https://curobo.org/advanced_examples/3_constrained_planning.html#:~:text=Grasp%20Approach%20Vector,behavior%20as%20below.
+                    # Enables moving to a pregrasp and then locked orientation movement to final grasp.
+                    # Since this is added as a cost, the trajectory will not reach the exact offset, instead it will try to take a blended path to the final grasp without stopping at the offset.
+                    # https://curobo.org/_api/curobo.rollout.cost.pose_cost.html#curobo.rollout.cost.pose_cost.PoseCostMetric.create_grasp_approach_metric
+                    pose_metric = PoseCostMetric.create_grasp_approach_metric() # 
+                if args.reach_partial_pose is not None:
+                    # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
+                    reach_vec = self.solver.tensor_args.to_device(args.reach_partial_pose)
+                    pose_metric = PoseCostMetric(
+                        reach_partial_pose=True, reach_vec_weight=reach_vec
+                    )
+                if args.hold_partial_pose is not None:
+                    # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
+                    hold_vec = self.solver.tensor_args.to_device(args.hold_partial_pose)
+                    pose_metric = PoseCostMetric(hold_partial_pose=True, hold_vec_weight=hold_vec)
+            
+            if succ: 
+                print(f"target counter  - targets with a reachible plan = {num_targets}") # the number of the targets which are defined by curobo (after being static and ready to plan to) and have a successfull a plan for.
+                num_targets += 1
+                cmd_plan = result.get_interpolated_plan() # TODO: To clarify myself what get_interpolated_plan() is doing to the initial "result"  does. Also see https://curobo.org/get_started/2a_python_examples.html#:~:text=result%20%3D%20motion_gen.plan_single(start_state%2C%20goal_pose%2C%20MotionGenPlanConfig(max_attempts%3D1))%0Atraj%20%3D%20result.get_interpolated_plan()%20%20%23%20result.interpolation_dt%20has%20the%20dt%20between%20timesteps%0Aprint(%22Trajectory%20Generated%3A%20%22%2C%20result.success)
+                cmd_plan = self.solver.get_full_js(cmd_plan) # get the full joint state from the interpolated plan
+                # get only joint names that are in both:
+                idx_list = []
+                common_js_names = []
+                for x in sim_js_names:
+                    if x in cmd_plan.joint_names:
+                        idx_list.append(robot.get_dof_index(x))
+                        common_js_names.append(x)
+                # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
+
+                cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
+
+                cmd_idx = 0
+
+            else:
+                carb.log_warn("Plan did not converge to a solution: " + str(result.status))
+            target_pose = cube_position
+            target_orientation = cube_orientation
+        
+        past_pose = cube_position
+        past_orientation = cube_orientation
+
+        
+        pass
+   
+        
 #############################################
 # MAIN SIMULATION LOOP
 #############################################
@@ -653,7 +849,7 @@ def main():
     # Create and configure obstacles 
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
     
-    robot2.init_motion_gen(world_cfg, collision_cache,tensor_args)
+    robot2.init_solver(world_cfg, collision_cache,tensor_args)
 
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
@@ -710,7 +906,7 @@ def main():
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
  
-    robot1.init_mpc(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    robot1.init_solver(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
     
 
     # Load stage and initialize simulation
@@ -819,26 +1015,16 @@ def main():
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
         else:
             for obs_index in range(len(dynamic_obstacles)):
-                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.mpc.world_coll_checker)
+                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker)
             
 
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
-        cube_position, cube_orientation = print_rate_decorator(lambda: robot1.target.get_world_pose(), args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-        # Update goal if target has moved
-        if past_pose is None:
-            past_pose = cube_position + 1.0
-        if np.linalg.norm(cube_position - past_pose) > 1e-3: # if the target has moved
-            # Set new end-effector goal based on target position
-            ee_translation_goal = cube_position
-            ee_orientation_teleop_goal = cube_orientation
-            ik_goal = Pose(
-                position=tensor_args.to_device(ee_translation_goal),
-                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
-            )
-            robot1.goal_buffer.goal_pose.copy_(ik_goal)
-            robot1.mpc.update_goal(robot1.goal_buffer)
-            past_pose = cube_position
+        updated_world_pos_target1, updated_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        updated_world_pos_target2, updated_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        # Update goals if targets has moved
+        robot1.sync_target_pose(updated_world_pos_target1, updated_world_orient_target1, tensor_args)
+        # robot2.sync_target_pose(updated_world_pos_target2, updated_world_orient_target2, tensor_args)
 
         ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
@@ -848,14 +1034,14 @@ def main():
         
         # Convert to CuRobo joint state format
         cu_js_robot1 = JointState(position=tensor_args.to_device(sim_js_robot1.positions), velocity=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, jerk=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, joint_names=sim_js_names_robot1,)
-        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.mpc.rollout_fn.joint_names)
-        robot1_as_spheres = robot1.mpc.kinematics.get_robot_as_spheres(cu_js_robot1.position)[0]
+        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names)
+        robot1_as_spheres = robot1.solver.kinematics.get_robot_as_spheres(cu_js_robot1.position)[0]
 
         if cmd_state_full_robot1 is None:
             robot1.current_state.copy_(cu_js_robot1)
         else:
             current_state_partial = cmd_state_full_robot1.get_ordered_joint_state(
-                robot1.mpc.rollout_fn.joint_names
+                robot1.solver.rollout_fn.joint_names
             )
             robot1.current_state.copy_(current_state_partial)
             robot1.current_state.joint_names = current_state_partial.joint_names
@@ -863,21 +1049,21 @@ def main():
         robot1.current_state.copy_(cu_js_robot1)
 
         ############### RUN MPC ROLLOUTS ###############
-        mpc_result = print_rate_decorator(lambda: robot1.mpc.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        mpc_result = print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
         ####### APPLY CONTROL COMMAND TO ROBOT #######
         # Process MPC result
         cmd_state_full_robot1 = mpc_result.js_action
-        common_js_names = []
+        common_js_names_robot1 = []
         idx_list_robot1 = []
         for x in sim_js_names_robot1:
             if x in cmd_state_full_robot1.joint_names:
                 idx_list_robot1.append(robot1.robot.get_dof_index(x))
-                common_js_names.append(x)
-        cmd_state = cmd_state_full_robot1.get_ordered_joint_state(common_js_names)
-        cmd_state_full_robot1 = cmd_state
+                common_js_names_robot1.append(x)
+        robot1_cmd_state = cmd_state_full_robot1.get_ordered_joint_state(common_js_names_robot1)
+        cmd_state_full_robot1 = robot1_cmd_state
         # Create and apply robot action
-        art_action = ArticulationAction(cmd_state.position.cpu().numpy(),joint_indices=idx_list_robot1,)
+        art_action = ArticulationAction(robot1_cmd_state.position.cpu().numpy(),joint_indices=idx_list_robot1,)
         # Execute planned motion
         for _ in range(3):
             robot1.articulation_controller.apply_action(art_action)
@@ -892,7 +1078,7 @@ def main():
             point_visualzer_inputs = [] # collect the different points sequences for visualization
             # collect the rollouts
             if VISUALIZE_MPC_ROLLOUTS:
-                rollouts_for_visualization = {'points': robot1.mpc.get_visual_rollouts(), 'color': 'green'}
+                rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
             # collect the predicted paths of dynamic obstacles
             if VISUALIZE_PREDICTED_OBS_PATHS:
