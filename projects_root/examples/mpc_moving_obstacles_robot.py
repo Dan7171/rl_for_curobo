@@ -62,7 +62,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -837,7 +837,7 @@ def main():
     # Set the world config for the dynamic obstacle collision checker.
     # If modifying cost (adding new cost term for dynamic obstacles), we pass a new instance of WorldConfig which will include only the dynamic obstacles, ignoring the static obstacles.
     # Else, we pass the original world config instance which will include both static and dynamic obstacles (as that's how the MPC would address this).
-    if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
+    if MODIFY_MPC_COST_FN_FOR_DYN_OBS :
         world_cfg_dynamic_obs_template  = WorldConfig() # curobo collision checker world config for dynamic obstacles. note: this instance should be pased to all obstacles. Will only be used as a template for the dynamic obstacle collision checker.
     else:
         world_cfg_dynamic_obs_template  = robot1.world_cfg # Use MPCs original world config instance to include both static and dynamic obstacles.
@@ -878,7 +878,7 @@ def main():
         ]
     # dynamic_obstacles = []
     # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-    if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:    
+    if MODIFY_MPC_COST_FN_FOR_DYN_OBS :    
         dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs_template , active_robots_collision_caches[0], step_dt_traj_mpc)
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
@@ -991,7 +991,7 @@ def main():
         
         ############ UPDATE COLLISION CHECKERS ##################
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
-        if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
+        if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
             # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
         else:
