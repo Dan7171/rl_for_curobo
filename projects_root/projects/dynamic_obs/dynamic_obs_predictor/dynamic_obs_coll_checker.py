@@ -1,6 +1,6 @@
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
-from curobo.geom.types import Obstacle
+from curobo.geom.types import Obstacle, WorldConfig
 from curobo.types.math import Pose
 from typing import List
 import numpy as np
@@ -20,14 +20,14 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, dynamic_obs_world_cfg, cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    def __init__(self, tensor_args, world_cfg_template:WorldConfig , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
 
         Args:
             tensor_args: pytorch tensor arguments.
-            dynamic_obs_world_cfg: World config template for the dynamic obstacles.
+            world_cfg_template : World config template for the dynamic obstacles.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
             step_dt_traj_mpc (float): Time passes between each step in the trajectory. This is what the mpc assumes time delta between steps in horizon is.
             H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.
@@ -53,15 +53,17 @@ class DynamicObsCollPredictor:
         self._obstacles_predicted_paths = {} # dictionary of predicted paths for each obstacle
         
         # Initialize the collision H buffers and H collision checkers:
-        world_collision_config_base = WorldCollisionConfig(tensor_args, copy.deepcopy(dynamic_obs_world_cfg), copy.deepcopy(cache)) # base template for collision checkers. We'll use this to make H copies.
+        world_cfg_template_cp = copy.deepcopy(world_cfg_template)
+        cache_cp = copy.deepcopy(cache)
+        world_collision_cfg_template  = WorldCollisionConfig(tensor_args, world_cfg_template_cp, cache_cp) # base template for collision checkers. We'll use this to make H copies.
         query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
         self.H_collision_buffers = [] # not sure what they are for but they are needed.
         self.H_world_cchecks = [] # list of collision checkers (one checker for each time step in the horizon)
         for _ in range(self.H):
-            world_config = copy.deepcopy(world_collision_config_base) # NOTE: I use copies to avoid side effects.
-            col_checker = WorldMeshCollision(world_config) # Initiate a single collision checker for each time step over the horizon.
-            self.H_world_cchecks.append(col_checker)
-            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for 
+            world_collision_cfg_h = copy.deepcopy(world_collision_cfg_template) # NOTE: I use copies to avoid side effects. We duplicate the 
+            col_checker_h = WorldMeshCollision(world_collision_cfg_h) # Initiate a single collision checker for each time step over the horizon.
+            self.H_world_cchecks.append(col_checker_h)
+            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker_h.collision_types)) # I dont know yet what they are for 
         
 
     def predict_obstacle_path(self, cur_obstacle_pos:np.ndarray, cur_obstacle_lin_vel:np.ndarray, cur_obstacle_lin_acceleration:np.ndarray, cur_obstacle_orientation:np.ndarray, cur_obstacle_angular_vel:np.ndarray, cur_obstacle_angular_acceleration:np.ndarray):
