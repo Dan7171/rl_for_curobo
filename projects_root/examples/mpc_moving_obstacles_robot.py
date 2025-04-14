@@ -145,7 +145,7 @@ from curobo.util_file import get_robot_configs_path, get_world_configs_path, joi
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
-
+from projects_root.utils.decorators import static_vars
 
 from curobo.wrap.reacher.motion_gen import (
     MotionGen,
@@ -447,9 +447,11 @@ class AutonomousFranka:
         """
         self.world = world
         self.robot_name = robot_name
-        self.target = create_target_pose_hologram(f'/World/targets/{self.robot_name}',target_position, target_orientation, target_color, target_size)
-        self.target_last_synced_position = None
-        self.target_last_synced_orientation = None
+        self.target_path = f'/World/targets/{self.robot_name}'
+        self.target = create_target_pose_hologram(self.target_path, target_position, target_orientation, target_color, target_size)
+        self.target_last_synced_position = None # current target position of robot as set to the planner
+        self.target_last_synced_orientation = None # current target orientation of robot as set to the planner
+
         self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"]
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
         self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
@@ -459,34 +461,37 @@ class AutonomousFranka:
         self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.base_position)
 
     @abstractmethod
-    def _check_prerequisites_for_syncing_target_pose(self, new_target_position, new_target_orientation, sim_js=None) -> bool:
+    def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         pass
 
-    def update_target_if_needed(self, new_target_position, new_target_orientation, sim_js=None):
-        """ Syncs the target pose of the robot with the target pose of the target.
-
-        Args:
-            new_target_position (_type_): _description_
-            new_target_orientation (_type_): _description_
-            tensor_args (_type_): _description_
+    def update_target_if_needed(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
+        """ Syncs (sets) the target pose of the robot with the target pose of the target.
+        real_target_position: target position in world frame
+        real_target_orientation: target orientation in world frame
+        real_target_position_prev_ts: target position in previous time step
+        real_target_orientation_prev_ts: target orientation in previous time step
+        sim_js: joint state of the robot (in simulation representation, not curobo representation)
 
         Returns:
             _type_: _description_
         """
-         
-        if self.target_last_synced_position is None:
-            self.target_last_synced_position = new_target_position + 1.0
-            self.target_last_synced_orientation = new_target_orientation
         
-        sync_target = self._check_prerequisites_for_syncing_target_pose(new_target_position, new_target_orientation, sim_js)
+        if self.target_last_synced_position is None:
+            self.target_last_synced_position = real_target_position + 1.0 # to force the first sync
+            self.target_last_synced_orientation = real_target_orientation
+            
+        sync_target = self._check_prerequisites_for_syncing_target_pose(real_target_position, real_target_orientation, sim_js)
 
         if sync_target:
-            self.target_last_synced_position = new_target_position
-            self.target_last_synced_orientation = new_target_orientation
+            self.target_last_synced_position = real_target_position
+            self.target_last_synced_orientation = real_target_orientation
             return True
         
         else:
             return False
+    
+
+    
         
     def get_last_synced_target_pose(self):
         return Pose(position=self.tensor_args.to_device(self.target_last_synced_position),quaternion=self.tensor_args.to_device(self.target_last_synced_orientation),)
@@ -498,12 +503,20 @@ class AutonomousFranka:
     def init_solver(self, world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
         pass
 
-    def _check_target_pose_changed(self, new_target_position, new_target_orientation) -> bool:
-        return np.linalg.norm(new_target_position - self.target_last_synced_position) > 1e-3 or np.linalg.norm(new_target_orientation - self.target_last_synced_orientation) > 1e-3
+    def _check_target_pose_changed(self, real_target_position, real_target_orientation) -> bool:
+        return np.linalg.norm(real_target_position - self.target_last_synced_position) > 1e-3 or np.linalg.norm(real_target_orientation - self.target_last_synced_orientation) > 1e-3
 
-    def _check_target_pose_static(self, new_target_position, new_target_orientation) -> bool:
-        return np.linalg.norm(new_target_position - self.target_last_synced_position) == 0.0 and np.linalg.norm(new_target_orientation - self.target_last_synced_orientation) == 0.0
-
+    def _check_target_pose_static(self, real_target_position, real_target_orientation) -> bool:
+        if not hasattr(self, '_real_target_pos_prev_t'):
+            self._real_target_pos_prev_t = real_target_position
+            self._real_target_orient_prev_t = real_target_orientation
+        
+        is_static = np.linalg.norm(real_target_position - self._real_target_pos_prev_t) == 0.0 and np.linalg.norm(real_target_orientation - self._real_target_orient_prev_t) == 0.0
+        self._real_target_pos_prev_t = real_target_position
+        self._real_target_orient_prev_t = real_target_orientation
+        return is_static
+    
+ 
     def _check_robot_static(self, sim_js) -> bool:
         return np.max(np.abs(sim_js.velocities)) < 0.2
 
@@ -568,31 +581,12 @@ class FrankaMpc(AutonomousFranka):
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
     
-    def _check_prerequisites_for_syncing_target_pose(self, new_target_position, new_target_orientation,sim_js=None) -> bool:
-        has_target_pose_changed = self._check_target_pose_changed(new_target_position, new_target_orientation)
+    def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
+        has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
         return has_target_pose_changed        
 
 
-    # def sync_target_pose(self, new_target_position, new_target_orientation, tensor_args):
-    #     # Update goal if target has moved
-    #     if self.target_last_synced_position is None:
-    #         self.target_last_synced_position = new_target_position + 1.0
-    #         self.target_last_synced_orientation = new_target_orientation
-        
-        
-    #     if np.linalg.norm(new_target_position - self.target_last_synced_position) > 1e-3 or np.linalg.norm(new_target_orientation - self.target_last_synced_orientation) > 1e-3: # if the target has moved
-    #         # Set new end-effector goal based on target position
-    #         ee_translation_goal = new_target_position
-    #         ee_orientation_teleop_goal = new_target_orientation
-    #         ik_goal = Pose(
-    #             position=tensor_args.to_device(ee_translation_goal),
-    #             quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
-    #         )
-            
-            # self.goal_buffer.goal_pose.copy_(ik_goal)
-            # self.solver.update_goal(self.goal_buffer)
-            # self.target_last_synced_position = new_target_position
-            # self.target_last_synced_orientation = new_target_orientation
+ 
 
 
 class FrankaCumotion(AutonomousFranka):
@@ -610,10 +604,13 @@ class FrankaCumotion(AutonomousFranka):
         self.solver = None
         self.past_cmd = None
         self.reactive = reactive
-        self.num_targets = 0
+        self.num_targets = 0 # the number of the targets which are defined by curobo (after being static and ready to plan to) and have a successfull a plan for.
         self.max_attempts = 4 if not self.reactive else 1
         self.enable_finetune_trajopt = True if not self.reactive else False
         self.pose_metric = None
+        self.constrain_grasp_approach = False
+        self.reach_partial_pose = None
+        self.hold_partial_pose = None
         self.add_robot_to_scene()
         self.cmd_plan = None
         self.cmd_idx = 0
@@ -671,15 +668,15 @@ class FrankaCumotion(AutonomousFranka):
             time_dilation_factor=0.5 if not self.reactive else 1.0,
         )
     
-    def _check_prerequisites_for_syncing_target_pose(self, new_target_position, new_target_orientation, sim_js) -> bool:
-        robot_prerequisites = self._check_robot_static(sim_js) or self.reactive # robot is allowed to replan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
-        target_prerequisites = self._check_target_pose_changed(new_target_position, new_target_orientation) and self._check_target_pose_static(new_target_position, new_target_orientation)
+    def _check_prerequisites_for_syncing_target_pose(self, real_target_position, real_target_orientation,sim_js) -> bool:
+        robot_prerequisites = self._check_robot_static(sim_js) or self.reactive # robot is allowed to reset_command_plan global plan if stopped (in the non-reactive mode) or anytime in the reactive mode
+        target_prerequisites = self._check_target_pose_changed(real_target_position, real_target_orientation) and self._check_target_pose_static(real_target_position, real_target_orientation)
         return robot_prerequisites and target_prerequisites
         
 
 
-    def replan(self, cu_js):
-        print("Replanning a new global plan - goal pose has changed!")
+    def reset_command_plan(self, cu_js):
+        print("reset_command_planning a new global plan - goal pose has changed!")
             
         # Set EE teleop goals, use cube for simple non-vr init:
         # ee_translation_goal = self.target_last_synced_position # cube position is the updated target pose (which has moved) 
@@ -695,7 +692,7 @@ class FrankaCumotion(AutonomousFranka):
         succ = result.success.item()  # an attribute of this returned object that signifies whether a trajectory was successfully generated. success tensor with index referring to the batch index.
         
         if self.num_targets == 1: # it's 1 only immediately after the first time it found a successfull plan for the FIRST time (first target).
-            if args.constrain_grasp_approach:
+            if self.constrain_grasp_approach:
                 # cuRobo also can enable constrained motions for part of a trajectory.
                 # This is useful in pick and place tasks where traditionally the robot goes to an offset pose (pre-grasp pose) and then moves 
                 # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it’s orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
@@ -704,33 +701,33 @@ class FrankaCumotion(AutonomousFranka):
                 # Since this is added as a cost, the trajectory will not reach the exact offset, instead it will try to take a blended path to the final grasp without stopping at the offset.
                 # https://curobo.org/_api/curobo.rollout.cost.pose_cost.html#curobo.rollout.cost.pose_cost.PoseCostMetric.create_grasp_approach_metric
                 self.pose_metric = PoseCostMetric.create_grasp_approach_metric() # 
-            if args.reach_partial_pose is not None:
+            if self.reach_partial_pose is not None:
                 # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
                 reach_vec = motion_gen.tensor_args.to_device(args.reach_partial_pose)
                 self.pose_metric = PoseCostMetric(
                     reach_partial_pose=True, reach_vec_weight=reach_vec
                 )
-            if args.hold_partial_pose is not None:
+            if self.hold_partial_pose is not None:
                 # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
                 hold_vec = self.solver.tensor_args.to_device(args.hold_partial_pose)
                 self.pose_metric = PoseCostMetric(hold_partial_pose=True, hold_vec_weight=hold_vec)
         
         if succ: 
-            print(f"target counter - targets with a reachible plan = {self.num_targets}") # the number of the targets which are defined by curobo (after being static and ready to plan to) and have a successfull a plan for.
+            print(f"target counter - targets with a reachible plan = {self.num_targets}") 
             self.num_targets += 1
             cmd_plan = result.get_interpolated_plan() # TODO: To clarify myself what get_interpolated_plan() is doing to the initial "result"  does. Also see https://curobo.org/get_started/2a_python_examples.html#:~:text=result%20%3D%20motion_gen.plan_single(start_state%2C%20goal_pose%2C%20MotionGenPlanConfig(max_attempts%3D1))%0Atraj%20%3D%20result.get_interpolated_plan()%20%20%23%20result.interpolation_dt%20has%20the%20dt%20between%20timesteps%0Aprint(%22Trajectory%20Generated%3A%20%22%2C%20result.success)
             cmd_plan = self.solver.get_full_js(cmd_plan) # get the full joint state from the interpolated plan
             # get only joint names that are in both:
-            idx_list = []
-            common_js_names = []
+            self.idx_list = []
+            self.common_js_names = []
             sim_js_names = self.robot.dof_names
             for x in sim_js_names:
                 if x in cmd_plan.joint_names:
-                    idx_list.append(self.robot.get_dof_index(x))
-                    common_js_names.append(x)
+                    self.idx_list.append(self.robot.get_dof_index(x))
+                    self.common_js_names.append(x)
             # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
 
-            cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
+            cmd_plan = cmd_plan.get_ordered_joint_state(self.common_js_names)
             
             self.cmd_plan = cmd_plan # global plan
             self.cmd_idx = 0 # commands executed from the global plan (counter)
@@ -739,7 +736,6 @@ class FrankaCumotion(AutonomousFranka):
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
 
-        return cmd_plan
     
     
 
@@ -841,39 +837,39 @@ def main():
         world_cfg_dynamic_obs = world_cfg # Use MPCs original world config instance to include both static and dynamic obstacles.
 
     # Initialize the dynamic obstacles.
-    dynamic_obstacles = [
-        Obstacle( 
-            name="dynamic_cuboid1", 
-            initial_pos=np.array([0.8,0.0,0.5]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([1,0,0]), # red 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.30, 0.0, 0.0],
-            angular_velocity=[1,1,1],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world,
-            world_cfg=world_cfg_dynamic_obs
-        )
-        ,  
-        Obstacle(
-            name="dynamic_cuboid2",
-            initial_pos=np.array([0.8,0.8,0.3]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([0,0 ,1]),# blue 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.15, -0.15, 0.05],
-            angular_velocity=[0,0,0],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world,
-            world_cfg=world_cfg_dynamic_obs
-        )  
-        # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
-        # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
-        # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
-        ]
-    
+    # dynamic_obstacles = [
+    #     Obstacle( 
+    #         name="dynamic_cuboid1", 
+    #         initial_pos=np.array([0.8,0.0,0.5]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([1,0,0]), # red 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.30, 0.0, 0.0],
+    #         angular_velocity=[1,1,1],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         world_cfg=world_cfg_dynamic_obs
+    #     )
+    #     ,  
+    #     Obstacle(
+    #         name="dynamic_cuboid2",
+    #         initial_pos=np.array([0.8,0.8,0.3]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         world_cfg=world_cfg_dynamic_obs
+    #     )  
+    #     # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
+    #     # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
+    #     # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
+    #     ]
+    dynamic_obstacles = []
     # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:    
         dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs, collision_cache, step_dt_traj_mpc)
@@ -896,7 +892,6 @@ def main():
     add_extensions(simulation_app, args.headless_mode)
     
     robot2.init_plan_config()
-    robot2_cmd_plan = None
 
     if not SIMULATING:
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
@@ -912,7 +907,6 @@ def main():
     ######################################
     ########### SIMULATION LOOP ##########
     ######################################
-
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     while simulation_app.is_running(): # not necessarily playing, just running                
         
@@ -943,6 +937,8 @@ def main():
         ########## INITIALIZATION BEFORE FIRST STEP ##########
         if t_idx == 0: # number of simulation steps since the play button was pressed
             my_world.reset()
+            
+            # Initialize robot 1
             idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
             robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1)
             # Set maximum joint efforts
@@ -952,15 +948,18 @@ def main():
             if args.print_ctrl_rate and SIMULATING:
                 real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
             
-            ctrl_loop_start_time = time.time()
 
+            # Initialize robot 2
+            robot2.robot._articulation_view.initialize()
             idx_list_robot2 = [robot2.robot.get_dof_index(x) for x in robot2.j_names]
             robot2.robot.set_joint_positions(robot2.default_config, idx_list_robot2)
-
             robot2.robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
             )
+            
+            ctrl_loop_start_time = time.time()
 
+         
             
 
         ########################################################
@@ -999,11 +998,11 @@ def main():
             
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
-        updated_world_pos_target1, updated_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        real_world_pos_target1, real_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         
         
         # Update goals if targets has moved
-        robot1_target_changed = robot1.update_target_if_needed(updated_world_pos_target1, updated_world_orient_target1)
+        robot1_target_changed = robot1.update_target_if_needed(real_world_pos_target1, real_world_orient_target1)
 
         if robot1_target_changed:
             print("robot1 target changed")
@@ -1059,57 +1058,75 @@ def main():
         ############################################################
         ########## ROBOT 2 STEP ##########
         ############################################################
-        sim_js_robot2 = robot2.robot.get_joints_state() # reading current joint state from robot
-        sim_js_names_robot2 = robot2.robot.dof_names # reading current joint names from robot
-        if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
-            log_error("isaac sim has returned NAN joint position values.")
-        cu_js_robot2 = JointState( # creating a joint state object for curobo
-            position=tensor_args.to_device(sim_js_robot2.positions),
-            velocity=tensor_args.to_device(sim_js_robot2.velocities),  # * 0.0,
-            acceleration=tensor_args.to_device(sim_js_robot2.velocities) * 0.0,
-            jerk=tensor_args.to_device(sim_js_robot2.velocities) * 0.0,
-            joint_names=sim_js_names_robot2,
-        )
-
-        if not robot2.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
-            cu_js_robot2.velocity *= 0.0
-            cu_js_robot2.acceleration *= 0.0
-
-        if robot2.reactive and robot2.past_cmd is not None:
-            cu_js_robot2.position[:] = robot2.past_cmd.position
-            cu_js_robot2.velocity[:] = robot2.past_cmd.velocity
-            cu_js_robot2.acceleration[:] = robot2.past_cmd.acceleration
-
-        cu_js_robot2 = cu_js_robot2.get_ordered_joint_state(robot2.solver.kinematics.joint_names)
-
-        updated_world_pos_target2, updated_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-        robot2_target_changed = robot2.update_target_if_needed(updated_world_pos_target2, updated_world_orient_target2, sim_js_robot2)
-        if robot2_target_changed:
-            print("robot2 target changed")
-            robot2.replan(cu_js_robot2)
-
-        if robot2.cmd_plan is not None:
-            print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
-            cmd_state = robot2.cmd_plan[robot2.cmd_idx]
-            robot2.past_cmd = cmd_state.clone()
-            # get full dof state
-            art_action = ArticulationAction(
-                cmd_state.position.cpu().numpy(),
-                cmd_state.velocity.cpu().numpy(),
-                joint_indices=idx_list_robot2,
-            )
-            # set desired joint angles obtained from IK:
-            robot2.articulation_controller.apply_action(art_action)
-            robot2.cmd_idx += 1 # the index of the next command to execute in the plan
-            for _ in range(2):
-                my_world.step(render=False)
+        if t_idx > 20:
+            # if t_idx == 50 or t_idx % 1000 == 0.0:
+            #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
+            #     obstacles = usd_help.get_obstacles_from_stage(
+            #         # only_paths=[obstacles_path],
+            #         reference_prim_path=robot2.robot_prim_path,
+            #         ignore_substring=[
+            #             robot2.robot_prim_path,
+            #             robot2.target_path,
+            #             "/World/defaultGroundPlane",
+            #             "/curobo",
+            #         ],
+            #     ).get_collision_check_world()
+            #     # print(len(obstacles.objects))
+            #     robot2.solver.update_world(obstacles)
+            #     print("Updated World")
+            #     carb.log_info("Synced CuRobo world from stage.")
             
-            if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
-                robot2.cmd_idx = 0
-                robot2.cmd_plan = None
-                robot2.past_cmd = None
+            sim_js_robot2 = robot2.robot.get_joints_state() # reading current joint state from robot
+            sim_js_names_robot2 = robot2.robot.dof_names # reading current joint names from robot
+            if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
+                log_error("isaac sim has returned NAN joint position values.")
+            cu_js_robot2 = JointState( # creating a joint state object for curobo
+                position=tensor_args.to_device(sim_js_robot2.positions),
+                velocity=tensor_args.to_device(sim_js_robot2.velocities),  # * 0.0,
+                acceleration=tensor_args.to_device(sim_js_robot2.velocities) * 0.0,
+                jerk=tensor_args.to_device(sim_js_robot2.velocities) * 0.0,
+                joint_names=sim_js_names_robot2,
+            )
 
-        
+            if not robot2.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
+                cu_js_robot2.velocity *= 0.0
+                cu_js_robot2.acceleration *= 0.0
+
+            if robot2.reactive and robot2.past_cmd is not None:
+                cu_js_robot2.position[:] = robot2.past_cmd.position
+                cu_js_robot2.velocity[:] = robot2.past_cmd.velocity
+                cu_js_robot2.acceleration[:] = robot2.past_cmd.acceleration
+
+            cu_js_robot2 = cu_js_robot2.get_ordered_joint_state(robot2.solver.kinematics.joint_names)
+
+            real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+            robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
+            if robot2_target_changed:
+                print("robot2 target changed")
+                robot2.reset_command_plan(cu_js_robot2) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
+
+            if robot2.cmd_plan is not None:
+                print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
+                cmd_state = robot2.cmd_plan[robot2.cmd_idx]
+                robot2.past_cmd = cmd_state.clone()
+                # get full dof state
+                art_action = ArticulationAction(
+                    cmd_state.position.cpu().numpy(),
+                    cmd_state.velocity.cpu().numpy(),
+                    joint_indices=idx_list_robot2,
+                )
+                # set desired joint angles obtained from IK:
+                robot2.articulation_controller.apply_action(art_action)
+                robot2.cmd_idx += 1 # the index of the next command to execute in the plan
+                for _ in range(2):
+                    my_world.step(render=False)
+                
+                if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
+                    robot2.cmd_idx = 0
+                    robot2.cmd_plan = None
+                    robot2.past_cmd = None
+
+            
 
 
 
