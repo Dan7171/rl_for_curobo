@@ -514,9 +514,7 @@ class AutonomousFranka:
     def _check_robot_static(self, sim_js) -> bool:
         return np.max(np.abs(sim_js.velocities)) < 0.2
     
-    # @abstractmethod
-    # # def get_robot_as_spheres(self, cu_js) -> list[Sphere]:
-    # #     pass
+
 
     def get_robot_as_spheres(self, cu_js, express_in_world_frame=False) -> list[Sphere]:
         """Get the robot as spheres from the curobot joints state.
@@ -849,6 +847,7 @@ def main():
         world_cfg_dynamic_obs_template  = robot1.world_cfg # Use MPCs original world config instance to include both static and dynamic obstacles.
 
     # Initialize the dynamic obstacles. Registering them in template world config of the dynamic obstacle collision checker.
+
     dynamic_obstacles = [
         Obstacle( 
             name="dynamic_cuboid1", 
@@ -965,7 +964,7 @@ def main():
             
             ctrl_loop_start_time = time.time()
 
-         
+            
             
 
         ########################################################
@@ -1028,7 +1027,6 @@ def main():
         cu_js_robot1 = JointState(position=tensor_args.to_device(sim_js_robot1.positions), velocity=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, jerk=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, joint_names=sim_js_names_robot1,)
         cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names)
         active_robots_cu_js[0] = cu_js_robot1
-        # robot1_as_spheres = robot1.solver.kinematics.get_robot_as_spheres(cu_js_robot1.position)[0]
         
         if cmd_state_full_robot1 is None:
             robot1.current_state.copy_(cu_js_robot1)
