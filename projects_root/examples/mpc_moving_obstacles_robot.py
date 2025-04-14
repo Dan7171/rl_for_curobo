@@ -229,7 +229,7 @@ args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
 ###########################################################
 ######################### HELPER ##########################
 ###########################################################
-def create_target_pose_hologram(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
+def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
     Create a target pose "hologram" in the simulation. By "hologram", 
     we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
@@ -440,25 +440,32 @@ def activate_gpu_dynamics(my_world):
 class AutonomousFranka:
     
     instance_counter = 0
-    def __init__(self,robot_cfg, world, p_R=np.array([0.0,0.0,0.0]), target_position=np.array([0.5,0.0,0.5]), target_orientation=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    def __init__(self,robot_cfg, world, p_R=np.array([0.0,0.0,0.0]),R_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
         https://drake.mit.edu/doxygen_cxx/group__multibody__notation__basics.html https://drake.mit.edu/doxygen_cxx/group__multibody__frames__and__bodies.html
         Args:
             world (_type_): _description_ 
-            p_R: position(p) of the robot's frame origin (R) expressed in the world frame W (implicit, else it was p_RW)
-
+            p_R: Position vector from Wo (W (World frame) origin (o)) to Ro (R's origin (robot's base frame)), expressed in the world frame W (implied).
+            R_R: Frame R's (second R, representing robot's base frame) orientation (first R, representing rotation) in the world frame W (implied, could be represented as R_WR). Quaternion (w,x,y,z)
+            p_T: Position vector from Wo (W (World frame) origin (o)) to To (target's origin), expressed in the world frame W (implied).
+            R_T: Frame T's (representing target's base frame) orientation (R, representing rotation) in the world frame W (implied, could be represented as R_WT). Quaternion (w,x,y,z)
 
         """
+        # simulator paths etc.
         self.world = world
         self.world_root ='/World'
         self.robot_name = f'robot_{AutonomousFranka.instance_counter}'
         self.subroot_path = f'{self.world_root}/world_{AutonomousFranka.instance_counter}' # f'{self.world_root}/world_{self.robot_name}'
-
-        # initial target settings
-        self.initial_target_position = target_position
-        self.initial_target_orientation = target_orientation
+        
+        # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
+        self.p_R = p_R  
+        self.R_R = R_R 
+        
+        # target settings
+        self.initial_p_T = p_T # initial target frame position (expressed in the world frame W)
+        self.initial_R_T = R_T # initial target frame rotation (expressed in the world frame W)
         self.initial_target_color = target_color
         self.initial_target_size = target_size
         self.target_path = self.subroot_path + '/target' # f'/World/targets/{self.robot_name}'
@@ -466,26 +473,38 @@ class AutonomousFranka:
         self.target_last_synced_orientation = None # current target orientation of robot as set to the planner
 
         self.robot_cfg = robot_cfg
-
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
         self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
-        self.base_position = p_R
+        
+        self.world_cfg = None # will be initialized in the _init_world_cfg method. Static obstacles world configuration for curobo collision checking.
+        
         self.tensor_args = TensorDeviceType()
         AutonomousFranka.instance_counter += 1
 
-    def _spawn_robot_and_target(self, usd_help:UsdHelper):
-        usd_help.add_subroot(self.world_root, self.subroot_path, Pose.from_list(list(self.base_position) + [1,0,0,0]))
-        self.target = create_target_pose_hologram(self.target_path, self.initial_target_position, self.initial_target_orientation, self.initial_target_color, self.initial_target_size)
-        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.base_position)
-        
-        # Load world configuration for collision checking
+    def _init_world_cfg(self, usd_help:UsdHelper):
+        """Initiating curobo world configuration for static obstacles.
+
+        Args:
+            usd_help (UsdHelper): _description_
+        """
         world_cfg_table = WorldConfig.from_dict(load_yaml(join_path(get_world_configs_path(), "collision_table.yml")))
         world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height
         world_cfg1 = WorldConfig.from_dict(load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))).get_mesh_world()
         world_cfg1.mesh[0].name += "_mesh"
         world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
-        self.world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
-        usd_help.add_world_to_stage(self.world_cfg, base_frame=self.subroot_path) 
+        
+        world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
+        usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path) 
+        self.world_cfg = world_cfg
+
+        
+    def _spawn_robot_and_target(self, usd_help:UsdHelper):
+        usd_help.add_subroot(self.world_root, self.subroot_path, Pose.from_list(list(self.p_R) + list(self.R_R)))
+        self.target = spawn_target(self.target_path, self.initial_p_T, self.initial_R_T, self.initial_target_color, self.initial_target_size)
+        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R)
+        
+        # Load world configuration for collision checking
+        
 
     @abstractmethod
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
@@ -548,16 +567,16 @@ class AutonomousFranka:
         return np.max(np.abs(sim_js.velocities)) < 0.2
 
 class FrankaMpc(AutonomousFranka):
-    def __init__(self, robot_cfg, world,usd_help:UsdHelper, base_position=np.array([0.0,0.0,0.0])):
+    def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
         Args:
             world (_type_): _description_
             robot_name (_type_): _description_
-            base_position (_type_): _description_
+            p_R (_type_): _description_
         """
-        super().__init__(robot_cfg, world, base_position)
+        super().__init__(robot_cfg, world, p_R, R_R, p_T, R_T, target_color, target_size)
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
@@ -617,17 +636,17 @@ class FrankaMpc(AutonomousFranka):
 
 
 class FrankaCumotion(AutonomousFranka):
-    def __init__(self, robot_cfg, world,usd_help:UsdHelper, base_position=np.array([0.0,0.0,0.0]), target_position=np.array([0.5, 0.0, 0.5]), target_orientation=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
+    def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
         Args:
             world (_type_): _description_
             robot_name (_type_): _description_
-            base_position (_type_): _description_
+            p_R (_type_): _description_
             reactive (bool, optional): _description_. Defaults to False.
         """
-        super().__init__(robot_cfg, world, base_position,target_position, target_orientation, target_color, target_size)
+        super().__init__(robot_cfg, world, p_R, R_R, p_T, R_T, target_color, target_size)
 
         self.solver = None
         self.past_cmd = None
@@ -712,8 +731,8 @@ class FrankaCumotion(AutonomousFranka):
         # ee_orientation_teleop_goal = self.target_last_synced_orientation # cube orientation is the updated target orientation (which has moved)
 
         # compute curobo solution:
-        p_target_R, r_target_R  = self.target.get_local_pose() # NOTE: position (p) and rotation (r) of the target expressesd in this robot's subroot world frame. 
-        ik_goal = Pose(position=self.tensor_args.to_device(p_target_R), quaternion=self.tensor_args.to_device(r_target_R))
+        p_RT, R_RT  = self.target.get_local_pose() # NOTE: position (p) and rotation (R) of frame T (target frame) expressed in the robot's base frame R. 
+        ik_goal = Pose(position=self.tensor_args.to_device(p_RT), quaternion=self.tensor_args.to_device(R_RT))
         self.plan_config.pose_cost_metric = self.pose_metric
         start_state = cu_js.unsqueeze(0) # cu_js is the current joint state of the robot
         goal_pose = ik_goal # ik_goal is the updated target pose (which has moved)
@@ -807,34 +826,17 @@ def main():
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
-    robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"]
-    
-    # Enable GPU dynamics if enabled
-    if ENABLE_GPU_DYNAMICS:
-        activate_gpu_dynamics(my_world)
-    
-    # past_pose = None
+    robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"] # For curobo's collision checker/s
     n_obstacle_cuboids = 30  # Number of collision boxes for obstacle approximation https://curobo.org/get_started/2c_world_collision.html
     n_obstacle_mesh = 10     # Number of mesh triangles for obstacle approximation https://curobo.org/get_started/2c_world_collision.html
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
-
-    # # Load world configuration for collision checking
-    # world_cfg_table = WorldConfig.from_dict(
-    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    # )
-    # world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height
-    # world_cfg1 = WorldConfig.from_dict(
-    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    # ).get_mesh_world()
-    # world_cfg1.mesh[0].name += "_mesh"
-    # world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
-    
-    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
+    if ENABLE_GPU_DYNAMICS:
+        activate_gpu_dynamics(my_world)
     
     # Adding two frankas to the scene
     # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
-    # robot1 = FrankaMpc(robot_cfg, my_world,usd_help, np.array([0.0,0.0,0.0])) # MPC robot - avoider
-    robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, np.array([0.5,0.0,0.0]), np.array([0.5,0.5,0.5])) # cumotion robot - interferer
+    robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
+    robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
 
     
     # Create and configure obstacles 
@@ -896,7 +898,7 @@ def main():
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
  
-    # robot1.init_solver(world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    robot1.init_solver(robot1.world_cfg, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
     
 
     # Load stage and initialize simulation
@@ -904,11 +906,12 @@ def main():
     # usd_help.add_world_to_stage(world_cfg, base_frame=robot2.subroot_path)
 
     init_world = False
-    # cmd_state_full_robot1 = None
+    cmd_state_full_robot1 = None
     
     if VISUALIZE_ROBOT_COL_SPHERES:
-        # motion_gen_mock_for_visualization, spheres_robot1 = init_robot_spheres_visualizer(robot1.robot_cfg,world_cfg,tensor_args,collision_cache), None
-        motion_gen_mock_for_visualization, spheres_robot2 = init_robot_spheres_visualizer(robot2.robot_cfg,world_cfg,tensor_args,collision_cache), None
+        motion_gen_mock_for_visualization, spheres_robot1 = init_robot_spheres_visualizer(robot1.robot_cfg,robot1.world_cfg,tensor_args,collision_cache), None
+        motion_gen_mock_for_visualization, spheres_robot2 = init_robot_spheres_visualizer(robot2.robot_cfg,robot2.world_cfg,tensor_args,collision_cache), None
+    
     add_extensions(simulation_app, args.headless_mode)
     
     robot2.init_plan_config()
@@ -959,12 +962,12 @@ def main():
             my_world.reset()
             
             # Initialize robot 1
-            # idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
-            # robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1)
+            idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
+            robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1)
             # Set maximum joint efforts
-            # robot1.robot._articulation_view.set_max_efforts(
-            #     values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
-            # )
+            robot1.robot._articulation_view.set_max_efforts(
+                values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
+            )
             if args.print_ctrl_rate and SIMULATING:
                 real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
             
@@ -1009,71 +1012,71 @@ def main():
         
         ############ UPDATE COLLISION CHECKERS ##################
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
-        # if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
-        #     # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
-        #     print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
-        # else:
-        #     for obs_index in range(len(dynamic_obstacles)):
-        #         dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker)
+        if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:
+            # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
+            print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
+        else:
+            for obs_index in range(len(dynamic_obstacles)):
+                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker)
             
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
-        # real_world_pos_target1, real_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        real_world_pos_target1, real_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         
         
         # Update goals if targets has moved
-        # robot1_target_changed = robot1.update_target_if_needed(real_world_pos_target1, real_world_orient_target1)
+        robot1_target_changed = robot1.update_target_if_needed(real_world_pos_target1, real_world_orient_target1)
 
-        # if robot1_target_changed:
-        #     print("robot1 target changed")
-        #     robot1.goal_buffer.goal_pose.copy_(robot1.get_last_synced_target_pose())
-        #     robot1.solver.update_goal(robot1.goal_buffer)
+        if robot1_target_changed:
+            print("robot1 target changed")
+            robot1.goal_buffer.goal_pose.copy_(robot1.get_last_synced_target_pose())
+            robot1.solver.update_goal(robot1.goal_buffer)
         
         
             
             
         ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
-        # sim_js_robot1 = robot1.robot.get_joints_state() # get the current joint state of the robot
-        # js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
-        # sim_js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
+        sim_js_robot1 = robot1.robot.get_joints_state() # get the current joint state of the robot
+        js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
+        sim_js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
         
         # Convert to CuRobo joint state format
-        # cu_js_robot1 = JointState(position=tensor_args.to_device(sim_js_robot1.positions), velocity=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, jerk=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, joint_names=sim_js_names_robot1,)
-        # cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names)
-        # robot1_as_spheres = robot1.solver.kinematics.get_robot_as_spheres(cu_js_robot1.position)[0]
+        cu_js_robot1 = JointState(position=tensor_args.to_device(sim_js_robot1.positions), velocity=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, jerk=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, joint_names=sim_js_names_robot1,)
+        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names)
+        robot1_as_spheres = robot1.solver.kinematics.get_robot_as_spheres(cu_js_robot1.position)[0]
         
-        # if cmd_state_full_robot1 is None:
-        #     robot1.current_state.copy_(cu_js_robot1)
-        # else:
-        #     current_state_partial = cmd_state_full_robot1.get_ordered_joint_state(
-        #         robot1.solver.rollout_fn.joint_names
-        #     )
-        #     robot1.current_state.copy_(current_state_partial)
-        #     robot1.current_state.joint_names = current_state_partial.joint_names
-        # common_js_names = []
-        # robot1.current_state.copy_(cu_js_robot1)
+        if cmd_state_full_robot1 is None:
+            robot1.current_state.copy_(cu_js_robot1)
+        else:
+            current_state_partial = cmd_state_full_robot1.get_ordered_joint_state(
+                robot1.solver.rollout_fn.joint_names
+            )
+            robot1.current_state.copy_(current_state_partial)
+            robot1.current_state.joint_names = current_state_partial.joint_names
+        common_js_names = []
+        robot1.current_state.copy_(cu_js_robot1)
 
     
         ############### RUN MPC ROLLOUTS ###############
-        # mpc_result = print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        mpc_result = print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
 
-        # ####### APPLY CONTROL COMMAND TO ROBOT #######
-        # # Process MPC result
-        # cmd_state_full_robot1 = mpc_result.js_action
-        # common_js_names_robot1 = []
-        # idx_list_robot1 = []
-        # for x in sim_js_names_robot1:
-        #     if x in cmd_state_full_robot1.joint_names:
-        #         idx_list_robot1.append(robot1.robot.get_dof_index(x))
-        #         common_js_names_robot1.append(x)
-        # robot1_cmd_state = cmd_state_full_robot1.get_ordered_joint_state(common_js_names_robot1)
-        # cmd_state_full_robot1 = robot1_cmd_state
-        # # Create and apply robot action
-        # art_action = ArticulationAction(robot1_cmd_state.position.cpu().numpy(),joint_indices=idx_list_robot1,)
-        # # Execute planned motion
-        # for _ in range(3):
-        #     robot1.articulation_controller.apply_action(art_action)
+        ####### APPLY CONTROL COMMAND TO ROBOT #######
+        # Process MPC result
+        cmd_state_full_robot1 = mpc_result.js_action
+        common_js_names_robot1 = []
+        idx_list_robot1 = []
+        for x in sim_js_names_robot1:
+            if x in cmd_state_full_robot1.joint_names:
+                idx_list_robot1.append(robot1.robot.get_dof_index(x))
+                common_js_names_robot1.append(x)
+        robot1_cmd_state = cmd_state_full_robot1.get_ordered_joint_state(common_js_names_robot1)
+        cmd_state_full_robot1 = robot1_cmd_state
+        # Create and apply robot action
+        art_action = ArticulationAction(robot1_cmd_state.position.cpu().numpy(),joint_indices=idx_list_robot1,)
+        # Execute planned motion
+        for _ in range(3):
+            robot1.articulation_controller.apply_action(art_action)
         
         ############################################################
         ########## ROBOT 2 STEP ##########
