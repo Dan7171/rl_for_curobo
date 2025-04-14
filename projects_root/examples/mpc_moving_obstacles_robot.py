@@ -67,7 +67,7 @@ DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
-VISUALIZE_ROBOT_COL_SPHERES = True # If True, then the robot collision spheres will be rendered in the simulation.
+VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
@@ -336,64 +336,7 @@ def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic
         obs_for_visualization.append({"points": obs_predicted_poses, "color": obs_color})
     return obs_for_visualization
 
-# def visualize_spheres(motion_gen, spheres, cu_js):
-#     """
-#     Render collision spheres of the robot for visualization purposes only.
-#     Took from examples like motion_gen_reacher.py.
 
-#     Args:
-#         motion_gen (_type_): _description_
-#         spheres (_type_): _description_
-#         cu_js (_type_): _description_
-#     """
-    
-#     sph_list = motion_gen.kinematics.get_robot_as_spheres(cu_js.position)
-
-#     if spheres is None:
-#         spheres = []
-#                 # create spheres:
-
-#         for si, s in enumerate(sph_list[0]):
-#             sp = sphere.VisualSphere(
-#                         prim_path="/curobo/robot_sphere_" + str(si),
-#                         position=np.ravel(s.position),
-#                         radius=float(s.radius),
-#                         color=np.array([0, 0.8, 0.2]),
-#                     )
-#             spheres.append(sp)
-#     else:
-#         for si, s in enumerate(sph_list[0]):
-#             if not np.isnan(s.position[0]):
-#                 spheres[si].set_world_pose(position=np.ravel(s.position))
-#                 spheres[si].set_radius(float(s.radius))
-
-# def init_robot_spheres_visualizer(robot_cfg,world_cfg,tensor_args,collision_cache):
-#     """
-#     Initialize the robot spheres visualizer.
-#     """
-#     trajopt_dt = None
-#     optimize_dt = True
-#     trajopt_tsteps = 32
-#     trim_steps = None
-#     interpolation_dt = 0.05
-#     motion_gen_config = MotionGenConfig.load_from_robot_config(
-#         robot_cfg,
-#         world_cfg,
-#     tensor_args,
-#     collision_checker_type=CollisionCheckerType.MESH,
-#     num_trajopt_seeds=12,
-#     num_graph_seeds=12,
-#     interpolation_dt=interpolation_dt,
-#     collision_cache=collision_cache,
-#     optimize_dt=optimize_dt,
-#     trajopt_dt=trajopt_dt,
-#     trajopt_tsteps=trajopt_tsteps,
-#     trim_steps=trim_steps,
-# )
-#     motion_gen = MotionGen(motion_gen_config)
-#     print("warming up motion gen...")
-#     motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
-#     return motion_gen
 
 def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc):
     """Prints information about the control loop frequncy (desired vs measured) and warns if it's too different.
@@ -584,7 +527,7 @@ class AutonomousFranka:
             list[Sphere]: list of spheres
         """
         assert isinstance(self.solver, MpcSolver) or isinstance(self.solver, MotionGen), "Solver not initialized"
-        sph_list = self.solver.kinematics.get_robot_as_spheres(cu_js.position) 
+        sph_list = self.solver.kinematics.get_robot_as_spheres(cu_js.position) # at this point each sph.position is expressed in the robot base frame, not in the world frame
         if express_in_world_frame:
             for sph in sph_list[0]:
                 sph.position = sph.position + self.p_R # express the spheres in the world frame
@@ -949,10 +892,7 @@ def main():
 
     cmd_state_full_robot1 = None
     
-    # if VISUALIZE_ROBOT_COL_SPHERES:
-    #     motion_gen_mock_for_visualization, spheres_robot1 = init_robot_spheres_visualizer(robot1.robot_cfg,robot1.world_cfg,tensor_args,collision_cache), None
-    #     motion_gen_mock_for_visualization, spheres_robot2 = init_robot_spheres_visualizer(robot2.robot_cfg,robot2.world_cfg,tensor_args,collision_cache), None
-    
+
     add_extensions(simulation_app, args.headless_mode)
     
     robot2.init_plan_config()
@@ -1195,12 +1135,9 @@ def main():
                     robot2.past_cmd = None
 
 
-
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-            # visualize_spheres(motion_gen_mock_for_visualization, spheres_robot1, cu_js_robot1)
-            # visualize_spheres(motion_gen_mock_for_visualization, spheres_robot2, cu_js_robot2)
             for i, robot in enumerate(active_robots):
                 robot.visualize_robot_as_spheres(active_robots_cu_js[i])
 
