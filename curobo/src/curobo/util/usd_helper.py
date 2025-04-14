@@ -535,7 +535,7 @@ class UsdHelper:
     ):
         # iterate through every obstacle type and create prims:
 
-        self.add_subroot(base_frame, obstacles_frame, base_t_obstacle_pose)
+        self.add_subroot(base_frame, obstacles_frame, base_t_obstacle_pose) 
         full_path = join_path(base_frame, obstacles_frame)
         prim_path = [
             self.get_prim_from_obstacle(o, full_path, timestep=timestep) for o in obstacles.objects

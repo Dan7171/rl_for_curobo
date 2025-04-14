@@ -438,27 +438,54 @@ def activate_gpu_dynamics(my_world):
 
 
 class AutonomousFranka:
-    def __init__(self, world, robot_name, base_position=np.array([0.0,0.0,0.0]), target_position=np.array([0.5,0.0,0.5]), target_orientation=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    
+    instance_counter = 0
+    def __init__(self,robot_cfg, world, p_R=np.array([0.0,0.0,0.0]), target_position=np.array([0.5,0.0,0.5]), target_orientation=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
-
+        All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
+        https://drake.mit.edu/doxygen_cxx/group__multibody__notation__basics.html https://drake.mit.edu/doxygen_cxx/group__multibody__frames__and__bodies.html
         Args:
             world (_type_): _description_ 
+            p_R: position(p) of the robot's frame origin (R) expressed in the world frame W (implicit, else it was p_RW)
+
+
         """
         self.world = world
-        self.robot_name = robot_name
-        self.target_path = f'/World/targets/{self.robot_name}'
-        self.target = create_target_pose_hologram(self.target_path, target_position, target_orientation, target_color, target_size)
+        self.world_root ='/World'
+        self.robot_name = f'robot_{AutonomousFranka.instance_counter}'
+        self.subroot_path = f'{self.world_root}/world_{AutonomousFranka.instance_counter}' # f'{self.world_root}/world_{self.robot_name}'
+
+        # initial target settings
+        self.initial_target_position = target_position
+        self.initial_target_orientation = target_orientation
+        self.initial_target_color = target_color
+        self.initial_target_size = target_size
+        self.target_path = self.subroot_path + '/target' # f'/World/targets/{self.robot_name}'
         self.target_last_synced_position = None # current target position of robot as set to the planner
         self.target_last_synced_orientation = None # current target orientation of robot as set to the planner
 
-        self.robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"]
+        self.robot_cfg = robot_cfg
+
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
         self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
-        self.base_position = base_position
+        self.base_position = p_R
         self.tensor_args = TensorDeviceType()
-    def add_robot_to_scene(self):
-        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.base_position)
+        AutonomousFranka.instance_counter += 1
+
+    def _spawn_robot_and_target(self, usd_help:UsdHelper):
+        usd_help.add_subroot(self.world_root, self.subroot_path, Pose.from_list(list(self.base_position) + [1,0,0,0]))
+        self.target = create_target_pose_hologram(self.target_path, self.initial_target_position, self.initial_target_orientation, self.initial_target_color, self.initial_target_size)
+        self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.base_position)
+        
+        # Load world configuration for collision checking
+        world_cfg_table = WorldConfig.from_dict(load_yaml(join_path(get_world_configs_path(), "collision_table.yml")))
+        world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height
+        world_cfg1 = WorldConfig.from_dict(load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))).get_mesh_world()
+        world_cfg1.mesh[0].name += "_mesh"
+        world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
+        self.world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
+        usd_help.add_world_to_stage(self.world_cfg, base_frame=self.subroot_path) 
 
     @abstractmethod
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
@@ -521,7 +548,7 @@ class AutonomousFranka:
         return np.max(np.abs(sim_js.velocities)) < 0.2
 
 class FrankaMpc(AutonomousFranka):
-    def __init__(self, world, robot_name, base_position=np.array([0.0,0.0,0.0])):
+    def __init__(self, robot_cfg, world,usd_help:UsdHelper, base_position=np.array([0.0,0.0,0.0])):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -530,9 +557,9 @@ class FrankaMpc(AutonomousFranka):
             robot_name (_type_): _description_
             base_position (_type_): _description_
         """
-        super().__init__(world, robot_name, base_position)
+        super().__init__(robot_cfg, world, base_position)
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
-        self.add_robot_to_scene()
+        self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
     
 
@@ -590,7 +617,7 @@ class FrankaMpc(AutonomousFranka):
 
 
 class FrankaCumotion(AutonomousFranka):
-    def __init__(self, world, robot_name, base_position,target_position=np.array([0.5, 0.5, 0.5]), target_orientation=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
+    def __init__(self, robot_cfg, world,usd_help:UsdHelper, base_position=np.array([0.0,0.0,0.0]), target_position=np.array([0.5, 0.0, 0.5]), target_orientation=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -600,7 +627,8 @@ class FrankaCumotion(AutonomousFranka):
             base_position (_type_): _description_
             reactive (bool, optional): _description_. Defaults to False.
         """
-        super().__init__(world, robot_name, base_position,target_position, target_orientation, target_color, target_size)
+        super().__init__(robot_cfg, world, base_position,target_position, target_orientation, target_color, target_size)
+
         self.solver = None
         self.past_cmd = None
         self.reactive = reactive
@@ -611,9 +639,10 @@ class FrankaCumotion(AutonomousFranka):
         self.constrain_grasp_approach = False
         self.reach_partial_pose = None
         self.hold_partial_pose = None
-        self.add_robot_to_scene()
         self.cmd_plan = None
         self.cmd_idx = 0
+        
+        self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
 
     def init_solver(self, world_cfg, collision_cache,tensor_args):
@@ -683,7 +712,8 @@ class FrankaCumotion(AutonomousFranka):
         # ee_orientation_teleop_goal = self.target_last_synced_orientation # cube orientation is the updated target orientation (which has moved)
 
         # compute curobo solution:
-        ik_goal = self.get_last_synced_target_pose()
+        p_target_R, r_target_R  = self.target.get_local_pose() # NOTE: position (p) and rotation (r) of the target expressesd in this robot's subroot world frame. 
+        ik_goal = Pose(position=self.tensor_args.to_device(p_target_R), quaternion=self.tensor_args.to_device(r_target_R))
         self.plan_config.pose_cost_metric = self.pose_metric
         start_state = cu_js.unsqueeze(0) # cu_js is the current joint state of the robot
         goal_pose = ik_goal # ik_goal is the updated target pose (which has moved)
@@ -703,7 +733,7 @@ class FrankaCumotion(AutonomousFranka):
                 self.pose_metric = PoseCostMetric.create_grasp_approach_metric() # 
             if self.reach_partial_pose is not None:
                 # This is probably a way to update the cost metric for reaching a partial pose reaching (not sure how, no documentation).
-                reach_vec = motion_gen.tensor_args.to_device(args.reach_partial_pose)
+                reach_vec = self.solver.tensor_args.to_device(args.reach_partial_pose)
                 self.pose_metric = PoseCostMetric(
                     reach_partial_pose=True, reach_vec_weight=reach_vec
                 )
@@ -767,59 +797,49 @@ def main():
     ###########################################################
     ################  SIMULATION INITIALIZATION ###############
     ###########################################################
-
-    # Initialize Isaac Sim world with 1 meter units
+    usd_help = UsdHelper()  # Helper for USD stage operations
     my_world = World(stage_units_in_meters=1.0) 
-    # Enable GPU dynamics if enabled
-    if ENABLE_GPU_DYNAMICS:
-        activate_gpu_dynamics(my_world)
-    # Set the simulation dt to the desired values.
+    my_world.scene.add_default_ground_plane()
     my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT) 
     stage = my_world.stage
-
-    # Set up the world hierarchy
+    usd_help.load_stage(stage)
     xform = stage.DefinePrim("/World", "Xform")  # Root transform for all objects
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
-    my_world.scene.add_default_ground_plane()
-
-    # Create a hologram  of the target cube for the robot to follow (for visualization purposes)
-    # target = create_target_pose_hologram()
-
-    # Configure CuRobo logging and parameters
     setup_curobo_logger("warn")
+    robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"]
     
-    past_pose = None
+    # Enable GPU dynamics if enabled
+    if ENABLE_GPU_DYNAMICS:
+        activate_gpu_dynamics(my_world)
+    
+    # past_pose = None
     n_obstacle_cuboids = 30  # Number of collision boxes for obstacle approximation https://curobo.org/get_started/2c_world_collision.html
     n_obstacle_mesh = 10     # Number of mesh triangles for obstacle approximation https://curobo.org/get_started/2c_world_collision.html
-
-    # Initialize CuRobo components
-    usd_help = UsdHelper()  # Helper for USD stage operations
-    target_pose = None
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
 
+    # # Load world configuration for collision checking
+    # world_cfg_table = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # )
+    # world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height
+    # world_cfg1 = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # ).get_mesh_world()
+    # world_cfg1.mesh[0].name += "_mesh"
+    # world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
+    
+    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
+    
     # Adding two frankas to the scene
     # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
-    # robot1 = FrankaMpc(my_world, "franka1", np.array([0.0,0.0,0.0])) # MPC robot - avoider
-    robot2 = FrankaCumotion(my_world, "franka2", np.array([1.0,0.0,0.0])) # cumotion robot - interferer
+    # robot1 = FrankaMpc(robot_cfg, my_world,usd_help, np.array([0.0,0.0,0.0])) # MPC robot - avoider
+    robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, np.array([0.5,0.0,0.0]), np.array([0.5,0.5,0.5])) # cumotion robot - interferer
 
-    # Load world configuration for collision checking
-    world_cfg_table = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    )
-    world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height
-    world_cfg1 = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    ).get_mesh_world()
-    world_cfg1.mesh[0].name += "_mesh"
-    world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
-    
-    world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
     
     # Create and configure obstacles 
     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
-    
-    robot2.init_solver(world_cfg, collision_cache,tensor_args)
+    robot2.init_solver(robot2.world_cfg, collision_cache,tensor_args)
 
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
@@ -880,11 +900,11 @@ def main():
     
 
     # Load stage and initialize simulation
-    usd_help.load_stage(my_world.stage)
-    # usd_help.add_world_to_stage(world_cfg, base_frame="/World")
+    # usd_help.load_stage(my_world.stage)
+    # usd_help.add_world_to_stage(world_cfg, base_frame=robot2.subroot_path)
 
     init_world = False
-    cmd_state_full_robot1 = None
+    # cmd_state_full_robot1 = None
     
     if VISUALIZE_ROBOT_COL_SPHERES:
         # motion_gen_mock_for_visualization, spheres_robot1 = init_robot_spheres_visualizer(robot1.robot_cfg,world_cfg,tensor_args,collision_cache), None
@@ -1058,6 +1078,7 @@ def main():
         ############################################################
         ########## ROBOT 2 STEP ##########
         ############################################################
+        print("t_idx = ", t_idx)
         if t_idx > 20:
             # if t_idx == 50 or t_idx % 1000 == 0.0:
             #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
@@ -1104,7 +1125,7 @@ def main():
             if robot2_target_changed:
                 print("robot2 target changed")
                 robot2.reset_command_plan(cu_js_robot2) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
-
+                
             if robot2.cmd_plan is not None:
                 print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
                 cmd_state = robot2.cmd_plan[robot2.cmd_idx]
