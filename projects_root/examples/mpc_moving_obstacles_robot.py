@@ -813,8 +813,6 @@ def main():
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
     robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"] # For curobo's collision checker/s
-    n_obstacle_cuboids = 30  # Number of collision boxes for obstacle approximation https://curobo.org/get_started/2c_world_collision.html
-    n_obstacle_mesh = 10     # Number of mesh triangles for obstacle approximation https://curobo.org/get_started/2c_world_collision.html
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
         activate_gpu_dynamics(my_world)
@@ -823,14 +821,12 @@ def main():
     # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
     robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
     robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
-
+    
     active_robots = [robot1, robot2]
     active_robots_cu_js =[None, None] # for visualization of robot spheres
+    active_robots_collision_caches = [{"obb": 100, "mesh": 10}, {"obb": 30, "mesh": 10}]
     
-    # Create and configure obstacles 
-    collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh}
-    robot2.init_solver(collision_cache,tensor_args)
-
+    
     if SIMULATING:
         step_dt_traj_mpc = RENDER_DT 
     else:
@@ -883,11 +879,12 @@ def main():
     # dynamic_obstacles = []
     # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     if MODIFY_MPC_COST_FUNCTION_TO_HANDLE_MOVING_OBSTACLES:    
-        dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs_template , collision_cache, step_dt_traj_mpc)
+        dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs_template , active_robots_collision_caches[0], step_dt_traj_mpc)
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
- 
-    robot1.init_solver(collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    
+    robot1.init_solver(active_robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    robot2.init_solver(active_robots_collision_caches[1],tensor_args)
 
     cmd_state_full_robot1 = None
     
