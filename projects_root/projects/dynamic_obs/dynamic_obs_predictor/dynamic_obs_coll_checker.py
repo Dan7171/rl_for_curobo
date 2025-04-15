@@ -29,7 +29,6 @@ class DynamicObsCollPredictor:
 
         Args:
             tensor_args: pytorch tensor arguments.
-            # world_cfg_template : World config template for the dynamic obstacles.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
             step_dt_traj_mpc (float): Time passes between each step in the trajectory. This is what the mpc assumes time delta between steps in horizon is.
             H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.

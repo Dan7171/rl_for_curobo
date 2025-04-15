@@ -526,9 +526,9 @@ class AutonomousFranka:
             list[Sphere]: list of spheres
         """
         assert isinstance(self.solver, MpcSolver) or isinstance(self.solver, MotionGen), "Solver not initialized"
-        sph_list = self.solver.kinematics.get_robot_as_spheres(cu_js.position) # at this point each sph.position is expressed in the robot base frame, not in the world frame
+        sph_list = self.solver.kinematics.get_robot_as_spheres(cu_js.position)[0] # at this point each sph.position is expressed in the robot base frame, not in the world frame
         if express_in_world_frame:
-            for sph in sph_list[0]:
+            for sph in sph_list:
                 sph.position = sph.position + self.p_R # express the spheres in the world frame
         return sph_list
 
@@ -538,7 +538,7 @@ class AutonomousFranka:
         sph_list = self.get_robot_as_spheres(cu_js, express_in_world_frame=True)
         if self._vis_spheres is None: # init visualization spheres
             self._vis_spheres = []
-            for si, s in enumerate(sph_list[0]):
+            for si, s in enumerate(sph_list):
                 sp = sphere.VisualSphere(
                             prim_path=f"/curobo/robot_{self.instance_id}_sphere_" + str(si),
                             position=np.ravel(s.position),
@@ -548,7 +548,7 @@ class AutonomousFranka:
                 self._vis_spheres.append(sp)
 
         else: # update visualization spheres
-            for si, s in enumerate(sph_list[0]):
+            for si, s in enumerate(sph_list):
                 if not np.isnan(s.position[0]):
                     self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
                     self._vis_spheres[si].set_radius(float(s.radius))
@@ -570,12 +570,23 @@ class AutonomousFranka:
         Returns:
             JointState: the robot’s joint configuration in curobo's representation.
         """
+        if sim_js is None:
+            sim_js = self.get_sim_joint_state()
         position = self.tensor_args.to_device(sim_js.positions)
         velocity = self.tensor_args.to_device(sim_js.velocities) * 0.0 if zero_vel else self.tensor_args.to_device(sim_js.velocities)
         acceleration = self.tensor_args.to_device(sim_js.velocities) * 0.0
         jerk = self.tensor_args.to_device(sim_js.velocities) * 0.0
         cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.get_dof_names()) # joint_names=self.robot.dof_names) 
         return cu_js
+    
+    # def get_robot_spheres_as_cubes(self):
+    #     cu_js = self.get_curobo_joint_state()
+    #     robot_spheres = self.get_robot_as_spheres(cu_js)
+    #     robot_spheres_approx = []
+    #     for sphere in robot_spheres:
+    #         robot_spheres_approx.append(sphere.copy())
+    #     return robot_spheres_approx
+    
     
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
@@ -645,7 +656,7 @@ class FrankaMpc(AutonomousFranka):
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
         return has_target_pose_changed
 
-    def get_curobo_joint_state(self, sim_js) -> JointState:
+    def get_curobo_joint_state(self, sim_js=None) -> JointState:
         """See super().get_curobo_joint_state() for more details.
         """
         cu_js =  super().get_curobo_joint_state (sim_js, True)        
@@ -711,6 +722,7 @@ class FrankaCumotion(AutonomousFranka):
         
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
+        
 
     def init_solver(self, collision_cache,tensor_args):
         """Initialize the motion generator (cumotion global planner).
@@ -831,7 +843,7 @@ class FrankaCumotion(AutonomousFranka):
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
 
-    def get_curobo_joint_state(self, sim_js) -> JointState:
+    def get_curobo_joint_state(self, sim_js=None) -> JointState:
         """
         See super().get_curobo_joint_state() for more details.
 
@@ -902,86 +914,78 @@ def main():
         activate_gpu_dynamics(my_world)
     
     # Adding two frankas to the scene
-    # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
-    robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
-    robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
+    # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
     
-    robots = [robot1, robot2]
+    robots: List[Optional[AutonomousFranka]] = [None, None]
     robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
     robots_collision_caches = [{"obb": 100, "mesh": 10}, {"obb": 30, "mesh": 10}]
     
+    # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
+    robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
+    robots[1] = robot2 
+    # init cumotion solver and plan config
+    robot2.init_solver(robots_collision_caches[1],tensor_args)
+    robot2.init_plan_config() # TODO: Can probably be move to constructor.
     
-    if SIMULATING:
-        step_dt_traj_mpc = RENDER_DT 
-    else:
-        step_dt_traj_mpc = REAL_TIME_EXPECTED_CTRL_DT    
-    expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.            
     
-    
-    # Set the world config for the dynamic obstacle collision checker.
-    # If modifying cost (adding new cost term for dynamic obstacles), we pass a new instance of WorldConfig which will include only the dynamic obstacles, ignoring the static obstacles.
-    # Else, we pass the original world config instance which will include both static and dynamic obstacles (as that's how the MPC would address this).
-    # if MODIFY_MPC_COST_FN_FOR_DYN_OBS :
-    #     curobo_world_model_dyn_obs_template = WorldConfig() # curobo collision checker world config for dynamic obstacles. note: this instance should be pased to all obstacles. Will only be used as a template for the dynamic obstacle collision checker.
-    # else:
-    #     curobo_world_model_dyn_obs_template = robot1.cu_stat_obs_world_model # Use MPCs original world config instance to include both static and dynamic obstacles.
 
-    # Initialize the dynamic obstacles. Registering them in template world config of the dynamic obstacle collision checker.
+    robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
+    robots[0] = robot1
 
-    dynamic_obstacles = [
-        Obstacle( 
-            name="dynamic_cuboid1", 
-            initial_pos=np.array([0.8,0.0,0.5]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([1,0,0]), # red 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.30, 0.0, 0.0],
-            angular_velocity=[1,1,1],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world 
-        )
-        ,  
-        Obstacle(
-            name="dynamic_cuboid2",
-            initial_pos=np.array([0.8,0.8,0.3]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([0,0 ,1]),# blue 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.15, -0.15, 0.05],
-            angular_velocity=[0,0,0],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world,
-            )  
+    
+    # dynamic_obstacles = [
+    #     Obstacle( 
+    #         name="dynamic_cuboid1", 
+    #         initial_pos=np.array([0.8,0.0,0.5]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([1,0,0]), # red 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.30, 0.0, 0.0],
+    #         angular_velocity=[1,1,1],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world 
+    #     )
+    #     ,  
+    #     Obstacle(
+    #         name="dynamic_cuboid2",
+    #         initial_pos=np.array([0.8,0.8,0.3]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         )  
         # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
         # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
         # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
-        ]
+    #    ]
     # dynamic_obstacles = []
-    # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-    robot2.init_solver(robots_collision_caches[1],tensor_args)
     
-    # robot2_spheres = robot2.get_robot_spheres()
-    if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-        
-        # curobo_world_model_dyn_obs_template = WorldConfig()
-        # for obs in dynamic_obstacles:
-        #     obs.inject_curobo_obs(curobo_world_model_dyn_obs_template) # inject the curobo representation of the obstacle into the world config (curobo world model).
-        
-        # dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, curobo_world_model_dyn_obs_template, robots_collision_caches[0], step_dt_traj_mpc)
-        dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc)
-        
-    else:
-        dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
     
-    robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
-        
+
+    # init mpc solver and collision predictor
+    # time.sleep(10)
+    
+    # # robot2_cubes = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state())
+    # step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
+    # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
+    # dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    # robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    
 
     add_extensions(simulation_app, args.headless_mode)
     
-    robot2.init_plan_config()
 
+    
+    
+    
+    ######################################
+    ########### SIMULATION LOOP ##########
+    ######################################
     if not SIMULATING:
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
@@ -993,11 +997,7 @@ def main():
         for _ in range(10):
             my_world.step(render=True) 
         init_world = True
-    
-    
-    ######################################
-    ########### SIMULATION LOOP ##########
-    ######################################
+
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     while simulation_app.is_running(): # not necessarily playing, just running                
         
@@ -1027,8 +1027,8 @@ def main():
 
         ########## INITIALIZATION BEFORE FIRST STEP ##########
         if t_idx == 0: # number of simulation steps since the play button was pressed
+            ##### SIM POST INIT #####
             my_world.reset()
-            
             # Initialize robot 1
             idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
             robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1)
@@ -1048,9 +1048,32 @@ def main():
                 values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
             )
             
+
+            robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state())
+
+            dynamic_obstacles = []
+            for i, sphere in enumerate(robot2_spheres):
+                dynamic_obstacles.append(Obstacle(
+                    name=f"robot2_cube_{i}",
+                    initial_pos=sphere.pose[:3],
+                    dims=2*sphere.radius,
+                    obstacle_type=DynamicCuboid,
+                    color=np.array([0,0,1]),
+                    mass=1.0,
+                    gravity_enabled=False,
+                    linear_velocity=np.array([0,0,0]),
+                    angular_velocity=np.array([0,0,0]),
+                    world=my_world
+                ))
+            
+            step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
+            expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
+            dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+            robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+            
+
             ctrl_loop_start_time = time.time()
 
-            
             
 
         ########################################################
@@ -1146,7 +1169,7 @@ def main():
             if robot2_target_changed:
                 print("robot2 target changed")
                 robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
-    
+                
             if robot2.cmd_plan is not None:
                 print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
                 cmd_state = robot2.cmd_plan[robot2.cmd_idx]
