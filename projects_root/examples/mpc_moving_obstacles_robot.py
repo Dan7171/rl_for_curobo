@@ -1050,7 +1050,7 @@ def main():
             )
             
 
-            robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state())
+            robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
 
             dynamic_obstacles = []
             
@@ -1157,55 +1157,55 @@ def main():
         ########## ROBOT 2 STEP ##########
         ############################################################
         print("t_idx = ", t_idx)
-        if t_idx > 20:
-            # if t_idx == 50 or t_idx % 1000 == 0.0:
-            #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
-            #     obstacles = usd_help.get_obstacles_from_stage(
-            #         # only_paths=[obstacles_path],
-            #         reference_prim_path=robot2.robot_prim_path,
-            #         ignore_substring=[
-            #             robot2.robot_prim_path,
-            #             robot2.target_path,
-            #             "/World/defaultGroundPlane",
-            #             "/curobo",
-            #         ],
-            #     ).get_collision_check_world()
-            #     # print(len(obstacles.objects))
-            #     robot2.solver.update_world(obstacles)
-            #     print("Updated World")
-            #     carb.log_info("Synced CuRobo world from stage.")
+        # if t_idx > -1:
+        #     # if t_idx == 50 or t_idx % 1000 == 0.0:
+        #     #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
+        #     #     obstacles = usd_help.get_obstacles_from_stage(
+        #     #         # only_paths=[obstacles_path],
+        #     #         reference_prim_path=robot2.robot_prim_path,
+        #     #         ignore_substring=[
+        #     #             robot2.robot_prim_path,
+        #     #             robot2.target_path,
+        #     #             "/World/defaultGroundPlane",
+        #     #             "/curobo",
+        #     #         ],
+        #     #     ).get_collision_check_world()
+        #     #     # print(len(obstacles.objects))
+        #     #     robot2.solver.update_world(obstacles)
+        #     #     print("Updated World")
+        #     #     carb.log_info("Synced CuRobo world from stage.")
             
-            sim_js_robot2 = robot2.get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
-            if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
-                log_error("isaac sim has returned NAN joint position values.")
+        sim_js_robot2 = robot2.get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
+        if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
+            log_error("isaac sim has returned NAN joint position values.")
+        
+        robots_cu_js[1] = robot2.get_curobo_joint_state(sim_js_robot2) 
+        real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+        robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
+        if robot2_target_changed:
+            print("robot2 target changed")
+            robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             
-            robots_cu_js[1] = robot2.get_curobo_joint_state(sim_js_robot2) 
-            real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-            robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
-            if robot2_target_changed:
-                print("robot2 target changed")
-                robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
-                
-            if robot2.cmd_plan is not None:
-                print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
-                cmd_state = robot2.cmd_plan[robot2.cmd_idx]
-                robot2.past_cmd = cmd_state.clone()
-                # get full dof state
-                art_action = ArticulationAction(
-                    cmd_state.position.cpu().numpy(),
-                    cmd_state.velocity.cpu().numpy(),
-                    joint_indices=idx_list_robot2,
-                )
-                # set desired joint angles obtained from IK:
-                robot2.articulation_controller.apply_action(art_action)
-                robot2.cmd_idx += 1 # the index of the next command to execute in the plan
-                for _ in range(2):
-                    my_world.step(render=False)
-                
-                if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
-                    robot2.cmd_idx = 0
-                    robot2.cmd_plan = None
-                    robot2.past_cmd = None
+        if robot2.cmd_plan is not None:
+            print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
+            cmd_state = robot2.cmd_plan[robot2.cmd_idx]
+            robot2.past_cmd = cmd_state.clone()
+            # get full dof state
+            art_action = ArticulationAction(
+                cmd_state.position.cpu().numpy(),
+                cmd_state.velocity.cpu().numpy(),
+                joint_indices=idx_list_robot2,
+            )
+            # set desired joint angles obtained from IK:
+            robot2.articulation_controller.apply_action(art_action)
+            robot2.cmd_idx += 1 # the index of the next command to execute in the plan
+            for _ in range(2):
+                my_world.step(render=False)
+            
+            if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
+                robot2.cmd_idx = 0
+                robot2.cmd_plan = None
+                robot2.past_cmd = None
 
 
         ############ OPTIONAL VISUALIZATIONS ###########
