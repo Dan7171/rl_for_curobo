@@ -62,7 +62,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -934,11 +934,26 @@ def main():
     robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
     robots[0] = robot1
 
-    
+    dynamic_obstacles = []
+    obs_num = 20
+    for i in range(obs_num):
+        dynamic_obstacles.append(Obstacle(
+            name=f"dynamic_cuboid_{i}",
+            initial_pose= np.random.uniform(0.8,1.2,7), # np.array([0.8+np.uniform(-0.1,0.1),0.0+random.uniform(-0.1,0.1),0.5+random.uniform(-0.1,0.1),1,0,0,0]), 
+            dims=0.1, 
+            obstacle_type=DynamicCuboid, 
+            color=np.array([1,0,0]), # red 
+            mass=args.obstacle_mass,
+            linear_velocity=[-0.30, 0.0, 0.0],
+            angular_velocity=[1,1,1],
+            gravity_enabled=args.gravity_enabled.lower() == "true",
+            world=my_world 
+        ))
+
     # dynamic_obstacles = [
     #     Obstacle( 
     #         name="dynamic_cuboid1", 
-    #         initial_pos=np.array([0.8,0.0,0.5]), 
+    #         initial_pose=np.array([0.8,0.0,0.5,1,0,0,0]), 
     #         dims=0.1, 
     #         obstacle_type=DynamicCuboid, 
     #         color=np.array([1,0,0]), # red 
@@ -951,7 +966,7 @@ def main():
     #     ,  
     #     Obstacle(
     #         name="dynamic_cuboid2",
-    #         initial_pos=np.array([0.8,0.8,0.3]), 
+    #         initial_pose=np.array([0.8,0.8,0.3,1,0,0,0]), 
     #         dims=0.1, 
     #         obstacle_type=DynamicCuboid, 
     #         color=np.array([0,0 ,1]),# blue 
@@ -960,11 +975,65 @@ def main():
     #         angular_velocity=[0,0,0],
     #         gravity_enabled=args.gravity_enabled.lower() == "true",
     #         world=my_world,
-    #         )  
+    #         ),
+
+    #     Obstacle(
+    #         name="dynamic_cuboid3",
+    #         initial_pose=np.array([0.1,0.8,0.3,1,0,0,0]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         ),
+
+    #     Obstacle(
+    #         name="dynamic_cuboid4",
+    #         initial_pose=np.array([0.1,0.3,0.3,1,0,0,0]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         ),
+    #     Obstacle(
+    #         name="dynamic_cuboid5",
+    #         initial_pose=np.array([0.1,2.3,0.3,1,0,0,0]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         ),
+    #     Obstacle(
+    #         name="dynamic_cuboid6",
+    #         initial_pose=np.array([0.2,3.3,0.8,1,0,0,0]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         )
+
+
+
         # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
         # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
         # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
-    #    ]
+        # ]
+    
     # dynamic_obstacles = []
     
     
@@ -1051,36 +1120,36 @@ def main():
             )
             
 
-            robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
+            # robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
 
-            dynamic_obstacles = []
+            # dynamic_obstacles = []
             
-            glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
-                        prim_path="/World/material/glass",  # path to the material prim to create
-                        ior=1.25,
-                        depth=0.001,
-                        thin_walled=True,
-                        color=np.array([1.0, 0.5, 0.5]))
+            # glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+            #             prim_path="/World/material/glass",  # path to the material prim to create
+            #             ior=1.25,
+            #             depth=0.001,
+            #             thin_walled=True,
+            #             color=np.array([1.0, 0.5, 0.5]))
             
-            for i, sphere in enumerate(robot2_spheres):
-                sphere_as_cuboid = sphere.get_cuboid() # cov
-                sphere_transform_matrix = sphere_as_cuboid.get_transform_matrix()
+            # for i, sphere in enumerate(robot2_spheres):
+            #     sphere_as_cuboid = sphere.get_cuboid() # cov
+            #     sphere_transform_matrix = sphere_as_cuboid.get_transform_matrix()
                 
-                dynamic_obstacles.append(Obstacle(
-                    name=f"robot2_cube_{i}",
-                    initial_pose=sphere_as_cuboid.pose, # X_obs_W
-                    dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
-                    obstacle_type=DynamicCuboid,
-                    color=np.array(sphere_as_cuboid.color[:3]),
-                    mass=1.0,
-                    gravity_enabled=False,
-                    linear_velocity=np.array([0,0,0]), # v_obs_W
-                    angular_velocity=np.array([0,0,0]), # w_obs_W
-                    world=my_world,
-                    sim_collision_enabled=False,
-                    visual_material=glass_visual_material
+            #     dynamic_obstacles.append(Obstacle(
+            #         name=f"robot2_cube_{i}",
+            #         initial_pose=sphere_as_cuboid.pose, # X_obs_W
+            #         dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
+            #         obstacle_type=DynamicCuboid,
+            #         color=np.array(sphere_as_cuboid.color[:3]),
+            #         mass=1.0,
+            #         gravity_enabled=False,
+            #         linear_velocity=np.array([0,0,0]), # v_obs_W
+            #         angular_velocity=np.array([0,0,0]), # w_obs_W
+            #         world=my_world,
+            #         sim_collision_enabled=False,
+            #         visual_material=glass_visual_material
 
-                ))
+            #     ))
             
             step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
             expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
