@@ -531,6 +531,7 @@ class AutonomousFranka:
         if express_in_world_frame:
             for sph in sph_list:
                 sph.position = sph.position + self.p_R # express the spheres in the world frame
+                sph.pose[:3] = sph.pose[:3] + self.p_R
         return sph_list
 
     def visualize_robot_as_spheres(self, cu_js):
