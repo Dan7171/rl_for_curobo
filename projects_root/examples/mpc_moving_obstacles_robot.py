@@ -104,7 +104,7 @@ except ImportError:
 
 # Third Party
 import time
-from typing import List
+from typing import List, Optional
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
 import torch
 import argparse
@@ -552,7 +552,17 @@ class AutonomousFranka:
                     self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
                     self._vis_spheres[si].set_radius(float(s.radius))
                     
-    def get_curobo_joints_state(self, sim_js, zero_vel:bool) -> JointState:
+    def get_curobo_joint_state(self, sim_js, zero_vel:bool) -> JointState:
+        """Returns the curobo joint configuration (robot joint state represented as a JointState object,
+        which is curobo's representation of the robot joint state) from the simulation joint state (the joint state of the robot as returned by the simulation).
+        For more details about JointState see https://curobo.org/advanced_examples/4_robot_segmentation.html
+        Args:
+            sim_js (_type_): the joint state of the robot as returned by the simulation.
+            zero_vel (bool): should multiply the velocities by 0.0 to set them to zero (differs for robot types - MPC and Cumotion).
+
+        Returns:
+            JointState: the robot’s joint configuration in curobo's representation.
+        """
         position = self.tensor_args.to_device(sim_js.positions)
         velocity = self.tensor_args.to_device(sim_js.velocities) * 0.0 if zero_vel else self.tensor_args.to_device(sim_js.velocities)
         acceleration = self.tensor_args.to_device(sim_js.velocities) * 0.0
@@ -625,9 +635,12 @@ class FrankaMpc(AutonomousFranka):
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
         return has_target_pose_changed
 
-    def get_curobo_joints_state(self, sim_js) -> JointState:
-        return super().get_curobo_joints_state(sim_js, True)        
-
+    def get_curobo_joint_state(self, sim_js) -> JointState:
+        """See super().get_curobo_joint_state() for more details.
+        """
+        cu_js =  super().get_curobo_joint_state (sim_js, True)        
+        cu_js = cu_js.get_ordered_joint_state(self.solver.rollout_fn.joint_names)
+        return cu_js
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
         """
@@ -778,8 +791,31 @@ class FrankaCumotion(AutonomousFranka):
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
 
-    def get_curobo_joints_state(self, sim_js) -> JointState:
-        return super().get_curobo_joints_state(sim_js, False)
+    def get_curobo_joint_state(self, sim_js) -> JointState:
+        """
+        See super().get_curobo_joint_state() for more details.
+
+        Args:
+            sim_js (_type_): _description_
+
+        Returns:
+            JointState: _description_
+        """
+        cu_js = super().get_curobo_joint_state(sim_js, False)
+
+        if not self.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
+                cu_js.velocity *= 0.0
+                cu_js.acceleration *= 0.0
+
+        if self.reactive and self.past_cmd is not None:
+            cu_js.position[:] = self.past_cmd.position
+            cu_js.velocity[:] = self.past_cmd.velocity
+            cu_js.acceleration[:] = self.past_cmd.acceleration
+
+        cu_js = cu_js.get_ordered_joint_state(self.solver.kinematics.joint_names) 
+
+
+        return cu_js    
     
 
    
@@ -831,7 +867,7 @@ def main():
     robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
     
     active_robots = [robot1, robot2]
-    active_robots_cu_js =[None, None] # for visualization of robot spheres
+    active_robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
     active_robots_collision_caches = [{"obb": 100, "mesh": 10}, {"obb": 30, "mesh": 10}]
     
     
@@ -1029,9 +1065,9 @@ def main():
         sim_js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
         
         # Convert to CuRobo joint state format
-        cu_js_robot1 = robot1.get_curobo_joints_state(sim_js_robot1)
+        cu_js_robot1 = robot1.get_curobo_joint_state(sim_js_robot1)
         
-        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names) # JS2
+        # cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names) # JS2
         active_robots_cu_js[0] = cu_js_robot1 # JS3
         
         if cmd_state_full_robot1 is None:
@@ -1094,19 +1130,9 @@ def main():
                 log_error("isaac sim has returned NAN joint position values.")
             
 
-            cu_js_robot2 = robot2.get_curobo_joints_state(sim_js_robot2)
+            cu_js_robot2 = robot2.get_curobo_joint_state(sim_js_robot2)
 
-            if not robot2.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
-                cu_js_robot2.velocity *= 0.0
-                cu_js_robot2.acceleration *= 0.0
-
-            if robot2.reactive and robot2.past_cmd is not None:
-                cu_js_robot2.position[:] = robot2.past_cmd.position
-                cu_js_robot2.velocity[:] = robot2.past_cmd.velocity
-                cu_js_robot2.acceleration[:] = robot2.past_cmd.acceleration
-
-            cu_js_robot2 = cu_js_robot2.get_ordered_joint_state(robot2.solver.kinematics.joint_names) #JS2
-            active_robots_cu_js[1] = cu_js_robot2 #JS3
+            active_robots_cu_js[1] = cu_js_robot2 
             real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
             robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
             if robot2_target_changed:
