@@ -5,6 +5,7 @@ except ImportError:
     pass
 
 # Third Party
+from typing import Optional
 import torch
 import numpy as np
 
@@ -20,20 +21,23 @@ from omni.isaac.core.materials import PhysicsMaterial
 from pxr import PhysxSchema
 
 # Import helper from curobo examples
-from projects_root.utils.helper import add_extensions, add_robot_to_scene
 
 # CuRobo
-from curobo.geom.types import Cuboid
+from curobo.geom.types import Cuboid, WorldConfig
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose 
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
 
+
+
 class Obstacle:
-    def __init__(self, name, initial_pos, dims, obstacle_type, color, mass, linear_velocity, angular_velocity, gravity_enabled, world, world_cfg):
-        """_summary_
+    def __init__(self, name, initial_pos, dims, obstacle_type, color, mass, linear_velocity, angular_velocity, gravity_enabled, world, world_model_curobo:Optional[WorldConfig]=None):
+        """
+        Creates the representations of the obstacle in the simulation form and in the curobo form (making equivalent representations).
+        If world model is provided, the curobo representation of the obstacle is injected into the world model of curobo (in the simulation in happens automatically when simulation representation is created).
+
         See https://curobo.org/get_started/2c_world_collision.html
 
         Args:
@@ -47,21 +51,22 @@ class Obstacle:
             angular_velocity (_type_):wx, wy, wz (rad/s)
             gravity_enabled (bool): enable/disable gravity for the obstacle. If False, the obstacle will not be affected by gravity.
             world (_type_): issac sim world instance (related to the simulator)
-            world_cfg (_type_): curobo world config instance (related to the collision checker of curobo)
+            world_model_curobo (_type_): # world_model_curobo is the world model of curobo. (represents the model of the world where obstacles are interlive in curobo)
         """
         self.name = name
         self.path = f'/World/new_obstacles/{name}'
         self.initial_pose = initial_pos
+        self.cur_pos = self.initial_pose[:3]
         self.dims = dims
         self.prim_type = obstacle_type
         self.tensor_args = TensorDeviceType()  # Add this to handle device placement
-        self.world_cfg = world_cfg
+        # self.world_model_curobo = world_model_curobo
+        self.world_model_curobo = None 
         self.linear_velocity = linear_velocity
         self.angular_velocity = angular_velocity
-        #initialize the obstacle in the simulation and the curobo representation of the obstacle in its collision checker
+        # initialize the obstacle in the simulation and the curobo representation of the obstacle in its collision checker
         self.simulation_representation = self._init_obstacle_in_simulation(world, self.initial_pose[:3], self.dims, obstacle_type, color, mass, gravity_enabled)
-        self.curobo_representation = self._init_curobo_obstacle() # initialize the curobo representation of the obstacle based on the simulation representation
-        self.cur_pos = self.initial_pose[:3]
+        self.curobo_representation = self._init_obstacle_curobo_curobo_rep() # initialize the curobo representation of the obstacle based on the simulation representation
 
 
     
@@ -161,9 +166,9 @@ class Obstacle:
         physx_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
         physx_api.CreateDisableGravityAttr(True)
 
-    def _init_curobo_obstacle(self):
+    def _init_obstacle_curobo_curobo_rep(self):
         """
-        Initialize the curobo representation of the obstacle in its collision checker.
+        Initialize the curobo representation of the obstacle (not yet injected into the world config).
         https://curobo.org/_api/curobo.types.math.html#curobo.types.math.Pose
         https://curobo.org/get_started/2c_world_collision.html
         
@@ -194,9 +199,21 @@ class Obstacle:
                 dims=[cube_edge_len, cube_edge_len, cube_edge_len]
             )
         
-        
-        # register the curobo representation of the obstacle in the curobo collision checker
-        self.world_cfg.add_obstacle(curobo_obstacle) 
+        # If world model was provided, register (inject) the curobo representation of the obstacle in curobo representation of world.
+        if self.world_model_curobo is not None:
+            self.inject_curobo_obs(self.world_model_curobo)
+
         return curobo_obstacle
+    
+
+    def inject_curobo_obs(self, world_model_curobo:WorldConfig):
+        """ Inject the curobo representation of the obstacle into a given world config (world model, the object that contains the obstacles in world in curobo).
+
+        Args:
+            world_model_curobo (_type_): _description_
+        """
+        if self.world_model_curobo is None:
+            self.world_model_curobo = world_model_curobo # sets the world this object will be living in
+        self.world_model_curobo.add_obstacle(self.curobo_representation) # adds (injects) the curobo representation to the curobo world model
     
         

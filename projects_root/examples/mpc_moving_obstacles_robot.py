@@ -384,13 +384,13 @@ def activate_gpu_dynamics(my_world):
 class AutonomousFranka:
     
     instance_counter = 0
-    def __init__(self,robot_cfg, world, p_R=np.array([0.0,0.0,0.0]),R_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    def __init__(self,robot_cfg, world, usd_help, p_R=np.array([0.0,0.0,0.0]),R_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
         https://drake.mit.edu/doxygen_cxx/group__multibody__notation__basics.html https://drake.mit.edu/doxygen_cxx/group__multibody__frames__and__bodies.html
         Args:
-            world (_type_): _description_ 
+            world (_type_): simulator world instance.
             p_R: Position vector from Wo (W (World frame) origin (o)) to Ro (R's origin (robot's base frame)), expressed in the world frame W (implied).
             R_R: Frame R's (second R, representing robot's base frame) orientation (first R, representing rotation) in the world frame W (implied, could be represented as R_WR). Quaternion (w,x,y,z)
             p_T: Position vector from Wo (W (World frame) origin (o)) to To (target's origin), expressed in the world frame W (implied).
@@ -421,13 +421,13 @@ class AutonomousFranka:
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
         self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
         
-        self.world_cfg = None # will be initialized in the _init_world_cfg method. Static obstacles world configuration for curobo collision checking.
+        self.cu_stat_obs_world_model = self._init_curobo_stat_obs_world_model(usd_help) # will be initialized in the _init_curobo_stat_obs_world_model method. Static obstacles world configuration for curobo collision checking.
         self.solver = None # will be initialized in the init_solver method.
         self.tensor_args = TensorDeviceType()
         self._vis_spheres = None # for visualization of robot spheres
         AutonomousFranka.instance_counter += 1
 
-    def _init_world_cfg(self, usd_help:UsdHelper):
+    def _init_curobo_stat_obs_world_model(self, usd_help:UsdHelper):
         """Initiating curobo world configuration for static obstacles.
         # NOTE: In other files its initialized a bit differently every time. So thats not the only way to do it.
         
@@ -443,7 +443,8 @@ class AutonomousFranka:
         
         world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
         usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path) 
-        self.world_cfg = world_cfg
+        return world_cfg
+        # self.cu_stat_obs_world_model = world_cfg
 
         
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
@@ -586,11 +587,11 @@ class FrankaMpc(AutonomousFranka):
             robot_name (_type_): _description_
             p_R (_type_): _description_
         """
-        super().__init__(robot_cfg, world, p_R, R_R, p_T, R_T, target_color, target_size)
+        super().__init__(robot_cfg, world, usd_help, p_R, R_R, p_T, R_T, target_color, target_size)
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
-    
+        self._cmd_state_full = None
 
 
     def init_solver(self, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
@@ -602,9 +603,12 @@ class FrankaMpc(AutonomousFranka):
             step_dt_traj_mpc (_type_): _description_
             dynamic_obs_coll_predictor (_type_): _description_
         """
+        dynamic_obs_checker = dynamic_obs_coll_predictor # New
+        override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
-            self.world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+            self.cu_stat_obs_world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
             use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
             use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
             use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
@@ -616,8 +620,8 @@ class FrankaMpc(AutonomousFranka):
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
             store_rollouts=True,  # Store trajectories for visualization
             step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
-            dynamic_obs_checker=dynamic_obs_coll_predictor,  # Add this line
-            override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+            dynamic_obs_checker=dynamic_obs_checker, # New
+            override_particle_file=override_particle_file # New
         )
         
         self.solver = MpcSolver(mpc_config)
@@ -647,6 +651,38 @@ class FrankaMpc(AutonomousFranka):
         cu_js =  super().get_curobo_joint_state (sim_js, True)        
         cu_js = cu_js.get_ordered_joint_state(self.solver.rollout_fn.joint_names)
         return cu_js
+    
+
+    def update_current_state(self, cu_js):
+        if self._cmd_state_full is None:
+            self.current_state.copy_(cu_js)
+        else:
+            current_state_partial = self._cmd_state_full.get_ordered_joint_state(
+                self.solver.rollout_fn.joint_names
+            )
+            self.current_state.copy_(current_state_partial)
+            self.current_state.joint_names = current_state_partial.joint_names
+        self.current_state.copy_(cu_js)
+
+
+    def get_art_action(self, js_action):
+        """Get articulated action from joint state action (supplied by MPC solver).
+        Args:
+            js_action (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        self._cmd_state_full = js_action
+        idx_list = []
+        common_js_names = []
+        for x in self.get_dof_names():
+            if x in self._cmd_state_full.joint_names:
+                idx_list.append(self.robot.get_dof_index(x))
+                common_js_names.append(x)
+        self._cmd_state_full = self._cmd_state_full.get_ordered_joint_state(common_js_names)
+        art_action = ArticulationAction(self._cmd_state_full.position.cpu().numpy(),joint_indices=idx_list,)
+        return art_action
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
         """
@@ -658,7 +694,7 @@ class FrankaCumotion(AutonomousFranka):
             p_R (_type_): _description_
             reactive (bool, optional): _description_. Defaults to False.
         """
-        super().__init__(robot_cfg, world, p_R, R_R, p_T, R_T, target_color, target_size)
+        super().__init__(robot_cfg, world, usd_help, p_R, R_R, p_T, R_T, target_color, target_size)
 
         self.solver = None
         self.past_cmd = None
@@ -700,7 +736,7 @@ class FrankaCumotion(AutonomousFranka):
 
         motion_gen_config = MotionGenConfig.load_from_robot_config( # solver config
             self.robot_cfg,
-            self.world_cfg,
+            self.cu_stat_obs_world_model,
             tensor_args,
             collision_checker_type=CollisionCheckerType.MESH,
             num_trajopt_seeds=12,
@@ -870,9 +906,9 @@ def main():
     robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
     robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
     
-    active_robots = [robot1, robot2]
-    active_robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
-    active_robots_collision_caches = [{"obb": 100, "mesh": 10}, {"obb": 30, "mesh": 10}]
+    robots = [robot1, robot2]
+    robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
+    robots_collision_caches = [{"obb": 100, "mesh": 10}, {"obb": 30, "mesh": 10}]
     
     
     if SIMULATING:
@@ -885,10 +921,10 @@ def main():
     # Set the world config for the dynamic obstacle collision checker.
     # If modifying cost (adding new cost term for dynamic obstacles), we pass a new instance of WorldConfig which will include only the dynamic obstacles, ignoring the static obstacles.
     # Else, we pass the original world config instance which will include both static and dynamic obstacles (as that's how the MPC would address this).
-    if MODIFY_MPC_COST_FN_FOR_DYN_OBS :
-        world_cfg_dynamic_obs_template  = WorldConfig() # curobo collision checker world config for dynamic obstacles. note: this instance should be pased to all obstacles. Will only be used as a template for the dynamic obstacle collision checker.
-    else:
-        world_cfg_dynamic_obs_template  = robot1.world_cfg # Use MPCs original world config instance to include both static and dynamic obstacles.
+    # if MODIFY_MPC_COST_FN_FOR_DYN_OBS :
+    #     curobo_world_model_dyn_obs_template = WorldConfig() # curobo collision checker world config for dynamic obstacles. note: this instance should be pased to all obstacles. Will only be used as a template for the dynamic obstacle collision checker.
+    # else:
+    #     curobo_world_model_dyn_obs_template = robot1.cu_stat_obs_world_model # Use MPCs original world config instance to include both static and dynamic obstacles.
 
     # Initialize the dynamic obstacles. Registering them in template world config of the dynamic obstacle collision checker.
 
@@ -903,8 +939,7 @@ def main():
             linear_velocity=[-0.30, 0.0, 0.0],
             angular_velocity=[1,1,1],
             gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world,
-            world_cfg=world_cfg_dynamic_obs_template 
+            world=my_world 
         )
         ,  
         Obstacle(
@@ -918,25 +953,30 @@ def main():
             angular_velocity=[0,0,0],
             gravity_enabled=args.gravity_enabled.lower() == "true",
             world=my_world,
-            world_cfg=world_cfg_dynamic_obs_template 
-        )  
+            )  
         # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
         # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
         # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
         ]
     # dynamic_obstacles = []
     # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-    robot2.init_solver(active_robots_collision_caches[1],tensor_args)
+    robot2.init_solver(robots_collision_caches[1],tensor_args)
+    
     # robot2_spheres = robot2.get_robot_spheres()
-    if MODIFY_MPC_COST_FN_FOR_DYN_OBS :    
-        dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs_template , active_robots_collision_caches[0], step_dt_traj_mpc)
+    if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+        
+        # curobo_world_model_dyn_obs_template = WorldConfig()
+        # for obs in dynamic_obstacles:
+        #     obs.inject_curobo_obs(curobo_world_model_dyn_obs_template) # inject the curobo representation of the obstacle into the world config (curobo world model).
+        
+        # dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, curobo_world_model_dyn_obs_template, robots_collision_caches[0], step_dt_traj_mpc)
+        dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc)
+        
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
     
-    robot1.init_solver(active_robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
-    
-    cmd_state_full_robot1 = None
-    
+    robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+        
 
     add_extensions(simulation_app, args.headless_mode)
     
@@ -1065,39 +1105,11 @@ def main():
         ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
         sim_js_robot1 = robot1.get_sim_joint_state() # robot1.robot.get_joints_state() # get the current joint state of the robot        
-        cu_js_robot1 = robot1.get_curobo_joint_state(sim_js_robot1)
-        
-        # cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names) # JS2
-        active_robots_cu_js[0] = cu_js_robot1 # JS3
-        
-        if cmd_state_full_robot1 is None:
-            robot1.current_state.copy_(cu_js_robot1)
-        else:
-            current_state_partial = cmd_state_full_robot1.get_ordered_joint_state(
-                robot1.solver.rollout_fn.joint_names
-            )
-            robot1.current_state.copy_(current_state_partial)
-            robot1.current_state.joint_names = current_state_partial.joint_names
-        common_js_names = []
-        robot1.current_state.copy_(cu_js_robot1)
-
-    
+        robots_cu_js[0] = robot1.get_curobo_joint_state(sim_js_robot1)
+        robot1.update_current_state(robots_cu_js[0])
         ############### RUN MPC ROLLOUTS ###############
         mpc_result = print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
-
-        ####### APPLY CONTROL COMMAND TO ROBOT #######
-        # Process MPC result
-        cmd_state_full_robot1 = mpc_result.js_action
-        common_js_names_robot1 = []
-        idx_list_robot1 = [] 
-        for x in robot1.get_dof_names():
-            if x in cmd_state_full_robot1.joint_names:
-                idx_list_robot1.append(robot1.robot.get_dof_index(x))
-                common_js_names_robot1.append(x)
-        robot1_cmd_state = cmd_state_full_robot1.get_ordered_joint_state(common_js_names_robot1)
-        cmd_state_full_robot1 = robot1_cmd_state
-        # Create and apply robot action
-        art_action = ArticulationAction(robot1_cmd_state.position.cpu().numpy(),joint_indices=idx_list_robot1,)
+        art_action = robot1.get_art_action(mpc_result.js_action) # get articulated action from joint state action
         # Execute planned motion
         for _ in range(3):
             robot1.articulation_controller.apply_action(art_action)
@@ -1128,16 +1140,13 @@ def main():
             if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
                 log_error("isaac sim has returned NAN joint position values.")
             
-
-            cu_js_robot2 = robot2.get_curobo_joint_state(sim_js_robot2)
-
-            active_robots_cu_js[1] = cu_js_robot2 
+            robots_cu_js[1] = robot2.get_curobo_joint_state(sim_js_robot2) 
             real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
             robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
             if robot2_target_changed:
                 print("robot2 target changed")
-                robot2.reset_command_plan(cu_js_robot2) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
-                
+                robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
+    
             if robot2.cmd_plan is not None:
                 print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
                 cmd_state = robot2.cmd_plan[robot2.cmd_idx]
@@ -1163,8 +1172,8 @@ def main():
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-            for i, robot in enumerate(active_robots):
-                robot.visualize_robot_as_spheres(active_robots_cu_js[i])
+            for i, robot in enumerate(robots):
+                robot.visualize_robot_as_spheres(robots_cu_js[i])
 
         if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS: # rendering using draw_points()
             point_visualzer_inputs = [] # collect the different points sequences for visualization

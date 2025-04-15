@@ -1,6 +1,6 @@
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
-from curobo.geom.types import Obstacle, WorldConfig
+from curobo.geom.types import WorldConfig
 from curobo.types.math import Pose
 from typing import List
 import numpy as np
@@ -9,6 +9,7 @@ import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
 SPHERE_DIM = 4 # The values which are required to define a sphere: x,y,z,radius. That's fixed in all curobo coll checkers
 
 class DynamicObsCollPredictor:
@@ -20,14 +21,15 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, world_cfg_template:WorldConfig , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    # def __init__(self, tensor_args, world_cfg_template:WorldConfig , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    def __init__(self, tensor_args, obstacle_list:List[Obstacle] , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
 
         Args:
             tensor_args: pytorch tensor arguments.
-            world_cfg_template : World config template for the dynamic obstacles.
+            # world_cfg_template : World config template for the dynamic obstacles.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
             step_dt_traj_mpc (float): Time passes between each step in the trajectory. This is what the mpc assumes time delta between steps in horizon is.
             H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.
@@ -51,16 +53,26 @@ class DynamicObsCollPredictor:
         self.shift_cost_matrix_left = shift_cost_matrix_left
         self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
         self._obstacles_predicted_paths = {} # dictionary of predicted paths for each obstacle
+
+        # Make H copies of the collision supported world model template
+
+        # First we make templates:
+        cache_cp = copy.deepcopy(cache) # so we won't modify the original cache
         
-        # Initialize the collision H buffers and H collision checkers:
-        world_cfg_template_cp = copy.deepcopy(world_cfg_template)
-        cache_cp = copy.deepcopy(cache)
-        world_collision_cfg_template  = WorldCollisionConfig(tensor_args, world_cfg_template_cp, cache_cp) # base template for collision checkers. We'll use this to make H copies.
+        # Make a template of curobo world model (curobo representation of world) and inject the curobo representation of the obstacles into it (we will use it to make the template collision checker configuration).
+        cu_world_model_template = WorldConfig()
+        for obs in obstacle_list:
+            obs.inject_curobo_obs(cu_world_model_template)
+        
+        # Convert the curobo world model template to a collision supported world model template.
+        cu_coll_supported_world_model_template = WorldCollisionConfig(tensor_args, cu_world_model_template, cache_cp) # base template for collision checkers. We'll use this to make H copies.
+        
+        # Now we can make H copies:
         query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
         self.H_collision_buffers = [] # not sure what they are for but they are needed.
         self.H_world_cchecks = [] # list of collision checkers (one checker for each time step in the horizon)
         for _ in range(self.H):
-            world_collision_cfg_h = copy.deepcopy(world_collision_cfg_template) # NOTE: I use copies to avoid side effects. We duplicate the 
+            world_collision_cfg_h = copy.deepcopy(cu_coll_supported_world_model_template) # NOTE: I use copies to avoid side effects. We duplicate the 
             col_checker_h = WorldMeshCollision(world_collision_cfg_h) # Initiate a single collision checker for each time step over the horizon.
             self.H_world_cchecks.append(col_checker_h)
             self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker_h.collision_types)) # I dont know yet what they are for 
