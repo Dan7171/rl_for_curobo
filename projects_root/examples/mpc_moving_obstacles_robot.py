@@ -552,6 +552,14 @@ class AutonomousFranka:
                     self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
                     self._vis_spheres[si].set_radius(float(s.radius))
                     
+    def get_curobo_joints_state(self, sim_js, zero_vel:bool) -> JointState:
+        position = self.tensor_args.to_device(sim_js.positions)
+        velocity = self.tensor_args.to_device(sim_js.velocities) * 0.0 if zero_vel else self.tensor_args.to_device(sim_js.velocities)
+        acceleration = self.tensor_args.to_device(sim_js.velocities) * 0.0
+        jerk = self.tensor_args.to_device(sim_js.velocities) * 0.0
+        cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.robot.dof_names) 
+        return cu_js
+    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
@@ -615,11 +623,10 @@ class FrankaMpc(AutonomousFranka):
     
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
-        return has_target_pose_changed        
+        return has_target_pose_changed
 
-    
- 
-
+    def get_curobo_joints_state(self, sim_js) -> JointState:
+        return super().get_curobo_joints_state(sim_js, True)        
 
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
@@ -771,7 +778,8 @@ class FrankaCumotion(AutonomousFranka):
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
 
-    
+    def get_curobo_joints_state(self, sim_js) -> JointState:
+        return super().get_curobo_joints_state(sim_js, False)
     
 
    
@@ -878,14 +886,15 @@ def main():
         ]
     # dynamic_obstacles = []
     # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    robot2.init_solver(active_robots_collision_caches[1],tensor_args)
+    # robot2_spheres = robot2.get_robot_spheres()
     if MODIFY_MPC_COST_FN_FOR_DYN_OBS :    
         dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, world_cfg_dynamic_obs_template , active_robots_collision_caches[0], step_dt_traj_mpc)
     else:
         dynamic_obs_coll_predictor = None # this will deactivate the prediction of poses of dynamic obstacles over the horizon in MPC cost function.
     
     robot1.init_solver(active_robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
-    robot2.init_solver(active_robots_collision_caches[1],tensor_args)
-
+    
     cmd_state_full_robot1 = None
     
 
@@ -992,11 +1001,10 @@ def main():
         ############ UPDATE COLLISION CHECKERS ##################
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
         if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
-            print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")()
+            print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")() # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts).             
         else:
             for obs_index in range(len(dynamic_obstacles)):
-                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker)
+                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker) # update static obstacle collision checker with the new pose of the obstacle from the simulation.
             
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
@@ -1021,9 +1029,10 @@ def main():
         sim_js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
         
         # Convert to CuRobo joint state format
-        cu_js_robot1 = JointState(position=tensor_args.to_device(sim_js_robot1.positions), velocity=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, acceleration=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, jerk=tensor_args.to_device(sim_js_robot1.velocities) * 0.0, joint_names=sim_js_names_robot1,)
-        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names)
-        active_robots_cu_js[0] = cu_js_robot1
+        cu_js_robot1 = robot1.get_curobo_joints_state(sim_js_robot1)
+        
+        cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names) # JS2
+        active_robots_cu_js[0] = cu_js_robot1 # JS3
         
         if cmd_state_full_robot1 is None:
             robot1.current_state.copy_(cu_js_robot1)
@@ -1083,13 +1092,9 @@ def main():
             sim_js_names_robot2 = robot2.robot.dof_names # reading current joint names from robot
             if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
                 log_error("isaac sim has returned NAN joint position values.")
-            cu_js_robot2 = JointState( # creating a joint state object for curobo
-                position=tensor_args.to_device(sim_js_robot2.positions),
-                velocity=tensor_args.to_device(sim_js_robot2.velocities),  # * 0.0,
-                acceleration=tensor_args.to_device(sim_js_robot2.velocities) * 0.0,
-                jerk=tensor_args.to_device(sim_js_robot2.velocities) * 0.0,
-                joint_names=sim_js_names_robot2,
-            )
+            
+
+            cu_js_robot2 = robot2.get_curobo_joints_state(sim_js_robot2)
 
             if not robot2.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
                 cu_js_robot2.velocity *= 0.0
@@ -1100,8 +1105,8 @@ def main():
                 cu_js_robot2.velocity[:] = robot2.past_cmd.velocity
                 cu_js_robot2.acceleration[:] = robot2.past_cmd.acceleration
 
-            cu_js_robot2 = cu_js_robot2.get_ordered_joint_state(robot2.solver.kinematics.joint_names)
-            active_robots_cu_js[1] = cu_js_robot2
+            cu_js_robot2 = cu_js_robot2.get_ordered_joint_state(robot2.solver.kinematics.joint_names) #JS2
+            active_robots_cu_js[1] = cu_js_robot2 #JS3
             real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
             robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
             if robot2_target_changed:
