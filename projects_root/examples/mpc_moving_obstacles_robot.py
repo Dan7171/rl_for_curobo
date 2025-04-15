@@ -551,7 +551,13 @@ class AutonomousFranka:
                 if not np.isnan(s.position[0]):
                     self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
                     self._vis_spheres[si].set_radius(float(s.radius))
-                    
+
+    def get_dof_names(self):
+        return self.robot.dof_names
+
+    def get_sim_joint_state(self):
+        return self.robot.get_joints_state()
+    
     def get_curobo_joint_state(self, sim_js, zero_vel:bool) -> JointState:
         """Returns the curobo joint configuration (robot joint state represented as a JointState object,
         which is curobo's representation of the robot joint state) from the simulation joint state (the joint state of the robot as returned by the simulation).
@@ -567,7 +573,7 @@ class AutonomousFranka:
         velocity = self.tensor_args.to_device(sim_js.velocities) * 0.0 if zero_vel else self.tensor_args.to_device(sim_js.velocities)
         acceleration = self.tensor_args.to_device(sim_js.velocities) * 0.0
         jerk = self.tensor_args.to_device(sim_js.velocities) * 0.0
-        cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.robot.dof_names) 
+        cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.get_dof_names()) # joint_names=self.robot.dof_names) 
         return cu_js
     
 class FrankaMpc(AutonomousFranka):
@@ -775,12 +781,10 @@ class FrankaCumotion(AutonomousFranka):
             # get only joint names that are in both:
             self.idx_list = []
             self.common_js_names = []
-            sim_js_names = self.robot.dof_names
-            for x in sim_js_names:
+            for x in self.get_dof_names():
                 if x in cmd_plan.joint_names:
                     self.idx_list.append(self.robot.get_dof_index(x))
                     self.common_js_names.append(x)
-            # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
 
             cmd_plan = cmd_plan.get_ordered_joint_state(self.common_js_names)
             
@@ -1060,11 +1064,7 @@ def main():
             
         ############ GET CURRENT ROBOT STATE ############
         # Get current robot state
-        sim_js_robot1 = robot1.robot.get_joints_state() # get the current joint state of the robot
-        js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
-        sim_js_names_robot1 = robot1.robot.dof_names # get the joint names of the robot
-        
-        # Convert to CuRobo joint state format
+        sim_js_robot1 = robot1.get_sim_joint_state() # robot1.robot.get_joints_state() # get the current joint state of the robot        
         cu_js_robot1 = robot1.get_curobo_joint_state(sim_js_robot1)
         
         # cu_js_robot1 = cu_js_robot1.get_ordered_joint_state(robot1.solver.rollout_fn.joint_names) # JS2
@@ -1089,8 +1089,8 @@ def main():
         # Process MPC result
         cmd_state_full_robot1 = mpc_result.js_action
         common_js_names_robot1 = []
-        idx_list_robot1 = []
-        for x in sim_js_names_robot1:
+        idx_list_robot1 = [] 
+        for x in robot1.get_dof_names():
             if x in cmd_state_full_robot1.joint_names:
                 idx_list_robot1.append(robot1.robot.get_dof_index(x))
                 common_js_names_robot1.append(x)
@@ -1124,8 +1124,7 @@ def main():
             #     print("Updated World")
             #     carb.log_info("Synced CuRobo world from stage.")
             
-            sim_js_robot2 = robot2.robot.get_joints_state() # reading current joint state from robot
-            sim_js_names_robot2 = robot2.robot.dof_names # reading current joint names from robot
+            sim_js_robot2 = robot2.get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
             if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
                 log_error("isaac sim has returned NAN joint position values.")
             
