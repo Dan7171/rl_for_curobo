@@ -62,7 +62,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FN_FOR_DYN_OBS  = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -126,6 +126,7 @@ from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.objects import DynamicCuboid
 from omni.isaac.debug_draw import _debug_draw
+from omni.isaac.core.materials import OmniGlass
 
 
 # Import helper from curobo examples
@@ -213,7 +214,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--print_ctrl_rate",
-    default="False",
+    default="True",
     type=str,
     choices=["True", "False"],
     help="When True, prints the control rate",
@@ -1052,18 +1053,32 @@ def main():
             robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state())
 
             dynamic_obstacles = []
+            
+            glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+                        prim_path="/World/material/glass",  # path to the material prim to create
+                        ior=1.25,
+                        depth=0.001,
+                        thin_walled=True,
+                        color=np.array([1.0, 0.5, 0.5]))
+            
             for i, sphere in enumerate(robot2_spheres):
+                sphere_as_cuboid = sphere.get_cuboid() # cov
+                sphere_transform_matrix = sphere_as_cuboid.get_transform_matrix()
+                
                 dynamic_obstacles.append(Obstacle(
                     name=f"robot2_cube_{i}",
-                    initial_pos=sphere.pose[:3],
-                    dims=2*sphere.radius,
+                    initial_pose=sphere_as_cuboid.pose, # X_obs_W
+                    dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
                     obstacle_type=DynamicCuboid,
-                    color=np.array([0,0,1]),
+                    color=np.array(sphere_as_cuboid.color[:3]),
                     mass=1.0,
                     gravity_enabled=False,
-                    linear_velocity=np.array([0,0,0]),
-                    angular_velocity=np.array([0,0,0]),
-                    world=my_world
+                    linear_velocity=np.array([0,0,0]), # v_obs_W
+                    angular_velocity=np.array([0,0,0]), # w_obs_W
+                    world=my_world,
+                    sim_collision_enabled=False,
+                    visual_material=glass_visual_material
+
                 ))
             
             step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
@@ -1105,6 +1120,7 @@ def main():
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
         if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
             print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")() # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts).             
+            pass
         else:
             for obs_index in range(len(dynamic_obstacles)):
                 dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker) # update static obstacle collision checker with the new pose of the obstacle from the simulation.
@@ -1198,14 +1214,14 @@ def main():
             for i, robot in enumerate(robots):
                 robot.visualize_robot_as_spheres(robots_cu_js[i])
 
-        if VISUALIZE_MPC_ROLLOUTS or VISUALIZE_PREDICTED_OBS_PATHS: # rendering using draw_points()
+        if VISUALIZE_MPC_ROLLOUTS or (VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS): # rendering using draw_points()
             point_visualzer_inputs = [] # collect the different points sequences for visualization
             # collect the rollouts
             if VISUALIZE_MPC_ROLLOUTS:
                 rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
             # collect the predicted paths of dynamic obstacles
-            if VISUALIZE_PREDICTED_OBS_PATHS:
+            if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
                     visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
                     point_visualzer_inputs.extend(visualization_points_per_obstacle)
             # render the points

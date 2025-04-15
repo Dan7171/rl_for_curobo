@@ -18,7 +18,7 @@ import numpy as np
 # https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
 from omni.isaac.core.objects import DynamicCuboid
 from omni.isaac.core.materials import PhysicsMaterial
-from pxr import PhysxSchema
+from pxr import PhysxSchema, UsdPhysics
 
 # Import helper from curobo examples
 
@@ -33,7 +33,7 @@ a = torch.zeros(4, device="cuda:0")
 
 
 class Obstacle:
-    def __init__(self, name, initial_pos, dims, obstacle_type, color, mass, linear_velocity, angular_velocity, gravity_enabled, world, world_model_curobo:Optional[WorldConfig]=None):
+    def __init__(self, name, initial_pose, dims, obstacle_type, color, mass, linear_velocity, angular_velocity, gravity_enabled, world, world_model_curobo:Optional[WorldConfig]=None, sim_collision_enabled=True,visual_material=None):
         """
         Creates the representations of the obstacle in the simulation form and in the curobo form (making equivalent representations).
         If world model is provided, the curobo representation of the obstacle is injected into the world model of curobo (in the simulation in happens automatically when simulation representation is created).
@@ -42,10 +42,10 @@ class Obstacle:
 
         Args:
             name (str): object name. Must be unique.
-            initial_pos (_type_): initial position of the obstacle in the world frame ([x,y,z]).
+            initial_pose (_type_): initial position of the obstacle in the world frame ([x,y,z, qw, qx, qy, qz]).
             dims (_type_): if cuboid, scalar (side length (m)).
             obstacle_type (np.array): [r,g,b]
-            color (_type_): 
+            color (_type_): [r,g,b,alpha] (alpha is the opacity of the obstacle)
             mass (_type_): kg
             linear_velocity (_type_): vx, vy, vz (m/s)
             angular_velocity (_type_):wx, wy, wz (rad/s)
@@ -54,26 +54,27 @@ class Obstacle:
             world_model_curobo (_type_): # world_model_curobo is the world model of curobo. (represents the model of the world where obstacles are interlive in curobo)
         """
         self.name = name
-        self.path = f'/World/new_obstacles/{name}'
-        self.initial_pose = initial_pos
-        self.cur_pos = self.initial_pose[:3]
+        self.path = f'/World/new_obstacles/{name}' # path to the obstacle in the simulation
+        self.cur_pos = initial_pose[:3] # position of the obstacle in the world frame p_obs_W
+        self.cur_rot = initial_pose[3:] # orientation of the obstacle in the world frame q_obs_W
+        
         self.dims = dims
         self.prim_type = obstacle_type
         self.tensor_args = TensorDeviceType()  # Add this to handle device placement
         # self.world_model_curobo = world_model_curobo
-        self.world_model_curobo = None 
+        self.world_model_curobo = world_model_curobo 
         self.linear_velocity = linear_velocity
         self.angular_velocity = angular_velocity
         # initialize the obstacle in the simulation and the curobo representation of the obstacle in its collision checker
-        self.simulation_representation = self._init_obstacle_in_simulation(world, self.initial_pose[:3], self.dims, obstacle_type, color, mass, gravity_enabled)
-        self.curobo_representation = self._init_obstacle_curobo_curobo_rep() # initialize the curobo representation of the obstacle based on the simulation representation
+        self.simulation_representation = self._init_obstacle_in_simulation(world, self.cur_pos, self.cur_rot, self.dims, obstacle_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material)
+        self.curobo_representation = self._init_obstacle_curobo_rep() # initialize the curobo representation of the obstacle based on the simulation representation
 
 
     
     def set_simulation_refernce(self, simulation_refernce):
         self.simulation_refernce = simulation_refernce
     
-    def _init_obstacle_in_simulation(self, world, position, dims, obstacle_type, color=None,  mass=1.0, gravity_enabled=True):
+    def _init_obstacle_in_simulation(self, world, position, orientation, dims, obstacle_type, color=None,  mass=1.0, gravity_enabled=True,sim_collision_enabled=True,visual_material=None):
         """
         Create a moving obstacle in the simulation.
         
@@ -90,11 +91,11 @@ class Obstacle:
             color = np.array([0.0, 0.0, 0.1])  # Default blue color
         
         if obstacle_type == DynamicCuboid:
-            obstacle = self._init_DynamicCuboid_for_simulation(world, position, dims, color, mass, gravity_enabled, np.array(self.linear_velocity),np.array(self.angular_velocity))
+            obstacle = self._init_DynamicCuboid_for_simulation(world, position, orientation, dims, color, mass, gravity_enabled, np.array(self.linear_velocity),np.array(self.angular_velocity),sim_collision_enabled,visual_material)
 
         return obstacle
     
-    def _init_DynamicCuboid_for_simulation(self,world, position, size, color, mass=1.0, gravity_enabled=True,linear_velocity:np.array=np.nan, angular_velocity:np.array=np.nan):
+    def _init_DynamicCuboid_for_simulation(self,world, position, orientation, size, color, mass=1.0, gravity_enabled=True,linear_velocity:np.array=np.nan, angular_velocity:np.array=np.nan,sim_collision_enabled=True,visual_material=None):
         """
         Initialize a cube obstacle.
         
@@ -107,7 +108,7 @@ class Obstacle:
             mass: Mass in kg  
             gravity_enabled: If False, disables gravity for the obstacle
         """
-        prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,size=size,color=color,mass=mass,density=0.9)         
+        prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,orientation=orientation,size=size,color=color,mass=mass,density=0.9,visual_material=visual_material)         
         material = PhysicsMaterial( # https://www.youtube.com/watch?v=tHOM-OCnBLE
             prim_path=self.path+"/aluminum",  # path to the material prim to create
             dynamic_friction=0,
@@ -121,6 +122,9 @@ class Obstacle:
             prim.set_angular_velocity(angular_velocity)
         if not gravity_enabled:
             self.disable_gravity(self.path, world.stage)
+
+        if not sim_collision_enabled: # Disable collision for the obstacle in the simulation
+            prim.set_collision_enabled(False)
         world.scene.add(prim)
         return prim
     
@@ -166,7 +170,7 @@ class Obstacle:
         physx_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
         physx_api.CreateDisableGravityAttr(True)
 
-    def _init_obstacle_curobo_curobo_rep(self):
+    def _init_obstacle_curobo_rep(self):
         """
         Initialize the curobo representation of the obstacle (not yet injected into the world config).
         https://curobo.org/_api/curobo.types.math.html#curobo.types.math.Pose
