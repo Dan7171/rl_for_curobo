@@ -67,7 +67,7 @@ DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
-VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
+VISUALIZE_ROBOT_COL_SPHERES = True # If True, then the robot collision spheres will be rendered in the simulation.
 
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
@@ -423,7 +423,7 @@ class AutonomousFranka:
 
         self.robot_cfg = robot_cfg # the section under the key 'robot_cfg' in the robot config file (yml). https://curobo.org/tutorials/1_robot_configuration.html#tut-robot-configuration
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"] # joint names for the robot
-        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] # initial joint configuration for the robot
+        self.initial_joint_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] # initial ("/retract") joint configuration for the robot
         
         self.cu_stat_obs_world_model = self._init_curobo_stat_obs_world_model(usd_help) # will be initialized in the _init_curobo_stat_obs_world_model method. Static obstacles world configuration for curobo collision checking.
         self.solver = None # will be initialized in the init_solver method.
@@ -1037,7 +1037,7 @@ def main():
     my_world.reset()
     # Initialize robot 1
     idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
-    robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1) 
+    robot1.robot.set_joint_positions(robot1.initial_joint_config, idx_list_robot1) 
     # Set maximum joint efforts
     robot1.robot._articulation_view.set_max_efforts(
         values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
@@ -1048,7 +1048,7 @@ def main():
     # Initialize robot 2
     robot2.robot._articulation_view.initialize()
     idx_list_robot2 = [robot2.robot.get_dof_index(x) for x in robot2.j_names]
-    robot2.robot.set_joint_positions(robot2.default_config, idx_list_robot2)
+    robot2.robot.set_joint_positions(robot2.initial_joint_config, idx_list_robot2)
     robot2.robot._articulation_view.set_max_efforts(
         values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
     )
