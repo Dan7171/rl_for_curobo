@@ -129,8 +129,8 @@ class DynamicObsCollPredictor:
             # old_world_model = copy.deepcopy(cchecker.world_model)
             # cchecker.load_collision_model(old_world_model)
             
-        print(f"looptime_to_device: {looptime_to_device}")
-        print(f"looptime_update_cchecker: {looptime_update_cchecker}")
+        print(f"debug: looptime_to_device: {looptime_to_device}")
+        print(f"debug: looptime_update_cchecker: {looptime_update_cchecker}")
         print("__")
             
     def _get_predicted_pose_at_step_h(self, h:int, obstacle_name:str):
@@ -139,9 +139,20 @@ class DynamicObsCollPredictor:
         """
         return self.H_world_cchecks[h].world_model.objects[obstacle_name].pose
     
-
+    def update_predictive_collision_checkers_with_predicted_poses(self, predicted_poses:torch.Tensor):
+        """
+        Update the collision checkers with the predicted poses of the obstacles.
+        """
+        obs_at_0 = self.H_world_cchecks[0].world_model.objects
+        obs_names = [obj.name for obj in obs_at_0] 
+        for h in range(self.H):
+            for ob_idx, obs_name in enumerate(obs_names):
+                pos_tensor = self.tensor_args.to_device(torch.from_numpy(predicted_poses[ob_idx][h][:3])) # x,y,z
+                rot_tensor = self.tensor_args.to_device(torch.from_numpy([1,0,0,0])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
+                new_pose = Pose(pos_tensor, rot_tensor) 
+                self.H_world_cchecks[h].update_obstacle_pose(name=obs_name, w_obj_pose=new_pose, update_cpu_reference=False) 
     
-    def update_predictive_collision_checkers(self, obstacles:List[Obstacle]):
+    def update_predictive_collision_checkers_by_constant_vel_pred(self, obstacles:List[Obstacle]):
         """
         First, For each object, predict its path (future positions) over the next H time steps.
         Then, for each time step, update the collision checker with the predicted positions of the objects.

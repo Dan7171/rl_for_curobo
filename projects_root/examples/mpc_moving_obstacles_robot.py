@@ -67,7 +67,7 @@ DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on
 FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
-VISUALIZE_ROBOT_COL_SPHERES = True # If True, then the robot collision spheres will be rendered in the simulation.
+VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
@@ -755,20 +755,20 @@ class FrankaCumotion(AutonomousFranka):
             optimize_dt = False
             trim_steps = [1, None]
             interpolation_dt = trajopt_dt
-
+        # See very good explainations for all the paramerts here: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenConfig
         motion_gen_config = MotionGenConfig.load_from_robot_config( # solver config
-            self.robot_cfg,
-            self.cu_stat_obs_world_model,
-            tensor_args,
-            collision_checker_type=CollisionCheckerType.MESH,
-            num_trajopt_seeds=12,
-            num_graph_seeds=12,
-            interpolation_dt=interpolation_dt,
-            collision_cache=collision_cache,
-            optimize_dt=optimize_dt,
-            trajopt_dt=trajopt_dt,
-            trajopt_tsteps=trajopt_tsteps,
-            trim_steps=trim_steps,
+            self.robot_cfg, # robot_cfg – Robot configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of RobotConfig. See Supported Robots for a list of available robots. You can also create a a configuration file for your robot using Configuring a New Robot.
+            self.cu_stat_obs_world_model, # world_model – World configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of WorldConfig. See Collision World Representation for more details.
+            tensor_args, # tensor_args - Numerical precision and compute device to use for motion generation
+            collision_checker_type=CollisionCheckerType.MESH, # collision_checker_type – Type of collision checker to use for motion generation. Default of CollisionCheckerType.MESH supports world represented by Cuboids and Meshes. See Collision World Representation for more details.
+            num_trajopt_seeds=12, # num_trajopt_seeds – Number of seeds to use for trajectory optimization per problem query. Default of 4 is found to be a good number for most cases. Increasing this will increase memory usage.
+            num_graph_seeds=12, # num_graph_seeds – Number of seeds to use for graph planner per problem query. When graph planning is used to generate seeds for trajectory optimization, graph planner will attempt to find collision-free paths from the start state to the many inverse kinematics solutions.
+            interpolation_dt=interpolation_dt, # interpolation_dt – Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints.
+            collision_cache=collision_cache, # collision_cache – Cache of obstacles to create to load obstacles between planning calls. An example: {"obb": 10, "mesh": 10}, to create a cache of 10 cuboids and 10 meshes.
+            optimize_dt=optimize_dt, # optimize_dt – Optimize dt during trajectory optimization. Default of True is recommended to find time-optimal trajectories. Setting this to False will use the provided trajopt_dt for trajectory optimization. Setting to False is required when optimizing from a non-static start state.
+            trajopt_dt=trajopt_dt, # trajopt_dt – Time step in seconds to use for trajectory optimization. A good value to start with is 0.15 seconds. This value is used to compute velocity, acceleration, and jerk values for waypoints through finite difference.
+            trajopt_tsteps=trajopt_tsteps, # trajopt_tsteps – Number of waypoints to use for trajectory optimization. Default of 32 is found to be a good number for most cases.
+            trim_steps=trim_steps, # trim_steps – Trim waypoints from optimized trajectory. The optimized trajectory will contain the start state at index 0 and have the last two waypoints be the same as T-2 as trajectory optimization implicitly optimizes for zero acceleration and velocity at the last waypoint. An example: [1,-2] will trim the first waypoint and last 3 waypoints from the optimized trajectory.
         )
         self.solver = MotionGen(motion_gen_config)
         if not self.reactive:
@@ -778,12 +778,15 @@ class FrankaCumotion(AutonomousFranka):
         print("Curobo is Ready")
 
     def init_plan_config(self):
+        """Initialize the plan config for the motion generator.
+        See all the documentation here: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenPlanConfig
+        """
         self.plan_config = MotionGenPlanConfig(
-            enable_graph=False,
-            enable_graph_attempt=2,
-            max_attempts=self.max_attempts,
-            enable_finetune_trajopt=self.enable_finetune_trajopt,
-            time_dilation_factor=0.5 if not self.reactive else 1.0,
+            enable_graph=False, # Use graph planner to generate collision-free seed for trajectory optimization.
+            enable_graph_attempt=2, # Number of failed attempts at which to fallback to a graph planner for obtaining trajectory seeds.
+            max_attempts=self.max_attempts, # Maximum number of attempts allowed to solve the motion generation problem.
+            enable_finetune_trajopt=self.enable_finetune_trajopt, # Run finetuning trajectory optimization after running 100 iterations of trajectory optimization. This will provide shorter and smoother trajectories. When MotionGenConfig.optimize_dt is True, this flag will also scale the trajectory optimization by a new dt. Leave this to True for most cases. If you are not interested in finding time-optimal solutions and only want to use motion generation as a feasibility check, set this to False. Note that when set to False, the resulting trajectory is only guaranteed to be collision-free and within joint limits. When False, it’s not guaranteed to be smooth and might not execute on a real robot.
+            time_dilation_factor=0.5 if not self.reactive else 1.0, # Slow down optimized trajectory by re-timing with a dilation factor. This is useful to execute trajectories at a slower speed for debugging. Use this to generate slower trajectories instead of reducing MotionGenConfig.velocity_scale or MotionGenConfig.acceleration_scale as those parameters will require re-tuning of the cost terms while MotionGenPlanConfig.time_dilation_factor will only post-process the trajectory.
         )
     
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position, real_target_orientation,sim_js) -> bool:
@@ -880,8 +883,27 @@ class FrankaCumotion(AutonomousFranka):
         return cu_js    
     
 
-   
-        
+    def get_current_plan_as_tensor(self, to_go_only=True) -> torch.Tensor:
+        """
+        Returns the joint states at at the start of each command in the current plan and the joint velocity commands in the current plan.
+
+        Args:
+            to_go_only (bool, optional):If true, only the commands left to execute in the current plan are returned (else, all commands, including the ones already executed, are returned). Defaults to True.
+
+        Returns:
+            _type_: _description_
+        """
+        if self.cmd_plan is None:
+            return None # robot is not following any plan at the moment
+        n_total = len(self.cmd_plan) # total num of commands (actions) to apply to controller in current command (global) plan
+        n_applied = self.cmd_idx # number of applied actions from total command plan
+        n_to_go = n_total - n_applied # num of commands left to execute 
+        start_idx = 0 if not to_go_only else n_applied
+        start_q = self.cmd_plan.position[start_idx:] # at index i: joint positions just before applying the ith command
+        vel_cmd = self.cmd_plan.velocity[start_idx:] # at index i: joint velocities to apply to the ith command
+        return torch.stack([start_q, vel_cmd]) # shape: (2, len(plan), dof_num)
+       
+    
 #############################################
 # MAIN SIMULATION LOOP
 #############################################
@@ -1046,36 +1068,36 @@ def main():
         robot.robot._articulation_view.set_max_efforts(values=np.array([5000 for i in range(len(robot_idx_lists[i]))]), joint_indices=robot_idx_lists[i])
     
     # ROBOT 2 AS CUBES
-    # dynamic_obstacles = []
-    # robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
-    # glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
-    #             prim_path="/World/material/glass",  # path to the material prim to create
-    #             ior=1.25,
-    #             depth=0.001,
-    #             thin_walled=True,
-    #             color=np.array([1.0, 0.5, 0.5]))
+    dynamic_obstacles = []
+    robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
+    glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+                prim_path="/World/material/glass",  # path to the material prim to create
+                ior=1.25,
+                depth=0.001,
+                thin_walled=True,
+                color=np.array([1.0, 0.5, 0.5]))
     
-    # sparsity = 10 # 1
-    # for i, sphere in enumerate(robot2_spheres):
-    #     if i % sparsity == 0:
-    #         sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
-    #         transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
+    sparsity = 1 # 10 # 1
+    for i, sphere in enumerate(robot2_spheres):
+        if i % sparsity == 0:
+            sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
+            transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
 
-    #         dynamic_obstacles.append(Obstacle(
-    #             name=f"robot2_cube_{i}",
-    #             initial_pose=sphere_as_cuboid.pose, # X_obs_W
-    #             dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
-    #             obstacle_type=DynamicCuboid,
-    #             color=np.array(sphere_as_cuboid.color[:3]),
-    #             mass=1.0,
-    #             gravity_enabled=False,
-    #             linear_velocity=np.array([0,0,0]), # v_obs_W
-    #             angular_velocity=np.array([0,0,0]), # w_obs_W
-    #             world=my_world,
-    #             sim_collision_enabled=False,
-    #             visual_material=glass_visual_material
+            dynamic_obstacles.append(Obstacle(
+                name=f"robot2_cube_{i}",
+                initial_pose=sphere_as_cuboid.pose, # X_obs_W
+                dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
+                obstacle_type=DynamicCuboid,
+                color=np.array(sphere_as_cuboid.color[:3]),
+                mass=1.0,
+                gravity_enabled=False,
+                linear_velocity=np.array([0,0,0]), # v_obs_W
+                angular_velocity=np.array([0,0,0]), # w_obs_W
+                world=my_world,
+                sim_collision_enabled=False,
+                visual_material=glass_visual_material
 
-    #         ))
+            ))
     
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
@@ -1109,13 +1131,15 @@ def main():
                 dynamic_obstacles[obs_index].simulation_representation.set_angular_velocity(dynamic_obstacles[obs_index].angular_velocity)
         
         ############ UPDATE COLLISION CHECKERS ##################
+
         # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
-        if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")() # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts).             
-            pass
-        else:
-            for obs_index in range(len(dynamic_obstacles)):
-                dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker) # update static obstacle collision checker with the new pose of the obstacle from the simulation.
+        
+        # if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+        #     print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers_by_constant_vel_pred(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")() # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts).             
+        #     pass
+        # else:
+        #     for obs_index in range(len(dynamic_obstacles)):
+        #         dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker) # update static obstacle collision checker with the new pose of the obstacle from the simulation.
             
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
@@ -1178,6 +1202,17 @@ def main():
             print("robot2 target changed")
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             
+            # new robot2 plan as obstacles for robot1
+            crmc = CudaRobotModelConfig.from_data_dict(robot2.robot_cfg) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+            robot2_plan = robot2.get_current_plan_as_tensor()
+            H = 30
+            next_H_q_pos, next_H_q_vel = robot2_plan[0][:H,:], robot2_plan[1][:H,:] # from current time step t to t+H-1 inclusive
+            batch_FK_result = CudaRobotModel(crmc).forward(next_H_q_pos, next_H_q_vel) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+            ee_pos, ee_q, _, _, link_pos, link_q, link_spheres = batch_FK_result
+            
+            dynamic_obs_coll_predictor.update_predictive_collision_checkers_with_predicted_poses(dynamic_obstacles)             
+            
+            
         if robot2.cmd_plan is not None:
 
             # urdf_file = robot2.robot_cfg["kinematics"]["urdf_path"]  # robot/franka_description/franka_panda.urdf' 
@@ -1218,9 +1253,9 @@ def main():
                 rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
             # collect the predicted paths of dynamic obstacles
-            if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-                    visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
-                    point_visualzer_inputs.extend(visualization_points_per_obstacle)
+            # if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+            #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
+            #         point_visualzer_inputs.extend(visualization_points_per_obstacle)
             # render the points
             print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
