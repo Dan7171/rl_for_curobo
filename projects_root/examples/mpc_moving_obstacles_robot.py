@@ -144,6 +144,9 @@ from curobo.util.logger import setup_curobo_logger, log_error
 from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
+from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
+from curobo.types.robot import RobotConfig
+
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
 from projects_root.utils.decorators import static_vars
@@ -418,9 +421,9 @@ class AutonomousFranka:
         self.target_last_synced_position = None # current target position of robot as set to the planner
         self.target_last_synced_orientation = None # current target orientation of robot as set to the planner
 
-        self.robot_cfg = robot_cfg
-        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"]
-        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"]
+        self.robot_cfg = robot_cfg # the section under the key 'robot_cfg' in the robot config file (yml). https://curobo.org/tutorials/1_robot_configuration.html#tut-robot-configuration
+        self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"] # joint names for the robot
+        self.default_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] # initial joint configuration for the robot
         
         self.cu_stat_obs_world_model = self._init_curobo_stat_obs_world_model(usd_help) # will be initialized in the _init_curobo_stat_obs_world_model method. Static obstacles world configuration for curobo collision checking.
         self.solver = None # will be initialized in the init_solver method.
@@ -910,36 +913,39 @@ def main():
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
-    robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"] # For curobo's collision checker/s
+    # robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"] # There is only one key (robot_cfg) in the yaml file. For curobo's collision checker/s
+    
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
         activate_gpu_dynamics(my_world)
     
     # Adding two frankas to the scene
     # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
-    
+
     robots: List[Optional[AutonomousFranka]] = [None, None]
     robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
-    robots_collision_caches = [{"obb": 100, "mesh": 10}, {"obb": 30, "mesh": 10}]
-    
+    robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 30, "mesh": 10}]
+    robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    robot2 = FrankaCumotion(robot_cfg, my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
     robots[1] = robot2 
     # init cumotion solver and plan config
     robot2.init_solver(robots_collision_caches[1],tensor_args)
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
-    
-    
-
-    robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
+    robot1 = FrankaMpc(robot_cfgs[0], my_world,usd_help) # MPC robot - avoider
     robots[0] = robot1
 
+    # CUBES AS MANY AS YOU WANT:
     # dynamic_obstacles = []
     # obs_num = 20
     # for i in range(obs_num):
+    #     initial_pose = np.random.uniform(-0.2,0.2,7)
+    #     initial_pose[0] = 1
+    #     initial_pose[2] = 0.5
+        
     #     dynamic_obstacles.append(Obstacle(
     #         name=f"dynamic_cuboid_{i}",
-    #         initial_pose= np.random.uniform(0.8,1.2,7), # np.array([0.8+np.uniform(-0.1,0.1),0.0+random.uniform(-0.1,0.1),0.5+random.uniform(-0.1,0.1),1,0,0,0]), 
+    #         initial_pose= initial_pose, # np.array([0.8+np.uniform(-0.1,0.1),0.0+random.uniform(-0.1,0.1),0.5+random.uniform(-0.1,0.1),1,0,0,0]), 
     #         dims=0.1, 
     #         obstacle_type=DynamicCuboid, 
     #         color=np.array([1,0,0]), # red 
@@ -950,6 +956,7 @@ def main():
     #         world=my_world 
     #     ))
 
+    # TWO ORIGINAL DYNAMIC OBSTACLES:
     dynamic_obstacles = [
         Obstacle( 
             name="dynamic_cuboid1", 
@@ -1005,118 +1012,86 @@ def main():
     
     
     
-    ######################################
-    ########### SIMULATION LOOP ##########
-    ######################################
+    # PRE PLAY
     if not SIMULATING:
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
         real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
 
-    
     init_world = False # ugly, do we need this?
     if not init_world:
         for _ in range(10):
             my_world.step(render=True) 
         init_world = True
 
+    wait_for_playing(my_world) # wait for the play button to be pressed
+    
+    # POST PLAY
+    # reset world:
+    my_world.step(render=True)
+    my_world.reset()
+    # Initialize robot 1
+    idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
+    robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1) 
+    # Set maximum joint efforts
+    robot1.robot._articulation_view.set_max_efforts(
+        values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
+    )
+    if args.print_ctrl_rate and SIMULATING:
+        real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
+    
+    # Initialize robot 2
+    robot2.robot._articulation_view.initialize()
+    idx_list_robot2 = [robot2.robot.get_dof_index(x) for x in robot2.j_names]
+    robot2.robot.set_joint_positions(robot2.default_config, idx_list_robot2)
+    robot2.robot._articulation_view.set_max_efforts(
+        values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
+    )
+    
+
+    # ROBOT 2 AS CUBES
+    # dynamic_obstacles = []
+    # robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
+    # glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+    #             prim_path="/World/material/glass",  # path to the material prim to create
+    #             ior=1.25,
+    #             depth=0.001,
+    #             thin_walled=True,
+    #             color=np.array([1.0, 0.5, 0.5]))
+    
+    # sparsity = 10 # 1
+    # for i, sphere in enumerate(robot2_spheres):
+    #     if i % sparsity == 0:
+    #         sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
+    #         transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
+
+    #         dynamic_obstacles.append(Obstacle(
+    #             name=f"robot2_cube_{i}",
+    #             initial_pose=sphere_as_cuboid.pose, # X_obs_W
+    #             dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
+    #             obstacle_type=DynamicCuboid,
+    #             color=np.array(sphere_as_cuboid.color[:3]),
+    #             mass=1.0,
+    #             gravity_enabled=False,
+    #             linear_velocity=np.array([0,0,0]), # v_obs_W
+    #             angular_velocity=np.array([0,0,0]), # w_obs_W
+    #             world=my_world,
+    #             sim_collision_enabled=False,
+    #             visual_material=glass_visual_material
+
+    #         ))
+    
+    step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
+    expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
+    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+  
+    
+    ctrl_loop_start_time = time.time()
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     while simulation_app.is_running(): # not necessarily playing, just running                
         
-        ########################################################
-        ############# WAITING FOR SIMULATION TO START ##########
-        ########################################################
-        
-        ######### TRY ADVANCING SIMULATION BY ONE STEP #########
-        # Try stepping simulation (steps will be skipped if the simulation is not playing)
         print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
-        
-        ############ VERIFY SIMULATION IS PLAYING BEFORE MOVING ON. PLAY IT IF AUTO PLAY IS ENABLED OR KEEP LOOPING UNTIL BUTTON IS PRESSED ############
-        if not my_world.is_playing(): # if the play button is not pressed yet
-            if args.autoplay: # if autoplay is enabled, play the simulation immediately
-                my_world.play()
-                while not my_world.is_playing():
-                    print("blocking until playing is confirmed...")
-                    time.sleep(0.1)
-            else:
-                print("Waiting for play button to be pressed...")
-                time.sleep(0.1)
-                continue # skip the rest of the loop
-
-        ######################################################
-        ######### IF GOT HERE, SIMULATION IS PLAYING #########
-        ######################################################
-
-        ########## INITIALIZATION BEFORE FIRST STEP ##########
-        if t_idx == 0: # number of simulation steps since the play button was pressed
-            ##### SIM POST INIT #####
-            my_world.reset()
-            # Initialize robot 1
-            idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
-            robot1.robot.set_joint_positions(robot1.default_config, idx_list_robot1)
-            # Set maximum joint efforts
-            robot1.robot._articulation_view.set_max_efforts(
-                values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
-            )
-            if args.print_ctrl_rate and SIMULATING:
-                real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
-            
-
-            # Initialize robot 2
-            robot2.robot._articulation_view.initialize()
-            idx_list_robot2 = [robot2.robot.get_dof_index(x) for x in robot2.j_names]
-            robot2.robot.set_joint_positions(robot2.default_config, idx_list_robot2)
-            robot2.robot._articulation_view.set_max_efforts(
-                values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
-            )
-            
-
-            # robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
-
-            # dynamic_obstacles = []
-            
-            # glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
-            #             prim_path="/World/material/glass",  # path to the material prim to create
-            #             ior=1.25,
-            #             depth=0.001,
-            #             thin_walled=True,
-            #             color=np.array([1.0, 0.5, 0.5]))
-            
-            # for i, sphere in enumerate(robot2_spheres):
-            #     sphere_as_cuboid = sphere.get_cuboid() # cov
-            #     sphere_transform_matrix = sphere_as_cuboid.get_transform_matrix()
-                
-            #     dynamic_obstacles.append(Obstacle(
-            #         name=f"robot2_cube_{i}",
-            #         initial_pose=sphere_as_cuboid.pose, # X_obs_W
-            #         dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
-            #         obstacle_type=DynamicCuboid,
-            #         color=np.array(sphere_as_cuboid.color[:3]),
-            #         mass=1.0,
-            #         gravity_enabled=False,
-            #         linear_velocity=np.array([0,0,0]), # v_obs_W
-            #         angular_velocity=np.array([0,0,0]), # w_obs_W
-            #         world=my_world,
-            #         sim_collision_enabled=False,
-            #         visual_material=glass_visual_material
-
-            #     ))
-            
-            step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
-            expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-            dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-            robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
-            
-
-            ctrl_loop_start_time = time.time()
-
-            
-
-        ########################################################
-        ################## SIMULATION STEP #####################
-        ########################################################
-        
-
         #####################################################
         ########## ROBOT 1 STEP ##########
         #####################################################
@@ -1208,6 +1183,10 @@ def main():
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             
         if robot2.cmd_plan is not None:
+
+            # urdf_file = robot2.robot_cfg["kinematics"]["urdf_path"]  # robot/franka_description/franka_panda.urdf' 
+            # base_link = robot2.robot_cfg["kinematics"]["base_link"]  # 'panda_link0'
+            # ee_link = robot2.robot_cfg["kinematics"]["ee_link"] # 'panda_hand'
             print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
             cmd_state = robot2.cmd_plan[robot2.cmd_idx]
             robot2.past_cmd = cmd_state.clone()
@@ -1219,7 +1198,7 @@ def main():
             )
             # set desired joint angles obtained from IK:
             
-            robot2.articulation_controller.apply_action(art_action)
+            robot2.articulation_controller.apply_action(art_action) # position, velocity, joint_indices https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
             robot2.cmd_idx += 1 # the index of the next command to execute in the plan
             # for _ in range(2):
             #     my_world.step(render=False)
@@ -1228,7 +1207,7 @@ def main():
                 robot2.cmd_idx = 0
                 robot2.cmd_plan = None
                 robot2.past_cmd = None
-
+            
 
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
@@ -1257,6 +1236,23 @@ def main():
         # print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')  
         if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
+
+def wait_for_playing(my_world):
+    playing = False
+    while simulation_app.is_running() and not playing:
+        my_world.step(render=True)
+        if my_world.is_playing():
+            playing = True
+        else:
+            if args.autoplay: # if autoplay is enabled, play the simulation immediately
+                my_world.play()
+                while not my_world.is_playing():
+                    print("blocking until playing is confirmed...")
+                    time.sleep(0.1)
+                playing = True
+            else:
+                print("Waiting for play button to be pressed...")
+                time.sleep(0.1)
 
 
         

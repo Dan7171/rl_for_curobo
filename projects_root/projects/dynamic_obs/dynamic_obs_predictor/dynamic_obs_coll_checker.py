@@ -11,8 +11,13 @@ from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
 from concurrent.futures import ProcessPoolExecutor, wait
-
+import time
 SPHERE_DIM = 4 # The values which are required to define a sphere: x,y,z,radius. That's fixed in all curobo coll checkers
+
+def _parallel_update_cchecker_single_step(h, all_H_ccheckers, full_H_obs_pose_preds, obs_names):
+    step_h_cchecker = all_H_ccheckers[h]
+    step_h_pose_predictions_all_rollouts = full_H_obs_pose_preds[:, h, :]
+    step_h_cchecker._update_cchecker(step_h_pose_predictions_all_rollouts, obs_names)
 
 class DynamicObsCollPredictor:
     """
@@ -103,20 +108,38 @@ class DynamicObsCollPredictor:
         Update the collision checker with the predicted positions of the obstacles.
         """
         # new_quaterion = np.array([1,0,0,0]) # TODO: This is temporary. We need to get the correct orientation of the obstacle.
+        looptime_to_device = 0
+        looptime_update_cchecker = 0
+        
         for obs_idx in range(len(obs_names)): # NOTE: could be parallelized
+            looptime_to_device_start = time.time()
             pos_tensor = self.tensor_args.to_device(torch.from_numpy(new_poses[:,:3][obs_idx])) # x,y,z
             rot_tensor = self.tensor_args.to_device(torch.from_numpy(new_poses[:,3:][obs_idx])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
             new_pose = Pose(pos_tensor, rot_tensor) 
-            # NOTE: I added update_obstacle_pose_in_world_model before update_obstacle_pose only after I realized that there is a chance that update_obstacle_pose is not working, or at least not updating the CPU. I dont know if they are both neede, but now the pose in the cpu is updated too.
-            # TODO: After I manage to give rise to awarness to obstacles in the cost and see change in behaviour, I should remove one of the next two calls, if redundant. For now they are here only to be on the safe side.
-            cchecker.update_obstacle_pose_in_world_model(pose=new_pose, name=obs_names[obs_idx]) 
-            cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
-    
+            looptime_to_device_end = time.time()
+            looptime_to_device += looptime_to_device_end - looptime_to_device_start
+
+            # both work but slow, therefore the no-cpu option is probably better
+            # cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
+            looptime_update_cchecker_start = time.time()
+            cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=False) 
+            looptime_update_cchecker_end = time.time()
+            looptime_update_cchecker += looptime_update_cchecker_end - looptime_update_cchecker_start
+            
+            # old_world_model = copy.deepcopy(cchecker.world_model)
+            # cchecker.load_collision_model(old_world_model)
+            
+        print(f"looptime_to_device: {looptime_to_device}")
+        print(f"looptime_update_cchecker: {looptime_update_cchecker}")
+        print("__")
+            
     def _get_predicted_pose_at_step_h(self, h:int, obstacle_name:str):
         """
         Get the pose of the obstacle in the collision checker.
         """
         return self.H_world_cchecks[h].world_model.objects[obstacle_name].pose
+    
+
     
     def update_predictive_collision_checkers(self, obstacles:List[Obstacle]):
         """
@@ -124,11 +147,7 @@ class DynamicObsCollPredictor:
         Then, for each time step, update the collision checker with the predicted positions of the objects.
         https://curobo.org/get_started/2c_world_collision.html#attach-object-note
         """
-        def _process_single_step(args):
-            self, h, obs_pose_preds, obs_names = args
-            step_h_cchecker = self.H_world_cchecks[h]
-            step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :]
-            self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names)
+        
 
         # 1) Get the names of the objects in the collision checker at time step 0. Order of the objects is important but remains the same for all collision checkers.
         obs_at_0 = self.H_world_cchecks[0].world_model.objects
@@ -159,23 +178,15 @@ class DynamicObsCollPredictor:
             self._obstacles_predicted_paths[obstacle.name] = predicted_obstacle_path # store the predicted path for the obstacle in the dictionary. This is used for debugging.
         
         # 3) Update each collision checker with the predicted positions of the obstacles in its time step.
-        # from multiprocessing import Pool
+        
         for h in range(self.H): # NOTE: We can parallelize this loop.
             step_h_cchecker = self.H_world_cchecks[h] # h'th collision checker
             step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :] # predicted positions of all obstacles at time step h
+            
             self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names) # update the collision checker with the predicted positions of the obstacles
         
-        # with ProcessPoolExecutor() as executor:
-        #     futures = [
-        #     executor.submit(_process_single_step, h, obs_pose_preds, obs_names) for h in range(self.H)
-        # ]
-        # wait(futures)  # Explicitly wait for all futures to complete
 
         
-        # with Pool() as pool:
-        #     args = [(self, h, obs_pose_preds, obs_names) for h in range(self.H)]
-        #     pool.map(_process_single_step, args)
-
             
         print("debug updated collision checkers")
     def cost_fn(self, robot_spheres, env_query_idx=None, method='curobo_prim_coll_cost_fn', binary=False):
