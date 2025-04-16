@@ -934,26 +934,12 @@ def main():
     robot1 = FrankaMpc(robot_cfg, my_world,usd_help) # MPC robot - avoider
     robots[0] = robot1
 
-    dynamic_obstacles = []
-    obs_num = 20
-    for i in range(obs_num):
-        dynamic_obstacles.append(Obstacle(
-            name=f"dynamic_cuboid_{i}",
-            initial_pose= np.random.uniform(0.8,1.2,7), # np.array([0.8+np.uniform(-0.1,0.1),0.0+random.uniform(-0.1,0.1),0.5+random.uniform(-0.1,0.1),1,0,0,0]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([1,0,0]), # red 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.30, 0.0, 0.0],
-            angular_velocity=[1,1,1],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world 
-        ))
-
-    # dynamic_obstacles = [
-    #     Obstacle( 
-    #         name="dynamic_cuboid1", 
-    #         initial_pose=np.array([0.8,0.0,0.5,1,0,0,0]), 
+    # dynamic_obstacles = []
+    # obs_num = 20
+    # for i in range(obs_num):
+    #     dynamic_obstacles.append(Obstacle(
+    #         name=f"dynamic_cuboid_{i}",
+    #         initial_pose= np.random.uniform(0.8,1.2,7), # np.array([0.8+np.uniform(-0.1,0.1),0.0+random.uniform(-0.1,0.1),0.5+random.uniform(-0.1,0.1),1,0,0,0]), 
     #         dims=0.1, 
     #         obstacle_type=DynamicCuboid, 
     #         color=np.array([1,0,0]), # red 
@@ -962,70 +948,35 @@ def main():
     #         angular_velocity=[1,1,1],
     #         gravity_enabled=args.gravity_enabled.lower() == "true",
     #         world=my_world 
-    #     )
-    #     ,  
-    #     Obstacle(
-    #         name="dynamic_cuboid2",
-    #         initial_pose=np.array([0.8,0.8,0.3,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([0,0 ,1]),# blue 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.15, -0.15, 0.05],
-    #         angular_velocity=[0,0,0],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world,
-    #         ),
+    #     ))
 
-    #     Obstacle(
-    #         name="dynamic_cuboid3",
-    #         initial_pose=np.array([0.1,0.8,0.3,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([0,0 ,1]),# blue 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.15, -0.15, 0.05],
-    #         angular_velocity=[0,0,0],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world,
-    #         ),
-
-    #     Obstacle(
-    #         name="dynamic_cuboid4",
-    #         initial_pose=np.array([0.1,0.3,0.3,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([0,0 ,1]),# blue 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.15, -0.15, 0.05],
-    #         angular_velocity=[0,0,0],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world,
-    #         ),
-    #     Obstacle(
-    #         name="dynamic_cuboid5",
-    #         initial_pose=np.array([0.1,2.3,0.3,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([0,0 ,1]),# blue 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.15, -0.15, 0.05],
-    #         angular_velocity=[0,0,0],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world,
-    #         ),
-    #     Obstacle(
-    #         name="dynamic_cuboid6",
-    #         initial_pose=np.array([0.2,3.3,0.8,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([0,0 ,1]),# blue 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.15, -0.15, 0.05],
-    #         angular_velocity=[0,0,0],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world,
-    #         )
+    dynamic_obstacles = [
+        Obstacle( 
+            name="dynamic_cuboid1", 
+            initial_pose=np.array([0.8,0.0,0.5,1,0,0,0]), 
+            dims=0.1, 
+            obstacle_type=DynamicCuboid, 
+            color=np.array([1,0,0]), # red 
+            mass=args.obstacle_mass,
+            linear_velocity=[-0.30, 0.0, 0.0],
+            angular_velocity=[1,1,1],
+            gravity_enabled=args.gravity_enabled.lower() == "true",
+            world=my_world 
+        )
+        ,  
+        Obstacle(
+            name="dynamic_cuboid2",
+            initial_pose=np.array([0.8,0.8,0.3,1,0,0,0]), 
+            dims=0.1, 
+            obstacle_type=DynamicCuboid, 
+            color=np.array([0,0 ,1]),# blue 
+            mass=args.obstacle_mass,
+            linear_velocity=[-0.15, -0.15, 0.05],
+            angular_velocity=[0,0,0],
+            gravity_enabled=args.gravity_enabled.lower() == "true",
+            world=my_world,
+            ),
+    ]
 
 
 
@@ -1267,10 +1218,11 @@ def main():
                 joint_indices=idx_list_robot2,
             )
             # set desired joint angles obtained from IK:
+            
             robot2.articulation_controller.apply_action(art_action)
             robot2.cmd_idx += 1 # the index of the next command to execute in the plan
-            for _ in range(2):
-                my_world.step(render=False)
+            # for _ in range(2):
+            #     my_world.step(render=False)
             
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 robot2.cmd_idx = 0

@@ -10,6 +10,8 @@ from curobo.geom.sdf.world import WorldCollisionConfig
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
+from concurrent.futures import ProcessPoolExecutor, wait
+
 SPHERE_DIM = 4 # The values which are required to define a sphere: x,y,z,radius. That's fixed in all curobo coll checkers
 
 class DynamicObsCollPredictor:
@@ -122,6 +124,11 @@ class DynamicObsCollPredictor:
         Then, for each time step, update the collision checker with the predicted positions of the objects.
         https://curobo.org/get_started/2c_world_collision.html#attach-object-note
         """
+        def _process_single_step(args):
+            self, h, obs_pose_preds, obs_names = args
+            step_h_cchecker = self.H_world_cchecks[h]
+            step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :]
+            self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names)
 
         # 1) Get the names of the objects in the collision checker at time step 0. Order of the objects is important but remains the same for all collision checkers.
         obs_at_0 = self.H_world_cchecks[0].world_model.objects
@@ -152,11 +159,25 @@ class DynamicObsCollPredictor:
             self._obstacles_predicted_paths[obstacle.name] = predicted_obstacle_path # store the predicted path for the obstacle in the dictionary. This is used for debugging.
         
         # 3) Update each collision checker with the predicted positions of the obstacles in its time step.
+        # from multiprocessing import Pool
         for h in range(self.H): # NOTE: We can parallelize this loop.
             step_h_cchecker = self.H_world_cchecks[h] # h'th collision checker
             step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :] # predicted positions of all obstacles at time step h
             self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names) # update the collision checker with the predicted positions of the obstacles
+        
+        # with ProcessPoolExecutor() as executor:
+        #     futures = [
+        #     executor.submit(_process_single_step, h, obs_pose_preds, obs_names) for h in range(self.H)
+        # ]
+        # wait(futures)  # Explicitly wait for all futures to complete
 
+        
+        # with Pool() as pool:
+        #     args = [(self, h, obs_pose_preds, obs_names) for h in range(self.H)]
+        #     pool.map(_process_single_step, args)
+
+            
+        print("debug updated collision checkers")
     def cost_fn(self, robot_spheres, env_query_idx=None, method='curobo_prim_coll_cost_fn', binary=False):
         """
         Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
