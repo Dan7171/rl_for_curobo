@@ -452,9 +452,14 @@ class AutonomousFranka:
 
         
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
-        usd_help.add_subroot(self.world_root, self.subroot_path, Pose.from_list(list(self.p_R) + list(self.R_R)))
-        self.target = spawn_target(self.target_path, self.initial_p_T, self.initial_R_T, self.initial_target_color, self.initial_target_size)
+        X_R = Pose.from_list(list(self.p_R) + list(self.R_R)) # initial pose (X) of robot's base frame (R) (expressed implicitly in the world frame (W))
+        
+        # spawn the robot in the scene in the initial pose X_R
+        usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
         self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R)
+
+        # spawn the target in the scene in the initial pose (X_T = p_T, R_T)
+        self.target = spawn_target(self.target_path, self.initial_p_T, self.initial_R_T, self.initial_target_color, self.initial_target_size)
         
         # Load world configuration for collision checking
         
@@ -927,7 +932,7 @@ def main():
     robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 30, "mesh": 10}]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([0.5,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
     robots[1] = robot2 
     # init cumotion solver and plan config
     robot2.init_solver(robots_collision_caches[1],tensor_args)
