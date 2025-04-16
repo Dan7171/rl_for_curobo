@@ -931,6 +931,8 @@ def main():
     robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
     robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 30, "mesh": 10}]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
+    robot_idx_lists:List[Optional[List]] = [None, None]
+    
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
     robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
     robots[1] = robot2 
@@ -1013,11 +1015,11 @@ def main():
 
     add_extensions(simulation_app, args.headless_mode)
     
-
-    
-    
     
     # PRE PLAY
+    if args.print_ctrl_rate and SIMULATING:
+        real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
+    
     if not SIMULATING:
         real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
@@ -1032,28 +1034,17 @@ def main():
     wait_for_playing(my_world) # wait for the play button to be pressed
     
     # POST PLAY
-    # reset world:
+    # reset world
     my_world.step(render=True)
     my_world.reset()
-    # Initialize robot 1
-    idx_list_robot1 = [robot1.robot.get_dof_index(x) for x in robot1.j_names]
-    robot1.robot.set_joint_positions(robot1.initial_joint_config, idx_list_robot1) 
-    # Set maximum joint efforts
-    robot1.robot._articulation_view.set_max_efforts(
-        values=np.array([5000 for i in range(len(idx_list_robot1))]), joint_indices=idx_list_robot1
-    )
-    if args.print_ctrl_rate and SIMULATING:
-        real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
     
-    # Initialize robot 2
-    robot2.robot._articulation_view.initialize()
-    idx_list_robot2 = [robot2.robot.get_dof_index(x) for x in robot2.j_names]
-    robot2.robot.set_joint_positions(robot2.initial_joint_config, idx_list_robot2)
-    robot2.robot._articulation_view.set_max_efforts(
-        values=np.array([5000 for i in range(len(idx_list_robot2))]), joint_indices=idx_list_robot2
-    )
+    # Set robots in initial joint configuration ("retract" config)
+    for i, robot in enumerate(robots):
+        # robot.robot._articulation_view.initialize()
+        robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
+        robot.robot.set_joint_positions(robot.initial_joint_config, robot_idx_lists[i]) 
+        robot.robot._articulation_view.set_max_efforts(values=np.array([5000 for i in range(len(robot_idx_lists[i]))]), joint_indices=robot_idx_lists[i])
     
-
     # ROBOT 2 AS CUBES
     # dynamic_obstacles = []
     # robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
@@ -1199,7 +1190,7 @@ def main():
             art_action = ArticulationAction(
                 cmd_state.position.cpu().numpy(),
                 cmd_state.velocity.cpu().numpy(),
-                joint_indices=idx_list_robot2,
+                joint_indices=robot_idx_lists[1], #joint_indices=idx_list_robot2,
             )
             # set desired joint angles obtained from IK:
             
