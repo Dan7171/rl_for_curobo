@@ -1,6 +1,6 @@
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
-from curobo.geom.types import WorldConfig
+from curobo.geom.types import Cuboid, WorldConfig
 from curobo.types.math import Pose
 from typing import List
 import numpy as np
@@ -29,7 +29,7 @@ class DynamicObsCollPredictor:
     
 
     # def __init__(self, tensor_args, world_cfg_template:WorldConfig , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
-    def __init__(self, tensor_args, obstacle_list:List[Obstacle] , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    def __init__(self, tensor_args, obstacle_list:List[Obstacle] , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,robot_collision_sphere_num=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True, n_checkers=-1):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -39,6 +39,7 @@ class DynamicObsCollPredictor:
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
             step_dt_traj_mpc (float): Time passes between each step in the trajectory. This is what the mpc assumes time delta between steps in horizon is.
             H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.
+            n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             robot_collision_sphere_num: The number of collision spheres (the robot is approximated as spheres when calculating collision. NOTE: 65 is in franka,)
             activation_distance:  The distance in meters between a robot sphere and an obstacle over all obstacles, at which the collision cost starts to be "active" (positive). Denoted as "etha" or "activation distance" in the paper section 3.3.
@@ -51,6 +52,10 @@ class DynamicObsCollPredictor:
         self.weight_col_check = tensor_args.to_device([1]) # Leave 1. This is the weight for curobo collision checking. Explained in the paper. Since we are only interested at wether there is a collision or not (i.e. cost is positive in collision and 0 else), this is not important. See https://curobo.org/get_started/2c_world_collision.html        
         self.tensor_args = tensor_args 
         self.H = H 
+        if n_checkers == -1:
+            self.n_checkers = H
+        else:
+            self.n_checkers = n_checkers
         self.collision_sphere_num = robot_collision_sphere_num 
         self.n_rollouts = n_rollouts 
         self.step_dt_traj_mpc = step_dt_traj_mpc 
@@ -59,9 +64,11 @@ class DynamicObsCollPredictor:
         self.shift_cost_matrix_left = shift_cost_matrix_left
         self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
         self._obstacles_predicted_paths = {} # dictionary of predicted paths for each obstacle
-
+        # self._window_starting_index = 0 # the starting index of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
+        self._n_valid_checkers = self.n_checkers  # the last valid of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
+        # self.routing_table = np.arange(self.n_checkers) # mapping at each time step from t (current time step) to t+n_checkers-1 (inclusive), which checker will be used to check the collision.
         # Make H copies of the collision supported world model template
-
+        self.cur_checker_idx = 0
         # First we make templates:
         cache_cp = copy.deepcopy(cache) # so we won't modify the original cache
         
@@ -75,15 +82,27 @@ class DynamicObsCollPredictor:
         
         # Now we can make H copies:
         query_buffer_shape = torch.zeros((self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM), device=self.tensor_args.device, dtype=self.tensor_args.dtype).shape # torch.Size([self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM]) # n_rollouts x 1(current time step) x num of coll spheres x sphere_dim (x,y,z,radius) https://curobo.org/get_started/2c_world_collision.html
-        self.H_collision_buffers = [] # not sure what they are for but they are needed.
-        self.H_world_cchecks = [] # list of collision checkers (one checker for each time step in the horizon)
-        for _ in range(self.H):
-            world_collision_cfg_h = copy.deepcopy(cu_coll_supported_world_model_template) # NOTE: I use copies to avoid side effects. We duplicate the 
-            col_checker_h = WorldMeshCollision(world_collision_cfg_h) # Initiate a single collision checker for each time step over the horizon.
-            self.H_world_cchecks.append(col_checker_h)
-            self.H_collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker_h.collision_types)) # I dont know yet what they are for 
+        self.collision_buffers = [] # not sure what they are for but they are needed.
+        self.cchecks = [] # list of collision checkers (one checker for each time step in the horizon)
+        for _ in range(self.n_checkers):
+            cu_coll_supported_world_model_cp = copy.deepcopy(cu_coll_supported_world_model_template) # NOTE: I use copies to avoid side effects. We duplicate the 
+            col_checker = WorldMeshCollision(cu_coll_supported_world_model_cp) # Initiate a single collision checker for each time step over the horizon.
+            self.cchecks.append(col_checker)
+            self.collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for 
         
+    # def update_routing_table(self, new_routing_table:np.ndarray=np.ndarray([])):
+    #     """
+    #     Update the routing table.
+    #     """
+    #     self.routing_table = new_routing_table
 
+    # def shift_routing_table(self):
+    #     """
+    #     Update the routing table to a circular order.
+    #     """
+    #     new_routing_table = np.append(self.routing_table[1:],self.routing_table[-1])
+    #     self.routing_table = new_routing_table
+        
     def predict_obstacle_path(self, cur_obstacle_pos:np.ndarray, cur_obstacle_lin_vel:np.ndarray, cur_obstacle_lin_acceleration:np.ndarray, cur_obstacle_orientation:np.ndarray, cur_obstacle_angular_vel:np.ndarray, cur_obstacle_angular_acceleration:np.ndarray):
         """
         Predict the path of the obstacle over the next H steps.
@@ -103,6 +122,12 @@ class DynamicObsCollPredictor:
 
         return path
     
+    # def update_obstacle_predicted_path(self,obstacle_name):
+        
+    #     for i in self.routing_table:
+    #         checker_step_i = self.cchecks[i]
+    #         self._obstacles_predicted_paths[obstacle_name][h] = checker_step_i.world_model.objects[obstacle_name].pose 
+
     def _update_cchecker(self, cchecker, new_poses, obs_names):
         """
         Update the collision checker with the predicted positions of the obstacles.
@@ -137,20 +162,47 @@ class DynamicObsCollPredictor:
         """
         Get the pose of the obstacle in the collision checker.
         """
-        return self.H_world_cchecks[h].world_model.objects[obstacle_name].pose
+        return self.cchecks[h].world_model.objects[obstacle_name].pose
     
-    def update_predictive_collision_checkers_with_predicted_poses(self, predicted_poses:torch.Tensor):
-        """
-        Update the collision checkers with the predicted poses of the obstacles.
-        """
-        obs_at_0 = self.H_world_cchecks[0].world_model.objects
-        obs_names = [obj.name for obj in obs_at_0] 
-        for h in range(self.H):
-            for ob_idx, obs_name in enumerate(obs_names):
-                pos_tensor = self.tensor_args.to_device(torch.from_numpy(predicted_poses[ob_idx][h][:3])) # x,y,z
-                rot_tensor = self.tensor_args.to_device(torch.from_numpy([1,0,0,0])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
-                new_pose = Pose(pos_tensor, rot_tensor) 
-                self.H_world_cchecks[h].update_obstacle_pose(name=obs_name, w_obj_pose=new_pose, update_cpu_reference=False) 
+    # def update_with_predicted_poses(self, X_predicted:torch.Tensor, obs_names:List[str]):
+    #     """
+    #     Update the collision checkers with the predicted poses of the obstacles (each pose is a tensor of shape (7,)
+    #     x,y,z,qw,qx,qy,qz).
+    #     X_predicted[i,j,:] = pose of the j'th obstacle at the i'th time step (i'th checker in the collision checkers).
+
+    #     """
+    #     # obs_at_0 = self.cchecks[0].world_model.objects
+    #     # obs_names = [obj.name for obj in obs_at_0] 
+    #     n_predictable = X_predicted.shape[0] # num of time steps which are predictable (given by the input)
+    #     n_spheres = X_predicted.shape[1] # number of obstacles
+    #     # X_spheres = torch.zeros((n_predictable, n_spheres, 7), device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+    #     for cchecker_idx in range(n_predictable):
+    #         # for ob_idx, obs_name in enumerate(obs_names):
+    #         checker_poses = X_predicted[cchecker_idx, :, :]
+    #         # pos_tensor = self.tensor_args.to_device(torch.from_numpy(spheres[ob_idx][h][:3])) # x,y,z
+    #         # rot_tensor = self.tensor_args.to_device(torch.from_numpy([1,0,0,0])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
+    #         # new_pose = Pose(pos_tensor, rot_tensor) 
+    #         self._update_cchecker(self.cchecks[cchecker_idx], X_predicted[cchecker_idx, :, :], obs_names)
+    #         # self.cchecks[h].update_obstacle_pose(name=obs_name, w_obj_pose=new_pose, update_cpu_reference=False) 
+        
+    #     self._n_valid_checkers = n_predictable # the last valid index of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
+    
+
+
+    # def set_coll_cuboids_sizes(self, dims:torch.Tensor, cuboid_names:List[str]):
+    #     """
+    #     Set the sizes of the cuboids in the collision checkers.
+    #     Args:
+    #         dims: dimensions of the cuboid in the collision checker.
+    #         dims[i] = Dimensions of cuboid in meters [x_length, y_length, z_length] for the i'th cuboid. As explained in https://curobo.org/_api/curobo.geom.sdf.world.html#curobo.geom.sdf.world.WorldPrimitiveCollision.enable_obstacle, https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.Cuboid.dims
+    #         cuboid_names (List[str]): names of the cuboids in the collision checkers at the order of the cuboids in dims.
+    #     """
+    #     for checker_idx in range(self._n_valid_checkers): # NOTE: could be parallelized
+    #         for cuboid_idx, cuboid_name in enumerate(cuboid_names):
+    #             cuboid = self.cchecks[checker_idx].world_model.objects[cuboid_name]
+    #             self.cchecks[checker_idx].update_obb_dims(dims[cuboid_idx],name=cuboid_name)
+    #             # cuboid.dims(]) # https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.Cuboid.dims
+                
     
     def update_predictive_collision_checkers_by_constant_vel_pred(self, obstacles:List[Obstacle]):
         """
@@ -161,7 +213,7 @@ class DynamicObsCollPredictor:
         
 
         # 1) Get the names of the objects in the collision checker at time step 0. Order of the objects is important but remains the same for all collision checkers.
-        obs_at_0 = self.H_world_cchecks[0].world_model.objects
+        obs_at_0 = self.cchecks[0].world_model.objects
         obs_names = [obj.name for obj in obs_at_0] 
         
         
@@ -191,7 +243,7 @@ class DynamicObsCollPredictor:
         # 3) Update each collision checker with the predicted positions of the obstacles in its time step.
         
         for h in range(self.H): # NOTE: We can parallelize this loop.
-            step_h_cchecker = self.H_world_cchecks[h] # h'th collision checker
+            step_h_cchecker = self.cchecks[h] # h'th collision checker
             step_h_pose_predictions_all_rollouts = obs_pose_preds[:, h, :] # predicted positions of all obstacles at time step h
             
             self._update_cchecker(step_h_cchecker, step_h_pose_predictions_all_rollouts, obs_names) # update the collision checker with the predicted positions of the obstacles
@@ -200,6 +252,7 @@ class DynamicObsCollPredictor:
         
             
         print("debug updated collision checkers")
+    
     def cost_fn(self, robot_spheres, env_query_idx=None, method='curobo_prim_coll_cost_fn', binary=False):
         """
         Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
@@ -218,26 +271,31 @@ class DynamicObsCollPredictor:
             tensor of shape [n_rollouts, horizon] containing collision costs (we denot the returned tensor by the matrix named "dynamic_coll_cost_matrix" 
             where dynamic_coll_cost_matrix[r,h] is the  predictrive collision cost for the robot for rollout r and time step h, where r is the rollout index and h is the time step index)
         """
-        
+        # self.shift_routing_table()
+
         if not torch.cuda.is_current_stream_capturing():
             self._init_counter += 1
             print(f"Initialization iteration {self._init_counter} (ignore this printing if not use_cuda_graph is False. Intializtion refers to the cuda graph capture. TODO: If use_cuda_graph is False, this should not be printed.)")
             if torch.cuda.is_current_stream_capturing():
                 print("During graph capture")
+        
+        
 
         # Initialize cost tensor
         dynamic_coll_cost_matrix = torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
         # Make input contiguous and ensure proper shape
         robot_spheres = robot_spheres.contiguous() # Returns a contiguous in memory tensor containing the same data as self tensor. If self tensor is already in the specified memory format, this function returns the self tensor. https://pytorch.org/docs/stable/generated/torch.Tensor.contiguous.html
         for h in range(self.H):
-            buffer_step_h = self.H_collision_buffers[h]
             
+            checker_to_use_at_step_h = max(self.cur_checker_idx + h, self.n_checkers - 1) # self.routing_table[h]
+            buffer_step_h = self.collision_buffers[checker_to_use_at_step_h]
+
             # Extract and reshape spheres for current timestep
             robot_spheres_step_h = robot_spheres[:, h].contiguous() # From [n_rollouts, H, n_spheres, SPHERE_DIM] to [n_rollouts, n_spheres, SPHERE_DIM]. We now focus on rollouts only from the time step "t+h" over the horizon (horizon starts at t, meaning h=0).
             robot_spheres_step_h = robot_spheres_step_h.reshape(self.n_rollouts, 1, self.collision_sphere_num, SPHERE_DIM) # From [n_rollouts, n_spheres, SPHERE_DIM] to [n_rollouts, 1, n_spheres, SPHERE_DIM] 
             
             if method == 'curobo_prim_coll_cost_fn': # NOTE: currently the only method implemented. There is an option to use the sdfs but I failed to make it work, I suspect there is a bug there
-                spheres_curobo_coll_costs = self.H_world_cchecks[h].get_sphere_distance( # NOTE: although the method is called get_sphere_distance, it actually returns the "curobo collision cost" (see section 3.3 in paper).
+                spheres_curobo_coll_costs = self.cchecks[checker_to_use_at_step_h].get_sphere_distance( # NOTE: although the method is called get_sphere_distance, it actually returns the "curobo collision cost" (see section 3.3 in paper).
                     query_sphere=robot_spheres_step_h, 
                     collision_query_buffer=buffer_step_h,
                     activation_distance=self.activation_distance,
@@ -264,11 +322,11 @@ class DynamicObsCollPredictor:
 
                 # #### debug ####
                 # if h % 7 == 0:
-                #     print(f"step {h}: col_checker obs estimated pose: {self.H_world_cchecks[h].world_model.objects[0].pose}")
+                #     print(f"step {h}: col_checker obs estimated pose: {self.cchecks[h].world_model.objects[0].pose}")
                 # ############### 
         
-        # Now that we have the full cost matrix, which is of shape [n_rollouts, horizon].
-        # Some post-processing if needed:
+            # Now that we have the full cost matrix, which is of shape [n_rollouts, horizon].
+            # Some post-processing if needed:
 
         # For each rollout, if a cost entry is less than the previous entry, set it to 0. The idea is to avoid charging for actions which take the robot out of collision. For those actions, we set a cost of 0.
         if self.mask_decreasing_cost_entries:
@@ -281,6 +339,7 @@ class DynamicObsCollPredictor:
         # Scale the cost matrix by the cost weight:
         dynamic_coll_cost_matrix *= self.cost_weight
         
+        self.cur_checker_idx += 1
         return dynamic_coll_cost_matrix 
     
     def get_predicted_path(self, obstacle_name:str):
@@ -290,4 +349,37 @@ class DynamicObsCollPredictor:
         return self._obstacles_predicted_paths[obstacle_name]
         
          
-       
+
+    def add_cuboids_to_checker(self, cuboid_list:List[Cuboid], checker_idx:int):
+        """
+        Add an obstacle to the collision checker at a specific index.
+        """
+        for cuboid in cuboid_list:
+            self.cchecks[checker_idx].add_obb(cuboid)
+            if cuboid.name not in self._obstacles_predicted_paths:
+                self._obstacles_predicted_paths[cuboid.name] = np.zeros((self.n_checkers, 7))
+            self._obstacles_predicted_paths[cuboid.name][checker_idx] = np.array(cuboid.pose)
+
+    def disable_obstacles_in_checker(self, obstacle_names:List[str], checker_idx:int):
+        """
+        Disable the obstacles in the collision checker at a specific index.
+        """
+        for obstacle_name in obstacle_names:
+            self.cchecks[checker_idx].enable_obstacle(obstacle_name, False)
+
+    def enable_obstacles_in_checker(self, obstacle_names:List[str], checker_idx:int):
+        """
+        Enable the obstacles in the collision checker at a specific index.
+        """
+        for obstacle_name in obstacle_names:
+            self.cchecks[checker_idx].enable_obstacle(obstacle_name)
+
+
+
+    
+
+    
+
+
+
+

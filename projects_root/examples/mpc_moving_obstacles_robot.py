@@ -64,7 +64,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
-FORCE_CONSTANT_VELOCITIES = True # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
+FORCE_CONSTANT_VELOCITIES = False # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
@@ -333,7 +333,7 @@ def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic
     for obs_index in range(len(dynamic_obstacles)):
         obs_predicted_poses = torch.zeros((1 ,horizon, 3))
         obs_name = dynamic_obstacles[obs_index].name
-        predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)
+        predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)[dynamic_obs_coll_predictor.cur_checker_idx:dynamic_obs_coll_predictor.cur_checker_idx+dynamic_obs_coll_predictor.H]
         predicted_path = predicted_path[:,:3]
         obs_predicted_poses[0] = torch.tensor(predicted_path)
         obs_color = dynamic_obstacles[obs_index].simulation_representation.get_applied_visual_material().get_color()
@@ -729,7 +729,7 @@ class FrankaCumotion(AutonomousFranka):
         self.hold_partial_pose = None
         self.cmd_plan = None
         self.cmd_idx = 0
-        
+        self.n_coll_spheres = 65
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         
@@ -851,7 +851,6 @@ class FrankaCumotion(AutonomousFranka):
             
             self.cmd_plan = cmd_plan # global plan
             self.cmd_idx = 0 # commands executed from the global plan (counter)
-            
         else:
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
@@ -986,33 +985,33 @@ def main():
     #     ))
 
     # TWO ORIGINAL DYNAMIC OBSTACLES:
-    dynamic_obstacles = [
-        Obstacle( 
-            name="dynamic_cuboid1", 
-            initial_pose=np.array([0.8,0.0,0.5,1,0,0,0]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([1,0,0]), # red 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.30, 0.0, 0.0],
-            angular_velocity=[1,1,1],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world 
-        )
-        ,  
-        Obstacle(
-            name="dynamic_cuboid2",
-            initial_pose=np.array([0.8,0.8,0.3,1,0,0,0]), 
-            dims=0.1, 
-            obstacle_type=DynamicCuboid, 
-            color=np.array([0,0 ,1]),# blue 
-            mass=args.obstacle_mass,
-            linear_velocity=[-0.15, -0.15, 0.05],
-            angular_velocity=[0,0,0],
-            gravity_enabled=args.gravity_enabled.lower() == "true",
-            world=my_world,
-            ),
-    ]
+    # dynamic_obstacles = [
+    #     Obstacle( 
+    #         name="dynamic_cuboid1", 
+    #         initial_pose=np.array([0.8,0.0,0.5,1,0,0,0]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([1,0,0]), # red 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.30, 0.0, 0.0],
+    #         angular_velocity=[1,1,1],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world 
+    #     )
+    #     ,  
+    #     Obstacle(
+    #         name="dynamic_cuboid2",
+    #         initial_pose=np.array([0.8,0.8,0.3,1,0,0,0]), 
+    #         dims=0.1, 
+    #         obstacle_type=DynamicCuboid, 
+    #         color=np.array([0,0 ,1]),# blue 
+    #         mass=args.obstacle_mass,
+    #         linear_velocity=[-0.15, -0.15, 0.05],
+    #         angular_velocity=[0,0,0],
+    #         gravity_enabled=args.gravity_enabled.lower() == "true",
+    #         world=my_world,
+    #         ),
+    # ]
 
 
 
@@ -1066,42 +1065,39 @@ def main():
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.robot.set_joint_positions(robot.initial_joint_config, robot_idx_lists[i]) 
         robot.robot._articulation_view.set_max_efforts(values=np.array([5000 for i in range(len(robot_idx_lists[i]))]), joint_indices=robot_idx_lists[i])
-    
+
     # ROBOT 2 AS CUBES
     dynamic_obstacles = []
-    robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
-    glass_visual_material = OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
-                prim_path="/World/material/glass",  # path to the material prim to create
-                ior=1.25,
-                depth=0.001,
-                thin_walled=True,
-                color=np.array([1.0, 0.5, 0.5]))
+    # robot2_spheres = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state(),express_in_world_frame=True)
     
-    sparsity = 1 # 10 # 1
-    for i, sphere in enumerate(robot2_spheres):
-        if i % sparsity == 0:
-            sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
-            transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
+    # robot2_n_col_cubes = 65
+    # for i in range(robot2_n_col_cubes):
+    #     # sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
+    #     # transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
+    #     dynamic_obstacles.append(Obstacle(
+    #         name=f"robot2_col_cube_{i}",
+    #         initial_pose=np.array([0,0,0,1,0,0,0]),# sphere_as_cuboid.pose, # X_obs_W
+    #         dims=0.01,#sphere_as_cuboid.dims[0],# 2*sphere.radius,
+    #         obstacle_type=DynamicCuboid,
+    #         color=np.array([0,0,0]),# (sphere_as_cuboid.color[:3]),
+    #         mass=1.0,
+    #         gravity_enabled=False,
+    #         linear_velocity=np.array([0,0,0]), # v_obs_W
+    #         angular_velocity=np.array([0,0,0]), # w_obs_W
+    #         world=my_world,
+    #         sim_collision_enabled=False, # we don't want it to collide with anything because it's only an approximation of robot2
+    #         visual_material=OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+    #             prim_path="/World/material/glass",  # path to the material prim to create
+    #             ior=1.25,
+    #             depth=0.001,
+    #             thin_walled=True,
+    #             color=np.array([1.0, 0.5, 0.5]))
 
-            dynamic_obstacles.append(Obstacle(
-                name=f"robot2_cube_{i}",
-                initial_pose=sphere_as_cuboid.pose, # X_obs_W
-                dims=sphere_as_cuboid.dims[0],# 2*sphere.radius,
-                obstacle_type=DynamicCuboid,
-                color=np.array(sphere_as_cuboid.color[:3]),
-                mass=1.0,
-                gravity_enabled=False,
-                linear_velocity=np.array([0,0,0]), # v_obs_W
-                angular_velocity=np.array([0,0,0]), # w_obs_W
-                world=my_world,
-                sim_collision_enabled=False,
-                visual_material=glass_visual_material
-
-            ))
+    #     ))
     
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc,n_checkers=100) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
     
@@ -1109,12 +1105,8 @@ def main():
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     while simulation_app.is_running(): # not necessarily playing, just running                
         
-        print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
-        #####################################################
+        my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
         ########## ROBOT 1 STEP ##########
-        #####################################################
-
-
         #### START MEASURING CTRL FREQ IF NEEDED AND CAN #######    
         if args.print_ctrl_rate and not SIMULATING:
             real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
@@ -1203,15 +1195,73 @@ def main():
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             
             # new robot2 plan as obstacles for robot1
-            crmc = CudaRobotModelConfig.from_data_dict(robot2.robot_cfg) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
             robot2_plan = robot2.get_current_plan_as_tensor()
-            H = 30
-            next_H_q_pos, next_H_q_vel = robot2_plan[0][:H,:], robot2_plan[1][:H,:] # from current time step t to t+H-1 inclusive
-            batch_FK_result = CudaRobotModel(crmc).forward(next_H_q_pos, next_H_q_vel) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-            ee_pos, ee_q, _, _, link_pos, link_q, link_spheres = batch_FK_result
+            # H = 30 # of robot1
+            pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
+            # pos_jsR2nextH, vel_jsR2nextH = pos_jsR2fullplan[:H,:], vel_jsR2fullplan[:H,:]
+            robot2_crmc = CudaRobotModelConfig.from_data_dict(robot2.robot_cfg) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+            robot2_crm = CudaRobotModel(robot2_crmc)
+            # FK of robot2 plan: all poses and orientations are expressed in robot2 frame (R2)
+            p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = \
+            robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
             
-            dynamic_obs_coll_predictor.update_predictive_collision_checkers_with_predicted_poses(dynamic_obstacles)             
+            # convert to world frame (W)
+            pos_eeR2fullplan = p_eeR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
+            q_eeR2fullplan = q_eeR2fullplan_R2.cpu() # TODO (need a real rotation)
+            pos_linksR2fullplan = p_linksR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
+            q_linksR2fullplan = q_linksR2fullplan_R2.cpu() # TODO (need a real rotation)
+            p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy
+            p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+            p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
+            X_spheresR2fullplan = torch.zeros(p_spheresR2fullplan.shape[0], p_spheresR2fullplan.shape[1], 7)
+            X_spheresR2fullplan[:,:,:3] = p_spheresR2fullplan
+            X_spheresR2fullplan[:,:,3:] = torch.tensor([1,0,0,0], device=X_spheresR2fullplan.device, dtype=X_spheresR2fullplan.dtype)
             
+            robot2_plan_len = X_spheresR2fullplan.shape[0] # time steps in the plan
+            robot2_n_spheres = p_spheresR2fullplan.shape[1] # number of spheres robot 2 is approximated to
+            
+            print("Updating dynamic obstacle collision checkers")
+            all_spheres = [f'robot2_col_cube_{i}' for i in range(robot2_n_spheres)]
+            subset_indices = [10] # range(len(all_spheres))
+            # obs_to_update_by_name = [obstacles_names[i] for i in obs_to_update]
+            
+            for i in range(robot2_plan_len): 
+                checker_i_cuboids = []
+                for j in subset_indices:
+                    obs_name = all_spheres[j] 
+                    sphere_pose = X_spheresR2fullplan[i,j,:3].tolist()+[1,0,0,0]
+                    sphere_radius = p_rad_spheresR2fullplan[i,j,3].item() 
+                    sphere = Sphere(name=obs_name,pose=sphere_pose,radius=sphere_radius)
+                    cuboid = sphere.get_cuboid() # convert sphere to cuboid
+                    checker_i_cuboids.append(cuboid)
+                    # sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
+                    # transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
+                    if i == 0:
+                        dynamic_obstacles.append(Obstacle(
+                            name=obs_name,
+                            initial_pose=np.array(sphere_pose),# sphere_as_cuboid.pose, # X_obs_W
+                            dims=cuboid.dims[0],#sphere_as_cuboid.dims[0],# 2*sphere.radius,
+                            obstacle_type=DynamicCuboid,
+                            color=np.array([0,0,0]),# (sphere_as_cuboid.color[:3]),
+                            mass=1.0,
+                            gravity_enabled=False,
+                            linear_velocity=np.array([0,0,0]), # v_obs_W
+                            angular_velocity=np.array([0,0,0]), # w_obs_W
+                            world=my_world,
+                            sim_collision_enabled=False, # we don't want it to collide with anything because it's only an approximation of robot2
+                            visual_material=OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+                                prim_path="/World/material/glass",  # path to the material prim to create
+                                ior=1.25,
+                                depth=0.001,
+                                thin_walled=True,
+                                color=np.array([1.0, 0.5, 0.5]))
+
+                    ))
+                
+                dynamic_obs_coll_predictor.add_cuboids_to_checker(checker_i_cuboids, i)
+            print("Updated dynamic obstacle collision checkers")
+
+
             
         if robot2.cmd_plan is not None:
 
@@ -1252,12 +1302,14 @@ def main():
             if VISUALIZE_MPC_ROLLOUTS:
                 rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
-            # collect the predicted paths of dynamic obstacles
-            # if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
-            #         point_visualzer_inputs.extend(visualization_points_per_obstacle)
+            #collect the predicted paths of dynamic obstacles
+            if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+                    visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
+                    point_visualzer_inputs.extend(visualization_points_per_obstacle)
             # render the points
-            print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
+            global_plan_points = {'points': p_spheresR2fullplan, 'color': 'green'}
+            point_visualzer_inputs.append(global_plan_points)
+            draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
         ############### UPDATE TIME STEP INDEX  ###############
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)

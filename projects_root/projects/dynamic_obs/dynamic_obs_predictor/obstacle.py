@@ -220,4 +220,8 @@ class Obstacle:
             self.world_model_curobo = world_model_curobo # sets the world this object will be living in
         self.world_model_curobo.add_obstacle(self.curobo_representation) # adds (injects) the curobo representation to the curobo world model
     
-        
+    
+
+    # def set_cube_dims(self, dims:list):
+    #     self.curobo_representation.dims = dims
+    #     self.simulation_representation.set_size(dims)
