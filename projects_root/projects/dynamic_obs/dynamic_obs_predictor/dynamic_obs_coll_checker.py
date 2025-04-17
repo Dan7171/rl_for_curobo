@@ -1,6 +1,6 @@
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
-from curobo.geom.types import Cuboid, WorldConfig
+from curobo.geom.types import Cuboid, Sphere, WorldConfig
 from curobo.types.math import Pose
 from typing import List
 import numpy as np
@@ -64,11 +64,11 @@ class DynamicObsCollPredictor:
         self.shift_cost_matrix_left = shift_cost_matrix_left
         self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
         self._obstacles_predicted_paths = {} # dictionary of predicted paths for each obstacle
-        # self._window_starting_index = 0 # the starting index of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
-        self._n_valid_checkers = self.n_checkers  # the last valid of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
-        # self.routing_table = np.arange(self.n_checkers) # mapping at each time step from t (current time step) to t+n_checkers-1 (inclusive), which checker will be used to check the collision.
+        self.n_valid_checkers = 0  # the last valid of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
+        self.cur_checker_idx = 0 # the current checker index (cost function will calculate from this index to this index + H or the last valid checker index)
+        
         # Make H copies of the collision supported world model template
-        self.cur_checker_idx = 0
+        
         # First we make templates:
         cache_cp = copy.deepcopy(cache) # so we won't modify the original cache
         
@@ -90,18 +90,7 @@ class DynamicObsCollPredictor:
             self.cchecks.append(col_checker)
             self.collision_buffers.append(CollisionQueryBuffer.initialize_from_shape(query_buffer_shape, self.tensor_args, col_checker.collision_types)) # I dont know yet what they are for 
         
-    # def update_routing_table(self, new_routing_table:np.ndarray=np.ndarray([])):
-    #     """
-    #     Update the routing table.
-    #     """
-    #     self.routing_table = new_routing_table
-
-    # def shift_routing_table(self):
-    #     """
-    #     Update the routing table to a circular order.
-    #     """
-    #     new_routing_table = np.append(self.routing_table[1:],self.routing_table[-1])
-    #     self.routing_table = new_routing_table
+    
         
     def predict_obstacle_path(self, cur_obstacle_pos:np.ndarray, cur_obstacle_lin_vel:np.ndarray, cur_obstacle_lin_acceleration:np.ndarray, cur_obstacle_orientation:np.ndarray, cur_obstacle_angular_vel:np.ndarray, cur_obstacle_angular_acceleration:np.ndarray):
         """
@@ -122,15 +111,10 @@ class DynamicObsCollPredictor:
 
         return path
     
-    # def update_obstacle_predicted_path(self,obstacle_name):
-        
-    #     for i in self.routing_table:
-    #         checker_step_i = self.cchecks[i]
-    #         self._obstacles_predicted_paths[obstacle_name][h] = checker_step_i.world_model.objects[obstacle_name].pose 
-
-    def _update_cchecker(self, cchecker, new_poses, obs_names):
+    
+    def _update_cchecker(self, cchecker, X, obs_names):
         """
-        Update the collision checker with the predicted positions of the obstacles.
+        Update the collision checker with the predicted poses obstacles.
         """
         # new_quaterion = np.array([1,0,0,0]) # TODO: This is temporary. We need to get the correct orientation of the obstacle.
         looptime_to_device = 0
@@ -138,15 +122,15 @@ class DynamicObsCollPredictor:
         
         for obs_idx in range(len(obs_names)): # NOTE: could be parallelized
             looptime_to_device_start = time.time()
-            pos_tensor = self.tensor_args.to_device(torch.from_numpy(new_poses[:,:3][obs_idx])) # x,y,z
-            rot_tensor = self.tensor_args.to_device(torch.from_numpy(new_poses[:,3:][obs_idx])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
+            pos_tensor = self.tensor_args.to_device(X[:,:3][obs_idx]) # torch.from_numpy(new_poses[:,:3][obs_idx])) # x,y,z
+            rot_tensor = self.tensor_args.to_device(X[:,3:][obs_idx]) # torch.from_numpy(new_poses[:,3:][obs_idx])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
             new_pose = Pose(pos_tensor, rot_tensor) 
             looptime_to_device_end = time.time()
             looptime_to_device += looptime_to_device_end - looptime_to_device_start
 
             # both work but slow, therefore the no-cpu option is probably better
-            # cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
             looptime_update_cchecker_start = time.time()
+            # cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
             cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=False) 
             looptime_update_cchecker_end = time.time()
             looptime_update_cchecker += looptime_update_cchecker_end - looptime_update_cchecker_start
@@ -157,37 +141,82 @@ class DynamicObsCollPredictor:
         print(f"debug: looptime_to_device: {looptime_to_device}")
         print(f"debug: looptime_update_cchecker: {looptime_update_cchecker}")
         print("__")
-            
+    
+
     def _get_predicted_pose_at_step_h(self, h:int, obstacle_name:str):
         """
         Get the pose of the obstacle in the collision checker.
         """
         return self.cchecks[h].world_model.objects[obstacle_name].pose
     
-    # def update_with_predicted_poses(self, X_predicted:torch.Tensor, obs_names:List[str]):
-    #     """
-    #     Update the collision checkers with the predicted poses of the obstacles (each pose is a tensor of shape (7,)
-    #     x,y,z,qw,qx,qy,qz).
-    #     X_predicted[i,j,:] = pose of the j'th obstacle at the i'th time step (i'th checker in the collision checkers).
-
-    #     """
-    #     # obs_at_0 = self.cchecks[0].world_model.objects
-    #     # obs_names = [obj.name for obj in obs_at_0] 
-    #     n_predictable = X_predicted.shape[0] # num of time steps which are predictable (given by the input)
-    #     n_spheres = X_predicted.shape[1] # number of obstacles
-    #     # X_spheres = torch.zeros((n_predictable, n_spheres, 7), device=self.tensor_args.device, dtype=self.tensor_args.dtype)
-    #     for cchecker_idx in range(n_predictable):
-    #         # for ob_idx, obs_name in enumerate(obs_names):
-    #         checker_poses = X_predicted[cchecker_idx, :, :]
-    #         # pos_tensor = self.tensor_args.to_device(torch.from_numpy(spheres[ob_idx][h][:3])) # x,y,z
-    #         # rot_tensor = self.tensor_args.to_device(torch.from_numpy([1,0,0,0])) # quaternion in scalar-first (w, x, y, z). https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=get_world_pose#core-omni-isaac-core
-    #         # new_pose = Pose(pos_tensor, rot_tensor) 
-    #         self._update_cchecker(self.cchecks[cchecker_idx], X_predicted[cchecker_idx, :, :], obs_names)
-    #         # self.cchecks[h].update_obstacle_pose(name=obs_name, w_obj_pose=new_pose, update_cpu_reference=False) 
+    def init_cuboids_from_spheres(self, X_spheres:torch.Tensor, rad_spheres:torch.Tensor, obs_indices:list[int]=[],vis=True):
+        """
+        Initialize the collision checkers.
+        """
+        # obs_names = [f'obs_{obs_to_update[i]}' for i in range(len(obs_to_update))]
+        self._reset_counters(X_spheres.shape[0])
+        # n_checkers = X_spheres.shape[0]
         
-    #     self._n_valid_checkers = n_predictable # the last valid index of the collision checkers. This is used to slide the collision checkers in a sliding window fashion.
-    
+        if obs_indices == []:
+            obs_indices = list(range(X_spheres.shape[1]))
 
+        for i in range(self.n_valid_checkers): 
+            for obs_idx in obs_indices:
+                obs_name = f'obs_{obs_idx}'
+                sphere = Sphere(name=obs_name,pose=X_spheres[i,obs_idx].tolist(),radius=rad_spheres[i,obs_idx].item())
+                cuboid = sphere.get_cuboid() # convert sphere to cuboid
+                self.cchecks[i].add_obb(cuboid)
+                
+                # if obs_name not in self._obstacles_predicted_paths:
+                #     self._obstacles_predicted_paths[obs_name] = np.zeros((self.n_checkers, 7))
+                #     self._obstacles_predicted_paths[obs_name][i] = np.array(cuboid.pose)
+                
+                # checker_i_cuboids.append(cuboid)
+                # sphere_as_cuboid = sphere.get_cuboid() # convert sphere to cuboid
+                # transform_matrix = sphere_as_cuboid.get_transform_matrix() # put that here so we know it exists
+                # if vis:
+                    
+                #     append(Obstacle(
+                #             name=obs_name,
+                #         initial_pose=np.array(sphere_pose),# sphere_as_cuboid.pose, # X_obs_W
+                #         dims=cuboid.dims[0],#sphere_as_cuboid.dims[0],# 2*sphere.radius,
+                #         obstacle_type=DynamicCuboid,
+                #         color=np.array([0,0,0]),# (sphere_as_cuboid.color[:3]),
+                #         mass=1.0,
+                #         gravity_enabled=False,
+                #         linear_velocity=np.array([0,0,0]), # v_obs_W
+                #         angular_velocity=np.array([0,0,0]), # w_obs_W
+                #         world=my_world,
+                #         sim_collision_enabled=False, # we don't want it to collide with anything because it's only an approximation of robot2
+                #         visual_material=OmniGlass( # https://docs.omniverse.nvidia.com/materials-and-rendering/latest/templates/OmniGlass.html
+                #             prim_path="/World/material/glass",  # path to the material prim to create
+                #             ior=1.25,
+                #             depth=0.001,
+                #             thin_walled=True,
+                #             color=np.array([1.0, 0.5, 0.5]))
+
+                # ))
+                # dynamic_obs_coll_predictor.add_cuboids_to_checker(checker_i_cuboids, i)
+    
+    def reset(self, X_predicted:torch.Tensor, obs_indices:List[int]):
+        """
+        Update the collision checkers with the predicted poses of the obstacles (each pose is a tensor of shape (7,)
+        x,y,z,qw,qx,qy,qz).
+        X_predicted[i,j,:] = pose of the j'th obstacle at the i'th time step (i'th checker in the collision checkers).
+
+        """
+        # reset the current checker index and the number of valid checkers
+        self._reset_counters(X_predicted.shape[0])
+        obs_names = [f'obs_{obs_idx}' for obs_idx in obs_indices]
+        for i in range(self.n_valid_checkers):
+            self._update_cchecker(self.cchecks[i], X_predicted[i, :, :], obs_names)
+
+    def _reset_counters(self,n_valid_checkers:int):
+        self.cur_checker_idx = 0
+        self.n_valid_checkers = n_valid_checkers # predictable time steps 
+        
+
+    # def reset_checkers(self,X):
 
     # def set_coll_cuboids_sizes(self, dims:torch.Tensor, cuboid_names:List[str]):
     #     """
@@ -287,7 +316,7 @@ class DynamicObsCollPredictor:
         robot_spheres = robot_spheres.contiguous() # Returns a contiguous in memory tensor containing the same data as self tensor. If self tensor is already in the specified memory format, this function returns the self tensor. https://pytorch.org/docs/stable/generated/torch.Tensor.contiguous.html
         for h in range(self.H):
             
-            checker_to_use_at_step_h = max(self.cur_checker_idx + h, self.n_checkers - 1) # self.routing_table[h]
+            checker_to_use_at_step_h = max(self.cur_checker_idx + h, self.n_valid_checkers - 1) # self.routing_table[h]
             buffer_step_h = self.collision_buffers[checker_to_use_at_step_h]
 
             # Extract and reshape spheres for current timestep
@@ -348,7 +377,15 @@ class DynamicObsCollPredictor:
         """
         return self._obstacles_predicted_paths[obstacle_name]
         
-         
+    # def update_cuboids_in_checker(self, cuboid_list:List[Cuboid], checker_idx:int):
+    #     """
+    #     Update the cuboids in the collision checker at a specific index.
+    #     """
+    #     for cuboid in cuboid_list:
+    #         self.cchecks[checker_idx].add_obb(cuboid)
+    #         if cuboid.name not in self._obstacles_predicted_paths:
+    #             self._obstacles_predicted_paths[cuboid.name] = np.zeros((self.n_checkers, 7))
+    #         self._obstacles_predicted_paths[cuboid.name][checker_idx] = np.array(cuboid.pose)
 
     def add_cuboids_to_checker(self, cuboid_list:List[Cuboid], checker_idx:int):
         """
