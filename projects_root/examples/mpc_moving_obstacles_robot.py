@@ -63,7 +63,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
+DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = False # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
@@ -625,7 +625,7 @@ class FrankaMpc(AutonomousFranka):
             dynamic_obs_coll_predictor (_type_): _description_
         """
         dynamic_obs_checker = dynamic_obs_coll_predictor # New
-        override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
         
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
@@ -646,6 +646,7 @@ class FrankaMpc(AutonomousFranka):
         )
         
         self.solver = MpcSolver(mpc_config)
+        self.H = self.solver.rollout_fn.horizon
         self._post_init_solver()
         retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
         joint_names = self.solver.rollout_fn.joint_names
@@ -1069,8 +1070,8 @@ def main():
     # ROBOT 2 AS CUBES
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    dynamic_obstacles = []
-    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc,n_checkers=100) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    # dynamic_obstacles = []
+    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
     
@@ -1090,10 +1091,10 @@ def main():
         
         #### MAINTAIN DYNAMIC OBSTACLE VELOCITIES IF NEEDED #####
         # Maintain dynamic obstacle velocities to ovecome the phenomenon that the dynamic obstacle is slowing down over time.
-        if FORCE_CONSTANT_VELOCITIES:
-            for obs_index in range(len(dynamic_obstacles)):
-                dynamic_obstacles[obs_index].simulation_representation.set_linear_velocity(dynamic_obstacles[obs_index].linear_velocity)
-                dynamic_obstacles[obs_index].simulation_representation.set_angular_velocity(dynamic_obstacles[obs_index].angular_velocity)
+        # if FORCE_CONSTANT_VELOCITIES:
+        #     for obs_index in range(len(dynamic_obstacles)):
+        #         dynamic_obstacles[obs_index].simulation_representation.set_linear_velocity(dynamic_obstacles[obs_index].linear_velocity)
+        #         dynamic_obstacles[obs_index].simulation_representation.set_angular_velocity(dynamic_obstacles[obs_index].angular_velocity)
         
         ############ UPDATE COLLISION CHECKERS ##################
 
@@ -1179,31 +1180,36 @@ def main():
             robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
             
             # convert to world frame (W)
-            pos_eeR2fullplan = p_eeR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
+            p_eeR2fullplan = p_eeR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
             q_eeR2fullplan = q_eeR2fullplan_R2.cpu() # TODO (need a real rotation)
-            pos_linksR2fullplan = p_linksR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
+            p_linksR2fullplan = p_linksR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
             q_linksR2fullplan = q_linksR2fullplan_R2.cpu() # TODO (need a real rotation)
             p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy
             p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
             p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
-            X_spheresR2fullplan = torch.zeros(p_spheresR2fullplan.shape[0], p_spheresR2fullplan.shape[1], 7)
-            X_spheresR2fullplan[:,:,:3] = p_spheresR2fullplan
-            X_spheresR2fullplan[:,:,3:] = torch.tensor([1,0,0,0], device=X_spheresR2fullplan.device, dtype=X_spheresR2fullplan.dtype)
+            rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65 spheres radii
             
-            # robot2_plan_len = X_spheresR2fullplan.shape[0] # time steps in the plan
-            # robot2_n_spheres = p_spheresR2fullplan.shape[1] # number of spheres robot 2 is approximated to
             
             print("Updating dynamic obstacle collision checkers")
+            assert dynamic_obs_coll_predictor is not None
+            p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
+            if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
+                dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
+            else:
+                dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
+
+                
+            
             # all_obs_names = [f'robot2_col_cube_{i}' for i in range(robot2_n_spheres)]
-            obs_indices = [i for i in range(65) if i%3 == 0] # range(len(all_obs_names))
+            #  = [i for i in range(65) if i%3 == 0] # range(len(all_obs_names))
             # ubset_names = [all_obs_names[i] for i in obs_subset]
             # X_sobs_spheresSubsetR2fullplan = X_spheresR2fullplan[:,obs_to_update,:]
 
-            if robot2.num_targets == 1:
-                dynamic_obs_coll_predictor.init_cuboids_from_spheres(X_spheresR2fullplan, p_rad_spheresR2fullplan[:,:,3], obs_indices)    
-            else:
-                dynamic_obs_coll_predictor.reset(X_spheresR2fullplan, obs_indices)
-            p_spheresR2updated_only = p_spheresR2fullplan[:,obs_indices,:]
+            # if robot2.num_targets == 1:
+            #     dynamic_obs_coll_predictor.init_cuboids_from_spheres(X_spheresR2fullplan, p_rad_spheresR2fullplan[:,:,3], obs_indices)    
+            # else:
+            #     dynamic_obs_coll_predictor.reset(X_spheresR2fullplan, obs_indices)
+            # p_spheresR2updated_only = p_spheresR2fullplan[:,obs_indices,:]
             print("Updated dynamic obstacle collision checkers")
 
 
@@ -1228,7 +1234,19 @@ def main():
             robot2.cmd_idx += 1 # the index of the next command to execute in the plan
             # for _ in range(2):
             #     my_world.step(render=False)
+            min_cmd_idx_horizon = robot2.cmd_idx
+            max_cmd_idx_horizon = min_cmd_idx_horizon + robot1.H - 1
+            n_cmds_plan = len(p_spheresR2fullplan)
+            max_cmd_idx_plan = n_cmds_plan - 1
+            if max_cmd_idx_horizon <= max_cmd_idx_plan:
+                p_obs = p_spheresR2fullplan[robot2.cmd_idx: min_cmd_idx_horizon + 1]
             
+            else: # repeat the last predicted positions in the plan
+                # n_repeats = max_cmd_idx_horizon - max_cmd_idx_plan
+                # p_predictable = p_spheresR2fullplan[robot2.cmd_idx:]
+                # p_obs = torch.cat([p_obs, p_predictable[-1].unsqueeze(0).repeat(n_repeats,1,1)])
+                p_obs = torch.cat([p_obs[1:],p_obs[-1].unsqueeze(0)])
+            dynamic_obs_coll_predictor.update_p_obs(p_obs.to(tensor_args.device))
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 robot2.cmd_idx = 0
                 robot2.cmd_plan = None
@@ -1249,11 +1267,11 @@ def main():
                 point_visualzer_inputs.append(rollouts_for_visualization)
             #collect the predicted paths of dynamic obstacles
             # if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
+            #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor,horizon=robot1.H)                
             #         point_visualzer_inputs.extend(visualization_points_per_obstacle)
             # render the points
-            global_plan_points = {'points': p_spheresR2updated_only, 'color': 'green'}
-            point_visualzer_inputs.append(global_plan_points)
+            # global_plan_points = {'points': p_spheresR2updated_only, 'color': 'green'}
+            # point_visualzer_inputs.append(global_plan_points)
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
         ############### UPDATE TIME STEP INDEX  ###############
