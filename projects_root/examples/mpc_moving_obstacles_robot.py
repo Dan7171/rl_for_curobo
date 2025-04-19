@@ -62,7 +62,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FN_FOR_DYN_OBS  = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = False # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -133,7 +133,7 @@ from omni.isaac.core.materials import OmniGlass
 from projects_root.utils.helper import add_extensions, add_robot_to_scene
 
 # CuRobo
-from curobo.geom.sdf.world import CollisionCheckerType
+from curobo.geom.sdf.world import CollisionCheckerType, WorldCollisionConfig
 from curobo.geom.types import Sphere, WorldConfig, Cuboid
 from curobo.rollout.rollout_base import Goal
 from curobo.types.base import TensorDeviceType
@@ -1070,18 +1070,18 @@ def main():
             
             print("robot2 target changed")
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
+            robot2_plan = robot2.get_current_plan_as_tensor()
+            pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
+            robot2_crm = robot2.crm # to compute FK                
+            # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+            p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+            # convert to world frame (W):
+            p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
+            p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+            p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
+            rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
             
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1
-                robot2_plan = robot2.get_current_plan_as_tensor()
-                pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
-                robot2_crm = robot2.crm                
-                # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
-                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-                # convert to world frame (W):
-                p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
-                p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
-                p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
-                rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
                 print("Updating dynamic obstacle collision checker")
                 assert dynamic_obs_coll_predictor is not None # just to ignore warnings
                 p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
@@ -1090,6 +1090,31 @@ def main():
                 else:
                     dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
                 print("Updated dynamic obstacle collision checker")
+
+            else:
+                # obstacles = usd_help.get_obstacles_from_stage(
+                #     # only_paths=[obstacles_path],
+                #     reference_prim_path=robot1.robot_prim_path,
+                #     ignore_substring=[
+                #         robot1.robot_prim_path,
+                #         robot1.target_path,
+                #         "/World/defaultGroundPlane",
+                #         "/curobo",
+                #     ],
+                # ).get_collision_check_world()
+                # link_spheres_r2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
+                p_rad_spheresR2curr = p_rad_spheresR2fullplan[0]
+                for i in range(p_rad_spheresR2curr.shape[0]):
+                    p_sphere = p_rad_spheresR2curr[i][:3]
+                    r_sphere = p_rad_spheresR2curr[i][3]
+                    if r_sphere > 0:
+                        robot1.cu_stat_obs_world_model.add_obstacle(Sphere(f'R2_{i}', position=p_sphere.tolist(), radius=r_sphere.item()).get_cuboid())
+
+                collision_support_world = WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)
+                world_collision_config = WorldCollisionConfig(tensor_args, world_model=collision_support_world)
+                world_ccheck = WorldMeshCollision(world_collision_config)
+            
+
 
         if robot2.cmd_plan is not None: # if the robot has a plan to execute
             cmd_state = robot2.cmd_plan[robot2.cmd_idx] # get the next joint command from the plan
@@ -1110,6 +1135,25 @@ def main():
                 else: # else embed in window the last predicted positions in the plan 
                     p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
                 dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
+            
+            else:
+          
+                link_spheres_r2_R2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
+                link_spheres_r2 = link_spheres_r2_R2[:,:,:3].cpu() + robot2.p_R # offset of robot1 origin in world frame (only position, radius is not affected)
+                link_spheres_r2 = link_spheres_r2.squeeze(0) # 
+            
+                
+                for i in range(link_spheres_r2.shape[0]):
+                    p_sphere = link_spheres_r2[i][:3]
+                    r_sphere = rad_spheresR2[i]
+                    if r_sphere.item() > 0:
+                        robot1.cu_stat_obs_world_model.add_obstacle(Sphere(f'R2_{i}', position=p_sphere.tolist(), radius=r_sphere.item()).get_cuboid())
+                        pos_tensor = robot1.tensor_args.to_device(p_sphere)
+                        rot_tensor = robot1.tensor_args.to_device(torch.tensor([1,0,0,0]))
+                        w_obj_pose = Pose(pos_tensor, rot_tensor)
+                        # update the obstacle pose in the curobo collision checker
+                        world_ccheck.update_obstacle_pose(f'R2_{i}', w_obj_pose)
+                
                 
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 robot2.cmd_idx = 0
@@ -1131,8 +1175,9 @@ def main():
                 point_visualzer_inputs.append(rollouts_for_visualization)
         
             # render the points
-            global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
-            point_visualzer_inputs.append(global_plan_points)
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+                global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
+                point_visualzer_inputs.append(global_plan_points)
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
         ############### UPDATE TIME STEP INDEX  ###############
