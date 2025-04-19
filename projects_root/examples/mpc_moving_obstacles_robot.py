@@ -189,12 +189,7 @@ parser.add_argument(
     default=None,
     help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
 )
-# parser.add_argument(
-#     "--robot",
-#     type=str,
-#     default="franka.yml",
-#     help="Robot configuration file to load (e.g., franka.yml)",
-# )
+
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
@@ -429,6 +424,8 @@ class AutonomousFranka:
         self.solver = None # will be initialized in the init_solver method.
         self.tensor_args = TensorDeviceType()
         self._vis_spheres = None # for visualization of robot spheres
+        self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(self.robot_cfg)) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+        
         AutonomousFranka.instance_counter += 1
 
     def _init_curobo_stat_obs_world_model(self, usd_help:UsdHelper):
@@ -495,7 +492,8 @@ class AutonomousFranka:
             return False
     
 
-    
+        
+                
         
     def get_last_synced_target_pose(self):
         return Pose(position=self.tensor_args.to_device(self.target_last_synced_position),quaternion=self.tensor_args.to_device(self.target_last_synced_orientation),)
@@ -524,7 +522,17 @@ class AutonomousFranka:
     def _check_robot_static(self, sim_js) -> bool:
         return np.max(np.abs(sim_js.velocities)) < 0.2
     
+    def init_joints(self, idx_list:list):
+        """Set the maximum efforts for the robot.
+        Args:
+          
+        """
+        # robot.robot._articulation_view.initialize()
+        self.robot.set_joint_positions(self.initial_joint_config, idx_list) 
+        self.robot._articulation_view.set_max_efforts(values=np.array([5000 for _ in range(len(idx_list))]), joint_indices=idx_list)
 
+        
+        
 
     def get_robot_as_spheres(self, cu_js, express_in_world_frame=False) -> list[Sphere]:
         """Get the robot as spheres from the curobot joints state.
@@ -589,13 +597,7 @@ class AutonomousFranka:
         cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.get_dof_names()) # joint_names=self.robot.dof_names) 
         return cu_js
     
-    # def get_robot_spheres_as_cubes(self):
-    #     cu_js = self.get_curobo_joint_state()
-    #     robot_spheres = self.get_robot_as_spheres(cu_js)
-    #     robot_spheres_approx = []
-    #     for sphere in robot_spheres:
-    #         robot_spheres_approx.append(sphere.copy())
-    #     return robot_spheres_approx
+
     
     
 class FrankaMpc(AutonomousFranka):
@@ -719,7 +721,7 @@ class FrankaCumotion(AutonomousFranka):
         super().__init__(robot_cfg, world, usd_help, p_R, R_R, p_T, R_T, target_color, target_size)
 
         self.solver = None
-        self.past_cmd = None
+        self.past_cmd:JointState = None
         self.reactive = reactive
         self.num_targets = 0 # the number of the targets which are defined by curobo (after being static and ready to plan to) and have a successfull a plan for.
         self.max_attempts = 4 if not self.reactive else 1
@@ -963,82 +965,9 @@ def main():
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
     robot1 = FrankaMpc(robot_cfgs[0], my_world,usd_help) # MPC robot - avoider
     robots[0] = robot1
-
-    # CUBES AS MANY AS YOU WANT:
-    # dynamic_obstacles = []
-    # obs_num = 20
-    # for i in range(obs_num):
-    #     initial_pose = np.random.uniform(-0.2,0.2,7)
-    #     initial_pose[0] = 1
-    #     initial_pose[2] = 0.5
-        
-    #     dynamic_obstacles.append(Obstacle(
-    #         name=f"dynamic_cuboid_{i}",
-    #         initial_pose= initial_pose, # np.array([0.8+np.uniform(-0.1,0.1),0.0+random.uniform(-0.1,0.1),0.5+random.uniform(-0.1,0.1),1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([1,0,0]), # red 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.30, 0.0, 0.0],
-    #         angular_velocity=[1,1,1],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world 
-    #     ))
-
-    # TWO ORIGINAL DYNAMIC OBSTACLES:
-    # dynamic_obstacles = [
-    #     Obstacle( 
-    #         name="dynamic_cuboid1", 
-    #         initial_pose=np.array([0.8,0.0,0.5,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([1,0,0]), # red 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.30, 0.0, 0.0],
-    #         angular_velocity=[1,1,1],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world 
-    #     )
-    #     ,  
-    #     Obstacle(
-    #         name="dynamic_cuboid2",
-    #         initial_pose=np.array([0.8,0.8,0.3,1,0,0,0]), 
-    #         dims=0.1, 
-    #         obstacle_type=DynamicCuboid, 
-    #         color=np.array([0,0 ,1]),# blue 
-    #         mass=args.obstacle_mass,
-    #         linear_velocity=[-0.15, -0.15, 0.05],
-    #         angular_velocity=[0,0,0],
-    #         gravity_enabled=args.gravity_enabled.lower() == "true",
-    #         world=my_world,
-    #         ),
-    # ]
-
-
-
-        # NOTE: 1.Add more obstacles here if needed (Call the Obstacle() constructor for each obstacle as in item in the list).
-        # NOTE: 2.must initialize the Obstacle() instances before initializing the MpcSolverConfig.
-        # NOTE: 3.must initialize the Obstacle() instances before DynamicObsCollisionChecker() initialization.
-        # ]
-    
-    # dynamic_obstacles = []
-    
-    
-
-    # init mpc solver and collision predictor
-    # time.sleep(10)
-    
-    # # robot2_cubes = robot2.get_robot_as_spheres(cu_js=robot2.get_curobo_joint_state())
-    # step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
-    # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    # dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, dynamic_obstacles, robots_collision_caches[0], step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-    # robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
-    
-
     add_extensions(simulation_app, args.headless_mode)
     
-    
-    # PRE PLAY
+    ################ PRE PLAYING SIM ###################
     if args.print_ctrl_rate and SIMULATING:
         real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
     
@@ -1052,25 +981,22 @@ def main():
         for _ in range(10):
             my_world.step(render=True) 
         init_world = True
-
     wait_for_playing(my_world) # wait for the play button to be pressed
     
-    # POST PLAY
+    ################# SIM IS PLAYING ###################
+    
     # reset world
     my_world.step(render=True)
     my_world.reset()
     
-    # Set robots in initial joint configuration ("retract" config)
+    # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
     for i, robot in enumerate(robots):
-        # robot.robot._articulation_view.initialize()
+        assert robot is not None
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
-        robot.robot.set_joint_positions(robot.initial_joint_config, robot_idx_lists[i]) 
-        robot.robot._articulation_view.set_max_efforts(values=np.array([5000 for i in range(len(robot_idx_lists[i]))]), joint_indices=robot_idx_lists[i])
+        robot.init_joints(robot_idx_lists[i])
 
-    # ROBOT 2 AS CUBES
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    # dynamic_obstacles = []
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
@@ -1089,41 +1015,17 @@ def main():
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
         
-        #### MAINTAIN DYNAMIC OBSTACLE VELOCITIES IF NEEDED #####
-        # Maintain dynamic obstacle velocities to ovecome the phenomenon that the dynamic obstacle is slowing down over time.
-        # if FORCE_CONSTANT_VELOCITIES:
-        #     for obs_index in range(len(dynamic_obstacles)):
-        #         dynamic_obstacles[obs_index].simulation_representation.set_linear_velocity(dynamic_obstacles[obs_index].linear_velocity)
-        #         dynamic_obstacles[obs_index].simulation_representation.set_angular_velocity(dynamic_obstacles[obs_index].angular_velocity)
-        
-        ############ UPDATE COLLISION CHECKERS ##################
-
-        # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts). 
-        
-        # if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-        #     print_rate_decorator(lambda: dynamic_obs_coll_predictor.update_predictive_collision_checkers_by_constant_vel_pred(dynamic_obstacles), args.print_ctrl_rate, "dynamic_obs_coll_predictor.update_predictive_collision_checkers")() # Update curobo collision checkers with the new dynamic obstacles poses from the simulation (if we modify the MPC cost function to predict poses of dynamic obstacles, the checkers are looking into the future. If not, the checkers are looking at the pose of an object in present during rollouts).             
-        #     pass
-        # else:
-        #     for obs_index in range(len(dynamic_obstacles)):
-        #         dynamic_obstacles[obs_index].update_world_coll_checker_with_sim_pose(robot1.solver.world_coll_checker) # update static obstacle collision checker with the new pose of the obstacle from the simulation.
-            
         ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
         # Get target position and orientation
         real_world_pos_target1, real_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-        
-        
         # Update goals if targets has moved
         robot1_target_changed = robot1.update_target_if_needed(real_world_pos_target1, real_world_orient_target1)
-
         if robot1_target_changed:
-            print("robot1 target changed")
+            print("robot1 target changed!")
             robot1.goal_buffer.goal_pose.copy_(robot1.get_last_synced_target_pose())
             robot1.solver.update_goal(robot1.goal_buffer)
-        
-        
             
-            
-        ############ GET CURRENT ROBOT STATE ############
+        ############ GET CURRENT STATE OF ROBOT 1  ############
         # Get current robot state
         sim_js_robot1 = robot1.get_sim_joint_state() # robot1.robot.get_joints_state() # get the current joint state of the robot        
         robots_cu_js[0] = robot1.get_curobo_joint_state(sim_js_robot1)
@@ -1165,73 +1067,50 @@ def main():
         real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
         if robot2_target_changed:
+            
             print("robot2 target changed")
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             
-            # new robot2 plan as obstacles for robot1
-            robot2_plan = robot2.get_current_plan_as_tensor()
-            # H = 30 # of robot1
-            pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
-            # pos_jsR2nextH, vel_jsR2nextH = pos_jsR2fullplan[:H,:], vel_jsR2fullplan[:H,:]
-            robot2_crmc = CudaRobotModelConfig.from_data_dict(robot2.robot_cfg) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-            robot2_crm = CudaRobotModel(robot2_crmc)
-            # FK of robot2 plan: all poses and orientations are expressed in robot2 frame (R2)
-            p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = \
-            robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-            
-            # convert to world frame (W)
-            p_eeR2fullplan = p_eeR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
-            q_eeR2fullplan = q_eeR2fullplan_R2.cpu() # TODO (need a real rotation)
-            p_linksR2fullplan = p_linksR2fullplan_R2.cpu() + robot2.p_R # offset of robot2 origin in world frame
-            q_linksR2fullplan = q_linksR2fullplan_R2.cpu() # TODO (need a real rotation)
-            p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy
-            p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
-            p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
-            rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65 spheres radii
-            
-            
-            print("Updating dynamic obstacle collision checkers")
-            assert dynamic_obs_coll_predictor is not None
-            p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
-            if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
-                dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
-            else:
-                dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1
+                robot2_plan = robot2.get_current_plan_as_tensor()
+                pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
+                robot2_crm = robot2.crm                
+                # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                # convert to world frame (W):
+                p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
+                p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+                p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
+                rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
+                print("Updating dynamic obstacle collision checker")
+                assert dynamic_obs_coll_predictor is not None # just to ignore warnings
+                p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
+                if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
+                    dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
+                else:
+                    dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
+                print("Updated dynamic obstacle collision checker")
 
-            print("Updated dynamic obstacle collision checkers")
-
-
-            
-        if robot2.cmd_plan is not None:
-
-            # urdf_file = robot2.robot_cfg["kinematics"]["urdf_path"]  # robot/franka_description/franka_panda.urdf' 
-            # base_link = robot2.robot_cfg["kinematics"]["base_link"]  # 'panda_link0'
-            # ee_link = robot2.robot_cfg["kinematics"]["ee_link"] # 'panda_hand'
-            print(f"debug plan: cmd_idx = {robot2.cmd_idx}, num_targets = {robot2.num_targets} ")
-            cmd_state = robot2.cmd_plan[robot2.cmd_idx]
-            robot2.past_cmd = cmd_state.clone()
-            # get full dof state
-            art_action = ArticulationAction(
-                cmd_state.position.cpu().numpy(),
-                cmd_state.velocity.cpu().numpy(),
-                joint_indices=robot_idx_lists[1], #joint_indices=idx_list_robot2,
-            )
-            # set desired joint angles obtained from IK:
-            
-            robot2.articulation_controller.apply_action(art_action) # position, velocity, joint_indices https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
-            robot2.cmd_idx += 1 # the index of the next command to execute in the plan
-            # for _ in range(2):
+        if robot2.cmd_plan is not None: # if the robot has a plan to execute
+            cmd_state = robot2.cmd_plan[robot2.cmd_idx] # get the next joint command from the plan
+            robot2.past_cmd = cmd_state.clone() # save the past command for future use
+            art_action = ArticulationAction(cmd_state.position.cpu().numpy(),cmd_state.velocity.cpu().numpy(),joint_indices=robot_idx_lists[1],) # controller command
+            robot2.articulation_controller.apply_action(art_action) # apply command to controller. position, velocity, joint_indices https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
+            robot2.cmd_idx += 1 # current plan command counter 
+            # for _ in range(2): # NOTE: this was part of the original code. But I dont see a reason to keep it.
             #     my_world.step(render=False)
             
-            max_idx_window = robot2.cmd_idx + robot1.H - 1
-            n_cmds_plan = len(p_spheresR2fullplan)
-            max_cmd_idx_plan = n_cmds_plan - 1 
-            if max_idx_window <= max_cmd_idx_plan: # if the window is within the plan
-                p_spheresR2H = p_spheresR2fullplan[robot2.cmd_idx: max_idx_window + 1]
-            else: # else embed in window the last predicted positions in the plan 
-                p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
-            dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
-            
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+                # move sliding window of predicted dynamic obstacles
+                max_idx_window = robot2.cmd_idx + robot1.H - 1
+                n_cmds_plan = len(p_spheresR2fullplan)
+                max_cmd_idx_plan = n_cmds_plan - 1 
+                if max_idx_window <= max_cmd_idx_plan: # if the window is within the plan
+                    p_spheresR2H = p_spheresR2fullplan[robot2.cmd_idx: max_idx_window + 1]
+                else: # else embed in window the last predicted positions in the plan 
+                    p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
+                dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
+                
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 robot2.cmd_idx = 0
                 robot2.cmd_plan = None
@@ -1250,10 +1129,7 @@ def main():
             if VISUALIZE_MPC_ROLLOUTS:
                 rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
-            #collect the predicted paths of dynamic obstacles
-            # if VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor,horizon=robot1.H)                
-            #         point_visualzer_inputs.extend(visualization_points_per_obstacle)
+        
             # render the points
             global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
             point_visualzer_inputs.append(global_plan_points)
