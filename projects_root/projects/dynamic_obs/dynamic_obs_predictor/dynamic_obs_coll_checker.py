@@ -131,6 +131,7 @@ class DynamicObsCollPredictor:
             # both work but slow, therefore the no-cpu option is probably better
             looptime_update_cchecker_start = time.time()
             # cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=True) 
+            
             cchecker.update_obstacle_pose(name=obs_names[obs_idx], w_obj_pose=new_pose, update_cpu_reference=False) 
             looptime_update_cchecker_end = time.time()
             looptime_update_cchecker += looptime_update_cchecker_end - looptime_update_cchecker_start
@@ -158,12 +159,14 @@ class DynamicObsCollPredictor:
         # n_checkers = X_spheres.shape[0]
         
         if obs_indices == []:
-            obs_indices = list(range(X_spheres.shape[1]))
+            obs_indices = list(range(X_spheres.shape[1])) # all obstacles
 
-        for i in range(self.n_valid_checkers): 
+        for i in range(self.n_checkers): 
             for obs_idx in obs_indices:
                 obs_name = f'obs_{obs_idx}'
-                sphere = Sphere(name=obs_name,pose=X_spheres[i,obs_idx].tolist(),radius=rad_spheres[i,obs_idx].item())
+                pose = X_spheres[i,obs_idx].tolist() if i < self.n_valid_checkers else np.zeros(7).tolist()
+                radius = rad_spheres[i,obs_idx].item() if i < self.n_valid_checkers else 0.0001
+                sphere = Sphere(name=obs_name,pose=pose,radius=radius)
                 cuboid = sphere.get_cuboid() # convert sphere to cuboid
                 self.cchecks[i].add_obb(cuboid)
                 

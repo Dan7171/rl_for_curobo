@@ -1195,14 +1195,15 @@ def main():
             
             print("Updating dynamic obstacle collision checkers")
             # all_obs_names = [f'robot2_col_cube_{i}' for i in range(robot2_n_spheres)]
-            obs_indices = [0, 30, 60] # range(len(all_obs_names))
-            # obs_subset_names = [all_obs_names[i] for i in obs_subset]
-            # X_spheresSubsetR2fullplan = X_spheresR2fullplan[:,obs_to_update,:]
+            obs_indices = [i for i in range(65) if i%3 == 0] # range(len(all_obs_names))
+            # ubset_names = [all_obs_names[i] for i in obs_subset]
+            # X_sobs_spheresSubsetR2fullplan = X_spheresR2fullplan[:,obs_to_update,:]
 
             if robot2.num_targets == 1:
                 dynamic_obs_coll_predictor.init_cuboids_from_spheres(X_spheresR2fullplan, p_rad_spheresR2fullplan[:,:,3], obs_indices)    
             else:
                 dynamic_obs_coll_predictor.reset(X_spheresR2fullplan, obs_indices)
+            p_spheresR2updated_only = p_spheresR2fullplan[:,obs_indices,:]
             print("Updated dynamic obstacle collision checkers")
 
 
@@ -1251,7 +1252,7 @@ def main():
             #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor)                
             #         point_visualzer_inputs.extend(visualization_points_per_obstacle)
             # render the points
-            global_plan_points = {'points': p_spheresR2fullplan, 'color': 'green'}
+            global_plan_points = {'points': p_spheresR2updated_only, 'color': 'green'}
             point_visualzer_inputs.append(global_plan_points)
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
