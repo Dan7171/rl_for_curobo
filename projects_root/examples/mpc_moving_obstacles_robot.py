@@ -1198,18 +1198,6 @@ def main():
             else:
                 dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
 
-                
-            
-            # all_obs_names = [f'robot2_col_cube_{i}' for i in range(robot2_n_spheres)]
-            #  = [i for i in range(65) if i%3 == 0] # range(len(all_obs_names))
-            # ubset_names = [all_obs_names[i] for i in obs_subset]
-            # X_sobs_spheresSubsetR2fullplan = X_spheresR2fullplan[:,obs_to_update,:]
-
-            # if robot2.num_targets == 1:
-            #     dynamic_obs_coll_predictor.init_cuboids_from_spheres(X_spheresR2fullplan, p_rad_spheresR2fullplan[:,:,3], obs_indices)    
-            # else:
-            #     dynamic_obs_coll_predictor.reset(X_spheresR2fullplan, obs_indices)
-            # p_spheresR2updated_only = p_spheresR2fullplan[:,obs_indices,:]
             print("Updated dynamic obstacle collision checkers")
 
 
@@ -1234,19 +1222,16 @@ def main():
             robot2.cmd_idx += 1 # the index of the next command to execute in the plan
             # for _ in range(2):
             #     my_world.step(render=False)
-            min_cmd_idx_horizon = robot2.cmd_idx
-            max_cmd_idx_horizon = min_cmd_idx_horizon + robot1.H - 1
-            n_cmds_plan = len(p_spheresR2fullplan)
-            max_cmd_idx_plan = n_cmds_plan - 1
-            if max_cmd_idx_horizon <= max_cmd_idx_plan:
-                p_obs = p_spheresR2fullplan[robot2.cmd_idx: max_cmd_idx_horizon + 1]
             
-            else: # repeat the last predicted positions in the plan
-                # n_repeats = max_cmd_idx_horizon - max_cmd_idx_plan
-                # p_predictable = p_spheresR2fullplan[robot2.cmd_idx:]
-                # p_obs = torch.cat([p_obs, p_predictable[-1].unsqueeze(0).repeat(n_repeats,1,1)])
-                p_obs = torch.cat([p_obs[1:],p_obs[-1].unsqueeze(0)])
-            dynamic_obs_coll_predictor.update_p_obs(p_obs.to(tensor_args.device))
+            max_idx_window = robot2.cmd_idx + robot1.H - 1
+            n_cmds_plan = len(p_spheresR2fullplan)
+            max_cmd_idx_plan = n_cmds_plan - 1 
+            if max_idx_window <= max_cmd_idx_plan: # if the window is within the plan
+                p_spheresR2H = p_spheresR2fullplan[robot2.cmd_idx: max_idx_window + 1]
+            else: # else embed in window the last predicted positions in the plan 
+                p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
+            dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
+            
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 robot2.cmd_idx = 0
                 robot2.cmd_plan = None
@@ -1270,8 +1255,8 @@ def main():
             #         visualization_points_per_obstacle = get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles, dynamic_obs_coll_predictor,horizon=robot1.H)                
             #         point_visualzer_inputs.extend(visualization_points_per_obstacle)
             # render the points
-            # global_plan_points = {'points': p_spheresR2updated_only, 'color': 'green'}
-            # point_visualzer_inputs.append(global_plan_points)
+            global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
+            point_visualzer_inputs.append(global_plan_points)
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
         ############### UPDATE TIME STEP INDEX  ###############
