@@ -1239,7 +1239,7 @@ def main():
             n_cmds_plan = len(p_spheresR2fullplan)
             max_cmd_idx_plan = n_cmds_plan - 1
             if max_cmd_idx_horizon <= max_cmd_idx_plan:
-                p_obs = p_spheresR2fullplan[robot2.cmd_idx: min_cmd_idx_horizon + 1]
+                p_obs = p_spheresR2fullplan[robot2.cmd_idx: max_cmd_idx_horizon + 1]
             
             else: # repeat the last predicted positions in the plan
                 # n_repeats = max_cmd_idx_horizon - max_cmd_idx_plan
