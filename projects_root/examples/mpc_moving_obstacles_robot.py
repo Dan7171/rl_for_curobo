@@ -127,7 +127,7 @@ from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.objects import DynamicCuboid
 from omni.isaac.debug_draw import _debug_draw
 from omni.isaac.core.materials import OmniGlass
-
+from omni.isaac.core.objects import VisualSphere
 
 # Import helper from curobo examples
 from projects_root.utils.helper import add_extensions, add_robot_to_scene
@@ -378,8 +378,18 @@ def activate_gpu_dynamics(my_world):
         print("GPU dynamics is enabled")
 
 
-
-
+def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch.Tensor, sphere_names:list, tensor_args:TensorDeviceType) -> list[Sphere]:
+    """
+    Returns a list of Sphere objects from a tensor of sphere positions and radii.
+    """
+    spheres = []
+    for i in range(p_spheres.shape[0]):
+        p_sphere = p_spheres[i]
+        r_sphere = rad_spheres[i].item()
+        X_sphere = p_sphere.tolist() + [1,0,0,0]# Pose(tensor_args.to_device(p_sphere), tensor_args.to_device(torch.tensor([1,0,0,0])))
+        name_sphere = sphere_names[i]
+        spheres.append(Sphere(name=name_sphere, pose=X_sphere, radius=r_sphere))
+    return spheres
 class AutonomousFranka:
     
     instance_counter = 0
@@ -425,7 +435,8 @@ class AutonomousFranka:
         self.tensor_args = TensorDeviceType()
         self._vis_spheres = None # for visualization of robot spheres
         self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(self.robot_cfg)) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-        
+        self.obs_viz = [] # for visualization of robot spheres
+        self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
         AutonomousFranka.instance_counter += 1
 
     def _init_curobo_stat_obs_world_model(self, usd_help:UsdHelper):
@@ -571,6 +582,20 @@ class AutonomousFranka:
                     self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
                     self._vis_spheres[si].set_radius(float(s.radius))
 
+    def update_obs_viz(self,p_spheres:torch.Tensor):
+        for i in range(len(self.obs_viz)):
+            self.obs_viz[i].set_world_pose(position=np.array(p_spheres[i].tolist()), orientation=np.array([1., 0., 0., 0.]))
+
+    def add_obs_viz(self,p_sphere:torch.Tensor,rad_sphere:torch.Tensor, obs_name:str,h=0,h_max=30):
+        
+        obs_viz = VisualSphere(
+            prim_path=f"{self.obs_viz_prim_path}/{obs_name}",
+            position=np.ravel(p_sphere),
+            radius=float(rad_sphere),
+            color=np.array([1-(h/h_max),0,0]))
+        self.obs_viz.append(obs_viz)
+
+
     def get_dof_names(self):
         return self.robot.dof_names
 
@@ -598,7 +623,32 @@ class AutonomousFranka:
         return cu_js
     
 
+    def get_current_spheres_state(self,express_in_world_frame:bool=True, valid_only=True):
+        cu_js = self.get_curobo_joint_state(self.get_sim_joint_state(),zero_vel=False) # zero vel doesent matter since we are getting sphere poses and radii
+        link_spheres_R = self.crm.compute_kinematics_from_joint_state(cu_js).get_link_spheres()
+        p_link_spheres_R = link_spheres_R[:,:,:3].cpu() # position of spheres expressedin robot base frame
+        if express_in_world_frame:
+            p_link_spheres_W = p_link_spheres_R + self.p_R
+            p_link_spheres_F = p_link_spheres_W
+        else:
+            p_link_spheres_F = p_link_spheres_R
+        p_link_spheres_F = p_link_spheres_F.squeeze(0)
+        rad_link_spheres = link_spheres_R[:,:,3].cpu().squeeze(0)
+        
+        if valid_only:
+            sphere_indices = torch.nonzero(rad_link_spheres > 0, as_tuple=True)[0] # valid is positive radius
+            p_link_spheres_F = p_link_spheres_F[sphere_indices]
+            rad_link_spheres = rad_link_spheres[sphere_indices]
+        else:
+            sphere_indices = torch.arange(p_link_spheres_F.shape[0]) # all sphere indices
+
+        return p_link_spheres_F, rad_link_spheres, sphere_indices
+        
     
+    def update_existing_sphere_obstacles_in_static_coll_checker(self,spheres):
+        spheres = self.get_current_spheres_state()
+        for sphere in spheres:
+            self.static_coll_checker.add_sphere(sphere)
     
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
@@ -669,10 +719,10 @@ class FrankaMpc(AutonomousFranka):
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
         return has_target_pose_changed
 
-    def get_curobo_joint_state(self, sim_js=None) -> JointState:
+    def get_curobo_joint_state(self, sim_js=None,zero_vel=True) -> JointState:
         """See super().get_curobo_joint_state() for more details.
         """
-        cu_js =  super().get_curobo_joint_state (sim_js, True)        
+        cu_js =  super().get_curobo_joint_state (sim_js, zero_vel)        
         cu_js = cu_js.get_ordered_joint_state(self.solver.rollout_fn.joint_names)
         return cu_js
     
@@ -858,7 +908,7 @@ class FrankaCumotion(AutonomousFranka):
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
 
-    def get_curobo_joint_state(self, sim_js=None) -> JointState:
+    def get_curobo_joint_state(self, sim_js=None,zero_vel=False) -> JointState:
         """
         See super().get_curobo_joint_state() for more details.
 
@@ -868,7 +918,7 @@ class FrankaCumotion(AutonomousFranka):
         Returns:
             JointState: _description_
         """
-        cu_js = super().get_curobo_joint_state(sim_js, False)
+        cu_js = super().get_curobo_joint_state(sim_js, zero_vel)
 
         if not self.reactive: # In reactive mode, we will not wait for a complete stopping of the robot before navigating to a new goal pose (if goal pose has changed). In the default mode on the other hand, we will wait for the robot to stop.
                 cu_js.velocity *= 0.0
@@ -1103,18 +1153,25 @@ def main():
                 #     ],
                 # ).get_collision_check_world()
                 # link_spheres_r2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
-                p_rad_spheresR2curr = p_rad_spheresR2fullplan[0]
-                for i in range(p_rad_spheresR2curr.shape[0]):
-                    p_sphere = p_rad_spheresR2curr[i][:3]
-                    r_sphere = p_rad_spheresR2curr[i][3]
-                    sphere_pose = p_sphere.tolist() + [1,0,0,0]
-                    if r_sphere > 0:
-                        robot1.cu_stat_obs_world_model.add_obstacle(Sphere(f'R2_{i}', pose=sphere_pose, radius=r_sphere.item()).get_cuboid())
-
-                collision_support_world = WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)
-                world_collision_config = WorldCollisionConfig(tensor_args, world_model=collision_support_world)
-                world_ccheck = WorldMeshCollision(world_collision_config)
+                
+                if robot2.num_targets == 1: # after planning the first global plan by robot 2 (but before executing it)
+                    show = True
+                    p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
+                    robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
+                    robot2_sphere_list = get_sphere_list_from_sphere_tensor(p_validspheresR2curr, rad_validspheresR2, robot2_as_obs_obnames, robot2.tensor_args)
+                    robot2_cube_list = [sphere.get_cuboid() for sphere in robot2_sphere_list]
+                    r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
+                    for cube in robot2_cube_list:
+                        robot1.cu_stat_obs_world_model.add_obstacle(cube)
+                    if show:
+                        for i in range(len(robot2_as_obs_obnames)):
+                            robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
             
+                else:
+                    pass
+                    
+                    
+                    
 
 
         if robot2.cmd_plan is not None: # if the robot has a plan to execute
@@ -1136,22 +1193,18 @@ def main():
                 else: # else embed in window the last predicted positions in the plan 
                     p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
                 dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
-            
-            else:
-          
-                link_spheres_r2_R2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
-                link_spheres_r2 = link_spheres_r2_R2[:,:,:3].cpu() + robot2.p_R # offset of robot1 origin in world frame (only position, radius is not affected)
-                link_spheres_r2 = link_spheres_r2.squeeze(0) # 
-                for i in range(link_spheres_r2.shape[0]):
-                    p_sphere = link_spheres_r2[i][:3]
-                    r_sphere = rad_spheresR2[i]
-                    if r_sphere.item() > 0:
-                        # update the obstacle pose in the curobo collision checker
-                        pos_tensor = robot1.tensor_args.to_device(p_sphere)
-                        rot_tensor = robot1.tensor_args.to_device(torch.tensor([1,0,0,0]))
-                        w_obj_pose = Pose(pos_tensor, rot_tensor)
-                        world_ccheck.update_obstacle_pose(f'R2_{i}', w_obj_pose)
                 
+            else:
+                p_validspheresR2curr, _, _ = robot2.get_current_spheres_state()     
+                for i in range(len(robot2_as_obs_obnames)):
+                    name = robot2_as_obs_obnames[i]
+                    X_sphere = Pose.from_list(p_validspheresR2curr[i].tolist() + [1,0,0,0])
+                    r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
+                    # if show:
+                        # robot2.obs_viz[i].set_world_pose(position=np.array(p_validspheresR2curr[i].tolist()), orientation=np.array([1., 0., 0., 0.]))
+                if show:
+                    robot1.update_obs_viz(p_validspheresR2curr)
+
                 
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
                 robot2.cmd_idx = 0
