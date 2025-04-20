@@ -96,72 +96,67 @@ PHYSICS_STEP_DT = 0.03 # original 1/60
 # - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
 # - all info above referse to calls to my_world.step(render=True) (i.e. calls to my_world.step() with rendering=True)
 
+if True: # imports and initiation (put it in if to collapse it)
+    try:
+        # Third Party
+        import isaacsim
+    except ImportError:
+        pass
 
-try:
     # Third Party
-    import isaacsim
-except ImportError:
-    pass
+    import time
+    from typing import List, Optional
+    from curobo.geom.sdf.world_mesh import WorldMeshCollision
+    import torch
+    import argparse
+    import os
+    import carb
+    import numpy as np
+    import copy
+    from abc import abstractmethod
 
-# Third Party
-import time
-from typing import List, Optional
-from curobo.geom.sdf.world_mesh import WorldMeshCollision
-import torch
-import argparse
-import os
-import carb
-import numpy as np
-import copy
-from abc import abstractmethod
+    # Initialize the simulation app first (must be before "from omni.isaac.core")
 
-# Initialize the simulation app first (must be before "from omni.isaac.core")
+    from omni.isaac.kit import SimulationApp  
+    simulation_app = SimulationApp({"headless": False})
 
-from omni.isaac.kit import SimulationApp  
-simulation_app = SimulationApp({"headless": False})
+    # Now import other Isaac Sim modules
+    # https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
+    from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
+    from omni.isaac.core.objects import cuboid, sphere
+    from omni.isaac.core.utils.types import ArticulationAction
+    from omni.isaac.core.objects import DynamicCuboid
+    from omni.isaac.debug_draw import _debug_draw
+    from omni.isaac.core.materials import OmniGlass
+    from omni.isaac.core.objects import VisualSphere
 
-# Now import other Isaac Sim modules
-# https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
-from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
-from omni.isaac.core.objects import cuboid, sphere
-from omni.isaac.core.utils.types import ArticulationAction
-from omni.isaac.core.objects import DynamicCuboid
-from omni.isaac.debug_draw import _debug_draw
-from omni.isaac.core.materials import OmniGlass
-from omni.isaac.core.objects import VisualSphere
+    # Import helper from curobo examples
 
-# Import helper from curobo examples
-from projects_root.utils.helper import add_extensions, add_robot_to_scene
+    from projects_root.utils.helper import add_extensions, add_robot_to_scene
 
-# CuRobo
-from curobo.geom.sdf.world import CollisionCheckerType, WorldCollisionConfig
-from curobo.geom.types import Sphere, WorldConfig, Cuboid
-from curobo.rollout.rollout_base import Goal
-from curobo.types.base import TensorDeviceType
-from curobo.types.math import Pose
-from curobo.types.robot import JointState
-from curobo.types.state import JointState
-from curobo.util.logger import setup_curobo_logger, log_error
-from curobo.util.usd_helper import UsdHelper
-from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
-from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
-from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
-from curobo.types.robot import RobotConfig
+    # CuRobo
+    from curobo.geom.sdf.world import CollisionCheckerType, WorldCollisionConfig
+    from curobo.geom.types import Sphere, WorldConfig, Cuboid
+    from curobo.rollout.rollout_base import Goal
+    from curobo.types.base import TensorDeviceType
+    from curobo.types.math import Pose
+    from curobo.types.robot import JointState
+    from curobo.types.state import JointState
+    from curobo.util.logger import setup_curobo_logger, log_error
+    from curobo.util.usd_helper import UsdHelper
+    from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
+    from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
+    from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
+    from curobo.types.robot import RobotConfig
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
+    from projects_root.utils.decorators import static_vars
+    from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig,PoseCostMetric,)
 
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
-from projects_root.utils.decorators import static_vars
+    # Initialize CUDA device
+    a = torch.zeros(4, device="cuda:0") 
 
-from curobo.wrap.reacher.motion_gen import (
-    MotionGen,
-    MotionGenConfig,
-    MotionGenPlanConfig,
-    PoseCostMetric,
-)
-
-# Initialize CUDA device
-a = torch.zeros(4, device="cuda:0") 
-
+################### Read arguments ########################
 parser = argparse.ArgumentParser(
     description="CuRobo MPC example with moving obstacle in Isaac Sim",
     formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -183,14 +178,12 @@ Examples:
   omni_python mpc_example_with_moving_obstacle.py  --autoplay False
 """
 )
-################### Read arguments ########################
 parser.add_argument(
     "--headless_mode",
     type=str,
     default=None,
     help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
 )
-
 parser.add_argument(
     "--autoplay",
     help="Start simulation automatically without requiring manual play button press",
@@ -218,13 +211,9 @@ parser.add_argument(
     choices=["True", "False"],
     help="When True, prints the control rate",
 )
-
 args = parser.parse_args()
-
-# Convert string arguments to boolean
 args.autoplay = args.autoplay.lower() == "true"
 args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
-
 
 ###########################################################
 ######################### HELPER ##########################
@@ -336,8 +325,6 @@ def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic
         obs_for_visualization.append({"points": obs_predicted_poses, "color": obs_color})
     return obs_for_visualization
 
-
-
 def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc):
     """Prints information about the control loop frequncy (desired vs measured) and warns if it's too different.
     Args:
@@ -366,7 +353,6 @@ def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_
             But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
                 You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
 
-
 def activate_gpu_dynamics(my_world):
     """
     Activates GPU dynamics for the given world.
@@ -377,7 +363,6 @@ def activate_gpu_dynamics(my_world):
         my_world_physics_context.enable_gpu_dynamics(True)
         assert my_world_physics_context.is_gpu_dynamics_enabled()
         print("GPU dynamics is enabled")
-
 
 def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch.Tensor, sphere_names:list, tensor_args:TensorDeviceType) -> list[Sphere]:
     """
@@ -504,10 +489,6 @@ class AutonomousFranka:
         else:
             return False
     
-
-        
-                
-        
     def get_last_synced_target_pose(self):
         return Pose(position=self.tensor_args.to_device(self.target_last_synced_position),quaternion=self.tensor_args.to_device(self.target_last_synced_orientation),)
             
@@ -543,9 +524,6 @@ class AutonomousFranka:
         # robot.robot._articulation_view.initialize()
         self.robot.set_joint_positions(self.initial_joint_config, idx_list) 
         self.robot._articulation_view.set_max_efforts(values=np.array([5000 for _ in range(len(idx_list))]), joint_indices=idx_list)
-
-        
-        
 
     def get_robot_as_spheres(self, cu_js, express_in_world_frame=False) -> list[Sphere]:
         """Get the robot as spheres from the curobot joints state.
@@ -596,7 +574,6 @@ class AutonomousFranka:
             radius=float(rad_sphere),
             color=np.array([1-(h/h_max),0,0]))
         self.obs_viz.append(obs_viz)
-
 
     def get_dof_names(self):
         return self.robot.dof_names
@@ -650,8 +627,7 @@ class AutonomousFranka:
     def update_existing_sphere_obstacles_in_static_coll_checker(self,spheres):
         spheres = self.get_current_spheres_state()
         for sphere in spheres:
-            self.static_coll_checker.add_sphere(sphere)
-    
+            self.static_coll_checker.add_sphere(sphere)    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
@@ -849,8 +825,6 @@ class FrankaCumotion(AutonomousFranka):
         target_prerequisites = self._check_target_pose_changed(real_target_position, real_target_orientation) and self._check_target_pose_static(real_target_position, real_target_orientation)
         return robot_prerequisites and target_prerequisites
         
-
-
     def reset_command_plan(self, cu_js):
         print("reset_command_planning a new global plan - goal pose has changed!")
             
@@ -1010,7 +984,8 @@ def main():
     robot_idx_lists:List[Optional[List]] = [None, None]
     
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=np.array([0.5,0.5,0.5])) # cumotion robot - interferer
+    p_Trobot2 =np.array([0.4,0,0.5])
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_Trobot2) # cumotion robot - interferer
     robots[1] = robot2 
     # init cumotion solver and plan config
     robot2.init_solver(robots_collision_caches[1],tensor_args)

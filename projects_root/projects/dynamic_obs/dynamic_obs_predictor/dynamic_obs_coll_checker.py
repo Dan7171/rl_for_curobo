@@ -140,59 +140,12 @@ class DynamicObsCollPredictor:
             col = (sd_ownobs < safety_margin).float() # sets True for rollout if any of the robot spheres are too close to any of the obstacles (i.e, their "safety zone" is violated). Its a vector in length of n_rollouts, for each rollout, checks if for that rollout any of the robot spheres got too close to any of the obstacles. 
             col = col.sum(dim=3).sum(dim=2) # for each (rollout,step) sum all collisions (over all pairs of own spheres and obstacles). Get a matrix of shape [n_rollouts, H] where each entry is the number of violations of the safety margin for the robot spheres.
             dynamic_coll_cost_matrix = col
-        # dynamic_coll_cost_matrix = torch.sum(col, dim=3) # sum of collisioncosts over all spheres.
-        # sd_ownobs = compute_signed_distance(p_own, ,c)
+      
 
-        # dynamic_coll_cost_matrix = torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
-
-        # prad_ownh = prad_own.contiguous() # From [n_rollouts, H, n_spheres, SPHERE_DIM] to [n_rollouts, n_spheres, SPHERE_DIM]. We now focus on rollouts only from the time step "t+h" over the horizon (horizon starts at t, meaning h=0).
-        # prad_ownh = prad_ownh.reshape(self.n_rollouts, 1, self.n_spheres_own, SPHERE_DIM) # From [n_rollouts, n_spheres, SPHERE_DIM] to [n_rollouts, 1, n_spheres, SPHERE_DIM] 
-        # prad_ownh = prad_ownh.squeeze(1) # From [n_rollouts, 1, n_spheres, SPHERE_DIM] to [n_rollouts, n_spheres, SPHERE_DIM]. the second dimension is squeezed out because it's 1 (representing only the  h'th step over the horizon).
-        # p_ownh, rad_ownh = prad_ownh[:,:,:3], prad_ownh[:,:,3]
-        # d_collh = torch.zeros((self.n_rollouts, self.n_spheres_own), device=self.tensor_args.device)
-
-
-        # for h in range(self.H):
-    
-        #     # checker_to_use_at_step_h = max(self.cur_checker_idx + h, self.n_valid_checkers - 1) # self.routing_table[h]
-        #     # buffer_step_h = self.collision_buffers[checker_to_use_at_step_h]
-
-        #     # Extract and reshape spheres for current timestep
-        #     prad_ownh = prad_own[:, h].contiguous() # From [n_rollouts, H, n_spheres, SPHERE_DIM] to [n_rollouts, n_spheres, SPHERE_DIM]. We now focus on rollouts only from the time step "t+h" over the horizon (horizon starts at t, meaning h=0).
-        #     prad_ownh = prad_ownh.reshape(self.n_rollouts, 1, self.n_spheres_own, SPHERE_DIM) # From [n_rollouts, n_spheres, SPHERE_DIM] to [n_rollouts, 1, n_spheres, SPHERE_DIM] 
-        #     prad_ownh = prad_ownh.squeeze(1) # From [n_rollouts, 1, n_spheres, SPHERE_DIM] to [n_rollouts, n_spheres, SPHERE_DIM]. the second dimension is squeezed out because it's 1 (representing only the  h'th step over the horizon).
-        #     p_ownh, rad_ownh = prad_ownh[:,:,:3], prad_ownh[:,:,3]
-        #     d_collh = torch.zeros((self.n_rollouts, self.n_spheres_own), device=self.tensor_args.device)
-
-        #     # cost_matrix_step_h = self.cchecks[checker_to_use_at_step_h].get_sphere_distance( # NOTE: although the method is called get_sphere_distance, it actually returns the "curobo collision cost" (see section 3.3 in paper).
-        #     # cost_matrix_step_h = cost_matrix_step_h.squeeze(1) # from [n_rollouts, 1, n_spheres] to [n_rollouts, n_spheres]. the second dimension is squeezed out because it's 1 (representing only the  h'th step over the horizon).
-        #     # NOTE: 2 "spheres_curobo_coll_costs" is a 3d tensor of shape:
-        #     # [n_rollouts # number of rollouts, 1 # horizon length is 1 because we check collision for each time step separately, n_spheres # number of spheres in the robot (65 for franka)  
-        #     # We don't need the horizon dimension, so we squeezed it out.
-        
-            
-        #     if binary:
-        #         safety_margin_violation_rollouts = torch.any(cost_matrix_step_h > 0, dim=1) # sets True for rollout if any of the robot spheres are too close to an obstacle (i.e, their "safety zone" is violated). Its a vector in length of n_rollouts, for each rollout, checks if for that rollout (at the h'th step) any of the robot spheres got too close to any of the obstacles. It does that by checking if there is any positive of "curobo collision cost" for that specific rollout (in the specific step h). 
-        #         safety_margin_violation_rollouts = safety_margin_violation_rollouts.float() # The .float() converts bool to float (True (safety margin violation) turns 1, False (no violation) turns 0).                
-        #     else:
-        #         safety_margin_violation_rollouts = torch.sum(spheres_curobo_coll_costs, dim=1) # sum of collisioncosts over all spheres.
-            
-
-            
-        # dynamic_coll_cost_matrix[:, h] = safety_margin_violation_rollouts 
-
-
-                # #### debug ####
-                # if h % 7 == 0:
-                #     print(f"step {h}: col_checker obs estimated pose: {self.cchecks[h].world_model.objects[0].pose}")
-                # ############### 
-        
-            # Now that we have the full cost matrix, which is of shape [n_rollouts, horizon].
-            # Some post-processing if needed:
-
+      
         # For each rollout, if a cost entry is less than the previous entry, set it to 0. The idea is to avoid charging for actions which take the robot out of collision. For those actions, we set a cost of 0.
-        # if self.mask_decreasing_cost_entries:
-        #     dynamic_coll_cost_matrix = mask_decreasing_values(dynamic_coll_cost_matrix)
+        if self.mask_decreasing_cost_entries:
+            dynamic_coll_cost_matrix = mask_decreasing_values(dynamic_coll_cost_matrix)
         
         # Shift the cost matrix left by one (to charge for the action that leads to the collision, and not for the state you are in collision):
         if self.shift_cost_matrix_left:
@@ -209,39 +162,7 @@ class DynamicObsCollPredictor:
         """
         return self._obstacles_predicted_paths[obstacle_name]
         
-    # def update_cuboids_in_checker(self, cuboid_list:List[Cuboid], checker_idx:int):
-    #     """
-    #     Update the cuboids in the collision checker at a specific index.
-    #     """
-    #     for cuboid in cuboid_list:
-    #         self.cchecks[checker_idx].add_obb(cuboid)
-    #         if cuboid.name not in self._obstacles_predicted_paths:
-    #             self._obstacles_predicted_paths[cuboid.name] = np.zeros((self.n_checkers, 7))
-    #         self._obstacles_predicted_paths[cuboid.name][checker_idx] = np.array(cuboid.pose)
 
-    # def add_cuboids_to_checker(self, cuboid_list:List[Cuboid], checker_idx:int):
-    #     """
-    #     Add an obstacle to the collision checker at a specific index.
-    #     """
-    #     for cuboid in cuboid_list:
-    #         self.cchecks[checker_idx].add_obb(cuboid)
-    #         if cuboid.name not in self._obstacles_predicted_paths:
-    #             self._obstacles_predicted_paths[cuboid.name] = np.zeros((self.n_checkers, 7))
-    #         self._obstacles_predicted_paths[cuboid.name][checker_idx] = np.array(cuboid.pose)
-
-    # def disable_obstacles_in_checker(self, obstacle_names:List[str], checker_idx:int):
-    #     """
-    #     Disable the obstacles in the collision checker at a specific index.
-    #     """
-    #     for obstacle_name in obstacle_names:
-    #         self.cchecks[checker_idx].enable_obstacle(obstacle_name, False)
-
-    # def enable_obstacles_in_checker(self, obstacle_names:List[str], checker_idx:int):
-    #     """
-    #     Enable the obstacles in the collision checker at a specific index.
-    #     """
-    #     for obstacle_name in obstacle_names:
-    #         self.cchecks[checker_idx].enable_obstacle(obstacle_name)
 
 
 
