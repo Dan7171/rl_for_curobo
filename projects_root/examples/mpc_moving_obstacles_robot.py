@@ -68,6 +68,7 @@ FORCE_CONSTANT_VELOCITIES = False # If True, then the velocities of the dynamic 
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
+HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
 
 ###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
@@ -1138,9 +1139,8 @@ def main():
                 p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
                 if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
                     dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
-                    show = True
                     # robot2_as_obs_obnames = []
-                    if show:
+                    if HIGHLIGHT_OBS:
                         for h in range(p_spheresR2H.shape[0]):
                             for i in range(p_spheresR2H.shape[1]):
                                 obs_nameih = f'{robot2.robot_name}_obs{i}_h{h}'
@@ -1164,7 +1164,6 @@ def main():
                 # link_spheres_r2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
                 
                 if robot2.num_targets == 1: # after planning the first global plan by robot 2 (but before executing it)
-                    show = True
                     p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
                     robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
                     for i in range(len(robot2_as_obs_obnames)):
@@ -1174,7 +1173,7 @@ def main():
                     r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
                     for cube in robot2_cube_list:
                         robot1.cu_stat_obs_world_model.add_obstacle(cube)
-                    if show:
+                    if HIGHLIGHT_OBS:
                         for i in range(len(robot2_as_obs_obnames)):
                             robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
             
@@ -1204,7 +1203,7 @@ def main():
                 else: # else embed in window the last predicted positions in the plan 
                     p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
                 dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
-                if show and t_idx % robot1.H == 0: # 
+                if HIGHLIGHT_OBS and t_idx % robot1.H == 0: # 
                     p_spheresR2H_reshaped_for_viz = p_spheresR2H.reshape(-1, 3) # collapse first two dimensions
                     robot1.update_obs_viz(p_spheresR2H_reshaped_for_viz.cpu())                
             else:
@@ -1213,7 +1212,7 @@ def main():
                     name = robot2_as_obs_obnames[i]
                     X_sphere = Pose.from_list(p_validspheresR2curr[i].tolist() + [1,0,0,0])
                     r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
-                if show:
+                if HIGHLIGHT_OBS:
                     robot1.update_obs_viz(p_validspheresR2curr)
         
 
