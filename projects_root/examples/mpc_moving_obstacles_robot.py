@@ -62,7 +62,7 @@ ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
     # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
     # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
 FORCE_CONSTANT_VELOCITIES = False # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
@@ -436,6 +436,7 @@ class AutonomousFranka:
         self._vis_spheres = None # for visualization of robot spheres
         self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(self.robot_cfg)) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
         self.obs_viz = [] # for visualization of robot spheres
+        self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
         AutonomousFranka.instance_counter += 1
 
@@ -1137,6 +1138,14 @@ def main():
                 p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
                 if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
                     dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
+                    show = True
+                    # robot2_as_obs_obnames = []
+                    if show:
+                        for h in range(p_spheresR2H.shape[0]):
+                            for i in range(p_spheresR2H.shape[1]):
+                                obs_nameih = f'{robot2.robot_name}_obs{i}_h{h}'
+                                robot1.obs_viz_obs_names.append(obs_nameih)
+                                robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
                 else:
                     dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
                 print("Updated dynamic obstacle collision checker")
@@ -1158,6 +1167,8 @@ def main():
                     show = True
                     p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
                     robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
+                    for i in range(len(robot2_as_obs_obnames)):
+                        robot1.obs_viz_obs_names.append(robot2_as_obs_obnames[i])
                     robot2_sphere_list = get_sphere_list_from_sphere_tensor(p_validspheresR2curr, rad_validspheresR2, robot2_as_obs_obnames, robot2.tensor_args)
                     robot2_cube_list = [sphere.get_cuboid() for sphere in robot2_sphere_list]
                     r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
@@ -1193,17 +1204,18 @@ def main():
                 else: # else embed in window the last predicted positions in the plan 
                     p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
                 dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
-                
+                if show and t_idx % robot1.H == 0: # 
+                    p_spheresR2H_reshaped_for_viz = p_spheresR2H.reshape(-1, 3) # collapse first two dimensions
+                    robot1.update_obs_viz(p_spheresR2H_reshaped_for_viz.cpu())                
             else:
                 p_validspheresR2curr, _, _ = robot2.get_current_spheres_state()     
                 for i in range(len(robot2_as_obs_obnames)):
                     name = robot2_as_obs_obnames[i]
                     X_sphere = Pose.from_list(p_validspheresR2curr[i].tolist() + [1,0,0,0])
                     r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
-                    # if show:
-                        # robot2.obs_viz[i].set_world_pose(position=np.array(p_validspheresR2curr[i].tolist()), orientation=np.array([1., 0., 0., 0.]))
                 if show:
                     robot1.update_obs_viz(p_validspheresR2curr)
+        
 
                 
             if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
