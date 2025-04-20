@@ -1123,65 +1123,49 @@ def main():
             print("robot2 target changed")
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             robot2_plan = robot2.get_current_plan_as_tensor()
-            pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
-            robot2_crm = robot2.crm # to compute FK                
-            # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
-            p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-            # convert to world frame (W):
-            p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
-            p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
-            p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
-            rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
-            
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
-                print("Updating dynamic obstacle collision checker")
-                assert dynamic_obs_coll_predictor is not None # just to ignore warnings
-                p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
-                if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
-                    dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
-                    # robot2_as_obs_obnames = []
-                    if HIGHLIGHT_OBS:
-                        for h in range(p_spheresR2H.shape[0]):
-                            for i in range(p_spheresR2H.shape[1]):
-                                obs_nameih = f'{robot2.robot_name}_obs{i}_h{h}'
-                                robot1.obs_viz_obs_names.append(obs_nameih)
-                                robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
-                else:
-                    dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
-                print("Updated dynamic obstacle collision checker")
-
-            else:
-                # obstacles = usd_help.get_obstacles_from_stage(
-                #     # only_paths=[obstacles_path],
-                #     reference_prim_path=robot1.robot_prim_path,
-                #     ignore_substring=[
-                #         robot1.robot_prim_path,
-                #         robot1.target_path,
-                #         "/World/defaultGroundPlane",
-                #         "/curobo",
-                #     ],
-                # ).get_collision_check_world()
-                # link_spheres_r2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
+            if robot2_plan is not None:
+                pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
+                robot2_crm = robot2.crm # to compute FK                
+                # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                # convert to world frame (W):
+                p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
+                p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+                p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
+                rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
                 
-                if robot2.num_targets == 1: # after planning the first global plan by robot 2 (but before executing it)
-                    p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
-                    robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
-                    for i in range(len(robot2_as_obs_obnames)):
-                        robot1.obs_viz_obs_names.append(robot2_as_obs_obnames[i])
-                    robot2_sphere_list = get_sphere_list_from_sphere_tensor(p_validspheresR2curr, rad_validspheresR2, robot2_as_obs_obnames, robot2.tensor_args)
-                    robot2_cube_list = [sphere.get_cuboid() for sphere in robot2_sphere_list]
-                    r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
-                    for cube in robot2_cube_list:
-                        robot1.cu_stat_obs_world_model.add_obstacle(cube)
-                    if HIGHLIGHT_OBS:
-                        for i in range(len(robot2_as_obs_obnames)):
-                            robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
-            
+                if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
+                    print("Updating dynamic obstacle collision checker")
+                    assert dynamic_obs_coll_predictor is not None # just to ignore warnings
+                    p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
+                    if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
+                        dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
+                        # robot2_as_obs_obnames = []
+                        if HIGHLIGHT_OBS:
+                            for h in range(p_spheresR2H.shape[0]):
+                                for i in range(p_spheresR2H.shape[1]):
+                                    obs_nameih = f'{robot2.robot_name}_obs{i}_h{h}'
+                                    robot1.obs_viz_obs_names.append(obs_nameih)
+                                    robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
+                    else:
+                        dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
+                    print("Updated dynamic obstacle collision checker")
+
                 else:
-                    pass
-                    
-                    
-                    
+                    if robot2.num_targets == 1: # after planning the first global plan by robot 2 (but before executing it)
+                        p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
+                        robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
+                        for i in range(len(robot2_as_obs_obnames)):
+                            robot1.obs_viz_obs_names.append(robot2_as_obs_obnames[i])
+                        robot2_sphere_list = get_sphere_list_from_sphere_tensor(p_validspheresR2curr, rad_validspheresR2, robot2_as_obs_obnames, robot2.tensor_args)
+                        robot2_cube_list = [sphere.get_cuboid() for sphere in robot2_sphere_list]
+                        r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
+                        for cube in robot2_cube_list:
+                            robot1.cu_stat_obs_world_model.add_obstacle(cube)
+                        if HIGHLIGHT_OBS:
+                            for i in range(len(robot2_as_obs_obnames)):
+                                robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
+                                    
 
 
         if robot2.cmd_plan is not None: # if the robot has a plan to execute
