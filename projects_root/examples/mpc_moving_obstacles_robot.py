@@ -1058,46 +1058,47 @@ def main():
     ctrl_loop_start_time = time.time()
     robot1_init_obs = False
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    while simulation_app.is_running(): # not necessarily playing, just running                
+    while simulation_app.is_running():                 
         
+        # Update simulation
+        print("(debug) t_idx= ", t_idx)
         my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
-        ########## ROBOT 1 STEP ##########
-        #### START MEASURING CTRL FREQ IF NEEDED AND CAN #######    
+        
+        # Measure control frequency
         if args.print_ctrl_rate and not SIMULATING:
             real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
             real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
             if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+
+        # Get robot 1 current joint state from simulation and update it in the relevant fields.
+        robots_cu_js[0] = robot1.get_curobo_joint_state(robot1.get_sim_joint_state())
+        robot1.update_current_state(robots_cu_js[0])
         
-        ######### UPDATE GOAL POSE AT MPC IF GOAL MOVED #########
-        # Get target position and orientation
+        # Get robot 1 target real pose from simulation and update it in the MPC solver if all other conditions are met.
         real_world_pos_target1, real_world_orient_target1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-        # Update goals if targets has moved
-        robot1_target_changed = robot1.update_target_if_needed(real_world_pos_target1, real_world_orient_target1)
-        if robot1_target_changed:
+        if robot1.update_target_if_needed(real_world_pos_target1, real_world_orient_target1):
             print("robot1 target changed!")
             robot1.goal_buffer.goal_pose.copy_(robot1.get_last_synced_target_pose())
             robot1.solver.update_goal(robot1.goal_buffer)
  
-        
-        ############################################################
-        ########## ROBOT 2 STEP ##########
-        ############################################################
-        print("t_idx = ", t_idx)
-        
-        robots_cu_js[0] = robot1.get_curobo_joint_state(robot1.get_sim_joint_state())
-        robot1.update_current_state(robots_cu_js[0])
+
+        # Get robot 2 current joint state from simulation and update it in the relevant fields.
         sim_js_robot2 = robot2.get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
         robots_cu_js[1] = robot2.get_curobo_joint_state(sim_js_robot2) 
-        real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-        robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
+
+        # Get robot 2 target real pose from simulation and update it in the cumotion solver if all other conditions are met.
+        real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose        
         
-        if robot2_target_changed:
-            print("robot2 target changed, updating plan...")
+
+        if robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2):
+            print("robot2 target changed!, updating plan")
+            # Replan and update the plan of robot2.
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             robot2_plan = robot2.get_current_plan_as_tensor()
-            if robot2_plan is not None:    
+            
+            if robot2_plan is not None: # new plan is availabe    
                 pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
                 # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
                 p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2.crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
@@ -1108,11 +1109,12 @@ def main():
                 rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
         
                 
-                if not robot1_init_obs:
-                    if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
+                if not robot1_init_obs: 
+                    # Initialize robot 2 as obstacles for robot 1.
+                    
+                    if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # Dynamic obstacles (with prediction, modified MPC cost function)   
                         # assert dynamic_obs_coll_predictor is not None # just to ignore warnings
                         p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
-
                         print("Obstacles initiation: Adding dynamic obstacle to collision checker")
                         dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
                         # robot2_as_obs_obnames = []
@@ -1124,7 +1126,7 @@ def main():
                                     robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
                         print("Added dynamic obstacles tocollision checker")
                 
-                    else:
+                    else: # Static obstacles (no prediction,normal MPC)
                         print("Obstacles initiation: Adding static obstacles to original curobo collision checker")
                         p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
                         robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
@@ -1135,14 +1137,16 @@ def main():
                         r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
                         for cube in robot2_cube_list:
                             robot1.cu_stat_obs_world_model.add_obstacle(cube)
-                        print("Obstacles initiation: Added static obstacles to original curobo collision checker")
                         if HIGHLIGHT_OBS:
                             for i in range(len(robot2_as_obs_obnames)):
                                 robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
+                        print("Obstacles initiation: Added static obstacles to original curobo collision checker")
+
                     robot1_init_obs = True        
         
-        if robot2.cmd_plan is not None and robot1_init_obs: # if the robot2 has a plan to execute (otherwise it should be static)    
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # Update obstacles in robot1's collision checker according to the current plan of robot2
+        if robot2.cmd_plan is not None and robot1_init_obs: 
+            # Update obstacles in robot1's collision checker according to the current plan of robot2
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # Dynamic obstacles (with prediction, modified MPC cost function)
                 # move sliding window of predicted dynamic obstacles
                 max_idx_window = robot2.cmd_idx + robot1.H - 1
                 n_cmds_plan = len(p_spheresR2fullplan)
@@ -1156,7 +1160,7 @@ def main():
                     p_spheresR2H_reshaped_for_viz = p_spheresR2H.reshape(-1, 3) # collapse first two dimensions
                     robot1.update_obs_viz(p_spheresR2H_reshaped_for_viz.cpu())                
             
-            else: # Update static obstacles in robot1's collision checker by reading the current state of robot2
+            else: # Static obstacles (no prediction,normal MPC)
                 p_validspheresR2curr, _, _ = robot2.get_current_spheres_state()     
                 for i in range(len(robot2_as_obs_obnames)):
                     name = robot2_as_obs_obnames[i]
@@ -1164,23 +1168,28 @@ def main():
                     r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
                 if HIGHLIGHT_OBS:
                     robot1.update_obs_viz(p_validspheresR2curr)
-        # mpc planning
-        mpc_result = robot1.solver.step(robot1.current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        
         
         # apply actions in robots
+        # robot 1 local planning
+        mpc_result = robot1.solver.step(robot1.current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        # robot 1 apply action
         robot1_art_action = robot1.get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
         robot1.apply_articulation_action(robot1_art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
+        # robot 2 apply action (from global plan)
         if robot2.cmd_plan is not None:
             robot2_art_action = robot2.get_next_articulation_action(idx_list=robot_idx_lists[1])
             robot2.apply_articulation_action(robot2_art_action)
-         
-        if t_idx % 100 == 0 and robot1_init_obs: # change pose of target in simulator of robot2 every 100 steps
+        
+        
+        # sample a new target from robot 2 every 100 steps and spawn in simulator 
+        if t_idx % 100 == 0 and robot1_init_obs: 
             p_validspheresR1curr, _, valid_sphere_indices_R1 = robot1.get_current_spheres_state()
             new_target_idx = np.random.choice(valid_sphere_indices_R1[20:]) # above the base of the robot
             p_new_target =  p_validspheresR1curr[new_target_idx]
             robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4))
 
-        ############ OPTIONAL VISUALIZATIONS ###########
+        # Some visualizations...
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
             for i, robot in enumerate(robots):
@@ -1199,7 +1208,8 @@ def main():
                 point_visualzer_inputs.append(global_plan_points)
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
-        ############### UPDATE TIME STEP INDEX  ###############
+        # Update time step index and print stats
+        
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
         print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
         # print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
