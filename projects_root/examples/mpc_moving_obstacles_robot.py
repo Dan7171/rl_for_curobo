@@ -1123,8 +1123,7 @@ def main():
                                     robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
                         print("Added dynamic obstacles tocollision checker")
                         robot1_init_obs = True
-                    else:
-                        dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
+             
                         
                 else:
                     if not robot1_init_obs: # after planning the first global plan by robot 2 (but before executing it)
@@ -1167,16 +1166,17 @@ def main():
                     r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
                 if HIGHLIGHT_OBS:
                     robot1.update_obs_viz(p_validspheresR2curr)
-
-        
+        # mpc planning
         mpc_result = robot1.solver.step(robot1.current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        
+        # apply actions in robots
         robot1_art_action = robot1.get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
         robot1.apply_articulation_action(robot1_art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
         if robot2.cmd_plan is not None:
             robot2_art_action = robot2.get_next_articulation_action(idx_list=robot_idx_lists[1])
             robot2.apply_articulation_action(robot2_art_action)
          
-        if t_idx % 100 == 0 and robot1_init_obs: # change target of robot2 every 100 steps
+        if t_idx % 100 == 0 and robot1_init_obs: # change pose of target in simulator of robot2 every 100 steps
             p_validspheresR1curr, _, valid_sphere_indices_R1 = robot1.get_current_spheres_state()
             new_target_idx = np.random.choice(valid_sphere_indices_R1[20:]) # above the base of the robot
             p_new_target =  p_validspheresR1curr[new_target_idx]
