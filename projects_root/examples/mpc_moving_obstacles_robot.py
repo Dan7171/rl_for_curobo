@@ -59,7 +59,7 @@ Example options:
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+MODIFY_MPC_COST_FN_FOR_DYN_OBS  = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
@@ -1107,11 +1107,12 @@ def main():
                 p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
                 rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
         
-                if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
-                    assert dynamic_obs_coll_predictor is not None # just to ignore warnings
-                    p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
-                    
-                    if not robot1_init_obs: # after planning the first global plan by R2 (but before executing it)
+                
+                if not robot1_init_obs:
+                    if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
+                        # assert dynamic_obs_coll_predictor is not None # just to ignore warnings
+                        p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
+
                         print("Obstacles initiation: Adding dynamic obstacle to collision checker")
                         dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
                         # robot2_as_obs_obnames = []
@@ -1122,11 +1123,8 @@ def main():
                                     robot1.obs_viz_obs_names.append(obs_nameih)
                                     robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
                         print("Added dynamic obstacles tocollision checker")
-                        robot1_init_obs = True
-             
-                        
-                else:
-                    if not robot1_init_obs: # after planning the first global plan by robot 2 (but before executing it)
+                
+                    else:
                         print("Obstacles initiation: Adding static obstacles to original curobo collision checker")
                         p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
                         robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
@@ -1141,7 +1139,7 @@ def main():
                         if HIGHLIGHT_OBS:
                             for i in range(len(robot2_as_obs_obnames)):
                                 robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
-                        robot1_init_obs = True        
+                    robot1_init_obs = True        
         
         if robot2.cmd_plan is not None and robot1_init_obs: # if the robot2 has a plan to execute (otherwise it should be static)    
             if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # Update obstacles in robot1's collision checker according to the current plan of robot2
