@@ -1107,8 +1107,9 @@ def main():
                 for i in range(p_rad_spheresR2curr.shape[0]):
                     p_sphere = p_rad_spheresR2curr[i][:3]
                     r_sphere = p_rad_spheresR2curr[i][3]
+                    sphere_pose = p_sphere.tolist() + [1,0,0,0]
                     if r_sphere > 0:
-                        robot1.cu_stat_obs_world_model.add_obstacle(Sphere(f'R2_{i}', position=p_sphere.tolist(), radius=r_sphere.item()).get_cuboid())
+                        robot1.cu_stat_obs_world_model.add_obstacle(Sphere(f'R2_{i}', pose=sphere_pose, radius=r_sphere.item()).get_cuboid())
 
                 collision_support_world = WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)
                 world_collision_config = WorldCollisionConfig(tensor_args, world_model=collision_support_world)
@@ -1141,17 +1142,14 @@ def main():
                 link_spheres_r2_R2 = robot2.crm.compute_kinematics_from_joint_state(robots_cu_js[1]).get_link_spheres()
                 link_spheres_r2 = link_spheres_r2_R2[:,:,:3].cpu() + robot2.p_R # offset of robot1 origin in world frame (only position, radius is not affected)
                 link_spheres_r2 = link_spheres_r2.squeeze(0) # 
-            
-                
                 for i in range(link_spheres_r2.shape[0]):
                     p_sphere = link_spheres_r2[i][:3]
                     r_sphere = rad_spheresR2[i]
                     if r_sphere.item() > 0:
-                        robot1.cu_stat_obs_world_model.add_obstacle(Sphere(f'R2_{i}', position=p_sphere.tolist(), radius=r_sphere.item()).get_cuboid())
+                        # update the obstacle pose in the curobo collision checker
                         pos_tensor = robot1.tensor_args.to_device(p_sphere)
                         rot_tensor = robot1.tensor_args.to_device(torch.tensor([1,0,0,0]))
                         w_obj_pose = Pose(pos_tensor, rot_tensor)
-                        # update the obstacle pose in the curobo collision checker
                         world_ccheck.update_obstacle_pose(f'R2_{i}', w_obj_pose)
                 
                 
