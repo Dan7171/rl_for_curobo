@@ -376,6 +376,24 @@ def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch
         name_sphere = sphere_names[i]
         spheres.append(Sphere(name=name_sphere, pose=X_sphere, radius=r_sphere))
     return spheres
+
+def wait_for_playing(my_world):
+    playing = False
+    while simulation_app.is_running() and not playing:
+        my_world.step(render=True)
+        if my_world.is_playing():
+            playing = True
+        else:
+            if args.autoplay: # if autoplay is enabled, play the simulation immediately
+                my_world.play()
+                while not my_world.is_playing():
+                    print("blocking until playing is confirmed...")
+                    time.sleep(0.1)
+                playing = True
+            else:
+                print("Waiting for play button to be pressed...")
+                time.sleep(0.1)
+
 class AutonomousFranka:
     
     instance_counter = 0
@@ -968,7 +986,6 @@ def main():
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
-    # robot_cfg = load_yaml(join_path(get_robot_configs_path(), "franka.yml"))["robot_cfg"] # There is only one key (robot_cfg) in the yaml file. For curobo's collision checker/s
     
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
@@ -984,7 +1001,7 @@ def main():
     robot_idx_lists:List[Optional[List]] = [None, None]
     
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    p_Trobot2 =np.array([0.4,0,0.5])
+    p_Trobot2 =np.array([0.3,0,0.5])
     robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_Trobot2) # cumotion robot - interferer
     robots[1] = robot2 
     # init cumotion solver and plan config
@@ -1069,27 +1086,24 @@ def main():
         ############################################################
         print("t_idx = ", t_idx)
         # if t_idx > -1:
-        #     # if t_idx == 50 or t_idx % 1000 == 0.0:
-        #     #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
-        #     #     obstacles = usd_help.get_obstacles_from_stage(
-        #     #         # only_paths=[obstacles_path],
-        #     #         reference_prim_path=robot2.robot_prim_path,
-        #     #         ignore_substring=[
-        #     #             robot2.robot_prim_path,
-        #     #             robot2.target_path,
-        #     #             "/World/defaultGroundPlane",
-        #     #             "/curobo",
-        #     #         ],
-        #     #     ).get_collision_check_world()
-        #     #     # print(len(obstacles.objects))
-        #     #     robot2.solver.update_world(obstacles)
-        #     #     print("Updated World")
-        #     #     carb.log_info("Synced CuRobo world from stage.")
+            # if t_idx == 50 or t_idx % 1000 == 0.0:
+            #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
+            #     obstacles = usd_help.get_obstacles_from_stage(
+            #         # only_paths=[obstacles_path],
+            #         reference_prim_path=robot2.robot_prim_path,
+            #         ignore_substring=[
+            #             robot2.robot_prim_path,
+            #             robot2.target_path,
+            #             "/World/defaultGroundPlane",
+            #             "/curobo",
+            #         ],
+            #     ).get_collision_check_world()
+            #     # print(len(obstacles.objects))
+            #     robot2.solver.update_world(obstacles)
+            #     print("Updated World")
+            #     carb.log_info("Synced CuRobo world from stage.")
             
         sim_js_robot2 = robot2.get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
-        if np.any(np.isnan(sim_js_robot2.positions)): # check if any joint position is NaN
-            log_error("isaac sim has returned NAN joint position values.")
-        
         robots_cu_js[1] = robot2.get_curobo_joint_state(sim_js_robot2) 
         real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
@@ -1099,6 +1113,7 @@ def main():
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             robot2_plan = robot2.get_current_plan_as_tensor()
             if robot2_plan is not None:
+                
                 pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
                 robot2_crm = robot2.crm # to compute FK                
                 # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
@@ -1210,22 +1225,6 @@ def main():
         if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
             print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
 
-def wait_for_playing(my_world):
-    playing = False
-    while simulation_app.is_running() and not playing:
-        my_world.step(render=True)
-        if my_world.is_playing():
-            playing = True
-        else:
-            if args.autoplay: # if autoplay is enabled, play the simulation immediately
-                my_world.play()
-                while not my_world.is_playing():
-                    print("blocking until playing is confirmed...")
-                    time.sleep(0.1)
-                playing = True
-            else:
-                print("Waiting for play button to be pressed...")
-                time.sleep(0.1)
 
 
         
