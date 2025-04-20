@@ -141,6 +141,7 @@ class DynamicObsCollPredictor:
             col = col.sum(dim=3).sum(dim=2) # for each (rollout,step) sum all collisions (over all pairs of own spheres and obstacles). Get a matrix of shape [n_rollouts, H] where each entry is the number of violations of the safety margin for the robot spheres.
             dynamic_coll_cost_matrix = col
       
+            
 
       
         # For each rollout, if a cost entry is less than the previous entry, set it to 0. The idea is to avoid charging for actions which take the robot out of collision. For those actions, we set a cost of 0.

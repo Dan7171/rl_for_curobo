@@ -58,39 +58,27 @@ Example options:
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
-ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)
-    # GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.
-    # See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com
-    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
+ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
-FORCE_CONSTANT_VELOCITIES = False # If True, then the velocities of the dynamic obstacles will be forced to be constant. This eliminates the phenomenon that the dynamic obstacle is slowing down over time.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
-
-###################### RENDER_DT and PHYSICS_STEP_DT ########################
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
 # NOTE: RENDER_DT and PHYSICS_DT guide from emperical experiments!:
-
 # On every call call to my_world.step():
 #  * RULE 1: RENDER_DT controls the average pose change of an object.* 
 # If an object has a (constant) linear velocity of V[m/s], then if before the my_world.step() call the object was at position P, then after the my_world.step() call the object will be at position P+V*RENDER_DT on average*. Example: if RENDER_DT = 1/30, then if object is at pose xyz =(1[m],0[m],2[m]) and has a constant linear velocity of (0.15,0,0) [m/s], then after the my_world.step() call the object will be at pose (1+0.15*1/30,0,2)*[m]= (1.005[m],0[m],2[m]) on average(see exact definition below).
-
 # * RULE 2: RENDER_DT/PHYSICS_DT controls the time step index of the simulation: "my_world.current_time_step_index" *
 # RENDER_DT/PHYSICS_DT is the number of time steps *on average* that are added to the time step counter of the simulation (my_world.current_time_step_index) on every call to my_world.step(). Example: if before the my_world.step() call the time step counter was 10, and RENDER_DT/PHYSICS_DT = 2, then after the my_world.step() call the time step counter will be 10+2=12. In different words, the simulator takes REDNER_DT/PHYSICS_DT physics steps for every 1 rendering step on every call to my_world.step().
-
 #  * RULE 3: Internal simulation time is determined by my_world.current_time_step_index*PHYSICS_DT.
 # The furmula is my_world.current_time = my_world.current_time_step_index*PHYSICS_DT
-
 #  * RULE 4: *
 # my_world.current_time_step_index and my_world.current_time not necesarilly updated on every call to my_world.step(), but if they do, they are updated together (meaning that they are synchronized).
-
 # * RULE 5: *
 # the call to my_world.step() can perform 0, 1 or more than one physics steps.
-
 # Additional notes:
 # - "on average" means that the updated depends on the ratio: PHYSICS_DT/RENDER_DT. For example if the ratio = 4, then the update will be applied only every 4th call to my_world.step(). However if ths ratio is <=1, then the update will be applied every call to my_world.step().
 # - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
@@ -530,7 +518,9 @@ class AutonomousFranka:
         self._real_target_orient_prev_t = real_target_orientation
         return is_static
     
- 
+    def update_real_target(self, real_target_position, real_target_orientation):
+        self.target = spawn_target(self.target_path, real_target_position, real_target_orientation, self.initial_target_color, self.initial_target_size)
+        
     def _check_robot_static(self, sim_js) -> bool:
         return np.max(np.abs(sim_js.velocities)) < 0.2
     
@@ -620,8 +610,8 @@ class AutonomousFranka:
         return cu_js
     
 
-    def get_current_spheres_state(self,express_in_world_frame:bool=True, valid_only=True):
-        cu_js = self.get_curobo_joint_state(self.get_sim_joint_state(),zero_vel=False) # zero vel doesent matter since we are getting sphere poses and radii
+    def get_current_spheres_state(self,express_in_world_frame:bool=True, valid_only=True,zero_vel=False):
+        cu_js = self.get_curobo_joint_state(self.get_sim_joint_state(),zero_vel=zero_vel) # zero vel doesent matter since we are getting sphere poses and radii
         link_spheres_R = self.crm.compute_kinematics_from_joint_state(cu_js).get_link_spheres()
         p_link_spheres_R = link_spheres_R[:,:,:3].cpu() # position of spheres expressedin robot base frame
         if express_in_world_frame:
@@ -641,11 +631,10 @@ class AutonomousFranka:
 
         return p_link_spheres_F, rad_link_spheres, sphere_indices
         
+    @abstractmethod
+    def apply_articulation_action(self, art_action:ArticulationAction):
+        pass
     
-    def update_existing_sphere_obstacles_in_static_coll_checker(self,spheres):
-        spheres = self.get_current_spheres_state()
-        for sphere in spheres:
-            self.static_coll_checker.add_sphere(sphere)    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
@@ -735,7 +724,7 @@ class FrankaMpc(AutonomousFranka):
         self.current_state.copy_(cu_js)
 
 
-    def get_art_action(self, js_action):
+    def get_next_articulation_action(self, js_action):
         """Get articulated action from joint state action (supplied by MPC solver).
         Args:
             js_action (_type_): _description_
@@ -753,6 +742,12 @@ class FrankaMpc(AutonomousFranka):
         self._cmd_state_full = self._cmd_state_full.get_ordered_joint_state(common_js_names)
         art_action = ArticulationAction(self._cmd_state_full.position.cpu().numpy(),joint_indices=idx_list,)
         return art_action
+    
+
+    def apply_articulation_action(self, art_action: ArticulationAction,num_times:int=3):
+        for _ in range(num_times):
+            ans = self.articulation_controller.apply_action(art_action)
+        return ans
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
         """
@@ -782,7 +777,15 @@ class FrankaCumotion(AutonomousFranka):
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         
+    def apply_articulation_action(self, art_action: ArticulationAction):
+        self.cmd_idx += 1
+        if self.cmd_idx >= len(self.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
+            self.cmd_idx = 0
+            self.cmd_plan = None
+            self.past_cmd = None
+        return self.articulation_controller.apply_action(art_action)
 
+    
     def init_solver(self, collision_cache,tensor_args):
         """Initialize the motion generator (cumotion global planner).
 
@@ -948,7 +951,14 @@ class FrankaCumotion(AutonomousFranka):
         start_q = self.cmd_plan.position[start_idx:] # at index i: joint positions just before applying the ith command
         vel_cmd = self.cmd_plan.velocity[start_idx:] # at index i: joint velocities to apply to the ith command
         return torch.stack([start_q, vel_cmd]) # shape: (2, len(plan), dof_num)
-       
+    
+    def get_next_articulation_action(self,idx_list):
+        next_cmd = self.cmd_plan[self.cmd_idx] # get the next joint command from the plan
+        self.past_cmd = next_cmd.clone() # save the past command for future use
+        next_cmd_joint_pos = next_cmd.position.cpu().numpy() # Joint configuration of the next command.
+        next_cmd_joint_vel = next_cmd.velocity.cpu().numpy() # Joint velocities of the next command.
+        art_action = ArticulationAction(next_cmd_joint_pos, next_cmd_joint_vel,joint_indices=idx_list,) # controller command
+        return art_action
     
 #############################################
 # MAIN SIMULATION LOOP
@@ -1046,6 +1056,7 @@ def main():
   
     
     ctrl_loop_start_time = time.time()
+    robot1_init_obs = False
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     while simulation_app.is_running(): # not necessarily playing, just running                
         
@@ -1068,67 +1079,40 @@ def main():
             print("robot1 target changed!")
             robot1.goal_buffer.goal_pose.copy_(robot1.get_last_synced_target_pose())
             robot1.solver.update_goal(robot1.goal_buffer)
-            
-        ############ GET CURRENT STATE OF ROBOT 1  ############
-        # Get current robot state
-        sim_js_robot1 = robot1.get_sim_joint_state() # robot1.robot.get_joints_state() # get the current joint state of the robot        
-        robots_cu_js[0] = robot1.get_curobo_joint_state(sim_js_robot1)
-        robot1.update_current_state(robots_cu_js[0])
-        ############### RUN MPC ROLLOUTS ###############
-        mpc_result = print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
-        art_action = robot1.get_art_action(mpc_result.js_action) # get articulated action from joint state action
-        # Execute planned motion
-        for _ in range(3):
-            robot1.articulation_controller.apply_action(art_action)
+ 
         
         ############################################################
         ########## ROBOT 2 STEP ##########
         ############################################################
         print("t_idx = ", t_idx)
-        # if t_idx > -1:
-            # if t_idx == 50 or t_idx % 1000 == 0.0:
-            #     print("Updating world, reading w.r.t.", robot2.robot_prim_path)
-            #     obstacles = usd_help.get_obstacles_from_stage(
-            #         # only_paths=[obstacles_path],
-            #         reference_prim_path=robot2.robot_prim_path,
-            #         ignore_substring=[
-            #             robot2.robot_prim_path,
-            #             robot2.target_path,
-            #             "/World/defaultGroundPlane",
-            #             "/curobo",
-            #         ],
-            #     ).get_collision_check_world()
-            #     # print(len(obstacles.objects))
-            #     robot2.solver.update_world(obstacles)
-            #     print("Updated World")
-            #     carb.log_info("Synced CuRobo world from stage.")
-            
+        
+        robots_cu_js[0] = robot1.get_curobo_joint_state(robot1.get_sim_joint_state())
+        robot1.update_current_state(robots_cu_js[0])
         sim_js_robot2 = robot2.get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
         robots_cu_js[1] = robot2.get_curobo_joint_state(sim_js_robot2) 
         real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
         robot2_target_changed = robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2)
+        
         if robot2_target_changed:
-            
-            print("robot2 target changed")
+            print("robot2 target changed, updating plan...")
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
             robot2_plan = robot2.get_current_plan_as_tensor()
-            if robot2_plan is not None:
-                
+            if robot2_plan is not None:    
                 pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
-                robot2_crm = robot2.crm # to compute FK                
-                # Run FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
-                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2_crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2.crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
                 # convert to world frame (W):
                 p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
                 p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
                 p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
                 rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
-                
+        
                 if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # init the new robot2 plan as obstacles for robot1    
-                    print("Updating dynamic obstacle collision checker")
                     assert dynamic_obs_coll_predictor is not None # just to ignore warnings
                     p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
-                    if robot2.num_targets == 1: # after planning the first global plan by R2 (but before executing it)
+                    
+                    if not robot1_init_obs: # after planning the first global plan by R2 (but before executing it)
+                        print("Obstacles initiation: Adding dynamic obstacle to collision checker")
                         dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
                         # robot2_as_obs_obnames = []
                         if HIGHLIGHT_OBS:
@@ -1137,12 +1121,14 @@ def main():
                                     obs_nameih = f'{robot2.robot_name}_obs{i}_h{h}'
                                     robot1.obs_viz_obs_names.append(obs_nameih)
                                     robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
+                        print("Added dynamic obstacles tocollision checker")
+                        robot1_init_obs = True
                     else:
                         dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H)
-                    print("Updated dynamic obstacle collision checker")
-
+                        
                 else:
-                    if robot2.num_targets == 1: # after planning the first global plan by robot 2 (but before executing it)
+                    if not robot1_init_obs: # after planning the first global plan by robot 2 (but before executing it)
+                        print("Obstacles initiation: Adding static obstacles to original curobo collision checker")
                         p_validspheresR2curr, rad_validspheresR2, valid_sphere_indices_R2 = robot2.get_current_spheres_state()
                         robot2_as_obs_obnames = [f'{robot2.robot_name}_obs_{i}' for i in valid_sphere_indices_R2]
                         for i in range(len(robot2_as_obs_obnames)):
@@ -1152,22 +1138,14 @@ def main():
                         r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
                         for cube in robot2_cube_list:
                             robot1.cu_stat_obs_world_model.add_obstacle(cube)
+                        print("Obstacles initiation: Added static obstacles to original curobo collision checker")
                         if HIGHLIGHT_OBS:
                             for i in range(len(robot2_as_obs_obnames)):
                                 robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
-                                    
-
-
-        if robot2.cmd_plan is not None: # if the robot has a plan to execute
-            cmd_state = robot2.cmd_plan[robot2.cmd_idx] # get the next joint command from the plan
-            robot2.past_cmd = cmd_state.clone() # save the past command for future use
-            art_action = ArticulationAction(cmd_state.position.cpu().numpy(),cmd_state.velocity.cpu().numpy(),joint_indices=robot_idx_lists[1],) # controller command
-            robot2.articulation_controller.apply_action(art_action) # apply command to controller. position, velocity, joint_indices https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
-            robot2.cmd_idx += 1 # current plan command counter 
-            # for _ in range(2): # NOTE: this was part of the original code. But I dont see a reason to keep it.
-            #     my_world.step(render=False)
-            
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+                        robot1_init_obs = True        
+        
+        if robot2.cmd_plan is not None and robot1_init_obs: # if the robot2 has a plan to execute (otherwise it should be static)    
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS: # Update obstacles in robot1's collision checker according to the current plan of robot2
                 # move sliding window of predicted dynamic obstacles
                 max_idx_window = robot2.cmd_idx + robot1.H - 1
                 n_cmds_plan = len(p_spheresR2fullplan)
@@ -1180,7 +1158,8 @@ def main():
                 if HIGHLIGHT_OBS and t_idx % robot1.H == 0: # 
                     p_spheresR2H_reshaped_for_viz = p_spheresR2H.reshape(-1, 3) # collapse first two dimensions
                     robot1.update_obs_viz(p_spheresR2H_reshaped_for_viz.cpu())                
-            else:
+            
+            else: # Update static obstacles in robot1's collision checker by reading the current state of robot2
                 p_validspheresR2curr, _, _ = robot2.get_current_spheres_state()     
                 for i in range(len(robot2_as_obs_obnames)):
                     name = robot2_as_obs_obnames[i]
@@ -1188,14 +1167,20 @@ def main():
                     r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
                 if HIGHLIGHT_OBS:
                     robot1.update_obs_viz(p_validspheresR2curr)
-        
 
-                
-            if robot2.cmd_idx >= len(robot2.cmd_plan.position): # NOTE: all cmd_plans (global plans) are at the same length from my observations (currently 61), no matter how many time steps (step_indexes) take to complete the plan.
-                robot2.cmd_idx = 0
-                robot2.cmd_plan = None
-                robot2.past_cmd = None
-            
+        
+        mpc_result = robot1.solver.step(robot1.current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        robot1_art_action = robot1.get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
+        robot1.apply_articulation_action(robot1_art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
+        if robot2.cmd_plan is not None:
+            robot2_art_action = robot2.get_next_articulation_action(idx_list=robot_idx_lists[1])
+            robot2.apply_articulation_action(robot2_art_action)
+         
+        if t_idx % 100 == 0 and robot1_init_obs: # change target of robot2 every 100 steps
+            p_validspheresR1curr, _, valid_sphere_indices_R1 = robot1.get_current_spheres_state()
+            new_target_idx = np.random.choice(valid_sphere_indices_R1[20:]) # above the base of the robot
+            p_new_target =  p_validspheresR1curr[new_target_idx]
+            robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4))
 
         ############ OPTIONAL VISUALIZATIONS ###########
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
