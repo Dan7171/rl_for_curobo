@@ -388,6 +388,9 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
                 dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
                 cost_list.append(dynamic_coll_cost) 
+                # if "dynamic_coll_cost_max" not in dynamic_obs_col_checker.debug_dict:
+                #     dynamic_obs_col_checker.debug_dict["dynamic_coll_cost_max"] = []
+                # dynamic_obs_col_checker.debug_dict["dynamic_coll_cost_max"].append(dynamic_coll_cost.max())
         else:
             # log_warn("No dynamic obs checker set")
             pass

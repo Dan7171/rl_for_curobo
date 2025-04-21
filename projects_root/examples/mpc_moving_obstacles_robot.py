@@ -60,7 +60,7 @@ SIMULATING = True # if False, then we are running the robot in real time (i.e. t
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
+DEBUG_COST_FUNCTION = False # If True, then the cost function will be printed on every call to my_world.step()
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
@@ -1102,6 +1102,10 @@ def main():
                 pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
                 # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
                 p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2.crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                valid_only = True # remove spheres that are not valid (i.e. negative radius)
+                if valid_only:
+                    p_rad_spheresR2fullplan_R2 = p_rad_spheresR2fullplan_R2[:,:-4]
+
                 # convert to world frame (W):
                 p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
                 p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
@@ -1116,8 +1120,7 @@ def main():
                         # assert dynamic_obs_coll_predictor is not None # just to ignore warnings
                         p_spheresR2H = p_spheresR2fullplan[:robot1.H].to(tensor_args.device) # horizon length
                         print("Obstacles initiation: Adding dynamic obstacle to collision checker")
-                        dynamic_obs_coll_predictor.add_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
-                        # robot2_as_obs_obnames = []
+                        dynamic_obs_coll_predictor.reset_obs(p_spheresR2H, rad_spheresR2.to(tensor_args.device))
                         if HIGHLIGHT_OBS:
                             for h in range(p_spheresR2H.shape[0]):
                                 for i in range(p_spheresR2H.shape[1]):
@@ -1156,6 +1159,7 @@ def main():
                 else: # else embed in window the last predicted positions in the plan 
                     p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
                 dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
+                
                 if HIGHLIGHT_OBS and t_idx % robot1.H == 0: # 
                     p_spheresR2H_reshaped_for_viz = p_spheresR2H.reshape(-1, 3) # collapse first two dimensions
                     robot1.update_obs_viz(p_spheresR2H_reshaped_for_viz.cpu())                
