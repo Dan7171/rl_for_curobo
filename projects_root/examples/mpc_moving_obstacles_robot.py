@@ -439,10 +439,10 @@ class AutonomousFranka:
         Args:
             usd_help (UsdHelper): _description_
         """
-
-        world_cfg_table = WorldConfig.from_dict(load_yaml(join_path(get_world_configs_path(), "collision_table.yml")))
-        world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height
-        world_cfg1 = WorldConfig.from_dict(load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))).get_mesh_world()
+        collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table.yml"
+        world_cfg_table = WorldConfig.from_dict(load_yaml(collision_table_cfg_path))
+        # world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height. Moved to file
+        world_cfg1 = WorldConfig.from_dict(load_yaml(collision_table_cfg_path)).get_mesh_world() # modifying all obstacles to mesh
         world_cfg1.mesh[0].name += "_mesh"
         world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
         
@@ -1192,6 +1192,7 @@ def main():
             new_target_idx = np.random.choice(valid_sphere_indices_R1[20:]) # above the base of the robot
             p_new_target =  p_validspheresR1curr[new_target_idx]
             robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4))
+            
 
         # Some visualizations...
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
