@@ -24,8 +24,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    # def __init__(self, tensor_args, world_cfg_template:WorldConfig , cache, step_dt_traj_mpc, H=30, n_rollouts=400, activation_distance= 0.05,n_spheres_own=65, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
-    def __init__(self, tensor_args, step_dt_traj_mpc, H=30, n_rollouts=400, cost_weight=100000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    def __init__(self, tensor_args, step_dt_traj_mpc, H=30, n_rollouts=400, cost_weight=1000, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
