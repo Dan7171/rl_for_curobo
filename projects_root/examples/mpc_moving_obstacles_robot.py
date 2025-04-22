@@ -56,6 +56,9 @@ Example options:
 
 # ############################## Run settings ##############################
 
+from curobo.geom.types import Mesh
+
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -119,6 +122,10 @@ if True: # imports and initiation (put it in if to collapse it)
     from omni.isaac.core.objects import VisualSphere
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
+    from omni.isaac.core.prims import XFormPrim
+    # from omni.isaac.core.prims import SingleXFormPrim
+    import omni.kit.commands as cmd
+    from pxr import Gf
     # Import helper from curobo examples
 
     from projects_root.utils.helper import add_extensions, add_robot_to_scene
@@ -383,6 +390,9 @@ def wait_for_playing(my_world):
                 print("Waiting for play button to be pressed...")
                 time.sleep(0.1)
 
+def get_full_path_to_asset(asset_subpath):
+    return get_assets_root_path() + '/Isaac/' + asset_subpath
+
 def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
     """
     Loads an asset to a prim path.
@@ -390,9 +400,12 @@ def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
 
     asset_subpath: sub-path to the asset to load. Must end with .usd or .usda. Normally starts with /Isaac/...
     To browse, go to: asset browser in simulator and add /Issac/% your subpath% where %your subpath% is the path to the asset you want to load.
+    Note: to get the asset exact asset_subpath, In the simulator, open: Isaac Assets -> brows to the asset (usd file) -> right click -> copy url path and paste it here (the subpath is the part after the last /Isaac/).
+    Normally the assets are coming from web, but this tutorial can help you use local assets: https://docs.omniverse.nvidia.com/launcher/latest/it-managed-launcher/content_install.html.
 
+    For example: http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/Mugs/SM_Mug_A2.usd -> asset_subpath should be: Props/Mugs/SM_Mug_A2.usd
+        
     prim_path: path to the prim to load the asset to. If not provided, the asset will be loaded to the prim path /World/%asset_subpath%    
-
     is_fullpath: if True, the asset_subpath is a full path to the asset. If False, the asset_subpath is a subpath to the assets folder in the simulator.
     This is useful if you want to load an asset that is not in the {get_assets_root_path() + '/Isaac/'} folder (which is the root folder for Isaac Sim assets (see asset browser in simulator) but custom assets in your project from a local path.
 
@@ -402,7 +415,7 @@ def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
     load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd") will load the asset to the prim path /World/Promps_Mugs_SM_Mug_A2
     load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd", "/World/Mug") will load the asset to the prim path /World/Mug
     load_asset_to_prim_path("/home/me/some_folder/SM_Mug_A2.usd", "/World/Mug", is_fullpath=True) will load the asset to the prim path /World/Mug
-    
+    load_asset_to_prim_path("http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/KLT_Bin/small_KLT_visual_collision.usd", "/World/KLT_Bin", is_fullpath=True) will load the asset to the prim path /World/KLT_Bin
     """
 
     # validate asset 
@@ -415,7 +428,7 @@ def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
     
     # define full path to asset
     if not is_fullpath:
-        asset_fullpath = get_assets_root_path() + '/Isaac/' + asset_subpath # get_assets_root_path() will return the path to the assets folder in the simulator. In my case:  http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0
+        asset_fullpath = get_full_path_to_asset(asset_subpath)
     else:
         asset_fullpath = asset_subpath 
     
@@ -465,10 +478,10 @@ class AutonomousFranka:
         self.robot_cfg = robot_cfg # the section under the key 'robot_cfg' in the robot config file (yml). https://curobo.org/tutorials/1_robot_configuration.html#tut-robot-configuration
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"] # joint names for the robot
         self.initial_joint_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] # initial ("/retract") joint configuration for the robot
-        
+        self.tensor_args = TensorDeviceType()
+
         self.cu_stat_obs_world_model = self._init_curobo_stat_obs_world_model(usd_help) # will be initialized in the _init_curobo_stat_obs_world_model method. Static obstacles world configuration for curobo collision checking.
         self.solver = None # will be initialized in the init_solver method.
-        self.tensor_args = TensorDeviceType()
         self._vis_spheres = None # for visualization of robot spheres
         self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(self.robot_cfg)) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
         self.obs_viz = [] # for visualization of robot spheres
@@ -490,8 +503,26 @@ class AutonomousFranka:
         world_cfg1.mesh[0].name += "_mesh"
         world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
         
-        world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh) # representation of the world for use in curobo
+        ####
+        # bin_prim_path = load_asset_to_prim_path("Props/KLT_Bin/small_KLT_visual_collision.usd")
+        # prim = PrimWrapper(bin_prim_path)
+        # prim.set_world_pose(position=np.array([-0.5, 0.6, 0.5]),orientation=np.array([1.0, 0.0, 0.0, 0.0]))    
+        # prim.set_local_scale(scale=np.array([1, 1, 1]))
+        # world_model = get_world_model_from_current_stage(self.world.stage, usd_help=usd_help)
+        # world_model = world_model.get_mesh_world()
+
+
+        ####
+        # ORIGINAL: FINE
+        world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
+        
+        # MINE: ERROR
+        # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh+obs)
+        # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh + world_model.mesh)
+        
+        
         usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path) 
+        
         return world_cfg
         # self.cu_stat_obs_world_model = world_cfg
 
@@ -1002,10 +1033,75 @@ class FrankaCumotion(AutonomousFranka):
         next_cmd_joint_vel = next_cmd.velocity.cpu().numpy() # Joint velocities of the next command.
         art_action = ArticulationAction(next_cmd_joint_pos, next_cmd_joint_vel,joint_indices=idx_list,) # controller command
         return art_action
+
+class PrimWrapper:
+    def __init__(self, prim_path: str):
+        # Init after the prim is added to the stage!
+        self.prim_path = prim_path
+        self.prim = XFormPrim(
+            prim_path  = prim_path,
+            name       = prim_path.split("/")[-1],       # optional
+        )
+        self.prim.initialize() # the prim so it can be used as a normal prim
+        
+    def set_world_pose(self, position, orientation):
+        self.prim.set_world_pose(position, orientation)
     
+    def set_local_pose(self, position, orientation):
+        self.prim.set_local_pose(position, orientation)
+
+    def set_local_scale(self, scale):
+        self.prim.set_local_scale(scale)
+        
+        
 #############################################
 # MAIN SIMULATION LOOP
 #############################################
+def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",reference_prim_path="/world"):
+    """
+     This function reads the world model from a USD file.
+    It aims to read the world model (for static obstacles) from a USD file and return a list of cuboids and spheres.
+    Obstacles are expected to be under the prim path /world/obstacles.
+
+    NOTE: 
+    Was taken from https://curobo.org/notes/05_usd_api.html
+    Origin in of read_world_from_usd see: /curobo/examples/usd_example.py
+    """        
+    # usd_helper = UsdHelper()
+    usd_helper = UsdHelper()
+    usd_helper.load_stage_from_file(file_path)
+    world_model = usd_helper.get_obstacles_from_stage()
+    return world_model 
+
+# def read_world_from_usd(file_path: str):
+#     usd_helper = UsdHelper()
+#     usd_helper.load_stage_from_file(file_path)
+#     # world_model = usd_helper.get_obstacles_from_stage(reference_prim_path="/Root/world_obstacles")
+#     world_model = usd_helper.get_obstacles_from_stage(
+#         only_paths=["/world/obstacles"], reference_prim_path="/world"
+#     )
+#     # print(world_model)
+#     for x in world_model.cuboid:
+#         print(x.name + ":")
+#         print("  pose: ", x.pose)
+#         print("  dims: ", x.dims)
+
+def write_stage_to_usd_file(stage,file_path):
+    stage.Export(file_path) # export the stage to a temporary USD file
+    
+def get_world_model_from_current_stage(stage,obstacle_prim_paths=[],usd_help:UsdHelper=None):
+    # prepare tmp USD file:
+    tmp_usd = '.tmp_usd_file.usd'
+    if os.path.exists(tmp_usd):
+        os.remove(tmp_usd)
+    # write stage to tmp USD file:
+    write_stage_to_usd_file(stage, tmp_usd)
+    new_world_model = read_world_model_from_usd(tmp_usd)
+    #new_world_model = read_world_from_usd(tmp_usd)
+    # remove tmp USD file:
+    os.remove(tmp_usd)
+    return new_world_model
+
 def main():
     """
     Main simulation loop that demonstrates Model Predictive Control (MPC) with moving obstacles.
@@ -1039,9 +1135,15 @@ def main():
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
-    # load_asset_to_prim_path("/Isaac/Robots/Franka/Franka.usd", '/World/Franka5')   
-    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd")
 
+    # mug_prim_path = load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd")
+    # bin_asset_subpath = "Props/KLT_Bin/small_KLT_visual_collision.usd"
+    # bin_prim_path = load_asset_to_prim_path(bin_asset_subpath)
+    # prim = PrimWrapper(bin_prim_path)
+    # prim.set_world_pose(position=np.array([0.0, 1, 0.7]),orientation=np.array([1.0, 0.0, 0.0, 0.0]))    
+    # prim.set_local_scale(scale=np.array([1, 1, 1]))
+    
+    # world_model = get_world_model_from_current_stage(stage, usd_help=usd_help)
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
         activate_gpu_dynamics(my_world)
@@ -1058,6 +1160,14 @@ def main():
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
     p_Trobot2 =np.array([0.3,0,0.5])
     robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_Trobot2) # cumotion robot - interferer
+    # i_s = [0,1 ]# 2causes bugs
+    # for i in range(len(world_model.objects)):
+    #     if i in i_s:
+    #         o = world_model.objects[i]
+    #         o.nam5e = str(i) 
+    #         robot2.cu_stat_obs_world_model.add_obstacle(o)
+    # robot2.cu_stat_obs_world_model.randomize_color(r=[0.2, 0.7], g=[0.8, 1.0])
+    
     robots[1] = robot2 
     # init cumotion solver and plan config
     robot2.init_solver(robots_collision_caches[1],tensor_args)
