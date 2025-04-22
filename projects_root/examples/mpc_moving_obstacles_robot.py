@@ -383,19 +383,48 @@ def wait_for_playing(my_world):
                 print("Waiting for play button to be pressed...")
                 time.sleep(0.1)
 
-def load_asset_to_prim_path(world,asset_path, prim_path=''):
+def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
     """
     Loads an asset to a prim path.
+    Source: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.replicator.isaac/docs/index.html?highlight=add_reference_to_stage
+
+    asset_subpath: sub-path to the asset to load. Must end with .usd or .usda. Normally starts with /Isaac/...
+    To browse, go to: asset browser in simulator and add /Issac/% your subpath% where %your subpath% is the path to the asset you want to load.
+
+    prim_path: path to the prim to load the asset to. If not provided, the asset will be loaded to the prim path /World/%asset_subpath%    
+
+    is_fullpath: if True, the asset_subpath is a full path to the asset. If False, the asset_subpath is a subpath to the assets folder in the simulator.
+    This is useful if you want to load an asset that is not in the {get_assets_root_path() + '/Isaac/'} folder (which is the root folder for Isaac Sim assets (see asset browser in simulator) but custom assets in your project from a local path.
+
+
+
+    Examples:
+    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd") will load the asset to the prim path /World/Promps_Mugs_SM_Mug_A2
+    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd", "/World/Mug") will load the asset to the prim path /World/Mug
+    load_asset_to_prim_path("/home/me/some_folder/SM_Mug_A2.usd", "/World/Mug", is_fullpath=True) will load the asset to the prim path /World/Mug
+    
     """
-    assert asset_path.endswith('.usd') or asset_path.endswith('.usda'), "Asset path must end with .usd or .usda"
+
+    # validate asset 
     if not prim_path:
-        prim_name = asset_path.split('/')[-1].split('.')[0]
-        prim_path = f'/World/{prim_name}'
+        # prim_name = asset_subpath.split('/')[-1].split('.')[0]
+        asset_subpath_as_prim_name = asset_subpath.replace('/', '_').split('.')[0]
+        prim_path = f'/World/{asset_subpath_as_prim_name}'
     else:
         prim_path = prim_path
-    asset_path = get_assets_root_path() + asset_path
-    add_reference_to_stage(asset_path, prim_path)
-    return prim_path # http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/Mugs/SM_Mug_A2.usd
+    
+    # define full path to asset
+    if not is_fullpath:
+        asset_fullpath = get_assets_root_path() + '/Isaac/' + asset_subpath # get_assets_root_path() will return the path to the assets folder in the simulator. In my case:  http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0
+    else:
+        asset_fullpath = asset_subpath 
+    
+    # validate asset path
+    assert asset_fullpath.endswith('.usd') or asset_fullpath.endswith('.usda'), "Asset path must end with .usd or .usda"
+    
+    # load asset to prim path (adds the asset to the stage)
+    add_reference_to_stage(asset_fullpath, prim_path)
+    return prim_path 
     
 class AutonomousFranka:
     
@@ -1011,7 +1040,7 @@ def main():
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
     # load_asset_to_prim_path("/Isaac/Robots/Franka/Franka.usd", '/World/Franka5')   
-    load_asset_to_prim_path(my_world,"/Isaac/Props/Mugs/SM_Mug_A2.usd")
+    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd")
 
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
