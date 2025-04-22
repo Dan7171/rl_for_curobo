@@ -117,7 +117,8 @@ if True: # imports and initiation (put it in if to collapse it)
     from omni.isaac.debug_draw import _debug_draw
     from omni.isaac.core.materials import OmniGlass
     from omni.isaac.core.objects import VisualSphere
-
+    from omni.isaac.core.utils.stage import add_reference_to_stage
+    from omni.isaac.core.utils.nucleus import get_assets_root_path
     # Import helper from curobo examples
 
     from projects_root.utils.helper import add_extensions, add_robot_to_scene
@@ -382,6 +383,20 @@ def wait_for_playing(my_world):
                 print("Waiting for play button to be pressed...")
                 time.sleep(0.1)
 
+def load_asset_to_prim_path(world,asset_path, prim_path=''):
+    """
+    Loads an asset to a prim path.
+    """
+    assert asset_path.endswith('.usd') or asset_path.endswith('.usda'), "Asset path must end with .usd or .usda"
+    if not prim_path:
+        prim_name = asset_path.split('/')[-1].split('.')[0]
+        prim_path = f'/World/{prim_name}'
+    else:
+        prim_path = prim_path
+    asset_path = get_assets_root_path() + asset_path
+    add_reference_to_stage(asset_path, prim_path)
+    return prim_path # http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/Mugs/SM_Mug_A2.usd
+    
 class AutonomousFranka:
     
     instance_counter = 0
@@ -634,7 +649,6 @@ class AutonomousFranka:
     @abstractmethod
     def apply_articulation_action(self, art_action:ArticulationAction):
         pass
-    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), R_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
@@ -996,7 +1010,9 @@ def main():
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
-    
+    # load_asset_to_prim_path("/Isaac/Robots/Franka/Franka.usd", '/World/Franka5')   
+    load_asset_to_prim_path(my_world,"/Isaac/Props/Mugs/SM_Mug_A2.usd")
+
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
         activate_gpu_dynamics(my_world)
@@ -1192,7 +1208,7 @@ def main():
             new_target_idx = np.random.choice(valid_sphere_indices_R1[20:]) # above the base of the robot
             p_new_target =  p_validspheresR1curr[new_target_idx]
             robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4))
-            
+
 
         # Some visualizations...
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
