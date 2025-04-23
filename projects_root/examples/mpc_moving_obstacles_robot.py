@@ -520,7 +520,6 @@ class AutonomousFranka:
             obj.pose[:3] -= self.p_R # Subroot relates to robot base frame, so we need to shift the objects to the world frame
         usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path)
         return world_cfg
-        # self.cu_stat_obs_world_model = world_cfg
 
         
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
@@ -1132,12 +1131,7 @@ def main():
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
 
-    # mug_prim_path = load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd")
-    # bin_asset_subpath = "Props/KLT_Bin/small_KLT_visual_collision.usd"
-    # bin_prim_path = load_asset_to_prim_path(bin_asset_subpath)
-    # prim = PrimWrapper(bin_prim_path)
-    # prim.set_world_pose(position=np.array([0.0, 1, 0.7]),orientation=np.array([1.0, 0.0, 0.0, 0.0]))    
-    # prim.set_local_scale(scale=np.array([1, 1, 1]))
+
     
     # world_model = get_world_model_from_current_stage(stage, usd_help=usd_help)
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
@@ -1156,13 +1150,7 @@ def main():
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
     p_Trobot2 =np.array([0.3,0,0.5])
     robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_Trobot2) # cumotion robot - interferer
-    # i_s = [0,1 ]# 2causes bugs
-    # for i in range(len(world_model.objects)):
-    #     if i in i_s:
-    #         o = world_model.objects[i]
-    #         o.nam5e = str(i) 
-    #         robot2.cu_stat_obs_world_model.add_obstacle(o)
-    # robot2.cu_stat_obs_world_model.randomize_color(r=[0.2, 0.7], g=[0.8, 1.0])
+  
     
     robots[1] = robot2 
     # init cumotion solver and plan config
