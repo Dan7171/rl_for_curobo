@@ -514,23 +514,11 @@ class AutonomousFranka:
 
         # MINE: ERROR
         collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table_bin.yml"
-        world_cfg_table_bin = WorldConfig.from_dict(load_yaml(collision_table_cfg_path))
-        # bin_prim_path = load_asset_to_prim_path("Props/KLT_Bin/small_KLT_visual_collision.usd")
-        # prim = PrimWrapper(bin_prim_path)
-        # prim.set_world_pose(position=np.array([-0.5, 0.6, 0.5]),orientation=np.array([1.0, 0.0, 0.0, 0.0]))    
-        # prim.set_local_scale(scale=np.array([1, 1, 1]))
-        # world_cfg_usd = get_world_model_from_current_stage(self.world.stage, usd_help=usd_help)
-        # for obs in world_cfg_usd.mesh:
-        #     obs.name += "_mesh"
-        #     obs.pose[2] = -10.5  # Place mesh below ground
-        
-        # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg_usd.mesh)
-        # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid)
+        world_cfg_table_bin = WorldConfig.from_dict(load_yaml(collision_table_cfg_path))        
         world_cfg = world_cfg_table_bin
         for obj in world_cfg.objects:
             obj.pose[:3] -= self.p_R # Subroot relates to robot base frame, so we need to shift the objects to the world frame
-        usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path) 
-        # usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path) 
+        usd_help.add_world_to_stage(world_cfg, base_frame=self.subroot_path)
         return world_cfg
         # self.cu_stat_obs_world_model = world_cfg
 

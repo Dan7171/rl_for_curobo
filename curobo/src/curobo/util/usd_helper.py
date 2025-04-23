@@ -636,7 +636,7 @@ class UsdHelper:
         obj_prim = self.stage.GetPrimAtPath(root_path)
         # obstacle.update_material() # This does not get the correct materials
         set_geom_mesh_attrs(obj_geom, obstacle, timestep=timestep)
-
+        
         obj_prim.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
         obj_prim.GetAttribute("physics:rigidBodyEnabled").Set(enable_physics)
 
