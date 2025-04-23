@@ -86,6 +86,8 @@ PHYSICS_STEP_DT = 0.03 # original 1/60
 # - "on average" means that the updated depends on the ratio: PHYSICS_DT/RENDER_DT. For example if the ratio = 4, then the update will be applied only every 4th call to my_world.step(). However if ths ratio is <=1, then the update will be applied every call to my_world.step().
 # - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
 # - all info above referse to calls to my_world.step(render=True) (i.e. calls to my_world.step() with rendering=True)
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 if True: # imports and initiation (put it in if to collapse it)
     try:
