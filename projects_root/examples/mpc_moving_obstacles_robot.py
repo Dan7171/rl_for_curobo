@@ -87,7 +87,7 @@ PHYSICS_STEP_DT = 0.03 # original 1/60
 # - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
 # - all info above referse to calls to my_world.step(render=True) (i.e. calls to my_world.step() with rendering=True)
 import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
 
 if True: # imports and initiation (put it in if to collapse it)
     try:
@@ -1137,15 +1137,19 @@ def main():
     robot_idx_lists:List[Optional[List]] = [None, None]
     
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    p_Trobot2 =np.array([0.3,0,0.5])
-    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_Trobot2) # cumotion robot - interferer
+    stat_obs_cfg = load_yaml("projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table_bin.yml")
+    p_bin_center = np.array(stat_obs_cfg["cuboid"]["bin_base"]["pose"][:3])
+    # bin_base_world_height = stat_obs_cfg["cuboid"]["bin_base"]["pose"][2] +
+    bin_base_thickness = stat_obs_cfg["cuboid"]["bin_base"]["dims"][2] # thickness of the bin base along the z-axis
+    p_targets = p_bin_center + np.array([0,0, bin_base_thickness]) + np.array([0.0, 0.0, 0.2])
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_targets) # cumotion robot - interferer
   
     
     robots[1] = robot2 
     # init cumotion solver and plan config
     robot2.init_solver(robots_collision_caches[1],tensor_args)
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
-    robot1 = FrankaMpc(robot_cfgs[0], my_world,usd_help) # MPC robot - avoider
+    robot1 = FrankaMpc(robot_cfgs[0], my_world,usd_help, p_T=p_targets) # MPC robot - avoider
     robots[0] = robot1
     add_extensions(simulation_app, args.headless_mode)
     
@@ -1220,8 +1224,6 @@ def main():
 
         # Get robot 2 target real pose from simulation and update it in the cumotion solver if all other conditions are met.
         real_world_pos_target2, real_world_orient_target2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose        
-        
-
         if robot2.update_target_if_needed(real_world_pos_target2, real_world_orient_target2,sim_js_robot2):
             print("robot2 target changed!, updating plan")
             # Replan and update the plan of robot2.
@@ -1257,7 +1259,7 @@ def main():
                                     obs_nameih = f'{robot2.robot_name}_obs{i}_h{h}'
                                     robot1.obs_viz_obs_names.append(obs_nameih)
                                     robot1.add_obs_viz(p_spheresR2H[h,i].cpu(),rad_spheresR2[i].cpu(),obs_nameih,h=h,h_max=robot1.H)
-                        print("Added dynamic obstacles tocollision checker")
+                        print("Added dynamic obstacles to collision checker")
                 
                     else: # Static obstacles (no prediction,normal MPC)
                         print("Obstacles initiation: Adding static obstacles to original curobo collision checker")
