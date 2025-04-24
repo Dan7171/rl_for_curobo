@@ -13,11 +13,11 @@
 # Base thickness is 0.02m
 # Table thinkness is 0.03m
 cuboid:
-  table:
-    dims: [3.0, 2.0, 0.03] # x, y, z
-    pose: [0.0, 0.0, 0.00, 1, 0, 0, 0.0] # x, y, z, qx, qy, qz, qw        
+  # table:
+  #   dims: [3.0, 2.0, 0.00] # x, y, z
+  #   pose: [0.5, 0.0, 0.00, 1, 0, 0, 0.0] # x, y, z, qx, qy, qz, qw        
   bin_base:
-    pose: [0.5, 0.0, 0.05, 1, 0, 0, 0.0]
+    pose: [0.5, 0.0, 0.00, 1, 0, 0, 0.0]
     dims: [0.5, 0.5, 0.02]
   bin_wall1:
     pose: [0.5, -0.25, 0.0, 1, 0, 0, 0.0]
