@@ -5,7 +5,7 @@ except ImportError:
     pass
 
 # Third Party
-from typing import Optional
+from typing import List, Optional, Union
 import torch
 import numpy as np
 
@@ -65,10 +65,19 @@ class Obstacle:
         self.world_model_curobo = world_model_curobo 
         self.linear_velocity = linear_velocity
         self.angular_velocity = angular_velocity
+        
+        
         # initialize the obstacle in the simulation and the curobo representation of the obstacle in its collision checker
+        
+        # This is the simulation representation of the obstacle: responsible for physics and 3d visualization in simulator!
         self.simulation_representation = self._init_obstacle_in_simulation(world, self.cur_pos, self.cur_rot, self.dims, obstacle_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material)
+        
+        # This is the curobo representation of the obstacle: responsible for collision checking in curobo! (no visual representation, just a twin of the simulation representation)
         self.curobo_representation = self._init_obstacle_curobo_rep() # initialize the curobo representation of the obstacle based on the simulation representation
-
+        
+        # If world model was provided, register (inject) the curobo representation of the obstacle in curobo representation of world.
+        if self.world_model_curobo is not None:
+            self.inject_curobo_obs(self.world_model_curobo)
 
     
     def set_simulation_refernce(self, simulation_refernce):
@@ -95,7 +104,7 @@ class Obstacle:
 
         return obstacle
     
-    def _init_DynamicCuboid_for_simulation(self,world, position, orientation, size, color, mass=1.0, gravity_enabled=True,linear_velocity:np.array=np.nan, angular_velocity:np.array=np.nan,sim_collision_enabled=True,visual_material=None):
+    def _init_DynamicCuboid_for_simulation(self,world, position, orientation, dims, color, mass=1.0, gravity_enabled=True,linear_velocity:np.array=np.nan, angular_velocity:np.array=np.nan,sim_collision_enabled=True,visual_material=None):
         """
         Initialize a cube obstacle.
         
@@ -108,7 +117,7 @@ class Obstacle:
             mass: Mass in kg  
             gravity_enabled: If False, disables gravity for the obstacle
         """
-        prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,orientation=orientation,size=size,color=color,mass=mass,density=0.9,visual_material=visual_material)         
+        prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,orientation=orientation,size=1,color=color,mass=mass,density=0.9,visual_material=visual_material, scale=dims)         
         material = PhysicsMaterial( # https://www.youtube.com/watch?v=tHOM-OCnBLE
             prim_path=self.path+"/aluminum",  # path to the material prim to create
             dynamic_friction=0,
@@ -128,9 +137,22 @@ class Obstacle:
         world.scene.add(prim)
         return prim
     
-    def update_world_coll_checker_with_sim_pose(self,world_coll_checker):
+    def update_world_coll_checker_with_sim_pose(self, world_coll_checker:Union[WorldConfig, List[WorldConfig]]):
+        """ 
+        SYNCHRONIZE THE COLLISION CHECKER INFORMATION ABOUT THE OBSTACLE TO BE AS THE  SIMULATION INFORMATION!
+
+        This function aims to update (sync) the curobo representation of the obstacle in its collision checker with the simulation representation of the obstacle.
+        In general: they are not synced (the simulation is the actual representation and physics in scene but if we won't actively propagate 
+        the information from simulation about the obstacle to the collision checker, the collision checker will not know about the actual physics of the obstacle. That's exactly what this function does!),
+
+        This might be expensive (not sure, but probably), so we probablyshould not do it every time step.
+        In ideal condition, it shoukld be called after every world.step() in the simulator (which can change the obstacle in simulator and possibly "break" the synchronization of collision checker which stays behind the simulator and therefore needs an update).
+        
+        Args:
+            world_coll_checker (_type_): _description_
+        """
         # get the updated pose of the obstacle in the simulation
-        position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose()
+        position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose() 
         # update the current position of the obstacle
         self.cur_pos = position_isaac_dynamic_prim
         # update the curobo representation of the obstacle in its collision checker
@@ -203,9 +225,6 @@ class Obstacle:
                 dims=[cube_edge_len, cube_edge_len, cube_edge_len]
             )
         
-        # If world model was provided, register (inject) the curobo representation of the obstacle in curobo representation of world.
-        if self.world_model_curobo is not None:
-            self.inject_curobo_obs(self.world_model_curobo)
 
         return curobo_obstacle
     
