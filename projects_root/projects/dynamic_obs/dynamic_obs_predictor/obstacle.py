@@ -6,6 +6,7 @@ except ImportError:
 
 # Third Party
 from typing import Iterable, List, Optional, Union
+from matplotlib.pyplot import bone
 import torch
 import numpy as np
 
@@ -25,10 +26,10 @@ from pxr import PhysxSchema, UsdPhysics
 # Import helper from curobo examples
 
 # CuRobo
-from curobo.geom.types import Cuboid, WorldConfig
+from curobo.geom.types import Capsule, Cuboid, Cylinder, Mesh, Sphere, WorldConfig
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose 
-
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
 
@@ -39,8 +40,9 @@ class Obstacle:
                 world:World, 
                 name:str,
                 obstacle_type:str, 
-                world_model_curobo:Optional[WorldConfig]=None,
-                initial_pose:Iterable[float]=np.array([1,1,1,1,0,0,0]), 
+                cu_world_models:Union[WorldConfig, List[WorldConfig]]=[],
+                T_Wmos:Union[np.ndarray, List[np.ndarray]]=[],
+                X_initial:Iterable[float]=np.array([1,1,1,1,0,0,0]), 
                 dims:Iterable[float]=np.array([1,1,1]),
                 color:Iterable[float]=np.array([0,0,0]), 
                 mass:float=1.0, 
@@ -57,7 +59,7 @@ class Obstacle:
 
         Args:
             name (str): object name. Must be unique.
-            initial_pose (_type_): initial position of the obstacle in the world frame ([x,y,z, qw, qx, qy, qz]).
+            X_initial (_type_): initial position of the obstacle in the world frame ([x,y,z, qw, qx, qy, qz]).
             dims (_type_): if cuboid, scalar (side length (m)).
             obstacle_type (np.array): [r,g,b]
             color (_type_): [r,g,b,alpha] (alpha is the opacity of the obstacle)
@@ -66,42 +68,46 @@ class Obstacle:
             angular_velocity (_type_):wx, wy, wz (rad/s)
             gravity_enabled (bool): enable/disable gravity for the obstacle. If False, the obstacle will not be affected by gravity.
             world (_type_): issac sim world instance (related to the simulator)
-            world_model_curobo (_type_): # world_model_curobo is the world model of curobo. (represents the model of the world where obstacles are interlive in curobo)
+            cu_world_models (_type_): # cu_world_models is the world model of curobo. (represents the model of the world where obstacles are interlive in curobo)
         """
         assert obstacle_type in ["cuboid", "sphere", "mesh", "capsule", "cylinder", "cone"]
-        prim_type_to_sim_type = {"cuboid": DynamicCuboid, "sphere": DynamicSphere, "mesh": None, "capsule": DynamicCapsule, "cylinder": DynamicCylinder, "cone": DynamicCone}
-
+        self.obs_type_to_sim_type = {"cuboid": DynamicCuboid, "sphere": DynamicSphere, "mesh": None, "capsule": DynamicCapsule, "cylinder": DynamicCylinder}
+        self.obs_type_to_curobo_type = {"cuboid": Cuboid, "sphere": Sphere, "mesh": Mesh, "capsule": Capsule, "cylinder": Cylinder}
+        self.curobo_type_to_world_model_type = {"cuboid": Cuboid, "sphere": Mesh, "mesh": Mesh, "capsule": Mesh, "cylinder": Mesh}
+        
         self.name = name
         self.path = f'/World/curobo_world_cfg_obs_visual_twins/{name}' # path to the obstacle in the simulation
-        self.cur_pos = initial_pose[:3] # position of the obstacle in the world frame p_obs_W
-        self.cur_rot = initial_pose[3:] # orientation of the obstacle in the world frame q_obs_W
+        self.cur_pos = X_initial[:3] # position of the obstacle in the world frame p_obs_W
+        self.cur_rot = X_initial[3:] # orientation of the obstacle in the world frame q_obs_W
         
         self.dims = dims
-        self.sim_prim_type = prim_type_to_sim_type[obstacle_type]
+        self.obstacle_type = obstacle_type
+        self.sim_type = self.obs_type_to_sim_type[obstacle_type]
         self.tensor_args = TensorDeviceType()  # Add this to handle device placement
-        # self.world_model_curobo = world_model_curobo
-        self.world_model_curobo = world_model_curobo 
-        self.linear_velocity = linear_velocity
-        self.angular_velocity = angular_velocity
-        
+        self.cu_world_models = cu_world_models 
+        self.T_Wmos = T_Wmos
+
         
         # initialize the obstacle in the simulation and the curobo representation of the obstacle in its collision checker
         
         # This is the simulation representation of the obstacle: responsible for physics and 3d visualization in simulator!
-        self.simulation_representation = self._init_obstacle_in_simulation(world, self.cur_pos, self.cur_rot, self.dims, self.sim_prim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material)
-        
+        # This is the visual representation of the obstacle in the simulation!
+        self.simulation_representation = self._init_obstacle_in_simulation(world, self.cur_pos, self.cur_rot, self.dims, self.sim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
+        self.add_to_world_models(self.cu_world_models, self.T_Wmos)
+
         # This is the curobo representation of the obstacle: responsible for collision checking in curobo! (no visual representation, just a twin of the simulation representation)
-        self.curobo_representation = self._init_obstacle_curobo_rep() # initialize the curobo representation of the obstacle based on the simulation representation
+        # This is invisible in the simulation, but will be visible in the collision checker!
+        # self.curobo_representation = self._init_world_model_representation() # initialize the curobo representation of the obstacle based on the simulation representation
         
         # If world model was provided, register (inject) the curobo representation of the obstacle in curobo representation of world.
-        if self.world_model_curobo is not None:
-            self.inject_curobo_obs(self.world_model_curobo)
+        # if self.cu_world_models is not None:
+        #     self.inject_curobo_obs(self.cu_world_models)
 
     
     def set_simulation_refernce(self, simulation_refernce):
         self.simulation_refernce = simulation_refernce
     
-    def _init_obstacle_in_simulation(self, world, position, orientation, dims, obstacle_type, color=None,  mass=1.0, gravity_enabled=True,sim_collision_enabled=True,visual_material=None):
+    def _init_obstacle_in_simulation(self, world, position, orientation, dims, obstacle_type, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity):
         """
         Create a moving obstacle in the simulation.
         
@@ -118,11 +124,11 @@ class Obstacle:
             color = np.array([0.0, 0.0, 0.1])  # Default blue color
         
         if obstacle_type == DynamicCuboid:
-            obstacle = self._init_DynamicCuboid_for_simulation(world, position, orientation, dims, color, mass, gravity_enabled, np.array(self.linear_velocity),np.array(self.angular_velocity),sim_collision_enabled,visual_material)
+            obstacle = self._init_DynamicCuboid_for_simulation(world, position, orientation, dims, obstacle_type, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
 
         return obstacle
     
-    def _init_DynamicCuboid_for_simulation(self,world, position, orientation, dims, color, mass=1.0, gravity_enabled=True,linear_velocity:np.array=np.nan, angular_velocity:np.array=np.nan,sim_collision_enabled=True,visual_material=None):
+    def _init_DynamicCuboid_for_simulation(self,world, position, orientation, dims, obstacle_type, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity):
         """
         Initialize a cube obstacle.
         
@@ -210,8 +216,10 @@ class Obstacle:
         physx_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
         physx_api.CreateDisableGravityAttr(True)
 
-    def _init_obstacle_curobo_rep(self):
+    def _init_world_model_representation(self, T_Wmo) -> Union[Cuboid, Mesh]:
         """
+
+        
         Initialize the curobo representation of the obstacle (not yet injected into the world config).
         https://curobo.org/_api/curobo.types.math.html#curobo.types.math.Pose
         https://curobo.org/get_started/2c_world_collision.html
@@ -230,35 +238,62 @@ class Obstacle:
         
         """
         curobo_obstacle = None
-        position_isaac_dynamic_prim, orient_isaac_dynamic_prim = self.simulation_representation.get_world_pose() # specified in world frame
-        w_obj_pose = Pose(torch.from_numpy(position_isaac_dynamic_prim), torch.from_numpy(orient_isaac_dynamic_prim))
+        p_obs, q_obs = self.simulation_representation.get_world_pose() # specified in world frame
+        p_obs_Wmo, q_obs_Wmo = FrameUtils.world_to_F(T_Wmo[:3], T_Wmo[3:], p_obs, q_obs) # get the pose of the obstacle (frame F2) in the world model origin frame (frame F)
+        X_obs_Wmo = Pose(torch.from_numpy(p_obs_Wmo), torch.from_numpy(q_obs_Wmo)) # Pose (X) of the obstacle (obs) expressed in the world model origin frame (Wmo)
         
         
         # Here we initialize the curobo representation of the obstacle in its collision checker.
-        if self.sim_prim_type == DynamicCuboid:
-            cube_edge_len = self.simulation_representation.get_size()
+        if self.obstacle_type == "cuboid":
+            cube_edge_len = self.simulation_representation.get_size() # self.dims should work too
             curobo_obstacle = Cuboid(
                 name=self.name,
-                pose=w_obj_pose.tolist(),
+                pose=X_obs_Wmo.tolist(),
                 dims=[cube_edge_len, cube_edge_len, cube_edge_len]
             )
-        
+        elif self.obstacle_type == "mesh":
+            pass
+            # TODO: Implement this
+            # curobo_obstacle = Mesh(
+            #     name=self.name,
+            #     pose=X_obs_Wmo.tolist(),
+            #     mesh_path=self.simulation_representation.get_mesh_path # type: ignore()
+            # )
 
         return curobo_obstacle
     
-
-    def inject_curobo_obs(self, world_model_curobo:WorldConfig):
-        """ Inject the curobo representation of the obstacle into a given world config (world model, the object that contains the obstacles in world in curobo).
-
+    def add_to_world_models(self, cu_world_models:Union[WorldConfig, List[WorldConfig]], T_Wmos: Union[np.ndarray, List[np.ndarray]]):
+        """ Initiates the curobo representation of the obstacle into a given world config (world model, the object that contains the obstacles in world in curobo). 
+        And making a link between the simualtion representation of the object to each of the world models provided.
+        
         Args:
-            world_model_curobo (_type_): _description_
+            cu_world_models: list of world configs (world models) or a single world config (world model).
+            T_Wmo: a same length list or of arrays or a single array, each representing a transform (T) of the world model origin (Wmo) in the world frame  (inspired by drake notations https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=C-,T_BC,-The%20relationship%20between).
+            Those are actually just the poses of the origins of the base frames of the world models in the world frame (normally the origin of the world frame is the same as the origin of the base frame of the robot which the world model is attached to).
+
         """
-        if self.world_model_curobo is None:
-            self.world_model_curobo = world_model_curobo # sets the world this object will be living in
-        self.world_model_curobo.add_obstacle(self.curobo_representation) # adds (injects) the curobo representation to the curobo world model
     
+        if isinstance(self.cu_world_models, list):
+            assert len(T_Wmos) == len(self.cu_world_models)
+            for i in range(len(self.cu_world_models)):
+                self.cu_world_models[i].add_obstacle(self._init_world_model_representation(T_Wmos[i])) # adds (injects) the curobo representation to the curobo world model
+        
+        else:
+            assert isinstance(T_Wmos, np.ndarray)
+            T_Wmo = T_Wmos # a single array
+            cu_world_model = self.cu_world_models # a single world config
+            cu_world_model.add_obstacle(self._init_world_model_representation(T_Wmo))
+
+    
+    
+
+
+    
+
     
 
     # def set_cube_dims(self, dims:list):
     #     self.curobo_representation.dims = dims
     #     self.simulation_representation.set_size(dims)
+
+    

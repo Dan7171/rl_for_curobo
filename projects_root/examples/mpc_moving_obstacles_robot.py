@@ -107,7 +107,8 @@ if True: # imports and initiation (put it in if to collapse it)
     from abc import abstractmethod
     import os
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
-
+    # torch.cuda.empty_cache()
+    # torch.cuda.ipc_collect()  # Also helps clean up inter-process memory
 
     # Initialize the simulation app first (must be before "from omni.isaac.core")
 
@@ -131,6 +132,7 @@ if True: # imports and initiation (put it in if to collapse it)
     from pxr import Gf
 
     from projects_root.utils.helper import add_extensions, add_robot_to_scene
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
 
     # CuRobo
     from curobo.geom.sdf.world import CollisionCheckerType, WorldCollisionConfig
@@ -442,74 +444,11 @@ def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
     add_reference_to_stage(asset_fullpath, prim_path)
     return prim_path 
 
-class FrameUtils:
-    @staticmethod
-    def quat_inv(q):
-        # q = [w, x, y, z], unit quaternion
-        w, x, y, z = q
-        return np.array([w, -x, -y, -z])
-
-    @staticmethod
-    def quat_mul(q1, q2):
-        # Hamilton product of two quaternions
-        w1,x1,y1,z1 = q1
-        w2,x2,y2,z2 = q2
-        return np.array([
-            w1*w2 - x1*x2 - y1*y2 - z1*z2,
-            w1*x2 + x1*w2 + y1*z2 - z1*y2,
-            w1*y2 - x1*z2 + y1*w2 + z1*x2,
-            w1*z2 + x1*y2 - y1*x2 + z1*w2
-        ])
-
-    @staticmethod
-    def rotate_vec(q, v):
-        # rotate 3-vector v by unit quaternion q
-        qv = np.concatenate([[0.], v])
-        return FrameUtils.quat_mul(FrameUtils.quat_mul(q, qv), FrameUtils.quat_inv(q))[1:]
-
-    @staticmethod
-    def world_to_F(p_WF, q_WF, p_WF2, q_WF2):
-        """Takes 2 poses (frames) F and F2 in the world frame W, and returns the pose of F2 expressed in the frame F.
-        In:
-            Frame F's pose expressed in the world frame W:
-                p_WF: position (x,y,z) of frame F expressed in the world frame W
-                q_WF:quaternion (qw,qx,qy,qz) of frame F expressed in the world frame W
-            Frame F2's pose in the world frame W:
-                p_WF2: position (x,y,z) of frame F2 expressed in the world frame W
-                q_WF2: quaternion (qw,qx,qy,qz) of frame F2 expressed in the world frame W
-        Out:
-            p_FF2: position (x,y,z) of frame F2 expressed in the frame F
-            q_FF2: quaternion (qw,qx,qy,qz) of frame F2 expressed in the frame F
-        """
-        # returns (p_FF2, q_FF2)
-        delta = p_WF2 - p_WF
-        p_rel = FrameUtils.rotate_vec(FrameUtils.quat_inv(q_WF), delta)
-        q_rel = FrameUtils.quat_mul(FrameUtils.quat_inv(q_WF), q_WF2)
-        return p_rel, q_rel
-
-    @staticmethod
-    def F_to_world(p_WF, q_WF, p_FF2, q_FF2):
-        """Takes a frame F's pose expressed in the world frame W and a frame F2's pose expressed in the frame F, and returns the pose of F2 expressed in the world frame W.
-        In:
-            Frame F's pose expressed in the world frame W:
-                p_WF: position (x,y,z) of frame F expressed in the world frame W
-                q_WF:quaternion (qw,qx,qy,qz) of frame F expressed in the world frame W
-            Frame F2's pose in the frame F:
-                p_FF2: position (x,y,z) of frame F2 expressed in the frame F
-                q_FF2: quaternion (qw,qx,qy,qz) of frame F2 expressed in the frame F
-        Out:
-            p_WF2: position (x,y,z) of frame F2 expressed in the world frame W
-            q_WF2: quaternion (qw,qx,qy,qz) of frame F2 expressed in the world frame W
-        """
-                    
-        p_WF2 = FrameUtils.rotate_vec(q_WF, p_FF2) + p_WF
-        q_WF2 = FrameUtils.quat_mul(q_WF, q_FF2)
-        return p_WF2, q_WF2
 
 class AutonomousFranka:
     
     instance_counter = 0
-    def __init__(self,robot_cfg, world:World, world_collision_model:WorldConfig,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    def __init__(self,robot_cfg, world:World, world_collision_model:WorldConfig, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
@@ -534,14 +473,14 @@ class AutonomousFranka:
         self.q_R = q_R 
         
         # target settings
-        self.initial_p_T = p_T # initial target frame position (expressed in the world frame W)
-        self.initial_R_T = R_T # initial target frame rotation (expressed in the world frame W)
+        self._p_initTarget = p_T # initial target frame position (expressed in the world frame W)
+        self._q_initTarget = R_T # initial target frame rotation (expressed in the world frame W)
         
         self.initial_target_color = target_color
         self.initial_target_size = target_size
-        # self.target_path = self.subroot_path + '/target' # f'/World/targets/{self.robot_name}'
-        self.p_solverTarget = None # current target position of robot as set to the planner
-        self.q_solverTarget = None # current target orientation of robot as set to the planner
+        
+        self.p_solverTarget = None # current target position of robot as set to the planner (solver). Not necessarily synced with (may be behind of) the target in the scene.
+        self.q_solverTarget = None # current target orientation of robot as set to the planner (solver). Not necessarily synced with (may be behind of) the target in the scene.
 
         self.robot_cfg = robot_cfg # the section under the key 'robot_cfg' in the robot config file (yml). https://curobo.org/tutorials/1_robot_configuration.html#tut-robot-configuration
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"] # joint names for the robot
@@ -567,8 +506,8 @@ class AutonomousFranka:
         # self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R)
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         # spawn the target in the scene in the initial pose (X_T = p_T, R_T)
-        # self.target = spawn_target(self.target_path, self.initial_p_T, self.initial_R_T, self.initial_target_color, self.initial_target_size)
-        self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self.initial_p_T, self.initial_R_T, self.initial_target_color, self.initial_target_size)
+        # self.target = spawn_target(self.target_path, self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
+        self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
         # Load world configuration for collision checking
         
 
@@ -576,8 +515,16 @@ class AutonomousFranka:
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         pass
 
-    def update_target_if_needed(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
-        """ Syncs (sets) the target pose of the robot with the target pose of the target.
+    def set_new_target_for_solver(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
+        
+        """ 
+        Checking if the target pose in the solver needs to be reset. 
+        If it needs to be reset, the target pose to the solver is re-written and the method returns True.
+        Otherwise, the method returns False.
+        Anyway, we are not resetting the target pose in the solver, but only updating it if needed.
+        The update in the solver will be done on a seperate method (here we just check if the update is needed and update the fields the solver will take the new values).
+
+
         real_target_position: target position in world frame
         real_target_orientation: target orientation in world frame
         real_target_position_prev_ts: target position in previous time step
@@ -751,7 +698,7 @@ class FrankaMpc(AutonomousFranka):
             robot_name (_type_): _description_
             p_R (_type_): _description_
         """
-        super().__init__(robot_cfg, world, world_collision_model,usd_help, p_R, q_R, p_T, R_T, target_color, target_size)
+        super().__init__(robot_cfg, world, world_collision_model, p_R, q_R, p_T, R_T, target_color, target_size)
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
@@ -805,7 +752,18 @@ class FrankaMpc(AutonomousFranka):
         self.goal_buffer = goal_buffer
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
-    
+
+
+
+    def update_solver_target(self):
+        # Express the target in the robot's base frame instead of the world frame (required for the solver)
+        p_solverTarget_R, q_solverTarget_R = FrameUtils.world_to_F(self.p_R, self.q_R, self.p_solverTarget, self.q_solverTarget)
+        X_solverTarget_R = Pose(position=self.tensor_args.to_device(p_solverTarget_R),quaternion=self.tensor_args.to_device(q_solverTarget_R))    
+        
+        # Update the goal buffer and the solver and in the cuda graph buffer
+        self.goal_buffer.goal_pose.copy_(X_solverTarget_R) 
+        self.solver.update_goal(self.goal_buffer)
+
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
         return has_target_pose_changed
@@ -854,6 +812,22 @@ class FrankaMpc(AutonomousFranka):
         for _ in range(num_times):
             ans = self.articulation_controller.apply_action(art_action)
         return ans
+    
+
+    def set_new_target_for_solver(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
+        solver_target_was_reset =  super().set_new_target_for_solver(real_target_position, real_target_orientation, sim_js)
+        if solver_target_was_reset:
+            # Express the target in the robot's base frame instead of the world frame (required for the solver)
+            p_solverTarget_R, q_solverTarget_R = FrameUtils.world_to_F(self.p_R, self.q_R, self.p_solverTarget, self.q_solverTarget)
+            X_solverTarget_R = Pose(position=self.tensor_args.to_device(p_solverTarget_R),quaternion=self.tensor_args.to_device(q_solverTarget_R))    
+            
+            # Update the goal buffer and the solver and in the cuda graph buffer
+            self.goal_buffer.goal_pose.copy_(X_solverTarget_R) 
+            self.solver.update_goal(self.goal_buffer)
+
+        return solver_target_was_reset
+    
+
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, robot_cfg, world:World, world_collision_model:WorldConfig, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
         """
@@ -865,7 +839,7 @@ class FrankaCumotion(AutonomousFranka):
             p_R (_type_): _description_
             reactive (bool, optional): _description_. Defaults to False.
         """
-        super().__init__(robot_cfg, world,world_collision_model, usd_help, p_R, q_R, p_T, R_T, target_color, target_size)
+        super().__init__(robot_cfg, world,world_collision_model, p_R, q_R, p_T, R_T, target_color, target_size)
 
         self.solver = None
         self.past_cmd:JointState = None
@@ -960,7 +934,6 @@ class FrankaCumotion(AutonomousFranka):
         # ee_orientation_teleop_goal = self.q_solverTarget # cube orientation is the updated target orientation (which has moved)
 
         # compute curobo solution:
-        # p_RT, q_RT  = self.target.get_local_pose() # NOTE: position (p) and quaternion (q) of frame T (target frame) expressed in the robot's base frame R. 
         p_solverTarget_R, q_solverTarget_R = FrameUtils.world_to_F(self.p_R, self.q_R, self.p_solverTarget, self.q_solverTarget) # TODO
         ik_goal = Pose(position=self.tensor_args.to_device(p_solverTarget_R), quaternion=self.tensor_args.to_device(q_solverTarget_R))
         self.plan_config.pose_cost_metric = self.pose_metric
@@ -1173,7 +1146,9 @@ def main():
     robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 30, "mesh": 10}]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
     robot_idx_lists:List[Optional[List]] = [None, None]
-    
+    X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
+    X_Targets = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_TargetOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
+    robot_world_cfgs = [WorldConfig() for _ in range(len(robots))]
     # Create a mutual world collision model for all robots (we could set a separate world model for each robot, its a choice depending on the application)
     # ORIGINAL: FINE
     # collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table.yml"
@@ -1187,7 +1162,7 @@ def main():
     # MINE: ERROR
     collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table_bin.yml"
     world_cfg_table_bin = WorldConfig.from_dict(load_yaml(collision_table_cfg_path))        
-    world_cfg = world_cfg_table_bin
+    world_cfg_for_reading = world_cfg_table_bin
     # for obj in world_cfg.objects:
     #     obj.pose[:3] -= self.p_R # Subroot relates to robot base frame, so we need to shift the objects to the world frame
     
@@ -1202,10 +1177,12 @@ def main():
 
     # mutual_world_cfg = WorldConfig() # world model of the world where obstacles are interlive in curobo. Will be mutual for all robots.
     # mutual_obstacles = [] # list of obstacles in the world
-    # for obj in world_cfg.objects:
-    #     sim_and_col_twins = Obstacle(my_world,obj.name,'cuboid',mutual_world_cfg, initial_pose=obj.pose, dims=obj.dims, gravity_enabled=True, sim_collision_enabled=True, mass=5000)
-    #     mutual_obstacles.append(sim_and_col_twins)
     
+    # for obj in world_cfg_for_reading.objects:
+    #     sim_and_col_twins = Obstacle(my_world,obj.name,'cuboid',robot_world_cfgs, X_Robots, X_initial=obj.pose, dims=obj.dims, gravity_enabled=True, sim_collision_enabled=True, mass=5000)
+    #     # mutual_obstacles.append(sim_and_col_twins)
+    
+    # world_cfg = mutual_world_cfg
     
     
     stat_obs_cfg = load_yaml("projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table_bin.yml")
@@ -1213,16 +1190,20 @@ def main():
     # bin_base_world_height = stat_obs_cfg["cuboid"]["bin_base"]["pose"][2] +
     bin_base_thickness = stat_obs_cfg["cuboid"]["bin_base"]["dims"][2] # thickness of the bin base along the z-axis
     p_targets = p_bin_center + np.array([0,0, bin_base_thickness]) + np.array([0.0, 0.0, 0.2])
-    
+    for i in range(len(X_Targets)):
+        X_Targets[i][:3] = p_targets
+
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    robot2 = FrankaCumotion(robot_cfgs[1], my_world,world_cfg, usd_help, p_R=np.array([1,0.0,0.0]), p_T=p_targets,target_color=np.array([0.5,0,0])) # cumotion robot - interferer
-  
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, robot_world_cfgs[1], usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
+                            R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0])) # cumotion robot - interferer
+    
     
     robots[1] = robot2 
     # init cumotion solver and plan config
     robot2.init_solver(robots_collision_caches[1],tensor_args)
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
-    robot1 = FrankaMpc(robot_cfgs[0], my_world,world_cfg, usd_help, p_T=p_targets) # MPC robot - avoider
+    robot1 = FrankaMpc(robot_cfgs[0], my_world, robot_world_cfgs[0], usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3],
+                      R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
     robots[0] = robot1
     add_extensions(simulation_app, args.headless_mode)
     
@@ -1284,10 +1265,9 @@ def main():
         
         # Get robot 1 target real pose from simulation and update it in the MPC solver if all other conditions are met.
         p_T1, q_T1 = robot1.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-        if robot1.update_target_if_needed(p_T1, q_T1):
+        if robot1.set_new_target_for_solver(p_T1, q_T1):
             print("robot1 target changed!")
-            robot1.goal_buffer.goal_pose.copy_(robot1.get_last_synced_target_pose())
-            robot1.solver.update_goal(robot1.goal_buffer)
+            robot1.update_solver_target()
  
 
         # Get robot 2 current joint state from simulation and update it in the relevant fields.
@@ -1297,7 +1277,7 @@ def main():
         # Get robot 2 target real pose from simulation and update it in the cumotion solver if all other conditions are met.
         p_T2, q_T2 = robot2.target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose        
         
-        if robot2.update_target_if_needed(p_T2, q_T2,sim_js_robot2):
+        if robot2.set_new_target_for_solver(p_T2, q_T2,sim_js_robot2):
             print("robot2 target changed!, updating plan")
             # Replan and update the plan of robot2.
             robot2.reset_command_plan(robots_cu_js[1]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
