@@ -54,7 +54,7 @@ class Obstacle:
             world_model_curobo (_type_): # world_model_curobo is the world model of curobo. (represents the model of the world where obstacles are interlive in curobo)
         """
         self.name = name
-        self.path = f'/World/new_obstacles/{name}' # path to the obstacle in the simulation
+        self.path = f'/World/collision_obstacles_visualization/{name}' # path to the obstacle in the simulation
         self.cur_pos = initial_pose[:3] # position of the obstacle in the world frame p_obs_W
         self.cur_rot = initial_pose[3:] # orientation of the obstacle in the world frame q_obs_W
         

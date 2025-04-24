@@ -1068,23 +1068,12 @@ def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",re
     world_model = usd_helper.get_obstacles_from_stage()
     return world_model 
 
-# def read_world_from_usd(file_path: str):
-#     usd_helper = UsdHelper()
-#     usd_helper.load_stage_from_file(file_path)
-#     # world_model = usd_helper.get_obstacles_from_stage(reference_prim_path="/Root/world_obstacles")
-#     world_model = usd_helper.get_obstacles_from_stage(
-#         only_paths=["/world/obstacles"], reference_prim_path="/world"
-#     )
-#     # print(world_model)
-#     for x in world_model.cuboid:
-#         print(x.name + ":")
-#         print("  pose: ", x.pose)
-#         print("  dims: ", x.dims)
+
 
 def write_stage_to_usd_file(stage,file_path):
     stage.Export(file_path) # export the stage to a temporary USD file
     
-def get_world_model_from_current_stage(stage,obstacle_prim_paths=[],usd_help:UsdHelper=None):
+def get_world_model_from_current_stage(stage):
     # prepare tmp USD file:
     tmp_usd = '.tmp_usd_file.usd'
     if os.path.exists(tmp_usd):
@@ -1133,7 +1122,7 @@ def main():
 
 
     
-    # world_model = get_world_model_from_current_stage(stage, usd_help=usd_help)
+    # world_model = get_world_model_from_current_stage(stage)
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
         activate_gpu_dynamics(my_world)
@@ -1181,6 +1170,8 @@ def main():
     # reset world
     my_world.step(render=True)
     my_world.reset()
+    
+    # tmp_obs = Obstacle("tmp_obs", np.array([0,0,0]), np.array([1,1,1]), DynamicCuboid, np.array([1,0,0]), 1.0, np.array([0,0,0]), np.array([0,0,0]), True, my_world)
     
     # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
     for i, robot in enumerate(robots):
