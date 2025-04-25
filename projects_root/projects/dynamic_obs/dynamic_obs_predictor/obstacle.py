@@ -42,7 +42,7 @@ class Obstacle:
                 obstacle_type:str, 
                 cu_world_models:Union[WorldConfig, List[WorldConfig]]=[],
                 T_Wmos:Union[np.ndarray, List[np.ndarray]]=[],
-                X_initial:Iterable[float]=np.array([1,1,1,1,0,0,0]), 
+                X_initial:np.ndarray=np.array([1,1,1,1,0,0,0]), 
                 dims:Iterable[float]=np.array([1,1,1]),
                 color:Iterable[float]=np.array([0,0,0]), 
                 mass:float=1.0, 
@@ -72,14 +72,11 @@ class Obstacle:
         """
         assert obstacle_type in ["cuboid", "sphere", "mesh", "capsule", "cylinder", "cone"]
         self.obs_type_to_sim_type = {"cuboid": DynamicCuboid, "sphere": DynamicSphere, "mesh": None, "capsule": DynamicCapsule, "cylinder": DynamicCylinder}
-        self.obs_type_to_curobo_type = {"cuboid": Cuboid, "sphere": Sphere, "mesh": Mesh, "capsule": Capsule, "cylinder": Cylinder}
-        self.curobo_type_to_world_model_type = {"cuboid": Cuboid, "sphere": Mesh, "mesh": Mesh, "capsule": Mesh, "cylinder": Mesh}
+        # self.obs_type_to_curobo_type = {"cuboid": Cuboid, "sphere": Sphere, "mesh": Mesh, "capsule": Capsule, "cylinder": Cylinder}
+        # self.curobo_type_to_world_model_type = {"cuboid": Cuboid, "sphere": Mesh, "mesh": Mesh, "capsule": Mesh, "cylinder": Mesh}
         
         self.name = name
         self.path = f'/World/curobo_world_cfg_obs_visual_twins/{name}' # path to the obstacle in the simulation
-        self.cur_pos = X_initial[:3] # position of the obstacle in the world frame p_obs_W
-        self.cur_rot = X_initial[3:] # orientation of the obstacle in the world frame q_obs_W
-        
         self.dims = dims
         self.obstacle_type = obstacle_type
         self.sim_type = self.obs_type_to_sim_type[obstacle_type]
@@ -92,8 +89,8 @@ class Obstacle:
         
         # This is the simulation representation of the obstacle: responsible for physics and 3d visualization in simulator!
         # This is the visual representation of the obstacle in the simulation!
-        self.simulation_representation = self._init_obstacle_in_simulation(world, self.cur_pos, self.cur_rot, self.dims, self.sim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
-        self.add_to_world_models(self.cu_world_models, self.T_Wmos)
+        self.simulation_representation = self._init_obstacle_in_simulation(world, X_initial[:3], X_initial[3:], self.dims, self.sim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
+        # self.add_to_world_models(self.cu_world_models, self.T_Wmos) # TODO: here is the bug so I commented it out
 
         # This is the curobo representation of the obstacle: responsible for collision checking in curobo! (no visual representation, just a twin of the simulation representation)
         # This is invisible in the simulation, but will be visible in the collision checker!
@@ -120,9 +117,7 @@ class Obstacle:
             mass: Mass in kg
             gravity_enabled: If False, disables gravity for the obstacle 
         """
-        if color is None:
-            color = np.array([0.0, 0.0, 0.1])  # Default blue color
-        
+       
         if obstacle_type == DynamicCuboid:
             obstacle = self._init_DynamicCuboid_for_simulation(world, position, orientation, dims, obstacle_type, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
 

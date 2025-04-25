@@ -106,13 +106,15 @@ if True: # imports and initiation (put it in if to collapse it)
     import copy
     from abc import abstractmethod
     import os
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
+    
+    # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
     # torch.cuda.empty_cache()
     # torch.cuda.ipc_collect()  # Also helps clean up inter-process memory
 
     # Initialize the simulation app first (must be before "from omni.isaac.core")
-
+    
     from omni.isaac.kit import SimulationApp  
+
     simulation_app = SimulationApp({"headless": False})
 
     # Now import other Isaac Sim modules
@@ -1175,12 +1177,11 @@ def main():
     
     # world_model = get_world_model_from_current_stage(stage)
 
-    # mutual_world_cfg = WorldConfig() # world model of the world where obstacles are interlive in curobo. Will be mutual for all robots.
-    # mutual_obstacles = [] # list of obstacles in the world
+    mutual_obstacles = [] # list of obstacles in the world
     
-    # for obj in world_cfg_for_reading.objects:
-    #     sim_and_col_twins = Obstacle(my_world,obj.name,'cuboid',robot_world_cfgs, X_Robots, X_initial=obj.pose, dims=obj.dims, gravity_enabled=True, sim_collision_enabled=True, mass=5000)
-    #     # mutual_obstacles.append(sim_and_col_twins)
+    for obj in world_cfg_for_reading.objects:
+        sim_and_col_twins = Obstacle(my_world,obj.name,'cuboid',robot_world_cfgs, X_Robots, X_initial=obj.pose, dims=obj.dims, gravity_enabled=True, sim_collision_enabled=True, mass=5000)
+        mutual_obstacles.append(sim_and_col_twins)
     
     # world_cfg = mutual_world_cfg
     
@@ -1404,7 +1405,7 @@ def main():
                 point_visualzer_inputs.append(rollouts_for_visualization)
         
             # render the points
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS and robot1_init_obs:
                 global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
                 point_visualzer_inputs.append(global_plan_points)
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
