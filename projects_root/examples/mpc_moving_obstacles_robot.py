@@ -450,7 +450,7 @@ def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
 class AutonomousFranka:
     
     instance_counter = 0
-    def __init__(self,robot_cfg, world:World, world_collision_model:WorldConfig, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0.0,1.0,0.0,0.0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    def __init__(self,robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
@@ -489,7 +489,7 @@ class AutonomousFranka:
         self.initial_joint_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] # initial ("/retract") joint configuration for the robot
         self.tensor_args = TensorDeviceType()
 
-        self.cu_stat_obs_world_model = world_collision_model # self._init_curobo_stat_obs_world_model() # will be initialized in the _init_curobo_stat_obs_world_model method. Static obstacles world configuration for curobo collision checking.
+        # self.cu_stat_obs_world_model = world_collision_model # self._init_curobo_stat_obs_world_model() # will be initialized in the _init_curobo_stat_obs_world_model method. Static obstacles world configuration for curobo collision checking.
         self.solver = None # will be initialized in the init_solver method.
         self._vis_spheres = None # for visualization of robot spheres
         self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(self.robot_cfg)) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
@@ -497,20 +497,15 @@ class AutonomousFranka:
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
         AutonomousFranka.instance_counter += 1
+        
+    def get_world_model(self):
+        return self.solver.world_ccheck.world_model
 
- 
+    def get_cchecker(self):
         
-    def _spawn_robot_and_target(self, usd_help:UsdHelper):
-        X_R = Pose.from_list(list(self.p_R) + list(self.q_R)) # initial pose (X) of robot's base frame (R) (expressed implicitly in the world frame (W))
-        
-        # spawn the robot in the scene in the initial pose X_R
-        # usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
-        # self.robot, self.robot_prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R)
+    def _spawn_robot_and_target(self):        
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
-        # spawn the target in the scene in the initial pose (X_T = p_T, R_T)
-        # self.target = spawn_target(self.target_path, self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
         self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
-        # Load world configuration for collision checking
         
 
     @abstractmethod
@@ -691,7 +686,7 @@ class AutonomousFranka:
     def apply_articulation_action(self, art_action:ArticulationAction):
         pass
 class FrankaMpc(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, world_collision_model:WorldConfig,usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
+    def __init__(self, robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -700,14 +695,14 @@ class FrankaMpc(AutonomousFranka):
             robot_name (_type_): _description_
             p_R (_type_): _description_
         """
-        super().__init__(robot_cfg, world, world_collision_model, p_R, q_R, p_T, R_T, target_color, target_size)
-        self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin
-        self._spawn_robot_and_target(usd_help)
+        super().__init__(robot_cfg, world, p_R, q_R, p_T, R_T, target_color, target_size)
+        self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
+        self._spawn_robot_and_target()
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
 
 
-    def init_solver(self, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
+    def init_solver(self,world_model, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
         """Initialize the MPC solver.
 
         Args:
@@ -721,7 +716,7 @@ class FrankaMpc(AutonomousFranka):
         
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
-            self.cu_stat_obs_world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+            world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
             use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
             use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
             use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
@@ -831,7 +826,7 @@ class FrankaMpc(AutonomousFranka):
     
 
 class FrankaCumotion(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, world_collision_model:WorldConfig, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False ):
+    def __init__(self, robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -841,7 +836,7 @@ class FrankaCumotion(AutonomousFranka):
             p_R (_type_): _description_
             reactive (bool, optional): _description_. Defaults to False.
         """
-        super().__init__(robot_cfg, world,world_collision_model, p_R, q_R, p_T, R_T, target_color, target_size)
+        super().__init__(robot_cfg, world, p_R, q_R, p_T, R_T, target_color, target_size)
 
         self.solver = None
         self.past_cmd:JointState = None
@@ -856,7 +851,7 @@ class FrankaCumotion(AutonomousFranka):
         self.cmd_plan = None
         self.cmd_idx = 0
         self.n_coll_spheres = 65
-        self._spawn_robot_and_target(usd_help)
+        self._spawn_robot_and_target()
         self.articulation_controller = self.robot.get_articulation_controller()
         
     def apply_articulation_action(self, art_action: ArticulationAction):
@@ -868,7 +863,7 @@ class FrankaCumotion(AutonomousFranka):
         return self.articulation_controller.apply_action(art_action)
 
     
-    def init_solver(self, collision_cache,tensor_args):
+    def init_solver(self,world_model, collision_cache,tensor_args):
         """Initialize the motion generator (cumotion global planner).
 
         Args:
@@ -892,7 +887,7 @@ class FrankaCumotion(AutonomousFranka):
         # See very good explainations for all the paramerts here: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenConfig
         motion_gen_config = MotionGenConfig.load_from_robot_config( # solver config
             self.robot_cfg, # robot_cfg – Robot configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of RobotConfig. See Supported Robots for a list of available robots. You can also create a a configuration file for your robot using Configuring a New Robot.
-            self.cu_stat_obs_world_model, # world_model – World configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of WorldConfig. See Collision World Representation for more details.
+            world_model, # world_model – World configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of WorldConfig. See Collision World Representation for more details.
             tensor_args, # tensor_args - Numerical precision and compute device to use for motion generation
             collision_checker_type=CollisionCheckerType.MESH, # collision_checker_type – Type of collision checker to use for motion generation. Default of CollisionCheckerType.MESH supports world represented by Cuboids and Meshes. See Collision World Representation for more details.
             num_trajopt_seeds=12, # num_trajopt_seeds – Number of seeds to use for trajectory optimization per problem query. Default of 4 is found to be a good number for most cases. Increasing this will increase memory usage.
@@ -1142,15 +1137,15 @@ def main():
     
     # Adding two frankas to the scene
     # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
-
+    
     robots: List[Optional[AutonomousFranka]] = [None, None]
     robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
     robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 30, "mesh": 10}]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
     robot_idx_lists:List[Optional[List]] = [None, None]
     X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
-    X_Targets = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_TargetOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
-    robot_world_cfgs = [WorldConfig() for _ in range(len(robots))]
+    X_Targets = [np.array([-0.5,0,0.5,0,1,0,0], dtype=np.float32), np.array([1.5,0,0.5,0,1,0,0], dtype=np.float32)] # X_TargetOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
+    static_obs_world_models = [WorldConfig() for _ in range(len(robots))]
     # Create a mutual world collision model for all robots (we could set a separate world model for each robot, its a choice depending on the application)
     # ORIGINAL: FINE
     # collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table.yml"
@@ -1162,49 +1157,33 @@ def main():
     # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     # MINE: ERROR
-    collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table_bin.yml"
-    world_cfg_table_bin = WorldConfig.from_dict(load_yaml(collision_table_cfg_path))        
-    world_cfg_for_reading = world_cfg_table_bin
-    # for obj in world_cfg.objects:
-    #     obj.pose[:3] -= self.p_R # Subroot relates to robot base frame, so we need to shift the objects to the world frame
-    
-    # mug_prim_path = load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd")
-    # bin_asset_subpath = "Props/KLT_Bin/small_KLT_visual_collision.usd"
-    # bin_prim_path = load_asset_to_prim_path(bin_asset_subpath)
-    # # prim = PrimWrapper(bin_prim_path)
-    # # prim.set_world_pose(position=np.array([0.0, 1, 0.7]),orientation=np.array([1.0, 0.0, 0.0, 0.0]))    
-    # # prim.set_local_scale(scale=np.array([1, 1, 1]))
-    
+    collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
+    # obstacles_world_cfg = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["world_cfg_settings"]) # original curobo world model
+    # obstacles_sim_settings = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["obstacles_sim_settings"]) # sim objects settings objects in world model
+    col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
+
     # world_model = get_world_model_from_current_stage(stage)
 
-    mutual_obstacles = [] # list of obstacles in the world
-    
-    for obj in world_cfg_for_reading.objects:
-        sim_and_col_twins = Obstacle(my_world,obj.name,'cuboid',robot_world_cfgs, X_Robots, X_initial=obj.pose, dims=obj.dims, gravity_enabled=True, sim_collision_enabled=True, mass=5000)
-        mutual_obstacles.append(sim_and_col_twins)
-    
-    # world_cfg = mutual_world_cfg
-    
-    
-    stat_obs_cfg = load_yaml("projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table_bin.yml")
-    p_bin_center = np.array(stat_obs_cfg["cuboid"]["bin_base"]["pose"][:3])
-    # bin_base_world_height = stat_obs_cfg["cuboid"]["bin_base"]["pose"][2] +
-    bin_base_thickness = stat_obs_cfg["cuboid"]["bin_base"]["dims"][2] # thickness of the bin base along the z-axis
-    p_targets = p_bin_center + np.array([0,0, bin_base_thickness]) + np.array([0.0, 0.0, 0.2])
-    for i in range(len(X_Targets)):
-        X_Targets[i][:3] = p_targets
+    obstacles = [] # list of obstacles in the world
+    for obstacle in col_ob_cfg:
+        obstacle = Obstacle(my_world, **obstacle)
+        for i in range(len(static_obs_world_models)):
+            obstacle.add_to_world_model(static_obs_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
+        obstacles.append(obstacle) # add the obstacle to the list of obstacles
+
+
+
 
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    robot2 = FrankaCumotion(robot_cfgs[1], my_world, robot_world_cfgs[1], usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
                             R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0])) # cumotion robot - interferer
     
     
     robots[1] = robot2 
     # init cumotion solver and plan config
-    robot2.init_solver(robots_collision_caches[1],tensor_args)
+    robot2.init_solver(static_obs_world_models[1],robots_collision_caches[1],tensor_args)
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
-    robot1 = FrankaMpc(robot_cfgs[0], my_world, robot_world_cfgs[0], usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3],
-                      R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
+    robot1 = FrankaMpc(robot_cfgs[0], my_world, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
     robots[0] = robot1
     add_extensions(simulation_app, args.headless_mode)
     
@@ -1240,7 +1219,7 @@ def main():
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-    robot1.init_solver(robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    robot1.init_solver(static_obs_world_models[0],robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
     
     ctrl_loop_start_time = time.time()
@@ -1297,7 +1276,7 @@ def main():
                 p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
                 p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
                 rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
-        
+
                 
                 if not robot1_init_obs: 
                     # Initialize robot 2 as obstacles for robot 1.
@@ -1323,9 +1302,13 @@ def main():
                             robot1.obs_viz_obs_names.append(robot2_as_obs_obnames[i])
                         robot2_sphere_list = get_sphere_list_from_sphere_tensor(p_validspheresR2curr, rad_validspheresR2, robot2_as_obs_obnames, robot2.tensor_args)
                         robot2_cube_list = [sphere.get_cuboid() for sphere in robot2_sphere_list]
+                        
+                        # NOTE:!!! TODO: should be replaces with robot1.solver.world_coll_checker? I think it is redundant to craete a new checker if there is already one in the solver.
+                        # alternatively we can probably also just run robot1.solver.world_coll_checker.world_model.add_obs(cube) I believe it will do the same thing.
+                        
                         r1_mesh_cchecker = WorldMeshCollision(WorldCollisionConfig(tensor_args, world_model=WorldConfig.create_collision_support_world(robot1.cu_stat_obs_world_model)))
                         for cube in robot2_cube_list:
-                            robot1.cu_stat_obs_world_model.add_obstacle(cube)
+                            robot1.get_world_model().add_obstacle(cube)
                         if HIGHLIGHT_OBS:
                             for i in range(len(robot2_as_obs_obnames)):
                                 robot1.add_obs_viz(p_validspheresR2curr[i],rad_validspheresR2[i],robot2_as_obs_obnames[i],h=0,h_max=1)
