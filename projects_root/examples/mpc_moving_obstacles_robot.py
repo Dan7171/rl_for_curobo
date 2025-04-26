@@ -468,6 +468,8 @@ class AutonomousFranka:
         self.world = world
         self.world_root ='/World'
         self.robot_name = f'robot_{self.instance_id}'
+        self.subroot_path = f'{self.world_root}/world_{self.robot_name}'
+
         # self.subroot_path = f'{self.world_root}/world_{self.instance_id}' # f'{self.world_root}/world_{self.robot_name}'
         
         # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
@@ -504,8 +506,10 @@ class AutonomousFranka:
     def get_cchecker(self):
         return self.solver.world_coll_checker
     
-    def _spawn_robot_and_target(self):        
-        self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
+    def _spawn_robot_and_target(self, usd_help:UsdHelper):
+        X_R = Pose.from_list(list(self.p_R) + list(self.q_R)) # 
+        usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
+        self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
         
 
@@ -687,7 +691,7 @@ class AutonomousFranka:
     def apply_articulation_action(self, art_action:ArticulationAction):
         pass
 class FrankaMpc(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
+    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -698,7 +702,7 @@ class FrankaMpc(AutonomousFranka):
         """
         super().__init__(robot_cfg, world, p_R, q_R, p_T, R_T, target_color, target_size)
         self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
-        self._spawn_robot_and_target()
+        self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
 
@@ -827,7 +831,7 @@ class FrankaMpc(AutonomousFranka):
     
 
 class FrankaCumotion(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
+    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -852,7 +856,7 @@ class FrankaCumotion(AutonomousFranka):
         self.cmd_plan = None
         self.cmd_idx = 0
         self.n_coll_spheres = 65
-        self._spawn_robot_and_target()
+        self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         
     def apply_articulation_action(self, art_action: ArticulationAction):
@@ -1160,24 +1164,26 @@ def main():
     # MINE: ERROR
     # # obstacles_world_cfg = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["world_cfg_settings"]) # original curobo world model
     # # obstacles_sim_settings = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["obstacles_sim_settings"]) # sim objects settings objects in world model
-    collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
-    col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
+    
+    
+    # collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
+    # col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
 
-    # # world_model = get_world_model_from_current_stage(stage)
+    # # # world_model = get_world_model_from_current_stage(stage)
 
-    obstacles = [] # list of obstacles in the world
-    for obstacle in col_ob_cfg:
-        obstacle = Obstacle(my_world, **obstacle)
-        for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
-            print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
-        obstacles.append(obstacle) # add the obstacle to the list of obstacles
+    # obstacles = [] # list of obstacles in the world
+    # for obstacle in col_ob_cfg:
+    #     obstacle = Obstacle(my_world, **obstacle)
+    #     for i in range(len(robot_world_models)):
+    #         world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
+    #         print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
+    #     obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
 
 
 
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
-    robot2 = FrankaCumotion(robot_cfgs[1], my_world, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
+    robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
                             R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0])) # cumotion robot - interferer
     
     
@@ -1185,7 +1191,7 @@ def main():
     # init cumotion solver and plan config
     robot2.init_solver(robot_world_models[1],robots_collision_caches[1],tensor_args)
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
-    robot1 = FrankaMpc(robot_cfgs[0], my_world, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
+    robot1 = FrankaMpc(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
     robots[0] = robot1
 
 
