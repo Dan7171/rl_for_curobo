@@ -209,7 +209,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--print_ctrl_rate",
-    default="True",
+    default="False",
     type=str,
     choices=["True", "False"],
     help="When True, prints the control rate",
@@ -499,10 +499,11 @@ class AutonomousFranka:
         AutonomousFranka.instance_counter += 1
         
     def get_world_model(self):
-        return self.solver.world_ccheck.world_model
+        return self.solver.world_coll_checker.world_model
 
     def get_cchecker(self):
-        
+        return self.solver.world_coll_checker
+    
     def _spawn_robot_and_target(self):        
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
@@ -1145,7 +1146,7 @@ def main():
     robot_idx_lists:List[Optional[List]] = [None, None]
     X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
     X_Targets = [np.array([-0.5,0,0.5,0,1,0,0], dtype=np.float32), np.array([1.5,0,0.5,0,1,0,0], dtype=np.float32)] # X_TargetOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
-    static_obs_world_models = [WorldConfig() for _ in range(len(robots))]
+    robot_world_models = [WorldConfig() for _ in range(len(robots))]
     # Create a mutual world collision model for all robots (we could set a separate world model for each robot, its a choice depending on the application)
     # ORIGINAL: FINE
     # collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table.yml"
@@ -1157,18 +1158,19 @@ def main():
     # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     # MINE: ERROR
+    # # obstacles_world_cfg = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["world_cfg_settings"]) # original curobo world model
+    # # obstacles_sim_settings = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["obstacles_sim_settings"]) # sim objects settings objects in world model
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
-    # obstacles_world_cfg = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["world_cfg_settings"]) # original curobo world model
-    # obstacles_sim_settings = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["obstacles_sim_settings"]) # sim objects settings objects in world model
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
 
-    # world_model = get_world_model_from_current_stage(stage)
+    # # world_model = get_world_model_from_current_stage(stage)
 
     obstacles = [] # list of obstacles in the world
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
-        for i in range(len(static_obs_world_models)):
-            obstacle.add_to_world_model(static_obs_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
+        for i in range(len(robot_world_models)):
+            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
+            print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
 
@@ -1181,10 +1183,14 @@ def main():
     
     robots[1] = robot2 
     # init cumotion solver and plan config
-    robot2.init_solver(static_obs_world_models[1],robots_collision_caches[1],tensor_args)
+    robot2.init_solver(robot_world_models[1],robots_collision_caches[1],tensor_args)
     robot2.init_plan_config() # TODO: Can probably be move to constructor.
     robot1 = FrankaMpc(robot_cfgs[0], my_world, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
     robots[0] = robot1
+
+
+    
+
     add_extensions(simulation_app, args.headless_mode)
     
     ################ PRE PLAYING SIM ###################
@@ -1219,12 +1225,28 @@ def main():
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-    robot1.init_solver(static_obs_world_models[0],robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
+    robot1.init_solver(robot_world_models[0],robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
+    
+    
+    # collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
+    # col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
+    # obstacles = [] # list of obstacles in the world
+    # for obstacle in col_ob_cfg:
+    #     obstacles.append(Obstacle(my_world, **obstacle)) # add the obstacle to the list of obstacles
+
+    # for i in range(len(robots)):
+    #     for j, obstacle in enumerate(obstacles):
+    #         cchecker_idx = obstacle.add_to_cchecker(robots[i].get_cchecker(), world_model_idx=i)
+    #         obstacle.update_cchecker(cchecker_idx, X_Robots[i])
+    #         print(f"Robot: {i} obstacle {j}: {obstacle.name} new checker at index {cchecker_idx} registered in obstacle")
     
     ctrl_loop_start_time = time.time()
     robot1_init_obs = False
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
+    
+    
+    
     while simulation_app.is_running():                 
         
         # Update simulation
@@ -1339,6 +1361,7 @@ def main():
                     name = robot2_as_obs_obnames[i]
                     X_sphere = Pose.from_list(p_validspheresR2curr[i].tolist() + [1,0,0,0])
                     r1_mesh_cchecker.update_obstacle_pose(name, X_sphere)
+
                 if HIGHLIGHT_OBS:
                     robot1.update_obs_viz(p_validspheresR2curr)
         
