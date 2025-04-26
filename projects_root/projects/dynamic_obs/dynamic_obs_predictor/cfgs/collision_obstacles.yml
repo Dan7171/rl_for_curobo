@@ -1,19 +1,5 @@
-##
-## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-##
-## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
-## property and proprietary rights in and to this material, related
-## documentation and any modifications thereto. Any use, reproduction,
-## disclosure or distribution of this material and related documentation
-## without an express license agreement from NVIDIA CORPORATION or
-## its affiliates is strictly prohibited.
-##
 
-# Wall thickness is 0.02m
-# Base thickness is 0.02m
-# Table thinkness is 0.03m
-- 
-  name: table
+- name: table
   curobo_type: cuboid  
   pose: [0.5, 0.0, 0.00, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
   dims: [3.0, 2.0, 0.02] # x, y, z
@@ -24,12 +10,23 @@
   gravity_enabled: False
   sim_collision_enabled: False
   visual_material: null
-    
--
-  name: bin_base
+
+# - name: bin_base
+#   curobo_type: cuboid  
+#   pose: [0.5, 0.0, 0.02, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+#   dims: [0.2, 0.2, 0.00001] # x, y, z
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [0, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: True
+#   sim_collision_enabled: True
+#   visual_material: null
+
+- name: bin_wall_1
   curobo_type: cuboid  
-  pose: [0.5, 0.0, 0.02, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
-  dims: [0.2, 0.2, 0.2] # x, y, z
+  pose: [0.5, -0.25, 0.00, 1, 0, 0, 0.0]
+  dims: [0.5, 0.2, 0.5]
   color: [0, 0, 0]
   mass: 5000
   linear_velocity: [0, 0, 0]
@@ -37,9 +34,20 @@
   gravity_enabled: True
   sim_collision_enabled: True
   visual_material: null
-      
 
-            
+
+# - name: moving_cube
+#   curobo_type: cuboid  
+#   pose: [-1, 0.0, 0.7, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+#   dims: [0.05, 0.1, 0.05] # x, y, z
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [0.15, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: False
+#   visual_material: null
+  
   # bin_base:
   #   pose: [0.5, 0.0, 0.00, 1, 0, 0, 0.0]
   #   dims: [0.5, 0.5, 0.02]

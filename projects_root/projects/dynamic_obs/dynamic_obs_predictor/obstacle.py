@@ -50,7 +50,7 @@ class Obstacle:
                 sim_collision_enabled=True,
                 visual_material=None,
                 simulation_enabled=True,
-                cchecking_enabled=True):
+                cchecking_enabled=True): 
         """
         Creates the representations of the obstacle in the simulation form and in the curobo form (making equivalent representations).
         If world model is provided, the curobo representation of the obstacle is injected into the world model of curobo (in the simulation in happens automatically when simulation representation is created).
@@ -84,7 +84,8 @@ class Obstacle:
         if self.simulation_enabled:
             self.simulation_representation = self._init_obstacle_in_simulation(world, pose[:3], pose[3:], self.dims, self.sim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
         self.cchecking_enabled = cchecking_enabled
-        self.world_models = [] # world models that the obstacle is added to
+        self.registered_world_models = [] # world models that the obstacle is added to
+        self.registered_Wmo_transforms = [] # transforms from world to world model origin for all registered world models
         self.registered_ccheckers = [] # all collision checkers that the obstacle is added to and their transforms       
 
       
@@ -215,8 +216,8 @@ class Obstacle:
 
         # express the pose of the obstacle in the world model origin frame (Wmo)
         p_obs_Wmo, q_obs_Wmo = FrameUtils.world_to_F(T_Wmo[:3], T_Wmo[3:], p_obs, q_obs) # get the pose of the obstacle (frame F2) in the world model origin frame (frame F)
-        X_obs_Wmo = Pose(torch.from_numpy(p_obs_Wmo), torch.from_numpy(q_obs_Wmo)) # Pose (X) of the obstacle (obs) expressed in the world model origin frame (Wmo)
-        return X_obs_Wmo
+        X_obs_Wmo = Pose(self.tensor_args.to_device(torch.from_numpy(p_obs_Wmo)), self.tensor_args.to_device(torch.from_numpy(q_obs_Wmo))) # Pose (X) of the obstacle (obs) expressed in the world model origin frame (Wmo)
+        return X_obs_Wmo 
     
     def _make_world_model_representation(self, T_Wmo, custom_pose=np.array([])) -> Union[Cuboid, Mesh]:
         """
@@ -260,35 +261,51 @@ class Obstacle:
             #     mesh_path=self.simulation_representation.get_mesh_path # type: ignore()
             # )
 
+
         return curobo_obstacle
     
         
     def add_to_world_model(self, cu_world_model:WorldConfig, T_Wmo:np.ndarray, custom_pose=np.array([])):
         """
-        Add the obstacle to a given world model.
+        Add the obstacle to a given world model. side not: this is currently happening before solvers are initialized (we pass each solver its world model with the initial pose of the obstacles).
         """
         cuObs_Wmo = self._make_world_model_representation(T_Wmo, custom_pose) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
+        
         cu_world_model.add_obstacle(cuObs_Wmo) # adding the curobo obs representation to the world model (inplace)
-        self.world_models.append((cu_world_model, T_Wmo)) # save in the list of world models that the obstacle is added to together with the transform from world to world moedl origin
-        world_model_idx = len(self.world_models) - 1
+        self.registered_world_models.append(cu_world_model) # Register the world model that the obstacle is added to and the transform from world to world moedl origin
+        self.registered_Wmo_transforms.append(T_Wmo)
+        world_model_idx = len(self.registered_world_models) - 1
         return world_model_idx # return the index of the world model that the obstacle is added to
     
 
-    # def add_to_cchecker(self, cchecker, T_Wmo, custom_pose=np.array([])):
-    #     """
-    #     Add the obstacle to a given collision checker.
-    #     """
-    #     # cuObs_Wmo = self.add_to_world_model(cchecker.world_model, T_Wmo, custom_pose)
-    #     # self.registered_ccheckers.append((cchecker, T_Wmo)) # save in the list of collision checkers that the obstacle is added to together with the transform from world to world moedl origin
-    #     # return len(self.registered_ccheckers) - 1 # return the index of the collision checker that the obstacle is added to
-    
-    def update_cchecker(self, cchecker_idx, custom_pose=np.array([]), dims=np.array([])):
-        cchecker, T_Wmo = self.registered_ccheckers[cchecker_idx]
+    def update_cchecker(self, cchecker_idx, custom_pose=np.array([]), custom_dims=np.array([])):
+        """
+        Update the pose of the obstacle in a given collision checker (cchecker must be registered first).
+        """
+        cchecker = self.registered_ccheckers[cchecker_idx]
+        T_Wmo = self.registered_Wmo_transforms[cchecker_idx]
         X_Wmo = self.get_X_Wmo(T_Wmo, custom_pose) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
         cchecker.update_obstacle_pose(self.name, X_Wmo)
-
-    # def set_cube_dims(self, dims:list):
-    #     self.curobo_representation.dims = dims
-    #     self.simulation_representation.set_size(dims)
+        # todo: update the dims of the obstacle in the collision checker
+    
 
     
+    def update_registered_ccheckers(self, custom_pose=np.array([]), custom_dims=np.array([])):
+        """
+        Update all registered collision checkers with the new pose and dims of the obstacle.
+        You must register the collision checkers with the obstacle first using the register_ccheckers method.
+        """
+        # custom pose (if passed) should be expressed in world frame
+        for cchecker_idx in range(len(self.registered_ccheckers)):
+            self.update_cchecker(cchecker_idx, custom_pose, custom_dims)
+    
+    def register_ccheckers(self, ccheckers):
+        """Register the collision checkers with the obstacle.
+        Pass the cchekers list in the order of the collision checkers in the world model (and the transform from world to world model origin) corresponding to the order of the ccheckers in the cchecker list.
+        (side note: this step can be done only after solvers are initialized.)
+        Args:
+            ccheckers (_type_): _description_
+        """
+        for cchecker in ccheckers:
+            self.registered_ccheckers.append(cchecker)
+            

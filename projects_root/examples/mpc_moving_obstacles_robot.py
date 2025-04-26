@@ -470,7 +470,6 @@ class AutonomousFranka:
         self.robot_name = f'robot_{self.instance_id}'
         self.subroot_path = f'{self.world_root}/world_{self.robot_name}'
 
-        # self.subroot_path = f'{self.world_root}/world_{self.instance_id}' # f'{self.world_root}/world_{self.robot_name}'
         
         # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
         self.p_R = p_R  
@@ -1151,6 +1150,8 @@ def main():
     X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
     X_Targets = [np.array([-0.5,0,0.5,0,1,0,0], dtype=np.float32), np.array([1.5,0,0.5,0,1,0,0], dtype=np.float32)] # X_TargetOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
     robot_world_models = [WorldConfig() for _ in range(len(robots))]
+    
+    
     # Create a mutual world collision model for all robots (we could set a separate world model for each robot, its a choice depending on the application)
     # ORIGINAL: FINE
     # collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table.yml"
@@ -1166,21 +1167,15 @@ def main():
     # # obstacles_sim_settings = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["obstacles_sim_settings"]) # sim objects settings objects in world model
     
     
-    # collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
-    # col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
-
-    # # # world_model = get_world_model_from_current_stage(stage)
-
-    # obstacles = [] # list of obstacles in the world
-    # for obstacle in col_ob_cfg:
-    #     obstacle = Obstacle(my_world, **obstacle)
-    #     for i in range(len(robot_world_models)):
-    #         world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
-    #         print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
-    #     obstacles.append(obstacle) # add the obstacle to the list of obstacles
-
-
-
+    collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
+    col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
+    obstacles = [] # list of obstacles in the world
+    for obstacle in col_ob_cfg:
+        obstacle = Obstacle(my_world, **obstacle)
+        for i in range(len(robot_world_models)):
+            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
+            print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
+        obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
     robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
@@ -1194,6 +1189,9 @@ def main():
     robot1 = FrankaMpc(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) # MPC robot - avoider
     robots[0] = robot1
 
+    
+    # for i in range(len(robot_world_models)):
+    #     usd_help.add_world_to_stage(robot_world_models[i], base_frame=robots[i].subroot_path)
 
     
 
@@ -1232,8 +1230,11 @@ def main():
     dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     robot1.init_solver(robot_world_models[0],robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
-    
-    
+    # getting the collision checkers of the robots and registering them with the obstacles - must be done after the robot solversare initialized
+    ccheckers = [robot1.get_cchecker(), robot2.get_cchecker()]
+    for i in range(len(obstacles)):
+        obstacles[i].register_ccheckers(ccheckers)
+
     # collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     # col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
     # obstacles = [] # list of obstacles in the world
@@ -1401,9 +1402,13 @@ def main():
         #                 robot.target.set_world_pose(position=p_rand, orientation=np.random.rand(4))
         #             else:
         #                 robot.target.set_world_pose(position=p_targets, orientation=np.array([1,0,0,0]))
-              
+
+        for obstacle in obstacles:
+            obstacle.update_registered_ccheckers()
+
         # Some visualizations...
         # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
+        
         if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
             for i, robot in enumerate(robots):
                 robot.visualize_robot_as_spheres(robots_cu_js[i])
