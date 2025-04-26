@@ -20,9 +20,11 @@ import numpy as np
 from omni.isaac.core.objects import DynamicCuboid, DynamicSphere, DynamicCapsule, DynamicCylinder, DynamicCone, GroundPlane
 from omni.isaac.core.materials import PhysicsMaterial
 from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
-
+from omni.isaac.core.prims import XFormPrim
 from pxr import PhysxSchema, UsdPhysics
-
+from omni.isaac.core.utils.stage import add_reference_to_stage
+from omni.isaac.core.utils.nucleus import get_assets_root_path
+import copy
 # Import helper from curobo examples
 
 # CuRobo
@@ -33,7 +35,71 @@ from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
 
+def get_full_path_to_asset(asset_subpath):
+    return get_assets_root_path() + '/Isaac/' + asset_subpath
 
+def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",reference_prim_path="/world",usd_helper=None):
+    """
+     This function reads the world model from a USD file.
+    It aims to read the world model (for static obstacles) from a USD file and return a list of cuboids and spheres.
+    Obstacles are expected to be under the prim path /world/obstacles.
+
+    NOTE: 
+    Was taken from https://curobo.org/notes/05_usd_api.html
+    Origin in of read_world_from_usd see: /curobo/examples/usd_example.py
+    """        
+   
+    usd_helper.load_stage_from_file(file_path)
+    world_model = usd_helper.get_obstacles_from_stage()
+    return world_model 
+
+
+
+def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
+    """
+    Loads an asset to a prim path.
+    Source: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.replicator.isaac/docs/index.html?highlight=add_reference_to_stage
+
+    asset_subpath: sub-path to the asset to load. Must end with .usd or .usda. Normally starts with /Isaac/...
+    To browse, go to: asset browser in simulator and add /Issac/% your subpath% where %your subpath% is the path to the asset you want to load.
+    Note: to get the asset exact asset_subpath, In the simulator, open: Isaac Assets -> brows to the asset (usd file) -> right click -> copy url path and paste it here (the subpath is the part after the last /Isaac/).
+    Normally the assets are coming from web, but this tutorial can help you use local assets: https://docs.omniverse.nvidia.com/launcher/latest/it-managed-launcher/content_install.html.
+
+    For example: http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/Mugs/SM_Mug_A2.usd -> asset_subpath should be: Props/Mugs/SM_Mug_A2.usd
+        
+    prim_path: path to the prim to load the asset to. If not provided, the asset will be loaded to the prim path /World/%asset_subpath%    
+    is_fullpath: if True, the asset_subpath is a full path to the asset. If False, the asset_subpath is a subpath to the assets folder in the simulator.
+    This is useful if you want to load an asset that is not in the {get_assets_root_path() + '/Isaac/'} folder (which is the root folder for Isaac Sim assets (see asset browser in simulator) but custom assets in your project from a local path.
+
+
+
+    Examples:
+    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd") will load the asset to the prim path /World/Promps_Mugs_SM_Mug_A2
+    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd", "/World/Mug") will load the asset to the prim path /World/Mug
+    load_asset_to_prim_path("/home/me/some_folder/SM_Mug_A2.usd", "/World/Mug", is_fullpath=True) will load the asset to the prim path /World/Mug
+    load_asset_to_prim_path("http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/KLT_Bin/small_KLT_visual_collision.usd", "/World/KLT_Bin", is_fullpath=True) will load the asset to the prim path /World/KLT_Bin
+    """
+
+    # validate asset 
+    if not prim_path:
+        # prim_name = asset_subpath.split('/')[-1].split('.')[0]
+        asset_subpath_as_prim_name = asset_subpath.replace('/', '_').split('.')[0]
+        prim_path = f'/World/{asset_subpath_as_prim_name}'
+    else:
+        prim_path = prim_path
+    
+    # define full path to asset
+    if not is_fullpath:
+        asset_fullpath = get_full_path_to_asset(asset_subpath)
+    else:
+        asset_fullpath = asset_subpath 
+    
+    # validate asset path
+    assert asset_fullpath.endswith('.usd') or asset_fullpath.endswith('.usda'), "Asset path must end with .usd or .usda"
+    
+    # load asset to prim path (adds the asset to the stage)
+    add_reference_to_stage(asset_fullpath, prim_path)
+    return prim_path 
 
 class Obstacle:
     def __init__(self, 
@@ -50,7 +116,8 @@ class Obstacle:
                 sim_collision_enabled=True,
                 visual_material=None,
                 simulation_enabled=True,
-                cchecking_enabled=True): 
+                cchecking_enabled=True,
+                usd_path=None): 
         """
         Creates the representations of the obstacle in the simulation form and in the curobo form (making equivalent representations).
         If world model is provided, the curobo representation of the obstacle is injected into the world model of curobo (in the simulation in happens automatically when simulation representation is created).
@@ -73,7 +140,7 @@ class Obstacle:
             cchecking_enabled (bool): if True, representation of the obstacle in collision is enabled (else its just a regualar simulation primitive).
         """
         assert curobo_type in ["cuboid", "sphere", "mesh", "capsule", "cylinder", "cone"]
-        self.obs_type_to_sim_type = {"cuboid": DynamicCuboid, "sphere": DynamicSphere, "mesh": None, "capsule": DynamicCapsule, "cylinder": DynamicCylinder}
+        self.obs_type_to_sim_type = {"cuboid": DynamicCuboid, "sphere": DynamicSphere, "mesh": XFormPrim, "capsule": DynamicCapsule, "cylinder": DynamicCylinder}
         self.name = name
         self.path = f'/World/curobo_world_cfg_obs_visual_twins/{name}' # path to the obstacle in the simulation
         self.dims = dims
@@ -82,8 +149,11 @@ class Obstacle:
         self.tensor_args = TensorDeviceType()  # Add this to handle device placement
         self.simulation_enabled = simulation_enabled
         if self.simulation_enabled:
-            self.simulation_representation = self._init_obstacle_in_simulation(world, pose[:3], pose[3:], self.dims, self.sim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
+            self.simulation_representation = self._init_obstacle_in_simulation(world, pose[:3], pose[3:], self.dims, self.sim_type, color, mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity, usd_path)
         self.cchecking_enabled = cchecking_enabled
+        self.usd_path = usd_path
+        
+        
         self.registered_world_models = [] # world models that the obstacle is added to
         self.registered_Wmo_transforms = [] # transforms from world to world model origin for all registered world models
         self.registered_ccheckers = [] # all collision checkers that the obstacle is added to and their transforms       
@@ -93,7 +163,7 @@ class Obstacle:
     def set_simulation_refernce(self, simulation_refernce):
         self.simulation_refernce = simulation_refernce
     
-    def _init_obstacle_in_simulation(self, world, position, orientation, dims, curobo_type, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity):
+    def _init_obstacle_in_simulation(self, world, position, orientation, dims, sim_type, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity, usd_path):
         """
         Create a moving obstacle in the simulation.
         
@@ -109,9 +179,12 @@ class Obstacle:
         linear_velocity = np.array(linear_velocity)
         angular_velocity = np.array(angular_velocity)
         color = np.array(color)
-        if curobo_type == DynamicCuboid:
+        if sim_type == DynamicCuboid:
             obstacle = self._init_DynamicCuboid_for_simulation(world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
-
+        
+        elif sim_type == XFormPrim:
+            obstacle = self._init_XFormPrim_for_simulation(world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity, usd_path)
+        
         return obstacle
     
     def _init_DynamicCuboid_for_simulation(self,world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity):
@@ -144,6 +217,25 @@ class Obstacle:
 
         if not sim_collision_enabled: # Disable collision for the obstacle in the simulation
             prim.set_collision_enabled(False)
+        world.scene.add(prim)
+        return prim
+
+    
+    def _init_XFormPrim_for_simulation(self,world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity, usd_path):
+        """
+        Initialize a mesh obstacle.
+        """
+        
+        # path = self.path + self.name
+        # prim = XFormPrim(prim_path=self.path,name=self.name, position=position,orientation=orientation,scale=dims)
+        # world.scene.add(prim)
+        # return prim
+        load_asset_to_prim_path(usd_path, self.path, is_fullpath=True)
+        # prim = PrimWrapper(self.path)
+        prim = XFormPrim(prim_path  = self.path) # , name = self.name)
+        prim.initialize() # the prim so it can be used as a normal prim
+        prim.set_world_pose(position, orientation)
+        # prim.set_local_scale(dims)
         world.scene.add(prim)
         return prim
     
@@ -219,7 +311,7 @@ class Obstacle:
         X_obs_Wmo = Pose(self.tensor_args.to_device(torch.from_numpy(p_obs_Wmo)), self.tensor_args.to_device(torch.from_numpy(q_obs_Wmo))) # Pose (X) of the obstacle (obs) expressed in the world model origin frame (Wmo)
         return X_obs_Wmo 
     
-    def _make_world_model_representation(self, T_Wmo, custom_pose=np.array([])) -> Union[Cuboid, Mesh]:
+    def _make_world_model_representation(self, T_Wmo, custom_pose=np.array([]), usd_helper=None) -> Union[Cuboid, Mesh]:
         """
 
         
@@ -242,41 +334,38 @@ class Obstacle:
         """
         
         X_obs_Wmo = self.get_X_Wmo(T_Wmo, custom_pose) # get the pose expressed in the world model origin frame (Wmo)
-        
+        pose = X_obs_Wmo.tolist()
         # 
         # Here we initialize the curobo representation of the obstacle in its collision checker.
         if self.curobo_type == "cuboid":
             dims = self.simulation_representation.get_world_scale()* self.simulation_representation.get_size() 
             curobo_obstacle = Cuboid(
                 name=self.name,
-                pose=X_obs_Wmo.tolist(),
+                pose=pose,
                 dims=list(dims)
             )
         elif self.curobo_type == "mesh":
-            pass
-            # TODO: Implement this
-            # curobo_obstacle = Mesh(
-            #     name=self.name,
-            #     pose=X_obs_Wmo.tolist(),
-            #     mesh_path=self.simulation_representation.get_mesh_path # type: ignore()
-            # )
+            usd_path = self.usd_path
+            tmp_model_read_only = read_world_model_from_usd(usd_path, usd_helper=usd_helper) # type: ignore()            
+            mesh = tmp_model_read_only.mesh[0]
+            mesh.pose = pose
+            curobo_obstacle = mesh
 
 
         return curobo_obstacle
     
         
-    def add_to_world_model(self, cu_world_model:WorldConfig, T_Wmo:np.ndarray, custom_pose=np.array([])):
+    def add_to_world_model(self, cu_world_model:WorldConfig, T_Wmo:np.ndarray, custom_pose=np.array([]), usd_helper=None):
         """
         Add the obstacle to a given world model. side not: this is currently happening before solvers are initialized (we pass each solver its world model with the initial pose of the obstacles).
         """
-        cuObs_Wmo = self._make_world_model_representation(T_Wmo, custom_pose) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
+        cuObs_Wmo = self._make_world_model_representation(T_Wmo, custom_pose, usd_helper) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
         
         cu_world_model.add_obstacle(cuObs_Wmo) # adding the curobo obs representation to the world model (inplace)
         self.registered_world_models.append(cu_world_model) # Register the world model that the obstacle is added to and the transform from world to world moedl origin
         self.registered_Wmo_transforms.append(T_Wmo)
         world_model_idx = len(self.registered_world_models) - 1
         return world_model_idx # return the index of the world model that the obstacle is added to
-    
 
     def update_cchecker(self, cchecker_idx, custom_pose=np.array([]), custom_dims=np.array([])):
         """
@@ -309,3 +398,18 @@ class Obstacle:
         for cchecker in ccheckers:
             self.registered_ccheckers.append(cchecker)
             
+
+# class PrimWrapper:
+#     def __init__(self, prim_path: str):
+#         # Init after the prim is added to the stage!
+#         self.prim_path = prim_path
+#         self.prim = 
+        
+#     def set_world_pose(self, position, orientation):
+#         self.prim.set_world_pose(position, orientation)
+    
+#     def set_local_pose(self, position, orientation):
+#         self.prim.set_local_pose(position, orientation)
+
+#     def set_local_scale(self, scale):
+#         self.prim.set_local_scale(scale)

@@ -128,7 +128,7 @@ if True: # imports and initiation (put it in if to collapse it)
     from omni.isaac.core.objects import VisualSphere
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
-    from omni.isaac.core.prims import XFormPrim
+    # from omni.isaac.core.prims import XFormPrim
     # from omni.isaac.core.prims import SingleXFormPrim
     import omni.kit.commands as cmd
     from pxr import Gf
@@ -1041,30 +1041,13 @@ class FrankaCumotion(AutonomousFranka):
         art_action = ArticulationAction(next_cmd_joint_pos, next_cmd_joint_vel,joint_indices=idx_list,) # controller command
         return art_action
 
-class PrimWrapper:
-    def __init__(self, prim_path: str):
-        # Init after the prim is added to the stage!
-        self.prim_path = prim_path
-        self.prim = XFormPrim(
-            prim_path  = prim_path,
-            name       = prim_path.split("/")[-1],       # optional
-        )
-        self.prim.initialize() # the prim so it can be used as a normal prim
-        
-    def set_world_pose(self, position, orientation):
-        self.prim.set_world_pose(position, orientation)
-    
-    def set_local_pose(self, position, orientation):
-        self.prim.set_local_pose(position, orientation)
 
-    def set_local_scale(self, scale):
-        self.prim.set_local_scale(scale)
         
         
 #############################################
 # MAIN SIMULATION LOOP
 #############################################
-def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",reference_prim_path="/world"):
+def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",reference_prim_path="/world",usd_helper:UsdHelper=None):
     """
      This function reads the world model from a USD file.
     It aims to read the world model (for static obstacles) from a USD file and return a list of cuboids and spheres.
@@ -1075,7 +1058,8 @@ def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",re
     Origin in of read_world_from_usd see: /curobo/examples/usd_example.py
     """        
     # usd_helper = UsdHelper()
-    usd_helper = UsdHelper()
+    if usd_helper is None:
+        usd_helper = UsdHelper()
     usd_helper.load_stage_from_file(file_path)
     world_model = usd_helper.get_obstacles_from_stage()
     return world_model 
@@ -1173,10 +1157,17 @@ def main():
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i]) # inplace modification of the world model with the obstacle
+            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i], usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
+    # load_asset_to_prim_path('/home/dan/Desktop/small_KLT.usd', '/World/curobo_world_cfg_obs_visual_twins/small_KLT',True)
+    # tmp_world_model = read_world_model_from_usd('/home/dan/Desktop/small_KLT.usd',usd_helper=usd_help)
+    
+    # stage = omni.usd.get_context().get_stage()
+    world_prim = stage.GetPrimAtPath("/World")
+    stage.SetDefaultPrim(world_prim)
+    
     # First set robot2 (cumotion robot) so we can use it to initialize the collision predictor of robot1.
     robot2 = FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],
                             R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0])) # cumotion robot - interferer
