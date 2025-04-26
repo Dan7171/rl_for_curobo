@@ -1215,7 +1215,6 @@ def main():
     my_world.step(render=True)
     my_world.reset()
     
-    
     # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
     for i, robot in enumerate(robots):
         assert robot is not None
