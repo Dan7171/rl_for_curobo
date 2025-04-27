@@ -32,6 +32,8 @@ from curobo.geom.types import Capsule, Cuboid, Cylinder, Mesh, Sphere, WorldConf
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose 
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
+# from curobo.util.usd_helper import UsdHelper
+
 # Initialize CUDA device
 a = torch.zeros(4, device="cuda:0") 
 
@@ -40,7 +42,7 @@ def get_full_path_to_asset(asset_subpath):
 
 def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",reference_prim_path="/world",usd_helper=None):
     """
-     This function reads the world model from a USD file.
+    This function reads the world model from a USD file.
     It aims to read the world model (for static obstacles) from a USD file and return a list of cuboids and spheres.
     Obstacles are expected to be under the prim path /world/obstacles.
 
@@ -48,7 +50,7 @@ def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",re
     Was taken from https://curobo.org/notes/05_usd_api.html
     Origin in of read_world_from_usd see: /curobo/examples/usd_example.py
     """        
-   
+    # usd_helper = UsdHelper() # experimental
     usd_helper.load_stage_from_file(file_path)
     world_model = usd_helper.get_obstacles_from_stage()
     return world_model 
@@ -232,11 +234,13 @@ class Obstacle:
         # return prim
         load_asset_to_prim_path(usd_path, self.path, is_fullpath=True)
         # prim = PrimWrapper(self.path)
-        prim = XFormPrim(prim_path  = self.path) # , name = self.name)
-        prim.initialize() # the prim so it can be used as a normal prim
-        prim.set_world_pose(position, orientation)
+        prim = XFormPrim(prim_path=self.path,translation=position,orientation=orientation) # , name = self.name)
+        prim.initialize() # the prim so it can be used as a normal prim # ⚠️ required before any pose ops
+        # prim.set_world_pose(position, orientation)
         # prim.set_local_scale(dims)
         world.scene.add(prim)
+        world.step(render=True)
+
         return prim
     
     def update_world_coll_checker_with_sim_pose(self, world_coll_checker):
@@ -346,9 +350,18 @@ class Obstacle:
             )
         elif self.curobo_type == "mesh":
             usd_path = self.usd_path
-            tmp_model_read_only = read_world_model_from_usd(usd_path, usd_helper=usd_helper) # type: ignore()            
-            mesh = tmp_model_read_only.mesh[0]
+            # tmp_model_read_only = read_world_model_from_usd(usd_path, usd_helper=usd_helper) # type: ignore()            
+            # mesh = tmp_model_read_only.mesh[0]
+            # mesh_file = join_path(get_assets_path(), "scene/nvblox/srl_ur10_bins.obj")
+            mesh_file = 'other/small_KLT_visual_collision/small_KLT_visual_collision.obj'
+            mesh = Mesh(
+                name=self.name,
+                pose=pose,
+                file_path=mesh_file,
+                # scale=dims,
+            )
             mesh.pose = pose
+            mesh.name = self.name
             curobo_obstacle = mesh
 
 

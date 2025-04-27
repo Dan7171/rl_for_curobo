@@ -1,0 +1,18 @@
+# File produced by Open Asset Import Library (http://www.assimp.sf.net)
+# (assimp v5.0.1937526254)
+
+newmtl FOF_Mesh_LabelsSG
+Kd 1 1 1
+illum 1
+map_Kd ./FOF_Map_Labels_D.png
+
+newmtl FOF_Mesh_StickerSG
+Kd 1 1 1
+illum 1
+map_Kd ./FOF_Mesh_Labels_D.png
+
+newmtl FOF_Mesh_Magenta_BoxSG
+Kd 1 1 1
+illum 1
+map_Kd ./FOF_Map_Magenta_Box_D.png
+

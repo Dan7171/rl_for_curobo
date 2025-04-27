@@ -1061,7 +1061,7 @@ def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",re
     if usd_helper is None:
         usd_helper = UsdHelper()
     usd_helper.load_stage_from_file(file_path)
-    world_model = usd_helper.get_obstacles_from_stage()
+    world_model = usd_helper.get_obstacles_from_stage(reference_prim_path="/world")
     return world_model 
 
 
@@ -1069,18 +1069,18 @@ def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",re
 def write_stage_to_usd_file(stage,file_path):
     stage.Export(file_path) # export the stage to a temporary USD file
     
-def get_world_model_from_current_stage(stage):
-    # prepare tmp USD file:
-    tmp_usd = '.tmp_usd_file.usd'
-    if os.path.exists(tmp_usd):
-        os.remove(tmp_usd)
-    # write stage to tmp USD file:
-    write_stage_to_usd_file(stage, tmp_usd)
-    new_world_model = read_world_model_from_usd(tmp_usd)
-    #new_world_model = read_world_from_usd(tmp_usd)
-    # remove tmp USD file:
-    os.remove(tmp_usd)
-    return new_world_model
+# def get_world_model_from_current_stage(stage):
+#     # prepare tmp USD file:
+#     tmp_usd = '.tmp_usd_file.usd'
+#     if os.path.exists(tmp_usd):
+#         os.remove(tmp_usd)
+#     # write stage to tmp USD file:
+#     write_stage_to_usd_file(stage, tmp_usd)
+#     new_world_model = read_world_model_from_usd(tmp_usd)
+#     #new_world_model = read_world_from_usd(tmp_usd)
+#     # remove tmp USD file:
+#     os.remove(tmp_usd)
+#     return new_world_model
 
 def main():
     """
@@ -1157,7 +1157,7 @@ def main():
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i], usd_helper=usd_help) # inplace modification of the world model with the obstacle
+            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i], usd_helper=usd_help)#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         obstacles.append(obstacle) # add the obstacle to the list of obstacles
 

@@ -80,14 +80,14 @@
 
 - name: small_KLT
   curobo_type: mesh  
-  pose: [0.25, 0.00, 0.00, 1, 0, 0, 0.0]
-  usd_path: /home/dan/Desktop/small_KLT.usd
+  pose: [0.5, 0.00, 0.25, 1, 0, 0, 0.0]
+  usd_path: projects_root/usd/assets/small_KLT_visual_collision.usd # /home/dan/Desktop/small_KLT.usd
   dims: [1, 1, 1]
   # color: [0, 0, 0]
   # mass: 5000
   # linear_velocity: [0, 0, 0]
   # angular_velocity: [0, 0, 0]
-  # gravity_enabled: True
+  gravity_enabled: False
   # sim_collision_enabled: True
   # visual_material: null
 
