@@ -3,7 +3,7 @@ __pycache__/
 build/
 *.cache
 *.flatbuffers
-isaac_sim-4.0.0/
+isaac_sim-4.0.0/    
 *.AppImage
 isaac_sim-4.0.0
 third_party

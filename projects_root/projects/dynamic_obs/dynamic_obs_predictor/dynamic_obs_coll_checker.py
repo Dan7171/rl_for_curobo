@@ -24,7 +24,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_mpc, H=30, n_rollouts=400, cost_weight=100, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    def __init__(self, tensor_args, step_dt_traj_mpc,n_own_spheres_valid, n_obs, H=30, n_rollouts=400, cost_weight=100, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -50,8 +50,8 @@ class DynamicObsCollPredictor:
         self.shift_cost_matrix_left = shift_cost_matrix_left
         self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
 
-        self.n_own_spheres_valid = 61 # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
-        self.n_obs_valid = 61 # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
+        self.n_own_spheres_valid = n_own_spheres_valid # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        self.n_obs_valid = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
         
         # Buffers for obstacles (spheres): position and radius
         self.rad_obs_buf = torch.zeros(self.n_obs_valid, device=self.tensor_args.device) # [n_obs] obstacles radii buffer
@@ -85,19 +85,25 @@ class DynamicObsCollPredictor:
         # self.p_obs_buf = torch.cat([self.p_obs_buf, p_obs], dim=1)
         # self.rad_obs_buf = torch.cat([self.rad_obs_buf, rad_obs], dim=0)
         
-        self.p_obs_buf.copy_(p_obs)
-        self.rad_obs_buf.copy_(rad_obs)
-        self.init_obs[0] = 1
+        self.update_p_obs(p_obs)
+        self.update_rad_obs(rad_obs)
+        self.init_obs[0] = 1 # flag
         
     
     def update_p_obs(self, p_obs:torch.Tensor):
         """
-        Update the poses of the obstacles.
+        Update the poses of the obstacles in self buffer. This is mandatory to call before calling cost_fn, everytime with the new poses of the obstacles.
         Args:
             p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
         """
         # self.p_obs = p_obs
         self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
+    
+    def update_rad_obs(self, rad_obs:torch.Tensor):
+        """
+        Update the radii of the obstacles in self buffer. This is mandatory to call before calling cost_fn, everytime with the new radii of the obstacles.
+        """
+        self.rad_obs_buf.copy_(rad_obs)
     
     def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
         """

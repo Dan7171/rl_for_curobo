@@ -476,6 +476,9 @@ class AutonomousFranka:
         self.q_R = q_R 
         
         # target settings
+        self.n_coll_spheres = 65
+        self.n_coll_spheres_valid = self.n_coll_spheres - 4 # Should be number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        
         self._p_initTarget = p_T # initial target frame position (expressed in the world frame W)
         self._q_initTarget = R_T # initial target frame rotation (expressed in the world frame W)
         
@@ -854,7 +857,6 @@ class FrankaCumotion(AutonomousFranka):
         self.hold_partial_pose = None
         self.cmd_plan = None
         self.cmd_idx = 0
-        self.n_coll_spheres = 65
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         
@@ -1179,10 +1181,10 @@ def main():
         assert robot is not None
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
-
+    
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+    dynamic_obs_coll_predictor = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc, robot1.n_coll_spheres_valid, robot2.n_coll_spheres_valid) if MODIFY_MPC_COST_FN_FOR_DYN_OBS else None # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
     robot1.init_solver(robot_world_models[0],robots_collision_caches[0], step_dt_traj_mpc, dynamic_obs_coll_predictor)
   
     # getting the collision checkers of the robots and registering them with the obstacles - must be done after the robot solversare initialized

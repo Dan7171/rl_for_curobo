@@ -12,53 +12,53 @@
   visual_material: null
 
  
-- name: bin_wall_1
-  curobo_type: cuboid  
-  pose: [0.6, -0.2, 0.2, 1, 0, 0, 0.0] # center of the wall
-  dims: [0.4, 0.02, 0.4]
-  color: [0, 0, 0]
-  mass: 5000
-  linear_velocity: [0, 0, 0]
-  angular_velocity: [0, 0, 0]
-  gravity_enabled: False
-  sim_collision_enabled: False
-  visual_material: null
+# - name: bin_wall_1
+#   curobo_type: cuboid  
+#   pose: [0.6, -0.2, 0.2, 1, 0, 0, 0.0] # center of the wall
+#   dims: [0.4, 0.02, 0.4]
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [0, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: False
+#   visual_material: null
 
-- name: bin_wall_2
-  curobo_type: cuboid  
-  pose: [0.6, 0.2, 0.2, 1, 0, 0, 0.0]
-  dims: [0.4, 0.02, 0.4]
-  color: [0, 0, 0]
-  mass: 5000
-  linear_velocity: [0, 0, 0]
-  angular_velocity: [0, 0, 0]
-  gravity_enabled: False
-  sim_collision_enabled: False
-  visual_material: null
+# - name: bin_wall_2
+#   curobo_type: cuboid  
+#   pose: [0.6, 0.2, 0.2, 1, 0, 0, 0.0]
+#   dims: [0.4, 0.02, 0.4]
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [0, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: False
+#   visual_material: null
 
-- name: bin_wall_3
-  curobo_type: cuboid  
-  pose: [0.4, 0.00, 0.2, 1, 0, 0, 0.0]
-  dims: [0.02, 0.4, 0.4]
-  color: [0, 0, 0]
-  mass: 5000
-  linear_velocity: [0, 0, 0]
-  angular_velocity: [0, 0, 0]
-  gravity_enabled: False
-  sim_collision_enabled: False
-  visual_material: null
+# - name: bin_wall_3
+#   curobo_type: cuboid  
+#   pose: [0.4, 0.00, 0.2, 1, 0, 0, 0.0]
+#   dims: [0.02, 0.4, 0.4]
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [0, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: False
+#   visual_material: null
 
-- name: bin_wall_4
-  curobo_type: cuboid  
-  pose: [0.8, 0.00, 0.2, 1, 0, 0, 0.0]
-  dims: [0.02, 0.4, 0.4] # depth, width, length
-  color: [0, 0, 0]
-  mass: 5000
-  linear_velocity: [0, 0, 0]
-  angular_velocity: [0, 0, 0]
-  gravity_enabled: False
-  sim_collision_enabled: False
-  visual_material: null
+# - name: bin_wall_4
+#   curobo_type: cuboid  
+#   pose: [0.8, 0.00, 0.2, 1, 0, 0, 0.0]
+#   dims: [0.02, 0.4, 0.4] # depth, width, length
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [0, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: False
+#   visual_material: null
 
 # - name: small_KLT
 #   curobo_type: mesh  
