@@ -700,7 +700,7 @@ class FrankaMpc(AutonomousFranka):
             p_R (_type_): _description_
         """
         super().__init__(robot_cfg, world, p_R, q_R, p_T, R_T, target_color, target_size)
-        self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
+        # self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
@@ -895,7 +895,7 @@ class FrankaCumotion(AutonomousFranka):
             tensor_args, # tensor_args - Numerical precision and compute device to use for motion generation
             collision_checker_type=CollisionCheckerType.MESH, # collision_checker_type – Type of collision checker to use for motion generation. Default of CollisionCheckerType.MESH supports world represented by Cuboids and Meshes. See Collision World Representation for more details.
             num_trajopt_seeds=12, # num_trajopt_seeds – Number of seeds to use for trajectory optimization per problem query. Default of 4 is found to be a good number for most cases. Increasing this will increase memory usage.
-            num_graph_seeds=12, # num_graph_seeds – Number of seeds to use for graph planner per problem query. When graph planning is used to generate seeds for trajectory optimization, graph planner will attempt to find collision-free paths from the start state to the many inverse kinematics solutions.
+            num_graph_seeds=24, # num_graph_seeds – Number of seeds to use for graph planner per problem query. When graph planning is used to generate seeds for trajectory optimization, graph planner will attempt to find collision-free paths from the start state to the many inverse kinematics solutions.
             interpolation_dt=interpolation_dt, # interpolation_dt – Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints.
             collision_cache=collision_cache, # collision_cache – Cache of obstacles to create to load obstacles between planning calls. An example: {"obb": 10, "mesh": 10}, to create a cache of 10 cuboids and 10 meshes.
             optimize_dt=optimize_dt, # optimize_dt – Optimize dt during trajectory optimization. Default of True is recommended to find time-optimal trajectories. Setting this to False will use the provided trajopt_dt for trajectory optimization. Setting to False is required when optimizing from a non-static start state.
@@ -1047,40 +1047,13 @@ class FrankaCumotion(AutonomousFranka):
 #############################################
 # MAIN SIMULATION LOOP
 #############################################
-def read_world_model_from_usd(file_path: str,obstacle_path="/world/obstacles",reference_prim_path="/world",usd_helper:UsdHelper=None):
-    """
-     This function reads the world model from a USD file.
-    It aims to read the world model (for static obstacles) from a USD file and return a list of cuboids and spheres.
-    Obstacles are expected to be under the prim path /world/obstacles.
-
-    NOTE: 
-    Was taken from https://curobo.org/notes/05_usd_api.html
-    Origin in of read_world_from_usd see: /curobo/examples/usd_example.py
-    """        
-    # usd_helper = UsdHelper()
-    if usd_helper is None:
-        usd_helper = UsdHelper()
-    usd_helper.load_stage_from_file(file_path)
-    world_model = usd_helper.get_obstacles_from_stage(reference_prim_path="/world")
-    return world_model 
 
 
 
 def write_stage_to_usd_file(stage,file_path):
     stage.Export(file_path) # export the stage to a temporary USD file
     
-# def get_world_model_from_current_stage(stage):
-#     # prepare tmp USD file:
-#     tmp_usd = '.tmp_usd_file.usd'
-#     if os.path.exists(tmp_usd):
-#         os.remove(tmp_usd)
-#     # write stage to tmp USD file:
-#     write_stage_to_usd_file(stage, tmp_usd)
-#     new_world_model = read_world_model_from_usd(tmp_usd)
-#     #new_world_model = read_world_from_usd(tmp_usd)
-#     # remove tmp USD file:
-#     os.remove(tmp_usd)
-#     return new_world_model
+
 
 def main():
     """
@@ -1131,25 +1104,16 @@ def main():
     robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 30, "mesh": 10}]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
     robot_idx_lists:List[Optional[List]] = [None, None]
-    X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
-    X_Targets = [np.array([-0.5,0,0.5,0,1,0,0], dtype=np.float32), np.array([1.5,0,0.5,0,1,0,0], dtype=np.float32)] # X_TargetOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
+    X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1.2,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
     robot_world_models = [WorldConfig() for _ in range(len(robots))]
-    
-    
-    # Create a mutual world collision model for all robots (we could set a separate world model for each robot, its a choice depending on the application)
-    # ORIGINAL: FINE
-    # collision_table_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_table.yml"
-    # world_cfg_table = WorldConfig.from_dict(load_yaml(collision_table_cfg_path))
-    # world_cfg_table.cuboid[0].pose[2] -= 0.04  # Adjust table height. Moved to file
-    # world_cfg1 = WorldConfig.from_dict(load_yaml(collision_table_cfg_path)).get_mesh_world() # modifying all obstacles to mesh
-    # world_cfg1.mesh[0].name += "_mesh"
-    # world_cfg1.mesh[0].pose[2] = -10.5  # Place mesh below ground
-    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
+    X_binCenter = np.array([0.6, 0, 0.2, 1, 0, 0, 0], dtype=np.float32)
+    X_target = X_binCenter.copy()
+    X_target[3:5] = [0,1] # upside down
+    X_Targets = [X_target.copy(), X_target.copy()] 
+    bin_dim = 0.4 # depends on the cfg file
+    p_infront, p_behind, p_on_left, p_on_right = X_binCenter[:3] + np.array([0,0.75 * bin_dim,bin_dim]),  X_binCenter[:3] + np.array([0,-0.75 * bin_dim,bin_dim]), X_binCenter[:3] + np.array([0.75 * bin_dim,0,bin_dim]), X_binCenter[:3] + np.array([- 0.75 * bin_dim,0,bin_dim])
+    valid_neihborhood = [[p_infront, p_behind, X_binCenter[:3]], [p_infront, p_behind, X_binCenter[:3]]]
 
-    # MINE: ERROR
-    # # obstacles_world_cfg = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["world_cfg_settings"]) # original curobo world model
-    # # obstacles_sim_settings = WorldConfig.from_dict(load_yaml(collision_obstacles_cfg_path)["obstacles_sim_settings"]) # sim objects settings objects in world model
-    
     
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
@@ -1157,7 +1121,7 @@ def main():
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i], usd_helper=usd_help)#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
+            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
@@ -1375,24 +1339,36 @@ def main():
             robot2.apply_articulation_action(robot2_art_action)
         
         
+        
         # sample a new target from robot 2 every 100 steps and spawn in simulator 
         # if t_idx % 100 == 0 and robot1_init_obs: 
         #     p_validspheresR1curr, _, valid_sphere_indices_R1 = robot1.get_current_spheres_state()
         #     new_target_idx = np.random.choice(valid_sphere_indices_R1[20:]) # above the base of the robot
         #     p_new_target =  p_validspheresR1curr[new_target_idx]
-        #     robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4)) 
-        # if t_idx % 100 == 0:
-        #     for robot in robots:
-        #         change_target = random.random() < 0.5
-        #         if change_target:
-        #             if np.linalg.norm(robot.target.get_world_pose()[0] - p_targets) < 0.01:
-        #                 rand_x = random.uniform(-0.25, 0.25)
-        #                 rand_y = random.uniform(-0.25, 0.25)
-        #                 rand_z = random.uniform(0.25, 0.5)
-        #                 p_rand = p_targets + np.array([rand_x, rand_y, rand_z])
-        #                 robot.target.set_world_pose(position=p_rand, orientation=np.random.rand(4))
-        #             else:
-        #                 robot.target.set_world_pose(position=p_targets, orientation=np.array([1,0,0,0]))
+            # robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4)) 
+        
+        mode_of_target_sampling = '4_side_neighbors'
+        if t_idx % 100 == 0:
+            for i in range(len(robots)):
+                robot = robots[i]
+                change_target = random.random() < 0.5
+                if change_target:
+                    if mode_of_target_sampling == 'random_neighbor':
+                        
+                        # if on target: sample a random neighbor
+                        if np.linalg.norm(robot.target.get_world_pose()[0] - X_Targets[i][:3]) < 0.01:
+                            rand_x = random.uniform(-0.25, 0.25)
+                            rand_y = random.uniform(-0.25, 0.25)
+                            rand_z = random.uniform(0.25, 0.5)
+                            robot.target.set_world_pose(position=X_Targets[i][:3] + np.array([rand_x, rand_y, rand_z]), orientation=np.random.rand(4))
+                        else: # not on target: move towards target
+                            robot.target.set_world_pose(position=X_Targets[i][:3], orientation=X_Targets[i][3:])
+                    
+                    elif mode_of_target_sampling == '4_side_neighbors': 
+                        
+                        p_next = valid_neihborhood[i][random.randint(0,len(valid_neihborhood[i])-1)]
+                        # robot.target.set_world_pose(position=p_next, orientation=X_Targets[i][3:])
+                        
 
         for obstacle in obstacles:
             obstacle.update_registered_ccheckers()

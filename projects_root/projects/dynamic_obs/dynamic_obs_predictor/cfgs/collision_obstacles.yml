@@ -1,8 +1,8 @@
 
 - name: table
   curobo_type: cuboid  
-  pose: [0.5, 0.0, -0.01, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
-  dims: [3.0, 2.0, 0.01] # x, y, z
+  pose: [0.0, 0.6, -0.01, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+  dims: [5.0, 5.0, 0.01] # x, y, z
   color: [0.7, 0.7, 0.7]
   mass: 5000
   linear_velocity: [0, 0, 0]
@@ -11,116 +11,72 @@
   sim_collision_enabled: False
   visual_material: null
 
-# - name: bin_base
-#   curobo_type: cuboid  
-#   pose: [0.5, 0.0, 0.02, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
-#   dims: [0.2, 0.2, 0.00001] # x, y, z
-#   color: [0, 0, 0]
-#   mass: 5000
-#   linear_velocity: [0, 0, 0]
-#   angular_velocity: [0, 0, 0]
-#   gravity_enabled: True
-#   sim_collision_enabled: True
-#   visual_material: null
-
-#########
-
-# -------- wall 1 ----------- 
-
-# -                           
-# w
-# a
-# l
-# l
-# 3
-# -
-# -
-
-# -------- wall 2 ----------- 
-
-#########
-
-
-
+ 
 - name: bin_wall_1
   curobo_type: cuboid  
-  pose: [0.5, -0.25, 0.00, 1, 0, 0, 0.0]
-  dims: [0.5, 0.1, 0.5]
+  pose: [0.6, -0.2, 0.2, 1, 0, 0, 0.0] # center of the wall
+  dims: [0.4, 0.02, 0.4]
   color: [0, 0, 0]
   mass: 5000
   linear_velocity: [0, 0, 0]
   angular_velocity: [0, 0, 0]
-  gravity_enabled: True
-  sim_collision_enabled: True
+  gravity_enabled: False
+  sim_collision_enabled: False
   visual_material: null
 
-# - name: bin_wall_2
-#   curobo_type: cuboid  
-#   pose: [0.5, 0.25, 0.00, 1, 0, 0, 0.0]
-#   dims: [0.5, 0.1, 0.5]
-#   color: [0, 0, 0]
-#   mass: 5000
-#   linear_velocity: [0, 0, 0]
-#   angular_velocity: [0, 0, 0]
-#   gravity_enabled: True
-#   sim_collision_enabled: True
-#   visual_material: null
-
-# - name: bin_wall_3
-#   curobo_type: cuboid  
-#   pose: [0.25, 0.00, 0.00, 1, 0, 0, 0.0]
-#   dims: [0.1, 0.5, 0.5]
-#   color: [0, 0, 0]
-#   mass: 5000
-#   linear_velocity: [0, 0, 0]
-#   angular_velocity: [0, 0, 0]
-#   gravity_enabled: True
-#   sim_collision_enabled: True
-#   visual_material: null
-
-- name: small_KLT
-  curobo_type: mesh  
-  pose: [0.5, 0.00, 0.25, 1, 0, 0, 0.0]
-  usd_path: projects_root/usd/assets/small_KLT_visual_collision.usd # /home/dan/Desktop/small_KLT.usd
-  dims: [1, 1, 1]
-  # color: [0, 0, 0]
-  # mass: 5000
-  # linear_velocity: [0, 0, 0]
-  # angular_velocity: [0, 0, 0]
+- name: bin_wall_2
+  curobo_type: cuboid  
+  pose: [0.6, 0.2, 0.2, 1, 0, 0, 0.0]
+  dims: [0.4, 0.02, 0.4]
+  color: [0, 0, 0]
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
   gravity_enabled: False
-  # sim_collision_enabled: True
-  # visual_material: null
+  sim_collision_enabled: False
+  visual_material: null
 
-# - name: moving_cube
-#   curobo_type: cuboid  
-#   pose: [-1, 0.0, 0.7, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
-#   dims: [0.05, 0.1, 0.05] # x, y, z
-#   color: [0, 0, 0]
-#   mass: 5000
-#   linear_velocity: [0.15, 0, 0]
-#   angular_velocity: [0, 0, 0]
+- name: bin_wall_3
+  curobo_type: cuboid  
+  pose: [0.4, 0.00, 0.2, 1, 0, 0, 0.0]
+  dims: [0.02, 0.4, 0.4]
+  color: [0, 0, 0]
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: False
+  visual_material: null
+
+- name: bin_wall_4
+  curobo_type: cuboid  
+  pose: [0.8, 0.00, 0.2, 1, 0, 0, 0.0]
+  dims: [0.02, 0.4, 0.4] # depth, width, length
+  color: [0, 0, 0]
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: False
+  visual_material: null
+
+# - name: small_KLT
+#   curobo_type: mesh  
+#   pose: [0.5, 0.00, 0.2, 1, 0, 0, 0.0]
+#   usd_path: projects_root/usd/assets/small_KLT_visual_collision.usd # /home/dan/Desktop/small_KLT.usd
+#   mesh_file_sub: other/small_KLT_visual_collision/small_KLT_visual_collision.obj # mesh file path (must be a subpath under curobo/src/curobo/content/assets)
+#   dims: [2, 2, 2] 
 #   gravity_enabled: False
-#   sim_collision_enabled: False
-#   visual_material: null
-  
-  # bin_base:
-  #   pose: [0.5, 0.0, 0.00, 1, 0, 0, 0.0]
-  #   dims: [0.5, 0.5, 0.02]
-  # bin_wall1:
-  #   pose: [0.5, -0.25, 0.0, 1, 0, 0, 0.0]
-  #   dims: [0.5, 0.02, 0.5]
-  # bin_wall2:
-  #   pose: [0.5, 0.25, 0.0, 1, 0, 0, 0.0]
-  #   dims: [0.5, 0.02, 0.5]
-  # bin_wall3:
-  #   pose: [0.25, 0.0, 0.0, 1, 0, 0, 0.0]
-  #   dims: [0.02, 0.5, 0.5] 
-  # bin_wall4:
-  #   pose: [0.75, 0.0, 0.0, 1, 0, 0, 0.0]
-  #   dims: [0.02, 0.5, 0.5]
 
-
-  # bin_base:
-  #   pose: [0.5, 0.0, 0.00, 1, 0, 0, 0.0]
-  #   dims: [0.5, 0.5, 0.02]
-                                                                                                                                                                                                                                
+- name: simple_cube
+  curobo_type: cuboid  
+  pose: [-1, 0.0, 0.7, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+  dims: [0.05, 0.1, 0.05] # x, y, z
+  color: [0, 0, 0]
+  mass: 5000
+  linear_velocity: [0.0, 0.0, 0.0] # [0.15, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: False
+  visual_material: null
+ 
