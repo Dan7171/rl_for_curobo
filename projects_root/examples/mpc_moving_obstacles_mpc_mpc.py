@@ -58,6 +58,9 @@ Example options:
 
 
 
+from typing import Callable, Dict, Union
+
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -720,8 +723,13 @@ class FrankaMpc(AutonomousFranka):
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
+        self.override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        self.cfg = load_yaml(self.override_particle_file)
+        self.H = self.cfg["model"]["horizon"]
+        self.num_particles = self.cfg["mppi"]["num_particles"]
+  
 
-
+    
     def init_solver(self,world_model, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
         """Initialize the MPC solver.
 
@@ -732,7 +740,6 @@ class FrankaMpc(AutonomousFranka):
             dynamic_obs_coll_predictor (_type_): _description_
         """
         dynamic_obs_checker = dynamic_obs_coll_predictor # New
-        override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
         
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
@@ -749,11 +756,11 @@ class FrankaMpc(AutonomousFranka):
             store_rollouts=True,  # Store trajectories for visualization
             step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
             dynamic_obs_checker=dynamic_obs_checker, # New
-            override_particle_file=override_particle_file # New
+            override_particle_file=self.override_particle_file # New
         )
         
         self.solver = MpcSolver(mpc_config)
-        self.H = self.solver.rollout_fn.horizon
+        
         self._post_init_solver()
         retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
         joint_names = self.solver.rollout_fn.joint_names
@@ -845,10 +852,11 @@ class FrankaMpc(AutonomousFranka):
         return solver_target_was_reset
     
     def get_policy_means(self):
-        return self.solver.solver.optimizers[0].mean_action
+        return self.solver.solver.optimizers[0].mean_action.squeeze(0)
     
-    def get_plan(self, in_task_space:bool, n_steps:int=-1):
-        """Get the H steps plan from the solver.
+    def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True):
+        """
+        Get the H steps plan from the solver.
         Args:
             in_task_space (bool): if True, return the plan in task space, otherwise return the plan in joint space.
             H (int, optional): the number of steps in the plan. If -1, return the entire plan. Defaults to -1.
@@ -856,56 +864,52 @@ class FrankaMpc(AutonomousFranka):
             torch.Tensor: the H steps plan.
         """
         
-        plan = self.get_policy_means() # VERRIFIED
-        
-        # vel_jsplan: 
-        # NOTE: not sure if this (vel_jsplan = self.solver.rollout_fn.traj_dt) is correct.
-        # Compared to the vel_jsplan of the cumotion planner.
-        # according to the cumotion planner, vel_jsplan should be a tensor in shape [length of the plan x 9] where last two columns are 0 everywhere (ee fingers velocities).
-        vel_jsplan = 1 / self.solver.rollout_fn.traj_dt # 1d tensor in length H
-        vel_jsplan.unsqueeze(0) # [1 x H]
-        vel_jsplan = vel_jsplan.T # [H x 1]
-        vel_jsplan = vel_jsplan.expand(vel_jsplan.shape[0], 9) # [H x 9]
-        vel_jsplan[:, 7:] = 0
-
-        
-        # Another reasonable option is  an 1/ self.solver.rollout_fn.step_dt
-        # like that:
-        # vel_jsplan = torch.zeros(plan.shape[0], 9)
-        # vel_jsplan[:, :7] = torch.ones(plan.shape[0], 7) * (1 / self.solver.rollout_fn.step_dt)
-        # vel_jsplan[:, 7:] = 0
-        if in_task_space: # get plan in task space (robot spheres)
-            p_js_plan = self.solver.rollout_fn.compute_kinematics(policy_means)
-            vel_js_plan = None # TODO
-            p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(p_jsplan, vel_jsplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-            valid_only = True # remove spheres that are not valid (i.e. negative radius)
-            if valid_only:
-                prad_spheresPlan = prad_spheresPlan[:, :self.n_coll_spheres_valid]
+        def map_nested_tensors(d: Dict[str, Union[dict, torch.Tensor]], fn: Callable[[torch.Tensor], torch.Tensor]) -> dict:
+            """Recursively apply fn to all tensor leaves in a nested dict."""
+            out = {}
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    out[k] = map_nested_tensors(v, fn)
+                elif isinstance(v, torch.Tensor):
+                    out[k] = fn(v)
+                else:
+                    raise TypeError(f"Unsupported value type at key '{k}': {type(v)}")
+            return out
+       
+        js_plan = self.get_policy_means() # (H x num of joints (7 in franka))
+        plan = {'js': js_plan}
+        if include_task_space: # get plan in task space (robot spheres)
             
+            # compute forward kinematics
+            j_names = self.solver.rollout_fn.joint_names # len 7
+            p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(js_plan,j_names) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+            
+            task_space_plan = {'ee': {'p': p_eeplan, 'q': q_eeplan}, 'links': {'p': p_linksplan, 'q': q_linksplan}, 'spheres': {'p': prad_spheresPlan[:,:,:3], 'r': prad_spheresPlan[:,:,3]}}
+            plan.update(task_space_plan)
+             # remove spheres that are not valid (i.e. negative radius)
+            if valid_spheres_only: # removes the (4) extra spheres reserved for simulating a picked object as part of the robot after picked
+                plan['spheres']['p'] = plan['spheres']['p'][:, :self.n_coll_spheres_valid]
+                plan['spheres']['r'] = plan['spheres']['r'][:, :self.n_coll_spheres_valid]
+            
+
             # express in world frame:
-            
-            prad_spheresPlan = prad_spheresPlan[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
-            prad_spheresPlan[:,:,:3] = prad_spheresPlan[:,:,:3] + self.p_R # # offset by robot origin to express in world frame (only position, radius is not affected)
-            
+            for key in plan.keys():
+                if isinstance(plan[key], dict) and 'p' in plan[key].keys():
+                    pKey = plan[key]['p']
+                    pKey = pKey.cpu() 
+                    pKey[...,:3] = pKey[...,:3] + self.p_R # # offset by robot origin to express in world frame (only position, radius is not affected)
+                
+            # take only the first n_steps
+            if not n_steps == -1:        
+                plan = map_nested_tensors(plan, lambda x: x[:n_steps])
+                # for key in plan.keys():
+                #     for subkey in plan[key].keys():
+                #         plan[key][subkey] = plan[key][subkey][:n_steps,:,:] 
 
-        if n_steps != -1 and n_steps < plan.shape[1]:
-            
-            plan = plan[::n_steps]
-
-        return plan
         
-        # plan = self.solver.rollout_fn.get_H_steps_plan(in_task_space, H)
-        # dt = self.solver.rollout_fn.traj_dt # H time deltas 
-        # H = self.solver.rollout_fn.action_horizon
-        # sample_of_next_steps = self.solver.rollout_fn.act_sample_gen.get_samples(H) # 30x7: sample from the policy I guess
-        # other_sample =  self.solver.rollout_fn.act_sample_gen.get_gaussian_samples(30).shape
-        # probably_this = self.solver.rollout_fn.rollout_fn(action_seq (torch.Tensor [num_particles, horizon, d_act])) # Return sequence of costs and states encountered by simulating a batch of action sequences
-        # see https://curobo.org/_api/curobo.rollout.arm_reacher.html#curobo.rollout.arm_reacher.ArmReacher
-        # or self.solver.rollout_fn(action_seq)
-        # ans should be H x n_spheres x 3 torch tensor if in task space or H x n_joints if in joint space
-        # also try: get_pose_costs(include_link_pose: bool = False,include_convergence: bool = True,only_convergence: bool = False,)
+        return plan 
         
-        # return plan
+       
 
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
@@ -1212,13 +1216,13 @@ def main():
     
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
-    obstacles = [] # list of obstacles in the world
+    env_obstacles = [] # list of obstacles in the world
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
             world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
-        obstacles.append(obstacle) # add the obstacle to the list of obstacles
+        env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
     # load_asset_to_prim_path('/home/dan/Desktop/small_KLT.usd', '/World/curobo_world_cfg_obs_visual_twins/small_KLT',True)
     # tmp_world_model = read_world_model_from_usd('/home/dan/Desktop/small_KLT.usd',usd_helper=usd_help)
@@ -1261,13 +1265,15 @@ def main():
     for i, robot in enumerate(robots):
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
-        
-        
+         
         if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
             n_obs = sum([robots[j].n_coll_spheres_valid for j in range(len(robots)) if i != j]) # number of obstacles derived from other robots 
             col_pred = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc, robot.n_coll_spheres_valid, n_obs)
             dynamic_obs_coll_predictors.append(col_pred) # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-            col_pred.reset_obs(torch.zeros((robots[i].H, n_obs, 3), device=robots[i].tensor_args.device), torch.zeros((robots[i].H, n_obs, 1), device=robots[i].tensor_args.device))
+            p_obs = torch.zeros((robots[i].H, n_obs, 3), device=robots[i].tensor_args.device)
+            rad_obs = torch.zeros(n_obs, device=robots[i].tensor_args.device)
+            col_pred.reset_obs(p_obs, rad_obs)
+
         else:
             dynamic_obs_coll_predictors.append(None)
         
@@ -1275,11 +1281,14 @@ def main():
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
         
-    for i in range(len(obstacles)):
-        obstacles[i].register_ccheckers(ccheckers)
+    for i in range(len(env_obstacles)):
+        env_obstacles[i].register_ccheckers(ccheckers)
 
-    if not MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-        r_spheres_as_obs_grouped_by_robot = []
+    if not MODIFY_MPC_COST_FN_FOR_DYN_OBS: 
+        # Treat spheres of other robots as static obstacles 
+        # (update the ccheckers of each robot with all other robots spheres 
+        # everytime the spheres of other robots change, but no prediction of path in the rollouts)
+        spheres_as_obs_grouped_by_robot = []
         for i in range(len(robots)):
             roboti_spheres_as_obstacles = []
             p_validspheresRjcurr, _, _ = robots[i].get_current_spheres_state()
@@ -1288,14 +1297,12 @@ def main():
                 sphere_as_cub_dims = [2*sphere_r, 2*sphere_r, 2*sphere_r]
                 sphere_obs = Obstacle(my_world, f"R{i}S{sphere_idx}",'cuboid', np.array(p_validspheresRjcurr[sphere_idx].tolist() + [1,0,0,0]), np.array(sphere_as_cub_dims), simulation_enabled=False)
                 roboti_spheres_as_obstacles.append(sphere_obs)
-            r_spheres_as_obs_grouped_by_robot.append(roboti_spheres_as_obstacles)
-
+            spheres_as_obs_grouped_by_robot.append(roboti_spheres_as_obstacles)
         for i in range(len(robots)):
             checkers_to_reg_on_robot_i_spheres = [ccheckers[j] for j in range(len(ccheckers)) if j != i] # checkers of other robots except i
-            for sphere_obs in r_spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
+            for sphere_obs in spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
                 sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
-    
-    
+        
     ctrl_loop_start_time = time.time()
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     
@@ -1314,7 +1321,39 @@ def main():
                 real_robot_cfm_start_time = time.time()
                 real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
         
+        
+        # update obstacles (environment obstacles)
+        for i in range(len(env_obstacles)): 
+            env_obstacles[i].update_registered_ccheckers()
+               
+        if not MODIFY_MPC_COST_FN_FOR_DYN_OBS:         
+            sphere_states_all_robots = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
+            
+        point_visualzer_inputs = []
+
         for i in range(len(robots)):
+            # update obstacles (robot spheres as obstacles)
+            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+                p_spheresOthersH = None
+                for j in range(len(robots)):
+                    if j != i: 
+                        p_spheresRobotjH = robots[j].get_plan(n_steps=robots[i].H)['spheres']['p'].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
+                        if p_spheresOthersH is None:
+                            p_spheresOthersH = p_spheresRobotjH
+                        else:
+                            p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
+                dynamic_obs_coll_predictors[i].update_p_obs(p_spheresOthersH)
+                if VISUALIZE_PREDICTED_OBS_PATHS:
+                    point_visualzer_inputs.append({'points': p_spheresOthersH, 'color': 'green'})
+            else:
+                for i in range(len(robots)):    
+                    spheres_as_obs_i = spheres_as_obs_grouped_by_robot[i] 
+                    for sphere_idx in range(len(spheres_as_obs_i)):
+                        updated_sphere_pose = np.array(sphere_states_all_robots[i][sphere_idx].tolist() + [1,0,0,0])
+                        obs:Obstacle = spheres_as_obs_i[sphere_idx]
+                        obs.update_registered_ccheckers(custom_pose=updated_sphere_pose) 
+                    
+            # update robot state and target
             robots_cu_js[i] = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())
             robots[i].update_current_state(robots_cu_js[i])    
             p_T, q_T = robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
@@ -1322,30 +1361,42 @@ def main():
                 print(f"robot {i} target changed!")
                 robots[i].update_solver_target()
             
-                
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-                # todo: replace these two by getting the plan from the policy
-                # p_spheresOtheresH = torch.zeros(robots[i].H, len(robots)-1, 3).to(tensor_args.device)
-                # p_rad_spheresOtheresH = torch.zeros(robots[i].H, len(robots)-1, 1).to(tensor_args.device)
-                p_spheresOtheresH = torch.zeros(robots[i].H, 0, 3).to(tensor_args.device)
-                for j in range(len(robots)):
-                    if j != i: 
-                        robot_j_plan_H = robots[j].get_plan(in_task_space=True, H=robots[i].H)
-                        torch.stack((p_spheresOtheresH, robot_j_plan_H),axis=1)
-                        p_spheresOtheresH = robot_j_plan_H[::3] # all robots except i sphere positions over horizon. TODO: Get all from policies
-                        p_spheresOtheresH = robot_j_plan[::3] # all robots except i sphere positions over horizon. TODO: Get all from policies
-                        p_rad_spheresOtheresH = robot_j_plan[3] # all robots except i sphere radii over horizon
-                        dynamic_obs_coll_predictors[i].update_p_obs(p_spheresAllH.to(tensor_args.device))             
-            else:
-                for j in range(len(robots)):
-                    if j != i:
-                    p_validspheresRjcurr, _, _ = robots[j].get_current_spheres_state()
-                    ccheckers_to_update = [ccheckers[i] for i in range(len(ccheckers)) if i != j]
-                    for sphere_idx in range(len(p_validspheresRjcurr)):
-                        X_sphere = np.array(p_validspheresRjcurr[sphere_idx].tolist() + [1,0,0,0])
-                        for cchecker in ccheckers_to_update:
-                            obstacle.update_cchecker(cchecker, X_sphere)                    
+            # mpc step
+            mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+            art_action = robots[i].get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
+            robots[i].apply_articulation_action(art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
+            
+            # visualization
+            if VISUALIZE_MPC_ROLLOUTS:
+                rollouts_for_visualization = {'points': robots[i].solver.get_visual_rollouts(), 'color': 'green'}
+                point_visualzer_inputs.append(rollouts_for_visualization)
+            
+            if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
+                robots[i].visualize_robot_as_spheres(robots_cu_js[i])
 
+  
+            
+        
+        draw_points(point_visualzer_inputs) # print_rate_decorator(l
+
+        # if VISUALIZE_MPC_ROLLOUTS or (VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS): # rendering using draw_points()
+        #      # collect the different points sequences for visualization
+        #     # collect the rollouts
+        #     if VISUALIZE_MPC_ROLLOUTS:
+        #         rollouts_for_visualization = {'points': robots[i].solver.get_visual_rollouts(), 'color': 'green'}
+        #         point_visualzer_inputs.append(rollouts_for_visualization)
+        
+        #     # render the points
+        #     if MODIFY_MPC_COST_FN_FOR_DYN_OBS and robot1_init_obs:
+        #         global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
+        #         point_visualzer_inputs.append(global_plan_points)
+        #     draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
+        
+        # Update time step index and print stats
+
+        t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
+        
+            
         # if robot2.set_new_target_for_solver(p_T2, q_T2,sim_js_robot2):
         #     print("robot2 target changed!, updating plan")
         #     # Replan and update the plan of robot2.
@@ -1435,14 +1486,14 @@ def main():
         
         # apply actions in robots
         # robot 1 local planning
-        mpc_result = robot1.solver.step(robot1.current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
-        # robot 1 apply action
-        robot1_art_action = robot1.get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
-        robot1.apply_articulation_action(robot1_art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
-        # robot 2 apply action (from global plan)
-        if robot2.cmd_plan is not None:
-            robot2_art_action = robot2.get_next_articulation_action(idx_list=robot_idx_lists[1])
-            robot2.apply_articulation_action(robot2_art_action)
+        # mpc_result = robot1.solver.step(robot1.current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+        # # robot 1 apply action
+        # robot1_art_action = robot1.get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
+        # robot1.apply_articulation_action(robot1_art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
+        # # robot 2 apply action (from global plan)
+        # if robot2.cmd_plan is not None:
+        #     robot2_art_action = robot2.get_next_articulation_action(idx_list=robot_idx_lists[1])
+        #     robot2.apply_articulation_action(robot2_art_action)
         
         
         
@@ -1453,61 +1504,61 @@ def main():
         #     p_new_target =  p_validspheresR1curr[new_target_idx]
             # robot2.target.set_world_pose(position=np.array(p_new_target.tolist()), orientation=np.random.rand(4)) 
         
-        mode_of_target_sampling = '4_side_neighbors'
-        if t_idx % 100 == 0:
-            for i in range(len(robots)):
-                robot = robots[i]
-                change_target = random.random() < 0.5
-                if change_target:
-                    if mode_of_target_sampling == 'random_neighbor':
+        # mode_of_target_sampling = '4_side_neighbors'
+        # if t_idx % 100 == 0:
+        #     for i in range(len(robots)):
+        #         robot = robots[i]
+        #         change_target = random.random() < 0.5
+        #         if change_target:
+        #             if mode_of_target_sampling == 'random_neighbor':
                         
-                        # if on target: sample a random neighbor
-                        if np.linalg.norm(robot.target.get_world_pose()[0] - X_Targets[i][:3]) < 0.01:
-                            rand_x = random.uniform(-0.25, 0.25)
-                            rand_y = random.uniform(-0.25, 0.25)
-                            rand_z = random.uniform(0.25, 0.5)
-                            robot.target.set_world_pose(position=X_Targets[i][:3] + np.array([rand_x, rand_y, rand_z]), orientation=np.random.rand(4))
-                        else: # not on target: move towards target
-                            robot.target.set_world_pose(position=X_Targets[i][:3], orientation=X_Targets[i][3:])
+        #                 # if on target: sample a random neighbor
+        #                 if np.linalg.norm(robot.target.get_world_pose()[0] - X_Targets[i][:3]) < 0.01:
+        #                     rand_x = random.uniform(-0.25, 0.25)
+        #                     rand_y = random.uniform(-0.25, 0.25)
+        #                     rand_z = random.uniform(0.25, 0.5)
+        #                     robot.target.set_world_pose(position=X_Targets[i][:3] + np.array([rand_x, rand_y, rand_z]), orientation=np.random.rand(4))
+        #                 else: # not on target: move towards target
+        #                     robot.target.set_world_pose(position=X_Targets[i][:3], orientation=X_Targets[i][3:])
                     
-                    elif mode_of_target_sampling == '4_side_neighbors': 
+        #             elif mode_of_target_sampling == '4_side_neighbors': 
                         
-                        p_next = valid_neihborhood[i][random.randint(0,len(valid_neihborhood[i])-1)]
-                        # robot.target.set_world_pose(position=p_next, orientation=X_Targets[i][3:])
+        #                 p_next = valid_neihborhood[i][random.randint(0,len(valid_neihborhood[i])-1)]
+        #                 # robot.target.set_world_pose(position=p_next, orientation=X_Targets[i][3:])
                         
 
-        for obstacle in obstacles:
-            obstacle.update_registered_ccheckers()
+        # for obstacle in obstacles:
+        #     obstacle.update_registered_ccheckers()
 
-        # Some visualizations...
-        # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
+        # # Some visualizations...
+        # # Visualize spheres, rollouts and predicted paths of dynamic obstacles (if needed) ############
         
-        if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-            for i, robot in enumerate(robots):
-                robot.visualize_robot_as_spheres(robots_cu_js[i])
+        # if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
+        #     for i, robot in enumerate(robots):
+        #         robot.visualize_robot_as_spheres(robots_cu_js[i])
 
-        if VISUALIZE_MPC_ROLLOUTS or (VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS): # rendering using draw_points()
-            point_visualzer_inputs = [] # collect the different points sequences for visualization
-            # collect the rollouts
-            if VISUALIZE_MPC_ROLLOUTS:
-                rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
-                point_visualzer_inputs.append(rollouts_for_visualization)
+        # if VISUALIZE_MPC_ROLLOUTS or (VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS): # rendering using draw_points()
+        #     point_visualzer_inputs = [] # collect the different points sequences for visualization
+        #     # collect the rollouts
+        #     if VISUALIZE_MPC_ROLLOUTS:
+        #         rollouts_for_visualization = {'points': robot1.solver.get_visual_rollouts(), 'color': 'green'}
+        #         point_visualzer_inputs.append(rollouts_for_visualization)
         
-            # render the points
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS and robot1_init_obs:
-                global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
-                point_visualzer_inputs.append(global_plan_points)
-            draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
+        #     # render the points
+        #     if MODIFY_MPC_COST_FN_FOR_DYN_OBS and robot1_init_obs:
+        #         global_plan_points = {'points': p_spheresR2H, 'color': 'green'}
+        #         point_visualzer_inputs.append(global_plan_points)
+        #     draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
 
-        # Update time step index and print stats
+        # # Update time step index and print stats
 
-        t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
-        print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
-        # print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
-        # print(f'Sim stats: my_world.current_time_step_index: {my_world.current_time_step_index}')
-        # print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')  
-        if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
-            print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
+        # t_idx += 1 # num of completed control steps (actions) in *played* simulation (after play button is pressed)
+        # print(f"New t_idx: (num of control steps done, in the control loop):{t_idx}")    
+        # # print(f'Control loop elapsed time (time we executed the simulation so far, in real world time, not simulation internal clock): {(time.time() - ctrl_loop_start_time):.5f}')
+        # # print(f'Sim stats: my_world.current_time_step_index: {my_world.current_time_step_index}')
+        # # print(f'Sim stats: my_world.current_time: {my_world.current_time:.5f} (physics_dt={PHYSICS_STEP_DT:.5f})')  
+        # if args.print_ctrl_rate and (SIMULATING or real_robot_cfm_is_initialized):
+        #     print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc)
 
 
 
