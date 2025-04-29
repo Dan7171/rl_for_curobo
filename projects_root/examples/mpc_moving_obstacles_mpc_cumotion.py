@@ -1251,7 +1251,7 @@ def main():
             if robot2_plan is not None: # new plan is availabe    
                 pos_jsR2fullplan, vel_jsR2fullplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
                 # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
-                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2.crm.forward(pos_jsR2fullplan, vel_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                p_eeR2fullplan_R2, q_eeR2fullplan_R2, _, _, p_linksR2fullplan_R2, q_linksR2fullplan_R2, p_rad_spheresR2fullplan_R2 = robot2.crm.forward(pos_jsR2fullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
                 valid_only = True # remove spheres that are not valid (i.e. negative radius)
                 if valid_only:
                     p_rad_spheresR2fullplan_R2 = p_rad_spheresR2fullplan_R2[:,:-4]
