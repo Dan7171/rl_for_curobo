@@ -906,7 +906,7 @@ class FrankaMpc(AutonomousFranka):
             if filter:
                 js_state = kinematics_model.filter_robot_state(js_state) # For some reason they do this. This function filters the joint state (pos, vel, acc) to be 90% the previous filtered state and 10% the new one. Don't know what that's for.
             
-            # js_cmd = kinematics_model.state_filter.integrate_acc(action, js_state) 
+            js_cmd = kinematics_model.state_filter.integrate_acc(action, js_state) 
             # plan['joint_space']['vel'][h] = js_cmd.velocity.squeeze()
             # plan['joint_space']['pos'][h] = js_cmd.position.squeeze()
             # js_state = JointState(js_cmd.position, js_cmd.velocity, js_cmd.acceleration,js_state.joint_names, js_state.jerk)
