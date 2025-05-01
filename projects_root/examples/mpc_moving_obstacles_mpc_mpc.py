@@ -60,17 +60,16 @@ Example options:
 
 from typing import Callable, Dict, Union
 
-
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
-VISUALIZE_MPC_ROLLOUTS = False # If True, then the MPC rollouts will be rendered in the simulation.
+VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
-HIGHLIGHT_OBS = True # mark the predicted (or not predicted) dynamic obstacles in the simulation
-HIGHLIGHT_OBS_H = 1
+HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
+HIGHLIGHT_OBS_H = 30
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
 # NOTE: RENDER_DT and PHYSICS_DT guide from emperical experiments!:
@@ -153,12 +152,12 @@ if True: # imports and initiation (put it in if to collapse it)
     from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
     from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
     from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
-    from curobo.types.robot import RobotConfig
+    from curobo.types.tensor import T_DOF
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     from projects_root.utils.decorators import static_vars
     from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig,PoseCostMetric,)
-
+    from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
     # Initialize CUDA device
     # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
     a = torch.zeros(4, device="cuda:0") 
@@ -708,7 +707,98 @@ class AutonomousFranka:
             torch.Tensor: the H steps plan.
         """
         pass
+    
 
+    def integrate_acc(self, acceleration: T_DOF,cmd_joint_state: JointState, dt_planning: float) -> JointState:
+        """
+        This function integrates the acceleration to get the velocity and position of the joint state.
+        Given a joint state and an acceleration, it returns the next joint state after integrating the acceleration.
+        
+        NOTE! This function is a cloned version with no significant changes of the function "integrate_acc" in curobo/src/curobo/util/state_filter.py.
+        The reason for cloning this is because when calling the original function, it changes internal attributes of the kinematics_model object and this is not something we wanted.
+        All the changes we made here compared to the original function are just to avoid changing the internal attributes of the kinematics_model object.
+        The logic of the function is the same as in the original function,
+        The original function is called during the MPC solver step, in order to compute how the acceleration (which is the mpc policy action) in a given input joint state will affect the state and change the joints velocity and position, 
+        explained in more detail in the  "how it works" section below.
+
+
+        
+        
+        
+        How it works?
+        First, the integration causes the next joint state's velocity to be the current velocity plus the acceleration times the time step. 
+        That means that we just change our cosntant velocity at previous state to a new constant velocity which is the previous velocity plus the acceleration times the duration of the step (dt_planning).
+        Then, we compute the new joint position as the previous position plus the velocity times the duration of the step (dt_planning).
+        
+        Example:
+            In:
+                acceleration = [0.1, -0.2, -0.4, 0.5, 0.0, 0.4, 0.8] # the input command -(7 dof). rad/sec^2
+                current_joint_state: # start state
+                    .acceleration = [WE DONT CARE] (because we override it in the new state)
+                    .velocity = [2.0, 0.4, 0.2, -0.4, -0.4, 1.5, 0.1] # the velocity of the joints at the start state (rad/sec)            
+                    .position = [-0.5, 0.0, 0.2, 0.0, -0.3, 0.2, 0.0] # the position of the joints at the start state (rad)
+                    
+                dt_planning = 0.1 # normally less, 0.5 only for the example
+            Out:
+                new_joint_state.acceleration # the acceleration of the joints at the beginning of the next step:  [0.1, -0.2, -0.4, 0.5, 0.0, 0.4, 0.8] # copied from the input command
+                new_joint_state.velocity # the velocity of the joints at the beginning of the next step: [2.01, 0.38, 0.16, -0.35, -0.4, 1.54, 0.18] (Way of computing: [2.0 + 0.1*0.1, 0.4 + -0.2*0.1, 0.2 + -0.4*0.1, -0.4 + 0.5*0.1, -0.4 + 0.0*0.1, 1.5 + 0.4*0.1, 0.1 + 0.8*0.1])
+                new_joint_state.position # the position of the joints at the beginning of the next step: [-0.299,  0.038,  0.216, -0.035, -0.34 ,  0.354,  0.018] (Way of computing: [for i in range(len(current_joint_state.position)): current_joint_state.position[i] + new_joint_state.velocity[i]*0.1])
+                
+            
+        Args:
+            acceleration (T_DOF): A tensor of shape (num of dogs,) representing the acceleration action (command) to apply to the joint state.
+            cmd_joint_state (JointState): some joint state of the robot to apply the acceleration to (contains it's current position, velocity, acceleration, jerk).
+            dt_planning (float): the duration (in seconds) of the step to integrate the acceleration over. Necessary to determine the new state's position (after the acceleration to the joints was applied, and therefore the velocity is changed).
+            Normally, set this to the the time you assume that elapses between each two consecutive steps in the control loop (for example in the MPC case btw, this is also the time that the planner considers between each two consecutive steps in the horizon, passed by step_dt in the MpcSolverConfig).
+
+
+        Returns:
+            JointState: The new joint state (the state at the beginning of the next step (at the end of the current step),
+            after integrating the new acceleration for the duration of dt_planning).
+        """
+        next_joint_state = cmd_joint_state.clone() # next joint state after integrating the acceleration
+        next_joint_state.acceleration[:] = acceleration # set the acceleration at the new state to the input command acceleration
+        next_joint_state.velocity[:] = cmd_joint_state.velocity + next_joint_state.acceleration * dt_planning # compute the new velocity given the current velocity, the acceleration and the dt which means for how long the acceleration is applied
+        next_joint_state.position[:] = cmd_joint_state.position + next_joint_state.velocity * dt_planning # compute the new position given the current position and the new velocity
+        if cmd_joint_state.jerk is None:
+            next_joint_state.jerk = acceleration * 0.0 # it's not used for computations, but it has to be initiated to avoid exceptions
+        return next_joint_state
+    
+    def filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients):
+        """ Reducing the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
+        
+        # NOTE! Similar to integrate_acc, this is a cloned version of another function from original curobo code.
+        As in integrate_acc, the logic of the function is the same as in the original function, and it was cloned to avoid changing the internal attributes and cause unexpected side effects.
+
+        The original function is: filter_joint_state at curobo/src/curobo/util/state_filter.py (row 60)
+        The original function is used by the mpc solver to reduce the sharpness of changes between following joint states, to simulate a smoother and more realistic robot movement () .
+        Its invoking the blend() function at curobo/src/curobo/types/state.py row 170 
+        The goal of the original function is to reduce the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
+        (If there is no previous state, it just returns the new state as the weighted sum is 100% of the new state)
+
+        Motivation of implementing this function and not using the original one:
+        Since there they save the previous state in the object itself, we had to clone the function to avoid changing the internal attributes and cause unexpected side effects.
+        The original function is used with the coefficients of the FilterCoeff class, taken from "self.filter_coeff" in the JointState object (see call atrow 68 curobo/src/curobo/util/state_filter.py).
+        (Similar to the motivation of implementing integrate_acc and not using the original one)
+        Args:
+            js_state_prev (JointState): the previous joint state (position, velocity, acceleration, jerk). (Jerk is not used though)
+            js_state_new (JointState): the new joint state (position, velocity, acceleration, jerk). (Jerk is not used though)
+            filter_coefficients (FilterCoeff): the filter coefficients. Replacing curobo/src/curobo/util/state_filter.py row 68 self.filter_coeff passed argument. For stable computations, 
+            use the original coefficients, which are saved in js_state_prev.filter_coeff. See example in get_plan() of the mpc autonomous franka example.
+
+        Returns:
+            JointState: A re-weighted joint state (blending the previous and new states).
+        """
+        if js_state_prev is None:
+            return js_state_new
+        
+        # re-weighting the new state to be closer to the previous state
+        js_state_new.position[:] = filter_coefficients.position * js_state_new.position + (1.0 - filter_coefficients.position) * js_state_prev.position
+        js_state_new.velocity[:] = filter_coefficients.velocity * js_state_new.velocity + (1.0 - filter_coefficients.velocity) * js_state_prev.velocity
+        js_state_new.acceleration[:] = filter_coefficients.acceleration * js_state_new.acceleration + (1.0 - filter_coefficients.acceleration) * js_state_prev.acceleration
+        js_state_new.jerk[:] = filter_coefficients.jerk * js_state_new.jerk + (1.0 - filter_coefficients.jerk) * js_state_prev.jerk
+        return js_state_new
+    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), R_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
@@ -893,46 +983,49 @@ class FrankaMpc(AutonomousFranka):
                     'pos': torch.zeros(pi_mpc_means.shape) # direct result of vel
                 }
             }
-        wrap_mpc = self.solver.solver
-        arm_reacher = wrap_mpc.safety_rollout
-        kinematics_model = arm_reacher.dynamics_model
-        # js_state_filter = kinematics_model.state_filter
-        filter = True # TODO: not sure if this is needed
+        
+        _wrap_mpc = self.solver.solver
+        _arm_reacher = _wrap_mpc.safety_rollout
+        _kinematics_model = _arm_reacher.dynamics_model
+        _state_filter = _kinematics_model.state_filter
+        filter_coefficients_solver = _state_filter.filter_coeff # READ ONLY: the original coefficients from the mpc planner (used only to read from. No risk that will be changed unexpectdely)
+        control_dt_solver = _state_filter.dt # READ ONLY: the delta between steps in the trajectory, as set in solver. This is what the mpc assumes time delta between steps in horizon is.s
 
+        apply_js_filter = True # Reducing the step size from prev state to new state
+        
         # translate the plan from joint accelerations only to joint velocities and positions 
         js_state = self.get_curobo_joint_state() # current joint state (including pos, vel, acc)
-        js_state.jerk = torch.zeros_like(js_state.velocity) # we don't really need this for computations, but it has to be initiated to avoid exceptions in the filtering
-        for h, action in enumerate(pi_mpc_means):
-            if filter:
-                js_state = kinematics_model.filter_robot_state(js_state) # For some reason they do this. This function filters the joint state (pos, vel, acc) to be 90% the previous filtered state and 10% the new one. Don't know what that's for.
-            
-            js_cmd = kinematics_model.state_filter.integrate_acc(action, js_state) 
-            # plan['joint_space']['vel'][h] = js_cmd.velocity.squeeze()
-            # plan['joint_space']['pos'][h] = js_cmd.position.squeeze()
-            # js_state = JointState(js_cmd.position, js_cmd.velocity, js_cmd.acceleration,js_state.joint_names, js_state.jerk)
-
-
+        js_state_prev = None
+        # js_state.jerk = torch.zeros_like(js_state.velocity) # we don't really need this for computations, but it has to be initiated to avoid exceptions in the filtering
         
-        if include_task_space: # get plan in task space (robot spheres)
-            
+        for h, action in enumerate(pi_mpc_means):
+            if apply_js_filter:
+                js_state = self.filter_joint_state(js_state_prev, js_state, filter_coefficients_solver) # 
+            next_js_state = self.integrate_acc(action, js_state, control_dt_solver) # this will be the new joint state after applying the acceleration the mpc policy commands for this step for dt_planning seconds
+            plan['joint_space']['vel'][h] = next_js_state.velocity.squeeze()
+            plan['joint_space']['pos'][h] = next_js_state.position.squeeze()
+            js_state = next_js_state # JointState(next_js_state.position, next_js_state.velocity, next_js_state.acceleration,js_state.joint_names, js_state.jerk)
+            js_state_prev = js_state
+        
+        if include_task_space: # get plan in task space (robot spheres)            
             # compute forward kinematics
-            # j_names = self.solver.rollout_fn.joint_names # len 7
             p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(self.tensor_args.to_device(plan['joint_space']['pos'])) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
             task_space_plan = {'ee': {'p': p_eeplan, 'q': q_eeplan}, 'links': {'p': p_linksplan, 'q': q_linksplan}, 'spheres': {'p': prad_spheresPlan[:,:,:3], 'r': prad_spheresPlan[:,:,3]}}
-            plan.update(task_space_plan)
-             # remove spheres that are not valid (i.e. negative radius)
+            plan['task_space'] = task_space_plan
+            
+            # remove spheres that are not valid (i.e. negative radius)
             if valid_spheres_only: # removes the (4) extra spheres reserved for simulating a picked object as part of the robot after picked
-                plan['spheres']['p'] = plan['spheres']['p'][:, :self.n_coll_spheres_valid]
-                plan['spheres']['r'] = plan['spheres']['r'][:, :self.n_coll_spheres_valid]
+                plan['task_space']['spheres']['p'] = plan['task_space']['spheres']['p'][:, :self.n_coll_spheres_valid]
+                plan['task_space']['spheres']['r'] = plan['task_space']['spheres']['r'][:, :self.n_coll_spheres_valid]
             
 
             # express in world frame:
-            for key in plan.keys():
-                if isinstance(plan[key], dict) and 'p' in plan[key].keys():
-                    pKey = plan[key]['p']
+            for key in plan['task_space'].keys():
+                if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys():
+                    pKey = plan['task_space'][key]['p']
                     pKey = pKey.cpu() 
                     pKey[...,:3] = pKey[...,:3] + self.p_R # # offset by robot origin to express in world frame (only position, radius is not affected)
-                    plan[key]['p'] = pKey
+                    plan['task_space'][key]['p'] = pKey
             # take only the first n_steps
             if not n_steps == -1:        
                 plan = map_nested_tensors(plan, lambda x: x[:n_steps])
@@ -1101,7 +1194,7 @@ class FrankaCumotion(AutonomousFranka):
             cmd_plan = None
 
     def get_plan(self, in_task_space:bool, n_steps:int=-1):
-        
+        # TODO: SEE get_plan() implementation OF MPC and projects_root/examples/mpc_moving_obstacles_mpc_cumotion.py
         plan = self.get_current_plan_as_tensor()            
         if plan is not None: # new plan is availabe    
             p_jsplan, vel_jsplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
@@ -1173,7 +1266,26 @@ class FrankaCumotion(AutonomousFranka):
         return art_action
 
 
-        
+    def integrate_acc(self,qdd_des: T_DOF,cmd_joint_state: Optional[JointState] = None,
+        dt: Optional[float] = None,
+    ):
+        dt = self.dt if dt is None else dt
+        if cmd_joint_state is not None:
+            if self.cmd_joint_state is None:
+                self.cmd_joint_state = cmd_joint_state.clone()
+            else:
+                self.cmd_joint_state.copy_(cmd_joint_state)
+        self.cmd_joint_state.acceleration[:] = qdd_des
+        self.cmd_joint_state.velocity[:] = self.cmd_joint_state.velocity + qdd_des * dt
+        self.cmd_joint_state.position[:] = (
+            self.cmd_joint_state.position + self.cmd_joint_state.velocity * dt
+        )
+        # TODO: for now just have zero jerl:
+        if self.cmd_joint_state.jerk is None:
+            self.cmd_joint_state.jerk = qdd_des * 0.0
+        else:
+            self.cmd_joint_state.jerk[:] = qdd_des * 0.0
+        return self.cmd_joint_state.clone()
         
 #############################################
 # MAIN SIMULATION LOOP
@@ -1239,6 +1351,8 @@ def main():
     robot_world_models = [WorldConfig() for _ in range(len(robots))]
     X_binCenter = np.array([0.6, 0, 0.2, 1, 0, 0, 0], dtype=np.float32)
     X_Targets = [[0.4, 0, 0.2, 0, 1, 0, 0], [0.6, 0.5, 0.2, 0, 1, 0, 0]]
+
+
     # X_target = X_binCenter.copy()
     # X_target[3:5] = [0,1] # upside down
     # X_Targets = [X_target.copy(), X_target.copy()] 
@@ -1375,7 +1489,7 @@ def main():
                 p_spheresOthersH = None
                 for j in range(len(robots)):
                     if j != i: 
-                        planSpheres_robotj = robots[j].get_plan(n_steps=robots[i].H)['spheres']
+                        planSpheres_robotj = robots[j].get_plan(n_steps=robots[i].H)['task_space']['spheres']
                         p_spheresRobotjH = planSpheres_robotj['p'].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
                         rad_spheresRobotjH = planSpheres_robotj['r'][0].to(tensor_args.device)
                         if p_spheresOthersH is None:
@@ -1384,7 +1498,6 @@ def main():
                         else:
                             p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
-                # dynamic_obs_coll_predictors[i].update_p_obs(p_spheresOthersH)
                 dynamic_obs_coll_predictors[i].reset_obs(p_spheresOthersH, rad_spheresOthersH)
                 if HIGHLIGHT_OBS and t_idx % robots[i].H == 0: # 
                     if not obs_viz_init:
@@ -1395,8 +1508,9 @@ def main():
                             obs_viz_init = True
                     else:
                         robots[i].update_obs_viz(p_spheresOthersH[:HIGHLIGHT_OBS_H].reshape(-1, 3).cpu()) # collapse first two dimensions
-                # if VISUALIZE_PREDICTED_OBS_PATHS:
-                #     point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
+                
+                if VISUALIZE_PREDICTED_OBS_PATHS:
+                    point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
             else:
                 for i in range(len(robots)):    
                     spheres_as_obs_i = spheres_as_obs_grouped_by_robot[i] 
@@ -1426,10 +1540,9 @@ def main():
             if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
                 robots[i].visualize_robot_as_spheres(robots_cu_js[i])
 
-  
             
         
-        # draw_points(point_visualzer_inputs) # print_rate_decorator(l
+        draw_points(point_visualzer_inputs) # print_rate_decorator(l
 
         # if VISUALIZE_MPC_ROLLOUTS or (VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS): # rendering using draw_points()
         #      # collect the different points sequences for visualization
