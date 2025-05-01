@@ -25,6 +25,7 @@ model:
   control_space: 'ACCELERATION'
   teleport_mode: False
   state_finite_difference_mode: "CENTRAL"
+  # return_full_act_buffer: True # experimental : trying to read the policy, Originaly false
 
 
 cost:
