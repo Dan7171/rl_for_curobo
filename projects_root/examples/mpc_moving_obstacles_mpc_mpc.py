@@ -58,18 +58,17 @@ Example options:
 
 
 
-from typing import Callable, Dict, Union
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG_COST_FUNCTION = True # If True, then the cost function will be printed on every call to my_world.step()
+DEBUG = True # If True, then the cost function will be printed on every call to my_world.step()
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
-VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
+VISUALIZE_MPC_ROLLOUTS = False # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
-HIGHLIGHT_OBS_H = 30
+HIGHLIGHT_OBS_H = 10
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
 # NOTE: RENDER_DT and PHYSICS_DT guide from emperical experiments!:
@@ -104,6 +103,7 @@ if True: # imports and initiation (put it in if to collapse it)
     import torch
     import argparse
     import os
+    from typing import Callable, Dict, Union
     import carb
     import numpy as np
     import copy
@@ -153,6 +153,7 @@ if True: # imports and initiation (put it in if to collapse it)
     from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
     from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
     from curobo.types.tensor import T_DOF
+    from curobo.types.state import FilterCoeff
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     from projects_root.utils.decorators import static_vars
@@ -637,13 +638,15 @@ class AutonomousFranka:
         for i in range(len(self.obs_viz)):
             self.obs_viz[i].set_world_pose(position=np.array(p_spheres[i].tolist()), orientation=np.array([1., 0., 0., 0.]))
 
-    def add_obs_viz(self,p_sphere:torch.Tensor,rad_sphere:torch.Tensor, obs_name:str,h=0,h_max=30):
+    def add_obs_viz(self,p_sphere:torch.Tensor,rad_sphere:torch.Tensor, obs_name:str,h=0,h_max=30,material=None):
         
         obs_viz = VisualSphere(
             prim_path=f"{self.obs_viz_prim_path}/{obs_name}",
             position=np.ravel(p_sphere),
             radius=float(rad_sphere),
-            color=np.array([1-(h/h_max),1-(h/h_max),1-(h/h_max)]))
+            color=np.array([1-(h/h_max),1-(h/h_max),1-(h/h_max)]),
+            visual_material = material
+            )
         self.obs_viz.append(obs_viz)
 
     def get_dof_names(self):
@@ -764,7 +767,7 @@ class AutonomousFranka:
             next_joint_state.jerk = acceleration * 0.0 # it's not used for computations, but it has to be initiated to avoid exceptions
         return next_joint_state
     
-    def filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients):
+    def filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients:FilterCoeff):
         """ Reducing the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
         
         # NOTE! Similar to integrate_acc, this is a cloned version of another function from original curobo code.
@@ -835,7 +838,7 @@ class FrankaMpc(AutonomousFranka):
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
             world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-            use_cuda_graph= not DEBUG_COST_FUNCTION, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
+            use_cuda_graph=not DEBUG, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
             use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
             use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
             self_collision_check=True, # Enable self-collision check during MPC optimization.
@@ -998,9 +1001,10 @@ class FrankaMpc(AutonomousFranka):
         js_state_prev = None
         # js_state.jerk = torch.zeros_like(js_state.velocity) # we don't really need this for computations, but it has to be initiated to avoid exceptions in the filtering
         
+        filter_coeff_debug = FilterCoeff(0.01, 0.01, 0.0,0.0)
         for h, action in enumerate(pi_mpc_means):
             if apply_js_filter:
-                js_state = self.filter_joint_state(js_state_prev, js_state, filter_coefficients_solver) # 
+                js_state = self.filter_joint_state(js_state_prev, js_state, filter_coeff_debug) # 
             next_js_state = self.integrate_acc(action, js_state, control_dt_solver) # this will be the new joint state after applying the acceleration the mpc policy commands for this step for dt_planning seconds
             plan['joint_space']['vel'][h] = next_js_state.velocity.squeeze()
             plan['joint_space']['pos'][h] = next_js_state.position.squeeze()
@@ -1350,7 +1354,7 @@ def main():
     X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1.2,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
     robot_world_models = [WorldConfig() for _ in range(len(robots))]
     X_binCenter = np.array([0.6, 0, 0.2, 1, 0, 0, 0], dtype=np.float32)
-    X_Targets = [[0.4, 0, 0.2, 0, 1, 0, 0], [0.6, 0.5, 0.2, 0, 1, 0, 0]]
+    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [0.6, 0, 0.2, 0, 1, 0, 0]]
 
 
     # X_target = X_binCenter.copy()
@@ -1405,21 +1409,22 @@ def main():
     ################# SIM IS PLAYING ###################    
     # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
     step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
-    dynamic_obs_coll_predictors = []
+    dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
     ccheckers = []
     expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
     obs_viz_init = False
+    total_obs_all_robots = sum([robots[i].n_coll_spheres_valid for i in range(len(robots))])
     for i, robot in enumerate(robots):
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
          
         if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            n_obs = sum([robots[j].n_coll_spheres_valid for j in range(len(robots)) if i != j]) # number of obstacles derived from other robots 
-            col_pred = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc, robot.n_coll_spheres_valid, n_obs)
-            dynamic_obs_coll_predictors.append(col_pred) # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-            p_obs = torch.zeros((robots[i].H, n_obs, 3), device=robots[i].tensor_args.device)
-            rad_obs = torch.zeros(n_obs, device=robots[i].tensor_args.device)
-            col_pred.reset_obs(p_obs, rad_obs)
+            n_obs_roboti = total_obs_all_robots - robots[i].n_coll_spheres_valid
+            col_pred_roboti = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc,robot.H,robot.num_particles, robot.n_coll_spheres_valid, n_obs_roboti)
+            dynamic_obs_coll_predictors.append(col_pred_roboti) # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
+            # p_obs = torch.zeros((robots[i].H, n_obs_roboti, 3), device=robots[i].tensor_args.device)
+            # rad_obs = torch.zeros(n_obs_roboti, device=robots[i].tensor_args.device)
+            # col_pred_roboti.reset_obs(p_obs, rad_obs)
  
         else:
             dynamic_obs_coll_predictors.append(None)
@@ -1452,7 +1457,8 @@ def main():
         
     ctrl_loop_start_time = time.time()
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    
+    if HIGHLIGHT_OBS:
+        glass_material = OmniGlass("/World/looks/glass_obsviz", color=np.array([0, 1, 0]), ior=1.25, depth=0.001, thin_walled=False)
 
     while simulation_app.is_running():                 
         
@@ -1474,8 +1480,8 @@ def main():
             env_obstacles[i].update_registered_ccheckers()
                
         if MODIFY_MPC_COST_FN_FOR_DYN_OBS:         
+            plans = [robots[i].get_plan() for i in range(len(robots))]
             # p_spheres_plan_all:list[torch.Tensor] = [robots[i].get_plan()['spheres']['p'].to(tensor_args.device) for i in range(len(robots))]
-            pass
             # print("Obstacles initiation: Added static obstacles to original curobo collision checker")
 
         else:
@@ -1489,8 +1495,8 @@ def main():
                 p_spheresOthersH = None
                 for j in range(len(robots)):
                     if j != i: 
-                        planSpheres_robotj = robots[j].get_plan(n_steps=robots[i].H)['task_space']['spheres']
-                        p_spheresRobotjH = planSpheres_robotj['p'].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
+                        planSpheres_robotj = plans[j]['task_space']['spheres'] # robots[j].get_plan(n_steps=robots[i].H)['task_space']['spheres']
+                        p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
                         rad_spheresRobotjH = planSpheres_robotj['r'][0].to(tensor_args.device)
                         if p_spheresOthersH is None:
                             p_spheresOthersH = p_spheresRobotjH
@@ -1498,12 +1504,18 @@ def main():
                         else:
                             p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
-                dynamic_obs_coll_predictors[i].reset_obs(p_spheresOthersH, rad_spheresOthersH)
-                if HIGHLIGHT_OBS and t_idx % robots[i].H == 0: # 
+                
+                if t_idx == 0:
+                    dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
+                else:
+                    dynamic_obs_coll_predictors[i].update(p_spheresOthersH)
+                
+                if HIGHLIGHT_OBS and t_idx % HIGHLIGHT_OBS_H == 0: # 
                     if not obs_viz_init:
+                        material = glass_material
                         for h in range(HIGHLIGHT_OBS_H):
-                            for j in range(len(rad_obs)):
-                                robots[i].add_obs_viz(p_spheresOthersH[h][j].cpu(),rad_spheresOthersH[j].cpu(),f"o{j}t{h}",h=h,h_max=robots[i].H)
+                            for j in range(p_spheresOthersH.shape[1]):
+                                robots[i].add_obs_viz(p_spheresOthersH[h][j].cpu(),rad_spheresOthersH[j].cpu(),f"o{j}t{h}",h=h,h_max=robots[i].H,material=material)
                         if i == len(robots) - 1:
                             obs_viz_init = True
                     else:
@@ -1541,8 +1553,8 @@ def main():
                 robots[i].visualize_robot_as_spheres(robots_cu_js[i])
 
             
-        
-        draw_points(point_visualzer_inputs) # print_rate_decorator(l
+        if len(point_visualzer_inputs):
+            draw_points(point_visualzer_inputs) # print_rate_decorator(l
 
         # if VISUALIZE_MPC_ROLLOUTS or (VISUALIZE_PREDICTED_OBS_PATHS and MODIFY_MPC_COST_FN_FOR_DYN_OBS): # rendering using draw_points()
         #      # collect the different points sequences for visualization

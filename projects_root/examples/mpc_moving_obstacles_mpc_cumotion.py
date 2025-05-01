@@ -1312,7 +1312,7 @@ def main():
                     p_spheresR2H = p_spheresR2fullplan[robot2.cmd_idx: max_idx_window + 1]
                 else: # else embed in window the last predicted positions in the plan 
                     p_spheresR2H = torch.cat([p_spheresR2H[1:],p_spheresR2H[-1].unsqueeze(0)])
-                dynamic_obs_coll_predictor.update_p_obs(p_spheresR2H.to(tensor_args.device))
+                dynamic_obs_coll_predictor.update(p_spheresR2H.to(tensor_args.device))
                 
                 if HIGHLIGHT_OBS and t_idx % robot1.H == 0: # 
                     p_spheresR2H_reshaped_for_viz = p_spheresR2H.reshape(-1, 3) # collapse first two dimensions

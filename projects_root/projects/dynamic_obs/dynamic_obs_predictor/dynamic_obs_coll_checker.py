@@ -24,7 +24,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_mpc,n_own_spheres_valid, n_obs, H=30, n_rollouts=400, cost_weight=100, shift_cost_matrix_left=True, mask_decreasing_cost_entries=True):
+    def __init__(self, tensor_args, step_dt_traj_mpc, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -37,9 +37,7 @@ class DynamicObsCollPredictor:
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
-            shift_cost_matrix_left: if True, the cost matrix will be shifted left by one (to charge for the action that leads to the collision, and not for the state you are in collision).
-            mask_decreasing_cost_entries: if True, the cost matrix will be modified so that only actions which take the robot closer to collision (i.e, the curobo cost function is increasing or distance to obstacle is decreasing) are considered and be charged at the dynamic cost function, and if an action is taking it away from a collision, it is not charged.
-            mask_decreasing_cost_entries: if True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
+            # REMOVED FOR NOW:mask_decreasing_cost_entries: if True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
             """
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
@@ -47,22 +45,20 @@ class DynamicObsCollPredictor:
         self.n_rollouts = n_rollouts 
         self.step_dt_traj_mpc = step_dt_traj_mpc 
         self.cost_weight = cost_weight
-        self.shift_cost_matrix_left = shift_cost_matrix_left
-        self.mask_decreasing_cost_entries = mask_decreasing_cost_entries
 
-        self.n_own_spheres_valid = n_own_spheres_valid # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
-        self.n_obs_valid = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
+        self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
         
         # Buffers for obstacles (spheres): position and radius
-        self.rad_obs_buf = torch.zeros(self.n_obs_valid, device=self.tensor_args.device) # [n_obs] obstacles radii buffer
+        self.rad_obs_buf = torch.zeros(self.n_obs, device=self.tensor_args.device) # [n_obs] obstacles radii buffer
         self.rad_obs_buf_unsqueezed = self.rad_obs_buf.reshape(1, *self.rad_obs_buf.shape) # [1 x n_obs]  Added 1 dimension for intermediate calculations
-        self.p_obs_buf = torch.zeros((self.H, self.n_obs_valid, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
-        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,H,1,self.n_obs_valid,3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
+        self.p_obs_buf = torch.zeros((self.H, self.n_obs, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
+        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,H,1,self.n_obs,3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
         
         # Buffers for own spheres: position and radius
-        self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres_valid, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres_valid,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
-        self.rad_own_buf = torch.zeros(self.n_own_spheres_valid, device=self.tensor_args.device) # [n_own] Own spheres radii buffer
+        self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
+        self.rad_own_buf = torch.zeros(self.n_own_spheres, device=self.tensor_args.device) # [n_own] Own spheres radii buffer
         self.rad_own_buf_unsqueezed = self.rad_own_buf.reshape(*self.rad_own_buf.shape, 1) # [n_own x 1] added 1 dimension for intermediate calculations
 
         # Buffers for intermediate calculations
@@ -74,36 +70,40 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] A tensor for the collision cost for each rollout and time step in the horizon. This is the output of the cost function.
 
         # flags
-        self.init_obs = torch.zeros(1) # [1] If 1, the obstacles are initialized.
-        self.init_rad_buffs = torch.zeros(1) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
-        
+        self.init_obs = torch.tensor([0]) # [1] If 1, the obstacles are initialized.
+        self.init_rad_buffs = torch.tensor([0]) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
+        self.is_active = torch.tensor([0]) # [1] If 1, the collision checker is active.
+    
+    def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
+        """
+        Activate the collision checker.
+        """
+        # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
+        self.p_obs_buf.copy_(p_obs)
+        self.rad_obs_buf.copy_(rad_obs)
+        self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
+        self.is_active[0] = 1 
 
-    def reset_obs(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
-        """
-        Initialize the obstacles.
-        """
-        # self.p_obs_buf = torch.cat([self.p_obs_buf, p_obs], dim=1)
-        # self.rad_obs_buf = torch.cat([self.rad_obs_buf, rad_obs], dim=0)
+    # def reset_obs(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
+    #     """
+    #     Initialize the obstacles.
+    #     """
+    #     # self.p_obs_buf = torch.cat([self.p_obs_buf, p_obs], dim=1)
+    #     # self.rad_obs_buf = torch.cat([self.rad_obs_buf, rad_obs], dim=0)
         
-        self.update_p_obs(p_obs)
-        self.update_rad_obs(rad_obs)
-        self.init_obs[0] = 1 # flag
+    #     self.p_obs_buf.copy_(p_obs)
+    #     self.rad_obs_buf.copy_(rad_obs)
+    #     self.init_obs[0] = 1
         
     
-    def update_p_obs(self, p_obs:torch.Tensor):
+    def update(self, p_obs:torch.Tensor):
         """
-        Update the poses of the obstacles in self buffer. This is mandatory to call before calling cost_fn, everytime with the new poses of the obstacles.
+        Update the poses of the obstacles.
         Args:
             p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
         """
         # self.p_obs = p_obs
         self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
-    
-    def update_rad_obs(self, rad_obs:torch.Tensor):
-        """
-        Update the radii of the obstacles in self buffer. This is mandatory to call before calling cost_fn, everytime with the new radii of the obstacles.
-        """
-        self.rad_obs_buf.copy_(rad_obs)
     
     def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
         """
@@ -124,36 +124,59 @@ class DynamicObsCollPredictor:
             where dynamic_coll_cost_matrix[r,h] is the  predictrive collision cost for the robot for rollout r and time step h, where r is the rollout index and h is the time step index)
         """
 
-        if not torch.cuda.is_current_stream_capturing(): # just printing the initialization counter (before)...
-            self._init_counter += 1
-            print(f"Initialization iteration {self._init_counter} (ignore this printing if not use_cuda_graph is False. Intializtion refers to the cuda graph capture. TODO: If use_cuda_graph is False, this should not be printed.)")
-            if torch.cuda.is_current_stream_capturing():
-                print("During graph capture")
-                return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
+        if not self.is_active[0]:
+            print(f'warning: dynamic obstacle collision checker is not active. Returning zero cost matrix. Activate the collision checker by calling the activate() method.')
+            return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
+
+        # if not torch.cuda.is_current_stream_capturing(): # just printing the initialization counter (before)...
+        #     self._init_counter += 1
+        #     print(f"Initialization iteration {self._init_counter} (ignore this printing if not use_cuda_graph is False. Intializtion refers to the cuda graph capture. TODO: If use_cuda_graph is False, this should not be printed.)")
+        #     if torch.cuda.is_current_stream_capturing():
+        #         print("During graph capture")
+        #         return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
         
- 
-        if not self.init_obs[0]: 
-            # Initialize buffers related to radii since they are not changed (once).
-            if not self.init_rad_buffs[0]:
-                self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres_valid,3]) # [n_own] init own spheres radii
-                self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
-                self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-                torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
-                self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
-                self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
-            
-            # Every time
-            self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres_valid,:3]) # read robot spheres positions to the "prad_own" buffer.
-            self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres_valid,1,3)) # Copy the reshaped version as well.
-            self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs_valid,3)) # Copy the reshaped version 
-            torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
-            torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1
-            self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
-            self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
-            torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
-            self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
+        if not self.init_rad_buffs[0]:
+            self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres,3]) # [n_own] init own spheres radii
+            self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
+            # self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
+            torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
+            self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
+            self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
         
+        # Every time
+        self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
+        self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs,3)) # Copy the reshaped version 
+        torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
+        torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1
+        self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
+        self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
+        torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+        self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
+
+        # if not self.init_obs[0]: 
+        #     # Initialize buffers related to radii since they are not changed (once).
+        #     if not self.init_rad_buffs[0]:
+        #         self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres_valid,3]) # [n_own] init own spheres radii
+        #         self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
+        #         self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
+        #         torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
+        #         self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
+        #         self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
+            
+        #     # Every time
+        #     self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres_valid,:3]) # read robot spheres positions to the "prad_own" buffer.
+        #     self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres_valid,1,3)) # Copy the reshaped version as well.
+        #     self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs_valid,3)) # Copy the reshaped version 
+        #     torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
+        #     torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1
+        #     self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
+        #     self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
+        #     torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+        #     self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
+        
+        # return self.cost_mat_buf # dynamic_coll_cost_matrix 
     
     
 
