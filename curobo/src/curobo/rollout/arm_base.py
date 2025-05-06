@@ -42,6 +42,7 @@ from curobo.types.state import JointState
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import cat_sum, cat_sum_horizon
 
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
 @dataclass
 class ArmCostConfig:
@@ -231,7 +232,14 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
         self._init_after_config_load()
+        self._dynamic_obs_coll_predictor: Optional[DynamicObsCollPredictor] = None
 
+    def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
+        self._dynamic_obs_coll_predictor = predictor
+    
+    def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
+        return self._dynamic_obs_coll_predictor
+    
     @profiler.record_function("arm_base/init_after_config_load")
     def _init_after_config_load(self):
         # self.current_state = None
@@ -369,6 +377,15 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                     env_query_idx=self._goal_buffer.batch_world_idx,
                 )
                 cost_list.append(coll_cost)
+        
+        # Dynamic obstacle predictive collision checking.
+        dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
+        if dynamic_obs_col_checker is not None:
+            is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
+            if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
+                dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
+                cost_list.append(dynamic_coll_cost) 
+       
         if return_list:
             return cost_list
         if self.sum_horizon:

@@ -63,7 +63,7 @@ SIMULATING = True # if False, then we are running the robot in real time (i.e. t
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG = False # If True, then the cost function will be printed on every call to my_world.step()
+DEBUG = True # If True, then the cost function will be printed on every call to my_world.step()
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = False # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
@@ -127,7 +127,7 @@ if True: # imports and initiation (put it in if to collapse it)
     from omni.isaac.core.utils.types import ArticulationAction
     from omni.isaac.core.objects import DynamicCuboid
     # from omni.isaac.debug_draw import _debug_draw
-    from isaacsim.util.debug_draw import _debug_draw
+    from isaacsim.util.debug_draw import _debug_draw # isaac 4.5
     # from omni.isaac.core.materials import OmniGlass # isaac 4
     from omni.isaac.core.objects import VisualSphere
     from omni.isaac.core.utils.stage import add_reference_to_stage

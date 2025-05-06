@@ -1,4 +1,3 @@
-dynamic_obs_coll_checker.py‏
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
 from curobo.geom.types import Cuboid, Sphere, WorldConfig
