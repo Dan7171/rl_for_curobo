@@ -9,3 +9,12 @@ isaac_sim-4.0.0/
 isaac_sim-4.0.0
 third_party
 .egg-info/
+*.austin
+*.obj
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico

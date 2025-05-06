@@ -123,17 +123,7 @@ class DynamicObsCollPredictor:
             where dynamic_coll_cost_matrix[r,h] is the  predictrive collision cost for the robot for rollout r and time step h, where r is the rollout index and h is the time step index)
         """
 
-        # if not bool(self.is_active[0]):
-        #     print(f'warning: dynamic obstacle collision checker is not active. Returning zero cost matrix. Activate the collision checker by calling the activate() method.')
-        #     return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
 
-        # if not torch.cuda.is_current_stream_capturing(): # just printing the initialization counter (before)...
-        #     self._init_counter += 1
-        #     print(f"Initialization iteration {self._init_counter} (ignore this printing if not use_cuda_graph is False. Intializtion refers to the cuda graph capture. TODO: If use_cuda_graph is False, this should not be printed.)")
-        #     if torch.cuda.is_current_stream_capturing():
-        #         print("During graph capture")
-        #         return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
-        
         if not bool(self.init_rad_buffs[0]):
             self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres,3]) # [n_own] init own spheres radii
             self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
@@ -154,30 +144,7 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
 
-        # if not self.init_obs[0]: 
-        #     # Initialize buffers related to radii since they are not changed (once).
-        #     if not self.init_rad_buffs[0]:
-        #         self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres_valid,3]) # [n_own] init own spheres radii
-        #         self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
-        #         self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-        #         torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
-        #         self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
-        #         self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
-            
-        #     # Every time
-        #     self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres_valid,:3]) # read robot spheres positions to the "prad_own" buffer.
-        #     self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres_valid,1,3)) # Copy the reshaped version as well.
-        #     self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs_valid,3)) # Copy the reshaped version 
-        #     torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
-        #     torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1
-        #     self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
-        #     self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
-        #     torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
-        #     self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
-        
-        # return self.cost_mat_buf # dynamic_coll_cost_matrix 
-    
-    
+     
 
         
 

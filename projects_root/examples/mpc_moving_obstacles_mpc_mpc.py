@@ -58,19 +58,21 @@ Example options:
 
 
 
-
+  
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG = True # If True, then the cost function will be printed on every call to my_world.step()
-VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
-VISUALIZE_MPC_ROLLOUTS = False # If True, then the MPC rollouts will be rendered in the simulation.
+DEBUG = False # If True, then the cost function will be printed on every call to my_world.step()
+VISUALIZE_PREDICTED_OBS_PATHS = False # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
+VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
 HIGHLIGHT_OBS_H = 30
 RENDER_DT = 0.03 # original 1/60
 PHYSICS_STEP_DT = 0.03 # original 1/60
+MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
+DEBUG_GPU_MEM = True # If True, then the GPU memory usage will be printed on every call to my_world.step()
 # NOTE: RENDER_DT and PHYSICS_DT guide from emperical experiments!:
 # On every call call to my_world.step():
 #  * RULE 1: RENDER_DT controls the average pose change of an object.* 
@@ -1338,6 +1340,8 @@ def main():
     ###########################################################
     ################  SIMULATION INITIALIZATION ###############
     ###########################################################
+
+    
     usd_help = UsdHelper()  # Helper for USD stage operations
     my_world = World(stage_units_in_meters=1.0) 
     my_world.scene.add_default_ground_plane()
@@ -1421,12 +1425,14 @@ def main():
     
     ################# SIM IS PLAYING ###################    
     # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
-    step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
+    # step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
+    step_dt_traj_mpc = MPC_DT
     dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
     ccheckers = []
-    expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
+    # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
     obs_viz_init = False
     total_obs_all_robots = sum([robots[i].n_coll_spheres_valid for i in range(len(robots))])
+
     for i, robot in enumerate(robots):
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
@@ -1470,17 +1476,16 @@ def main():
             for sphere_obs in spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
                 sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
             
-    ctrl_loop_start_time = time.time()
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     if HIGHLIGHT_OBS:
         glass_material = None # OmniGlass("/World/looks/glass_obsviz", color=np.array([1, 1, 1]),
                              #       ior=1.25, depth=0.001, thin_walled=True,
                                 #  ) - ISAAC 4
-    
+    ctrl_loop_start_time = time.time()
     while simulation_app.is_running():                 
         
         # Update simulation
-        print("(debug) t_idx= ", t_idx)
+        # print("(debug) t_idx= ", t_idx)
         my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
         
         # Measure control frequency
@@ -1573,15 +1578,44 @@ def main():
 
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
         
-            
+        if t_idx % 100 == 0:
+            print("t = ", t_idx)
+            ctrl_loop_freq = t_idx / (time.time() - ctrl_loop_start_time) 
+            print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
  
        
         
+    
+
+# import signal
+# import sys
+
+# def handle_sigint(signum, frame):
+#     print("Caught SIGINT (Ctrl+C), performing cleanup...")
+
+#     if DEBUG_GPU_MEM:
+#         torch.cuda.memory._dump_snapshot()
+#         # os.system("python torch/cuda/_memory_viz.py trace_plot dump_snapshot.pickle -o dump_snapshot.html")
+#         from torch.cuda._memory_viz import trace_plot
+#         trace_plot("dump_snapshot.pickle", "dump_snapshot.html")
+#         os.remove("dump_snapshot.pickle")
+        
+#     raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
     
 
 
         
         
 if __name__ == "__main__":
+    if DEBUG_GPU_MEM:
+        # signal.signal(signal.SIGINT, handle_sigint)
+        # print("GPU Memory Usage at start of loop:")
+        # torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
+        pass
     main()
-    simulation_app.close() 
+    simulation_app.close()
+    
+     
+        
+
+        
