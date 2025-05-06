@@ -1,3 +1,4 @@
+dynamic_obs_coll_checker.py‏
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
 from curobo.geom.types import Cuboid, Sphere, WorldConfig
@@ -70,9 +71,9 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] A tensor for the collision cost for each rollout and time step in the horizon. This is the output of the cost function.
 
         # flags
-        self.init_obs = torch.tensor([0]) # [1] If 1, the obstacles are initialized.
+        # self.init_obs = torch.tensor([0]) # [1] If 1, the obstacles are initialized.
         self.init_rad_buffs = torch.tensor([0]) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
-        self.is_active = torch.tensor([0]) # [1] If 1, the collision checker is active.
+        # self.is_active = torch.tensor([0]) # [1] If 1, the collision checker is active.
     
     def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
         """
@@ -82,7 +83,7 @@ class DynamicObsCollPredictor:
         self.p_obs_buf.copy_(p_obs)
         self.rad_obs_buf.copy_(rad_obs)
         self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-        self.is_active[0] = 1 
+        # self.is_active[0] = 1 
 
     # def reset_obs(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
     #     """
@@ -124,9 +125,9 @@ class DynamicObsCollPredictor:
             where dynamic_coll_cost_matrix[r,h] is the  predictrive collision cost for the robot for rollout r and time step h, where r is the rollout index and h is the time step index)
         """
 
-        if not self.is_active[0]:
-            print(f'warning: dynamic obstacle collision checker is not active. Returning zero cost matrix. Activate the collision checker by calling the activate() method.')
-            return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
+        # if not bool(self.is_active[0]):
+        #     print(f'warning: dynamic obstacle collision checker is not active. Returning zero cost matrix. Activate the collision checker by calling the activate() method.')
+        #     return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
 
         # if not torch.cuda.is_current_stream_capturing(): # just printing the initialization counter (before)...
         #     self._init_counter += 1
@@ -135,7 +136,7 @@ class DynamicObsCollPredictor:
         #         print("During graph capture")
         #         return torch.zeros(self.n_rollouts, self.H, device=self.tensor_args.device)
         
-        if not self.init_rad_buffs[0]:
+        if not bool(self.init_rad_buffs[0]):
             self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres,3]) # [n_own] init own spheres radii
             self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
             # self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
@@ -188,7 +189,6 @@ class DynamicObsCollPredictor:
     
 
     
-
 
 
 
