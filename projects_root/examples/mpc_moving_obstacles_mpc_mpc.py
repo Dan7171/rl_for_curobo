@@ -139,7 +139,7 @@ if True: # imports and initiation (put it in if to collapse it)
     import omni.kit.commands as cmd
     from pxr import Gf
 
-    from helper import add_extensions, add_robot_to_scene
+    from projects_root.utils.helper import add_extensions, add_robot_to_scene
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
 
     # CuRobo
@@ -925,7 +925,8 @@ class FrankaMpc(AutonomousFranka):
                 idx_list.append(self.robot.get_dof_index(x))
                 common_js_names.append(x)
         self._cmd_state_full = self._cmd_state_full.get_ordered_joint_state(common_js_names)
-        art_action = ArticulationAction(self._cmd_state_full.position.cpu().numpy(),joint_indices=idx_list,)
+        # art_action = ArticulationAction(self._cmd_state_full.position.cpu().numpy(),joint_indices=idx_list,)
+        art_action = ArticulationAction(self._cmd_state_full.position.view(-1).cpu().numpy(),joint_indices=idx_list,) # curobo 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
         return art_action
     
 
@@ -1439,6 +1440,8 @@ def main():
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], step_dt_traj_mpc, dynamic_obs_coll_predictors[i])
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
+        robots[i].robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
+
         
     for i in range(len(env_obstacles)):
         env_obstacles[i].register_ccheckers(ccheckers)
@@ -1461,14 +1464,14 @@ def main():
             checkers_to_reg_on_robot_i_spheres = [ccheckers[j] for j in range(len(ccheckers)) if j != i] # checkers of other robots except i
             for sphere_obs in spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
                 sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
-        
+            
     ctrl_loop_start_time = time.time()
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     if HIGHLIGHT_OBS:
         glass_material = None # OmniGlass("/World/looks/glass_obsviz", color=np.array([1, 1, 1]),
                              #       ior=1.25, depth=0.001, thin_walled=True,
                                 #  ) - ISAAC 4
-
+    
     while simulation_app.is_running():                 
         
         # Update simulation
@@ -1547,7 +1550,7 @@ def main():
             # mpc step
             mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
             art_action = robots[i].get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
-            robots[i].apply_articulation_action(art_action,num_times=3) # Note: I chhanged it to 1 instead of 3
+            robots[i].apply_articulation_action(art_action,num_times=1) # Note: I chhanged it to 1 instead of 3
             
             # visualization
             if VISUALIZE_MPC_ROLLOUTS:

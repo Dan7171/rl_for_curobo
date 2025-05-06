@@ -90,6 +90,8 @@ class MpcSolverConfig:
     #: Capture full step in MPC as a single CUDA graph. This is not supported currently.
     use_cuda_graph_full_step: bool = False
 
+    #: Instance of DynamicObsCollPredictor to use for MPC.    
+    dynamic_obs_checker: Optional[object] = None  # Add this field
     @staticmethod
     def load_from_robot_config(
         robot_cfg: Union[Union[str, dict], RobotConfig],
@@ -117,6 +119,7 @@ class MpcSolverConfig:
         particle_file: str = "particle_mpc.yml",
         override_particle_file: str = None,
         project_pose_to_goal_frame: bool = True,
+        dynamic_obs_checker=None,
     ):
         """Create an MPC solver configuration from robot and world configuration.
 
@@ -167,6 +170,7 @@ class MpcSolverConfig:
             project_pose_to_goal_frame: Project pose to goal frame when calculating distance
                 between reached and goal pose. Use this to constrain motion to specific axes
                 either in the global frame or the goal frame.
+            dynamic_obs_checker: Instance of DynamicObsCollPredictor to use for MPC.
 
         Returns:
             MpcSolverConfig: Configuration for the MPC solver.
@@ -323,6 +327,7 @@ class MpcSolverConfig:
             use_cuda_graph_full_step=use_cuda_graph_full_step,
             world_coll_checker=world_coll_checker,
             rollout_fn=arm_rollout_aux,
+            dynamic_obs_checker=dynamic_obs_checker  # Include in constructor
         )
 
 
@@ -377,6 +382,13 @@ class MpcSolver(MpcSolverConfig):
         self._cu_step_graph = None
         self._cu_result = None
 
+        # self.rollout_fn.set_dynamic_obs_checker(config.dynamic_obs_checker)
+        # Set the dynamic obstacle checker in all rollout functions
+        self.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        self.solver.safety_rollout.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        for optimizer in self.solver.optimizers:
+            optimizer.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        
     def setup_solve_single(self, goal: Goal, num_seeds: Optional[int] = None) -> Goal:
         """Creates a goal buffer to solve for a robot to reach target pose or joint configuration.
 
