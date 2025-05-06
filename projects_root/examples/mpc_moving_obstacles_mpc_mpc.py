@@ -63,7 +63,7 @@ SIMULATING = True # if False, then we are running the robot in real time (i.e. t
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG = True # If True, then the cost function will be printed on every call to my_world.step()
+DEBUG = False # If True, then the cost function will be printed on every call to my_world.step()
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = False # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
@@ -925,7 +925,7 @@ class FrankaMpc(AutonomousFranka):
                 idx_list.append(self.robot.get_dof_index(x))
                 common_js_names.append(x)
         self._cmd_state_full = self._cmd_state_full.get_ordered_joint_state(common_js_names)
-        # art_action = ArticulationAction(self._cmd_state_full.position.cpu().numpy(),joint_indices=idx_list,)
+        # art_action = ArticulationAction(self._cmd_state_full.position.cpu().numpy(),joint_indices=idx_list,) # old : with isaac 4
         art_action = ArticulationAction(self._cmd_state_full.position.view(-1).cpu().numpy(),joint_indices=idx_list,) # curobo 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
         return art_action
     
@@ -999,20 +999,25 @@ class FrankaMpc(AutonomousFranka):
         filter_coefficients_solver = _state_filter.filter_coeff # READ ONLY: the original coefficients from the mpc planner (used only to read from. No risk that will be changed unexpectdely)
         control_dt_solver = _state_filter.dt # READ ONLY: the delta between steps in the trajectory, as set in solver. This is what the mpc assumes time delta between steps in horizon is.s
 
-        apply_js_filter = True # Reducing the step size from prev state to new state
         
         # translate the plan from joint accelerations only to joint velocities and positions 
         # js_state = self.get_curobo_joint_state() # current joint state (including pos, vel, acc)
+        apply_js_filter = True # True: Reduce the step size from prev state to new state from 1 to something smaller (depends on the filter coefficients)
+        custom_filter = True # True: Use a custom filter coefficients to play with the filter weights
+        if apply_js_filter:
+            if custom_filter:
+                filter_coeff = FilterCoeff(0.01, 0.01, 0.0, 0.0) # custom one to play with the filter weights
+            else:
+                filter_coeff = filter_coefficients_solver # the one used by the mpc planner
         js_state_sim = self.get_sim_joint_state()
         n_dofs = pi_mpc_means.shape[1]
         js_state = JointState(torch.from_numpy(js_state_sim.positions[:n_dofs]), torch.from_numpy(js_state_sim.velocities[:n_dofs]), torch.zeros(n_dofs), self.get_dof_names(),torch.zeros(n_dofs), self.tensor_args)
         js_state_prev = None
         # js_state.jerk = torch.zeros_like(js_state.velocity) # we don't really need this for computations, but it has to be initiated to avoid exceptions in the filtering
         
-        filter_coeff_debug = FilterCoeff(0.001, 0.001, 0.0, 0.0)
         for h, action in enumerate(pi_mpc_means):
             if apply_js_filter:
-                js_state = self.filter_joint_state(js_state_prev, js_state, filter_coeff_debug) # 
+                js_state = self.filter_joint_state(js_state_prev, js_state, filter_coeff) # 
             next_js_state = self.integrate_acc(action, js_state, control_dt_solver) # this will be the new joint state after applying the acceleration the mpc policy commands for this step for dt_planning seconds
             plan['joint_space']['vel'][h] = next_js_state.velocity.squeeze()
             plan['joint_space']['pos'][h] = next_js_state.position.squeeze()
