@@ -535,7 +535,7 @@ class UsdHelper:
     ):
         # iterate through every obstacle type and create prims:
 
-        self.add_subroot(base_frame, obstacles_frame, base_t_obstacle_pose) 
+        self.add_subroot(base_frame, obstacles_frame, base_t_obstacle_pose)
         full_path = join_path(base_frame, obstacles_frame)
         prim_path = [
             self.get_prim_from_obstacle(o, full_path, timestep=timestep) for o in obstacles.objects
@@ -636,7 +636,7 @@ class UsdHelper:
         obj_prim = self.stage.GetPrimAtPath(root_path)
         # obstacle.update_material() # This does not get the correct materials
         set_geom_mesh_attrs(obj_geom, obstacle, timestep=timestep)
-        
+
         obj_prim.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
         obj_prim.GetAttribute("physics:rigidBodyEnabled").Set(enable_physics)
 

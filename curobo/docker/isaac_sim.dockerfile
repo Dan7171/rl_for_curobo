@@ -24,11 +24,7 @@ FROM nvcr.io/nvidia/cudagl:${CUDA_VERSION}-devel-${BASE_DIST}
 
 LABEL maintainer "User Name"
 
-# NOTE THIS IS A MODIFIED VERSION OF THE ORIGINAL DOCKERFILE - THE VULKAN SDK VERSION IS SET TO 1.3.236.0
-# THIS IS BECAUSE THE LATEST VERSION (1.3.244.1) IS NOT SUPPORTED BY THE CUDA VERSION WE ARE USING (11.4.2)
-# IF YOU WANT TO USE THE LATEST VERSION, YOU CAN UNCOMMENT THE NEXT LINE AND COMMENT THE LINE AFTER THAT
-# ARG VULKAN_SDK_VERSION=1.3.244.1
-ARG VULKAN_SDK_VERSION=1.3.236.0 
+ARG VULKAN_SDK_VERSION=1.3.224.1
 
 
 
@@ -47,6 +43,7 @@ RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selectio
 #    rm -rf /var/lib/apt/lists/*
 
 # Set timezone info
+
 RUN apt-get update && apt-get install -y \
   tzdata \
   software-properties-common \

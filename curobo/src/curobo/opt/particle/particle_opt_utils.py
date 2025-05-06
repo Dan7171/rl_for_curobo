@@ -20,6 +20,7 @@ import torch.autograd.profiler as profiler
 from curobo.types.base import TensorDeviceType
 from curobo.util.torch_utils import get_torch_jit_decorator
 
+
 class SquashType(Enum):
     CLAMP = 0
     CLAMP_RESCALE = 1
