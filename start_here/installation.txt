@@ -1,0 +1,27 @@
+Instructions for using with isaacsim 4.5:
+
+# check your cuda version:
+* $ nvidia-smi # to observe which cuda version you have: (version "xy.z". I use 12.8) 
+# install conda if missing:
+* install conda if you dont have any (run $ which conda to check): TODO ADD LINK
+
+# install isaacsim 4.5 conda env:
+* install isaacsim (4.5) as conda environment for easier process: https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/install_python.html#
+* verify installation using $ conda activate env_isaacsim and running $ (env_isaacsim) isaacsim # to verify isaacsim loaded
+# enter the new conda env and install curobo there:
+* enter conda env: $ conda activate env_isaacsim
+* export PATH as explained in link at step 1 but replace 11.8 with your cuda version ("xy.z"): https://curobo.org/get_started/1_install_instructions.html
+Meaning: $ (env_isaacsim) export PATH=/usr/local/cuda-xy.z/bin${PATH:+:${PATH}}
+* install nvcc inside the conda env
+$ (env_isaacsim) conda install -c nvidia cuda-toolkit=xy.z # where xy.z is your cuda version. 
+Next steps are based on https://curobo.org/get_started/1_install_instructions.html
+* $ sudo apt install git-lfs
+* $ (env_isaacsim) pip install tomli wheel ninja
+* $ (env_isaacsim) pip install requests # necessary for using isaacsim 4.5
+* $ (env_isaacsim) git clone https://github.com/NVlabs/curobo.git
+* $ (env_isaacsim) cd curobo
+* $ (env_isaacsim) pip install -e .[isaacsim] --no-build-isolation
+* $ (env_isaacsim) python curobo/examples/isaac-sim/mpc_example.py 
+* $ (env_isaacsim) cd your path to rl_for_curobo
+* $ (env_isaacsim) pip install . # install rl_for_curobo as module
+# to verify installation

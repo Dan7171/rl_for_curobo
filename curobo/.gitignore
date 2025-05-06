@@ -4,7 +4,7 @@
 *.bat
 *.p
 *.mlx
-
+.ssh/*
 *#
 *logs
 # Byte-compiled / optimized / DLL files

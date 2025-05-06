@@ -126,8 +126,9 @@ if True: # imports and initiation (put it in if to collapse it)
     from omni.isaac.core.objects import cuboid, sphere
     from omni.isaac.core.utils.types import ArticulationAction
     from omni.isaac.core.objects import DynamicCuboid
-    from omni.isaac.debug_draw import _debug_draw
-    from omni.isaac.core.materials import OmniGlass
+    # from omni.isaac.debug_draw import _debug_draw
+    from isaacsim.util.debug_draw import _debug_draw
+    # from omni.isaac.core.materials import OmniGlass # isaac 4
     from omni.isaac.core.objects import VisualSphere
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
@@ -138,7 +139,7 @@ if True: # imports and initiation (put it in if to collapse it)
     import omni.kit.commands as cmd
     from pxr import Gf
 
-    from projects_root.utils.helper import add_extensions, add_robot_to_scene
+    from helper import add_extensions, add_robot_to_scene
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
 
     # CuRobo
@@ -519,7 +520,8 @@ class AutonomousFranka:
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
         X_R = Pose.from_list(list(self.p_R) + list(self.q_R)) # 
         usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
-        self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
+        
+        self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, subroot=self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R, initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
         
 
@@ -1463,9 +1465,9 @@ def main():
     ctrl_loop_start_time = time.time()
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     if HIGHLIGHT_OBS:
-        glass_material = OmniGlass("/World/looks/glass_obsviz", color=np.array([1, 1, 1]),
-                                    ior=1.25, depth=0.001, thin_walled=True,
-                                    )
+        glass_material = None # OmniGlass("/World/looks/glass_obsviz", color=np.array([1, 1, 1]),
+                             #       ior=1.25, depth=0.001, thin_walled=True,
+                                #  ) - ISAAC 4
 
     while simulation_app.is_running():                 
         

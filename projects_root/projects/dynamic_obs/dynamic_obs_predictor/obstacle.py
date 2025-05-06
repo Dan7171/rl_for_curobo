@@ -17,8 +17,8 @@ import os
 
 # Now import other Isaac Sim modules
 # https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
-from omni.isaac.core.objects import DynamicCuboid, DynamicSphere, DynamicCapsule, DynamicCylinder, DynamicCone, GroundPlane
-from omni.isaac.core.materials import PhysicsMaterial
+from isaacsim.core.api.objects import DynamicCuboid, DynamicSphere, DynamicCapsule, DynamicCylinder, DynamicCone, GroundPlane
+from isaacsim.core.api.materials.physics_material import PhysicsMaterial
 from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
 from omni.isaac.core.prims import XFormPrim
 from pxr import PhysxSchema, UsdPhysics
