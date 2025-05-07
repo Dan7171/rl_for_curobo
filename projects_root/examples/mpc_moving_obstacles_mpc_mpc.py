@@ -138,7 +138,6 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from typing import List, Optional
     import torch
     import numpy as np
-    from abc import abstractmethod
     # Isaac Sim app initiation and isaac sim modules
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
     simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
@@ -360,8 +359,8 @@ def main():
     
     
     robots = [ 
-        FrankaMpc(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
-        FrankaMpc(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
+        FrankaMpc(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], q_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
+        FrankaMpc(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3], q_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
     ]    
     
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 

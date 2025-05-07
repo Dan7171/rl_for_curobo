@@ -2,7 +2,6 @@
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
@@ -78,7 +77,6 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from typing import List, Optional
     import torch
     import numpy as np
-    from abc import abstractmethod
     # Isaac Sim app initiation and isaac sim modules
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
     simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
@@ -87,7 +85,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from omni.isaac.core.utils.nucleus import get_assets_root_path
     # Our modules
     from projects_root.utils.helper import add_extensions
-    from projects_root.autonomous_franka import FrankaMpc
+    from projects_root.autonomous_franka import FrankaCumotion
     from projects_root.utils.draw import draw_points
     # CuRobo modules
     from curobo.geom.types import Sphere, WorldConfig
@@ -254,18 +252,13 @@ def main():
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
     setup_curobo_logger("warn")
-
-
-    
-    # world_model = get_world_model_from_current_stage(stage)
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     if ENABLE_GPU_DYNAMICS:
         activate_gpu_dynamics(my_world)
     
     # Adding two frankas to the scene
     # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batch motion gen reacher example is for multiple worlds)
-    
-    robots: List[FrankaMpc] = [None, None]
+    robots: List[FrankaCumotion] = [None, None]
     robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
     robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 100, "mesh": 100}]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
@@ -275,15 +268,12 @@ def main():
     X_binCenter = np.array([0.6, 0, 0.2, 1, 0, 0, 0], dtype=np.float32)
     X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [0.6, 0, 0.2, 0, 1, 0, 0]]
 
-
     # X_target = X_binCenter.copy()
     # X_target[3:5] = [0,1] # upside down
     # X_Targets = [X_target.copy(), X_target.copy()] 
     # bin_dim = 0.4 # depends on the cfg file
     # p_infront, p_behind, p_on_left, p_on_right = X_binCenter[:3] + np.array([0,0.75 * bin_dim,bin_dim]),  X_binCenter[:3] + np.array([0,-0.75 * bin_dim,bin_dim]), X_binCenter[:3] + np.array([0.75 * bin_dim,0,bin_dim]), X_binCenter[:3] + np.array([- 0.75 * bin_dim,0,bin_dim])
     # valid_neihborhood = [[p_infront, p_behind, X_binCenter[:3]], [p_infront, p_behind, X_binCenter[:3]]]
-
-    
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
     env_obstacles = [] # list of obstacles in the world
@@ -293,15 +283,12 @@ def main():
             world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
-
-
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
-    
     robots = [ 
-        FrankaMpc(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
-        FrankaMpc(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
+        FrankaCumotion(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
+        FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
     ]    
     
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
