@@ -135,7 +135,6 @@ if True: # imports and initiation (put it in if to collapse it)
 
     from projects_root.utils.helper import add_extensions, add_robot_to_scene
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
-
     # CuRobo
     from curobo.geom.sdf.world import CollisionCheckerType, WorldCollisionConfig
     from curobo.geom.types import Sphere, WorldConfig, Cuboid, Mesh
