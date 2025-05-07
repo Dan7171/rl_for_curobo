@@ -69,105 +69,43 @@ VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered 
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
 HIGHLIGHT_OBS_H = 30
-RENDER_DT = 0.03 # original 1/60
-PHYSICS_STEP_DT = 0.03 # original 1/60
-MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
 DEBUG_GPU_MEM = True # If True, then the GPU memory usage will be printed on every call to my_world.step()
-# NOTE: RENDER_DT and PHYSICS_DT guide from emperical experiments!:
-# On every call call to my_world.step():
-#  * RULE 1: RENDER_DT controls the average pose change of an object.* 
-# If an object has a (constant) linear velocity of V[m/s], then if before the my_world.step() call the object was at position P, then after the my_world.step() call the object will be at position P+V*RENDER_DT on average*. Example: if RENDER_DT = 1/30, then if object is at pose xyz =(1[m],0[m],2[m]) and has a constant linear velocity of (0.15,0,0) [m/s], then after the my_world.step() call the object will be at pose (1+0.15*1/30,0,2)*[m]= (1.005[m],0[m],2[m]) on average(see exact definition below).
-# * RULE 2: RENDER_DT/PHYSICS_DT controls the time step index of the simulation: "my_world.current_time_step_index" *
-# RENDER_DT/PHYSICS_DT is the number of time steps *on average* that are added to the time step counter of the simulation (my_world.current_time_step_index) on every call to my_world.step(). Example: if before the my_world.step() call the time step counter was 10, and RENDER_DT/PHYSICS_DT = 2, then after the my_world.step() call the time step counter will be 10+2=12. In different words, the simulator takes REDNER_DT/PHYSICS_DT physics steps for every 1 rendering step on every call to my_world.step().
-#  * RULE 3: Internal simulation time is determined by my_world.current_time_step_index*PHYSICS_DT.
-# The furmula is my_world.current_time = my_world.current_time_step_index*PHYSICS_DT
-#  * RULE 4: *
-# my_world.current_time_step_index and my_world.current_time not necesarilly updated on every call to my_world.step(), but if they do, they are updated together (meaning that they are synchronized).
-# * RULE 5: *
-# the call to my_world.step() can perform 0, 1 or more than one physics steps.
-# Additional notes:
-# - "on average" means that the updated depends on the ratio: PHYSICS_DT/RENDER_DT. For example if the ratio = 4, then the update will be applied only every 4th call to my_world.step(). However if ths ratio is <=1, then the update will be applied every call to my_world.step().
-# - For exact APIs see https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html?highlight=set_simulation_dt and https://docs.omniverse.nvidia.com/isaacsim/latest/simulation_fundamentals.html
-# - all info above referse to calls to my_world.step(render=True) (i.e. calls to my_world.step() with rendering=True)
+RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
+PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
+MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
 
-if True: # imports and initiation (put it in if to collapse it)
-    try:
-        # Third Party
-        import isaacsim
-    except ImportError:
-        pass
 
-    # Third Party
+if True: # imports and initiation (put it in an if statement to collapse it)
+    
+    
+    
+    # third party modules
     import time
-    import random
     from typing import List, Optional
-    from curobo.geom.sdf.world_mesh import WorldMeshCollision
     import torch
     import argparse
-    import os
-    from typing import Callable, Dict, Union
-    import carb
     import numpy as np
-    import copy
     from abc import abstractmethod
-    import os
-    
-    # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
-    # torch.cuda.empty_cache()
-    # torch.cuda.ipc_collect()  # Also helps clean up inter-process memory
-
-    # Initialize the simulation app first (must be before "from omni.isaac.core")
-    
-    from omni.isaac.kit import SimulationApp  
-
-    simulation_app = SimulationApp({"headless": False})
-
-    # Now import other Isaac Sim modules
-    # https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab
-    from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
-    from omni.isaac.core.objects import cuboid, sphere
-    from omni.isaac.core.utils.types import ArticulationAction
-    from omni.isaac.core.objects import DynamicCuboid
-    # from omni.isaac.debug_draw import _debug_draw
+    # Isaac Sim app initiation and isaac sim modules
+    from projects_root.utils.issacsim import init_app
+    simulation_app = init_app() # must happen before importing other isaac sim modules.
+    from omni.isaac.core import World 
     from isaacsim.util.debug_draw import _debug_draw # isaac 4.5
-    # from omni.isaac.core.materials import OmniGlass # isaac 4
-    from omni.isaac.core.objects import VisualSphere
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
-    from omni.isaac.core.utils.types import JointsState as isaac_JointsState
-    
-    # from omni.isaac.core.prims import XFormPrim
-    # from omni.isaac.core.prims import SingleXFormPrim
-    import omni.kit.commands as cmd
-    from pxr import Gf
-
-    from projects_root.utils.helper import add_extensions, add_robot_to_scene
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
+    # Our modules
+    from projects_root.utils.helper import add_extensions
     from projects_root.autonomous_franka import FrankaMpc
-
-    # CuRobo
-    from curobo.geom.sdf.world import CollisionCheckerType, WorldCollisionConfig
-    from curobo.geom.types import Sphere, WorldConfig, Cuboid, Mesh
-    from curobo.rollout.rollout_base import Goal
+    # CuRobo modules
+    from curobo.geom.types import Sphere, WorldConfig
     from curobo.types.base import TensorDeviceType
-    from curobo.types.math import Pose
-    # from curobo.types.robot import JointState
     from curobo.types.state import JointState
-    from curobo.util.logger import setup_curobo_logger, log_error
+    from curobo.util.logger import setup_curobo_logger
     from curobo.util.usd_helper import UsdHelper
-    from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
-    from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
-    from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
-    from curobo.types.tensor import T_DOF
-    from curobo.types.state import FilterCoeff
+    from curobo.util_file import  load_yaml
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
-    from projects_root.utils.decorators import static_vars
-    from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig,PoseCostMetric,)
-    from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
-    # Initialize CUDA device
-    # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" # prevent cuda out of memory errors
-    a = torch.zeros(4, device="cuda:0") 
+    a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
 ################### Read arguments ########################
 parser = argparse.ArgumentParser(
