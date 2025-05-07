@@ -287,176 +287,81 @@ def main():
     stage.SetDefaultPrim(world_prim)
     
     robots = [ 
-        FrankaCumotion(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], R_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
-        FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
+        FrankaCumotion(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], q_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
+        FrankaCumotion(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3], q_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
     ]    
     
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     
     ################ PRE PLAYING SIM ###################
-    if args.print_ctrl_rate and SIMULATING:
-        real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
-    
-    if not SIMULATING:
-        real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
-        real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
-        real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
 
     
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
     
     ################# SIM IS PLAYING ###################    
-    # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
-    # step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
-    step_dt_traj_mpc = MPC_DT
     dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
     ccheckers = []
     # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
     obs_viz_init = False
     total_obs_all_robots = sum([robots[i].n_coll_spheres_valid for i in range(len(robots))])
-
+    
     for i, robot in enumerate(robots):
+        # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
-         
-        if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            n_obs_roboti = total_obs_all_robots - robots[i].n_coll_spheres_valid
-            col_pred_roboti = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc,robot.H,robot.num_particles, robot.n_coll_spheres_valid, n_obs_roboti)
-            dynamic_obs_coll_predictors.append(col_pred_roboti) # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-            # p_obs = torch.zeros((robots[i].H, n_obs_roboti, 3), device=robots[i].tensor_args.device)
-            # rad_obs = torch.zeros(n_obs_roboti, device=robots[i].tensor_args.device)
-            # col_pred_roboti.reset_obs(p_obs, rad_obs)
- 
-        else:
-            dynamic_obs_coll_predictors.append(None)
-        
-        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], step_dt_traj_mpc, dynamic_obs_coll_predictors[i], DEBUG)
+        # init solver
+        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i])
+        robots[i].init_plan_config() # TODO: Can probably be move to constructor.
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
         robots[i].robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
 
-        
+    # register ccheckers for environment obstacles
     for i in range(len(env_obstacles)):
         env_obstacles[i].register_ccheckers(ccheckers)
-
-    if not MODIFY_MPC_COST_FN_FOR_DYN_OBS: 
-        # Treat spheres of other robots as static obstacles 
-        # (update the ccheckers of each robot with all other robots spheres 
-        # everytime the spheres of other robots change, but no prediction of path in the rollouts)
-        spheres_as_obs_grouped_by_robot = []
-        for i in range(len(robots)):
-            roboti_spheres_as_obstacles = []
-            p_validspheresRjcurr, _, _ = robots[i].get_current_spheres_state()
-            for sphere_idx in range(len(p_validspheresRjcurr)):
-                sphere_r = p_validspheresRjcurr[sphere_idx][3]
-                sphere_as_cub_dims = [2*sphere_r, 2*sphere_r, 2*sphere_r]
-                sphere_obs = Obstacle(my_world, f"R{i}S{sphere_idx}",'cuboid', np.array(p_validspheresRjcurr[sphere_idx].tolist() + [1,0,0,0]), np.array(sphere_as_cub_dims), simulation_enabled=True)
-                roboti_spheres_as_obstacles.append(sphere_obs)
-            spheres_as_obs_grouped_by_robot.append(roboti_spheres_as_obstacles)
-        for i in range(len(robots)):
-            checkers_to_reg_on_robot_i_spheres = [ccheckers[j] for j in range(len(ccheckers)) if j != i] # checkers of other robots except i
-            for sphere_obs in spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
-                sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
             
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    if HIGHLIGHT_OBS:
-        glass_material = None # OmniGlass("/World/looks/glass_obsviz", color=np.array([1, 1, 1]),
-                             #       ior=1.25, depth=0.001, thin_walled=True,
-                                #  ) - ISAAC 4
     ctrl_loop_start_time = time.time()
     while simulation_app.is_running():                 
         
-        # Update simulation
-        # print("(debug) t_idx= ", t_idx)
-        my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
-        
-        # Measure control frequency
-        if args.print_ctrl_rate and not SIMULATING:
-            real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
-            real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
-            if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
-                real_robot_cfm_start_time = time.time()
-                real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+        my_world.step(render=True)  
         
         # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
         for i in range(len(env_obstacles)): 
             env_obstacles[i].update_registered_ccheckers()
-               
-        if MODIFY_MPC_COST_FN_FOR_DYN_OBS:         
-            plans = [robots[i].get_plan() for i in range(len(robots))]
-        else:
-            sphere_states_all_robots:list[torch.Tensor] = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
-
-        point_visualzer_inputs = []
 
         for i in range(len(robots)):
-            # update obstacles (robot spheres as obstacles)
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-                p_spheresOthersH = None
-                for j in range(len(robots)):
-                    if j != i: 
-                        planSpheres_robotj = plans[j]['task_space']['spheres'] # robots[j].get_plan(n_steps=robots[i].H)['task_space']['spheres']
-                        p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
-                        rad_spheresRobotjH = planSpheres_robotj['r'][0].to(tensor_args.device)
-                        if p_spheresOthersH is None:
-                            p_spheresOthersH = p_spheresRobotjH
-                            rad_spheresOthersH = rad_spheresRobotjH
-                        else:
-                            p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
-                            rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
+            # get joint state
+            sim_js = robots[i].get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
+            robots_cu_js[i] = robots[i].get_curobo_joint_state(sim_js) 
+            if robots_cu_js[i] is None:
+                continue
+            # get real (most updated) position of target
+            p_T, q_T = robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose        
                 
-                if t_idx == 0:
-                    dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
-                else:
-                    dynamic_obs_coll_predictors[i].update(p_spheresOthersH)
+            if robots[i].set_new_target_for_solver(p_T, q_T, sim_js):
+                print("robot2 target changed!, updating plan")
+                # Replan and update the plan of robot2.
+                robots[i].reset_command_plan(robots_cu_js[i]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
+                plan = robots[i].get_current_plan_as_tensor()
                 
-                if HIGHLIGHT_OBS and t_idx % HIGHLIGHT_OBS_H == 0: # 
-                    if not obs_viz_init:
-                        material = glass_material
-                        for h in range(HIGHLIGHT_OBS_H):
-                            for j in range(p_spheresOthersH.shape[1]):
-                                robots[i].add_obs_viz(p_spheresOthersH[h][j].cpu(),rad_spheresOthersH[j].cpu(),f"o{j}t{h}",h=h,h_max=robots[i].H,material=material)
-                        if i == len(robots) - 1:
-                            obs_viz_init = True
-                    else:
-                        robots[i].update_obs_viz(p_spheresOthersH[:HIGHLIGHT_OBS_H].reshape(-1, 3).cpu()) # collapse first two dimensions
-                
-                if VISUALIZE_PREDICTED_OBS_PATHS:
-                    point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
-            else:
-                for i in range(len(robots)):    
-                    spheres_as_obs_i = spheres_as_obs_grouped_by_robot[i] 
-                    for sphere_idx in range(len(spheres_as_obs_i)):
-                        updated_sphere_pose = np.array(sphere_states_all_robots[i][sphere_idx].tolist() + [1,0,0,0])
-                        obs:Obstacle = spheres_as_obs_i[sphere_idx]
-                        obs.update_registered_ccheckers(custom_pose=updated_sphere_pose) 
+                if plan is not None: # new plan is availabe    
+                    # TODO: REPLACE BY robots[i].get_plan()
+             
+                    pass
+                    # pos_jsfullplan, vel_jsfullplan = plan[0], plan[1] # from current time step t to t+H-1 inclusive
+                    # # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+                    # p_eefullplan_R, q_eefullplan_R, _, _, p_linksfullplan_R, q_linksfullplan_R, p_rad_spheresfullplan_R = robots[i].crm.forward(pos_jsfullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                    # valid_only = True # remove spheres that are not valid (i.e. negative radius)
+                    # if valid_only:
+                    #     p_rad_spheresfullplan_R = p_rad_spheresfullplan_R[:,:-4]
+
+                    # # convert to world frame (W):
+                    # p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
+                    # p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+                    # p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
+                    # rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
                     
-            # update robot state and target
-            robots_cu_js[i] = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())
-            robots[i].update_current_state(robots_cu_js[i])    
-            p_T, q_T = robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
-            if robots[i].set_new_target_for_solver(p_T, q_T):
-                print(f"robot {i} target changed!")
-                robots[i].update_solver_target()
-            
-            # mpc step
-            mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
-            art_action = robots[i].get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
-            robots[i].apply_articulation_action(art_action,num_times=1) # Note: I chhanged it to 1 instead of 3
-            
-            # visualization
-            if VISUALIZE_MPC_ROLLOUTS:
-                rollouts_for_visualization = {'points': robots[i].solver.get_visual_rollouts(), 'color': 'green'}
-                point_visualzer_inputs.append(rollouts_for_visualization)
-            
-            if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-                robots[i].visualize_robot_as_spheres(robots_cu_js[i])
-
-            
-        if len(point_visualzer_inputs):
-            draw_points(point_visualzer_inputs) # print_rate_decorator(l
-
-
 
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
         

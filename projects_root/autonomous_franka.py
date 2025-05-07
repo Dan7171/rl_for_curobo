@@ -695,7 +695,7 @@ class FrankaCumotion(AutonomousFranka):
         return self.articulation_controller.apply_action(art_action)
 
     
-    def init_solver(self,world_model, collision_cache,tensor_args):
+    def init_solver(self,world_model, collision_cache):
         """Initialize the motion generator (cumotion global planner).
 
         Args:
@@ -703,7 +703,7 @@ class FrankaCumotion(AutonomousFranka):
             collision_cache (_type_): _description_
             tensor_args (_type_): _description_
         """
-        
+        tensor_args = self.tensor_args
         trajopt_dt = None
         optimize_dt = True
         trajopt_tsteps = 32

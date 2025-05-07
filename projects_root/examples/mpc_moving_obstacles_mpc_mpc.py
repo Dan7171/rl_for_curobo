@@ -378,7 +378,6 @@ def main():
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
     
     ################# SIM IS PLAYING ###################    
-    # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
     # step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
     step_dt_traj_mpc = MPC_DT
     dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
@@ -388,6 +387,7 @@ def main():
     total_obs_all_robots = sum([robots[i].n_coll_spheres_valid for i in range(len(robots))])
 
     for i, robot in enumerate(robots):
+        # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
          
@@ -431,10 +431,6 @@ def main():
                 sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
             
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    if HIGHLIGHT_OBS:
-        glass_material = None # OmniGlass("/World/looks/glass_obsviz", color=np.array([1, 1, 1]),
-                             #       ior=1.25, depth=0.001, thin_walled=True,
-                                #  ) - ISAAC 4
     ctrl_loop_start_time = time.time()
     while simulation_app.is_running():                 
         
