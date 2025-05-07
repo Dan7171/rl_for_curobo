@@ -375,11 +375,7 @@ def main():
         real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
         real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
 
-    init_world = False # ugly, do we need this?
-    if not init_world:
-        for _ in range(10):
-            my_world.step(render=True) 
-        init_world = True
+    
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
     
     ################# SIM IS PLAYING ###################    
