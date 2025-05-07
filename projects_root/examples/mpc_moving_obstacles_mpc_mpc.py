@@ -55,10 +55,6 @@ Example options:
 """
 
 # ############################## Run settings ##############################
-
-
-
-  
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -74,28 +70,85 @@ RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one
 PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
 MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
 
-
+################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
-    
-    
-    
+    # arg parsing:
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="CuRobo MPC example with moving obstacle in Isaac Sim",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+    Examples:
+    # Default behavior (red cuboid moving at -0.1 m/s in x direction, physics enabled)
+    omni_python mpc_example_with_moving_obstacle.py
+
+    # Sphere obstacle moving diagonally with autoplay disabled
+    omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity -0.1 0.1 0.0 --obstacle_size 0.15 --autoplay False
+
+    # Blue cuboid starting at specific position with physics enabled
+    omni_python mpc_example_with_moving_obstacle.py  --obstacle_initial_pos 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --obstacle_mass 1.0
+
+    # Green sphere moving in y direction with custom size and physics disabled
+    omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 
+
+    # Red cuboid with physics disabled and autoplay disabled
+    omni_python mpc_example_with_moving_obstacle.py  --autoplay False
+    """
+    )
+    parser.add_argument(
+        "--headless_mode",
+        type=str,
+        default=None,
+        help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
+    )
+    parser.add_argument(
+        "--autoplay",
+        help="Start simulation automatically without requiring manual play button press",
+        default="True",
+        type=str,
+        choices=["True", "False"],
+    )
+    parser.add_argument(
+        "--obstacle_mass",
+        type=float,
+        default=1.0,
+        help="Mass of the obstacle in kilograms",
+    )
+    parser.add_argument(
+        "--gravity_enabled",
+        help="Enable gravity for the obstacle  ",
+        default="False",
+        type=str,
+        choices=["True", "False"],
+    )
+    parser.add_argument(
+        "--print_ctrl_rate",
+        default="False",
+        type=str,
+        choices=["True", "False"],
+        help="When True, prints the control rate",
+    )
+    args = parser.parse_args()
+    args.autoplay = args.autoplay.lower() == "true"
+    args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
+
     # third party modules
     import time
+    import signal
     from typing import List, Optional
     import torch
-    import argparse
     import numpy as np
     from abc import abstractmethod
     # Isaac Sim app initiation and isaac sim modules
-    from projects_root.utils.issacsim import init_app
-    simulation_app = init_app() # must happen before importing other isaac sim modules.
+    from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
+    simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
     from omni.isaac.core import World 
-    from isaacsim.util.debug_draw import _debug_draw # isaac 4.5
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
     # Our modules
     from projects_root.utils.helper import add_extensions
     from projects_root.autonomous_franka import FrankaMpc
+    from projects_root.utils.draw import draw_points
     # CuRobo modules
     from curobo.geom.types import Sphere, WorldConfig
     from curobo.types.base import TensorDeviceType
@@ -107,128 +160,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
-################### Read arguments ########################
-parser = argparse.ArgumentParser(
-    description="CuRobo MPC example with moving obstacle in Isaac Sim",
-    formatter_class=argparse.RawDescriptionHelpFormatter,
-    epilog="""
-Examples:
-  # Default behavior (red cuboid moving at -0.1 m/s in x direction, physics enabled)
-  omni_python mpc_example_with_moving_obstacle.py
-
-  # Sphere obstacle moving diagonally with autoplay disabled
-  omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity -0.1 0.1 0.0 --obstacle_size 0.15 --autoplay False
-
-  # Blue cuboid starting at specific position with physics enabled
-  omni_python mpc_example_with_moving_obstacle.py  --obstacle_initial_pos 1.0 0.5 0.3 --obstacle_color 0.0 0.0 1.0 --obstacle_mass 1.0
-
-  # Green sphere moving in y direction with custom size and physics disabled
-  omni_python mpc_example_with_moving_obstacle.py  --obstacle_linear_velocity 0.0 0.1 0.0 --obstacle_size 0.2 --obstacle_color 0.0 1.0 0.0 
-
-  # Red cuboid with physics disabled and autoplay disabled
-  omni_python mpc_example_with_moving_obstacle.py  --autoplay False
-"""
-)
-parser.add_argument(
-    "--headless_mode",
-    type=str,
-    default=None,
-    help="Run in headless mode. Options: [native, websocket]. Note: webrtc might not work.",
-)
-parser.add_argument(
-    "--autoplay",
-    help="Start simulation automatically without requiring manual play button press",
-    default="True",
-    type=str,
-    choices=["True", "False"],
-)
-parser.add_argument(
-    "--obstacle_mass",
-    type=float,
-    default=1.0,
-    help="Mass of the obstacle in kilograms",
-)
-parser.add_argument(
-    "--gravity_enabled",
-    help="Enable gravity for the obstacle  ",
-    default="False",
-    type=str,
-    choices=["True", "False"],
-)
-parser.add_argument(
-    "--print_ctrl_rate",
-    default="False",
-    type=str,
-    choices=["True", "False"],
-    help="When True, prints the control rate",
-)
-args = parser.parse_args()
-args.autoplay = args.autoplay.lower() == "true"
-args.print_ctrl_rate = args.print_ctrl_rate.lower() == "true"
-
-###########################################################
 ######################### HELPER ##########################
-###########################################################
-
-
-def draw_points(points_dicts: List[dict], color='green'):
-    """
-    Visualize points in the simulation.
-    _debug_draw docs: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.debug_draw/docs/index.html?highlight=draw_point
-    color docs:
-        1.  https://docs.omniverse.nvidia.com/kit/docs/kit-manual/106.3.0/carb/carb.ColorRgba.html
-        2. rgba (rgb + alpha (transparency)) https://www.w3schools.com/css/css_colors_rgb.asp
-    Args:
-        points_dicts: List of dictionaries with keys 'points' and 'color'
-            points: Tensor of point sequences of shape [num of point-sequences (batch size), num of points per sequence, 3] # 3 is for x,y,z
-            color: Color of the points in tensor
-    """
-    unified_points = []
-    unified_colors = []
-    unified_sizes = []
-
-    for points_dict in points_dicts:
-        rollouts = points_dict['points']
-        color = points_dict['color']
-        if rollouts is None:
-            return
-        
-        draw = _debug_draw.acquire_debug_draw_interface()
-        draw.clear_points()
-        
-        cpu_rollouts = rollouts.cpu().numpy()
-        b, h, _ = cpu_rollouts.shape
-        point_list = []
-        colors = []
-        for i in range(b):
-            # get list of points:
-            point_list += [
-                (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
-            ]
-            if type(color) == str:
-                if color == 'green':
-                    colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
-                elif color == 'black':
-                    colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
-            
-            elif type(color) == np.ndarray:
-                color = list(color) # rgb
-                for step_idx in range(h):
-                    color_copy = color.copy()
-                    color_copy.append(1 - (0.5 * step_idx/h)) # decay alpha (decay transparency)
-                    colors.append(color_copy)
-
-        sizes = [10.0 for _ in range(b * h)]
-
-        for p in point_list:
-            unified_points.append(p)
-        for c in colors:
-            unified_colors.append(c)
-        for s in sizes:
-            unified_sizes.append(s)
-    
-    draw.draw_points(unified_points, unified_colors, unified_sizes)
-        
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     def wrapper(*args, **kwargs):
         duration, rate = None, None
@@ -245,22 +177,6 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
         else:
             return result
     return wrapper
-
-def get_predicted_dynamic_obss_poses_for_visualization(dynamic_obstacles,dynamic_obs_coll_predictor,horizon=30):
-    """
-    Get the predicted poses of the dynamic obstacles for visualization purposes.
-    """
-    # predicted_poses = torch.zeros((len(dynamic_obstacles),30, 3))
-    obs_for_visualization = [] 
-    for obs_index in range(len(dynamic_obstacles)):
-        obs_predicted_poses = torch.zeros((1 ,horizon, 3))
-        obs_name = dynamic_obstacles[obs_index].name
-        predicted_path = dynamic_obs_coll_predictor.get_predicted_path(obs_name)[dynamic_obs_coll_predictor.cur_checker_idx:dynamic_obs_coll_predictor.cur_checker_idx+dynamic_obs_coll_predictor.H]
-        predicted_path = predicted_path[:,:3]
-        obs_predicted_poses[0] = torch.tensor(predicted_path)
-        obs_color = dynamic_obstacles[obs_index].simulation_representation.get_applied_visual_material().get_color()
-        obs_for_visualization.append({"points": obs_predicted_poses, "color": obs_color})
-    return obs_for_visualization
 
 def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc):
     """Prints information about the control loop frequncy (desired vs measured) and warns if it's too different.
@@ -290,17 +206,6 @@ def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_
             But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
                 You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
 
-def activate_gpu_dynamics(my_world):
-    """
-    Activates GPU dynamics for the given world.
-    """
-    my_world_physics_context = my_world.get_physics_context()
-    if not my_world_physics_context.is_gpu_dynamics_enabled():
-        print("GPU dynamics is disabled. Initializing GPU dynamics...")
-        my_world_physics_context.enable_gpu_dynamics(True)
-        assert my_world_physics_context.is_gpu_dynamics_enabled()
-        print("GPU dynamics is enabled")
-
 def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch.Tensor, sphere_names:list, tensor_args:TensorDeviceType) -> list[Sphere]:
     """
     Returns a list of Sphere objects from a tensor of sphere positions and radii.
@@ -313,26 +218,6 @@ def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch
         name_sphere = sphere_names[i]
         spheres.append(Sphere(name=name_sphere, pose=X_sphere, radius=r_sphere))
     return spheres
-
-def wait_for_playing(my_world):
-    playing = False
-    while simulation_app.is_running() and not playing:
-        my_world.step(render=True)
-        if my_world.is_playing():
-            playing = True
-        else:
-            if args.autoplay: # if autoplay is enabled, play the simulation immediately
-                my_world.play()
-                while not my_world.is_playing():
-                    print("blocking until playing is confirmed...")
-                    time.sleep(0.1)
-                playing = True
-            else:
-                print("Waiting for play button to be pressed...")
-                time.sleep(0.1)
-    
-    my_world.step(render=True)
-    my_world.reset()
 
 def get_full_path_to_asset(asset_subpath):
     return get_assets_root_path() + '/Isaac/' + asset_subpath
@@ -383,17 +268,16 @@ def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
     add_reference_to_stage(asset_fullpath, prim_path)
     return prim_path 
 
-
-#############################################
-# MAIN SIMULATION LOOP
-#############################################
-
-
-
 def write_stage_to_usd_file(stage,file_path):
     stage.Export(file_path) # export the stage to a temporary USD file
     
-
+def handle_sigint_gpu_mem_debug(signum, frame):
+    print("Caught SIGINT (Ctrl+C), first dump snapshot...")
+    torch.cuda.memory._dump_snapshot()
+    print("Snapshot dumped to dump_snapshot.pickle, you can upload it to the server: https://docs.pytorch.org/memory_viz")
+    print("Now raising KeyboardInterrupt to let the original KeyboardInterrupt handler (of nvidia) to close the app")
+    raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
+    
 
 def main():
     """
@@ -439,7 +323,7 @@ def main():
         activate_gpu_dynamics(my_world)
     
     # Adding two frankas to the scene
-    # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batc)
+    # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batch motion gen reacher example is for multiple worlds)
     
     robots: List[FrankaMpc] = [None, None]
     robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
@@ -470,10 +354,7 @@ def main():
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
 
-    # load_asset_to_prim_path('/home/dan/Desktop/small_KLT.usd', '/World/curobo_world_cfg_obs_visual_twins/small_KLT',True)
-    # tmp_world_model = read_world_model_from_usd('/home/dan/Desktop/small_KLT.usd',usd_helper=usd_help)
-    
-    # stage = omni.usd.get_context().get_stage()
+
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
@@ -483,7 +364,7 @@ def main():
         FrankaMpc(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3],R_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
     ]    
     
-    add_extensions(simulation_app, args.headless_mode)
+    add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     
     ################ PRE PLAYING SIM ###################
     if args.print_ctrl_rate and SIMULATING:
@@ -499,7 +380,7 @@ def main():
         for _ in range(10):
             my_world.step(render=True) 
         init_world = True
-    wait_for_playing(my_world) # wait for the play button to be pressed
+    wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
     
     ################# SIM IS PLAYING ###################    
     # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
@@ -662,25 +543,9 @@ def main():
             print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
  
        
-        
-    
-
-import signal
-import sys
-
-def handle_sigint_gpu_mem_debug(signum, frame):
-    print("Caught SIGINT (Ctrl+C), first dump snapshot")
-    torch.cuda.memory._dump_snapshot()
-    # now upload the snapshot dump_snapshot.pickle to the server: https://docs.pytorch.org/memory_viz
-    raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
-    
-
-
-        
-        
 if __name__ == "__main__":
     if DEBUG_GPU_MEM:
-        signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug)
+        signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
     main()
     simulation_app.close()
