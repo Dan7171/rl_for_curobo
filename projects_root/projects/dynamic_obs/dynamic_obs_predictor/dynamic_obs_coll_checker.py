@@ -23,7 +23,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_mpc, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100):
+    def __init__(self, tensor_args, step_dt_traj_opt, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -31,7 +31,7 @@ class DynamicObsCollPredictor:
         Args:
             tensor_args: pytorch tensor arguments.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
-            step_dt_traj_mpc (float): Time passes between each step in the trajectory. This is what the mpc assumes time delta between steps in horizon is.
+            step_dt_traj_opt (float): Time passes between each step in the trajectory. This is what the mpc/curobo solver assumes time delta between steps in horizon is when parforming path planning.
             H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
@@ -42,7 +42,7 @@ class DynamicObsCollPredictor:
         self.tensor_args = tensor_args 
         self.H = H 
         self.n_rollouts = n_rollouts 
-        self.step_dt_traj_mpc = step_dt_traj_mpc 
+        self.step_dt_traj_opt = step_dt_traj_opt 
         self.cost_weight = cost_weight
 
         self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
