@@ -1,3 +1,3 @@
 THIS FILE IS FOR DEBUG:
-REF: https://docs.isaacsim.omniverse.nvidia.com/latest/overview/extensions_renaming.html
+REF: https://docs.isaacsim.omniverse.nvidia.com/latest/overview/extensions_renaming.html 
 1. omni.isaac.core.objects-> isaacsim.core.api.objects
