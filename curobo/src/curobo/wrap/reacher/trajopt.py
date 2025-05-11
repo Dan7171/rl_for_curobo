@@ -551,6 +551,7 @@ class TrajOptSolverConfig:
             store_debug_in_result=store_debug_in_result,
             optimize_dt=optimize_dt,
             use_cuda_graph=use_cuda_graph,
+            dynamic_obs_checker=dynamic_obs_checker,
         )
         return trajopt_cfg
 

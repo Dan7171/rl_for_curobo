@@ -880,22 +880,22 @@ class FrankaCumotion(AutonomousFranka):
             cmd_plan = None
 
     def get_plan(self, include_task_space:bool=True,to_go_only=True, plan_stage='final'):
-        # TODO: SEE get_plan() implementation OF MPC and projects_root/examples/mpc_moving_obstacles_mpc_cumotion.py
         plan = self.get_current_plan_as_tensor(to_go_only, plan_stage)            
-        if plan is not None: # new plan is availabe    
-            p_jsplan, vel_jsplan = plan[0], plan[1] # from current time step t to t+H-1 inclusive
-            # Compute FK on plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
-            p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(p_jsplan, vel_jsplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-            valid_only = True # remove spheres that are not valid (i.e. negative radius)
-            if valid_only:
-                prad_spheresPlan = prad_spheresPlan[:, self.valid_coll_spheres_idx]
-            # convert to world frame (W):
-            p_rad_spheresfullplan = prad_spheresPlan[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
-            p_rad_spheresfullplan[:,:,:3] = p_rad_spheresfullplan[:,:,:3] + self.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
-            p_spheresfullplan = p_rad_spheresfullplan[:,:,:3]
-            rad_spheres = p_rad_spheresfullplan[0,:,3] 
+        if plan is None or not len(plan[0]):
+            return 
+        p_jsplan, vel_jsplan = plan[0], plan[1] # from current time step t to t+H-1 inclusive
+        # Compute FK on plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+        p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(p_jsplan, vel_jsplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+        valid_only = True # remove spheres that are not valid (i.e. negative radius)
+        if valid_only:
+            prad_spheresPlan = prad_spheresPlan[:, self.valid_coll_spheres_idx]
+        # convert to world frame (W):
+        p_rad_spheresfullplan = prad_spheresPlan[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
+        p_rad_spheresfullplan[:,:,:3] = p_rad_spheresfullplan[:,:,:3] + self.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+        p_spheresfullplan = p_rad_spheresfullplan[:,:,:3]
+        rad_spheres = p_rad_spheresfullplan[0,:,3] 
 
-            return p_spheresfullplan, rad_spheres
+        return p_spheresfullplan, rad_spheres
 
     def get_curobo_joint_state(self, sim_js=None,zero_vel=False) -> JointState:
         """
@@ -936,18 +936,19 @@ class FrankaCumotion(AutonomousFranka):
         Returns:
             _type_: _description_
         """
-        
-        if self.cmd_plan is None:
-            return None # robot is not following any plan at the moment
+        if self.cmd_plan is None: # robot is not following any plan at the moment
+            return None
         
         if plan_stage == 'optimized': # Optimized plan: this is the plan right after optimization part in the motion generator. Length should be as trajopt_tsteps (todo: verify that).
-            plan = self.last_motion_gen_result.optimized_plan
+            plan = self.last_motion_gen_result.optimized_plan # fixed size (trajopt_tsteps x dof_num)
         elif plan_stage == 'final': # Final plan: this is the plan which will be sent to controller (optimized, interpoladed, and time-dilated if applied)
-            plan = self.cmd_plan
+            plan = self.cmd_plan # variable size (generated from the optimized plan)
         else:
             raise ValueError(f"Invalid plan stage: {plan_stage}")
+        
         n_total = len(plan) # total num of commands (actions) to apply to controller in current command (global) plan
         n_applied = self.cmd_idx # number of applied actions from total command plan
+        
         # n_to_go = n_total - n_applied # num of commands left to execute 
         start_idx = 0 if not to_go_only else n_applied
         start_q = plan.position[start_idx:] # at index i: joint positions just before applying the ith command
@@ -997,10 +998,19 @@ class FrankaCumotion(AutonomousFranka):
             self.cmd_joint_state.jerk[:] = qdd_des * 0.0
         return self.cmd_joint_state.clone()
         
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[]) -> DynamicObsCollPredictor:
+    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=True) -> DynamicObsCollPredictor:
         n_particles = self.num_trajopt_seeds 
         H = self.trajopt_tsteps # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
-        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args, None, H, n_particles, self.n_coll_spheres_valid, sum(obs_groups_nspheres), obs_groups_nspheres=obs_groups_nspheres)
+        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
+                                                            None,
+                                                            H,
+                                                            n_particles,
+                                                            self.n_coll_spheres_valid,
+                                                            sum(obs_groups_nspheres),
+                                                            cost_weight,
+                                                            obs_groups_nspheres,
+                                                            manually_express_p_own_in_world_frame,
+                                                            torch.from_numpy(self.p_R))
         return self.dynamic_obs_col_pred
     
     

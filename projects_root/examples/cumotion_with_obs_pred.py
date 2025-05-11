@@ -305,7 +305,7 @@ def main():
     ccheckers = []
     # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
     
-    col_preds = []
+    # col_preds = []
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
@@ -314,21 +314,22 @@ def main():
         # init dynamic obs coll predictors
         if OBS_PREDICTION:
             obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
-            robot.init_col_predictor(obs_groups_nspheres)
+            robot.init_col_predictor(obs_groups_nspheres, cost_weight=10000, manually_express_p_own_in_world_frame=True)
             col_pred = robot.dynamic_obs_col_pred
         else:
             col_pred = None
-        col_preds.append(col_pred)
+        # col_preds.append(col_pred)
     
     # init solvers
     threads = []
+    print('Initializing solvers (in threads)...')
     for i in range(n_robots):
-        t = threading.Thread(target=robots[i].init_solver, args=(robot_world_models[i],robots_collision_caches[i],col_preds[i], DEBUG))
+        t = threading.Thread(target=robots[i].init_solver, args=(robot_world_models[i],robots_collision_caches[i],robot.dynamic_obs_col_pred, DEBUG))
         threads.append(t)
         t.start()
-    
     for t in threads:
         t.join()
+    print('Solvers initialized.')
     
     for i in range(n_robots):
         # robots[i].init_solver(robot_world_models[i],robots_collision_caches[i],col_pred, DEBUG)
@@ -374,32 +375,29 @@ def main():
             if robots[i].set_new_target_for_solver(p_T, q_T, sim_js):
                 robots[i].reset_command_plan(robots_cu_js[i]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
         
-        all_plans_to_go = [robot.get_plan(plan_stage='optimized') for robot in robots] # arr[i] is None if no plan for robot i
+        robots_plans_to_go = [robot.get_plan(plan_stage='optimized') for robot in robots] # arr[i] is None if no plan for robot i
         for i in range(n_robots):
-            if VISUALIZE_PREDICTED_OBS_PATHS:
-                if all_plans_to_go[i] is not None:
-                    global_plan_points = {'points': all_plans_to_go[i][0], 'color': 'green'}
-                    point_visualzer_inputs.append(global_plan_points)        
-        
+
             # update dynamic obs col predictor
             if hasattr(robots[i], 'dynamic_obs_col_pred'):
                 col_pred = robots[i].dynamic_obs_col_pred 
                 obs_groups_to_update = []
                 p_obs_groups = []
-                for j, obs_group_id in enumerate(col_pred_with[i]):
-                    if all_plans_to_go[obs_group_id] is not None:
-                        obs_groups_to_update.append(j)
-                        p_obs_group = all_plans_to_go[obs_group_id][0]
-
+                for j, obs_group_id in enumerate(col_pred_with[i]): # for each obstacle group j that the ith robot will use for dynamic obs prediction
+                    if robots_plans_to_go[obs_group_id] is not None: # if obstacle group j has actions to go
+                        obs_groups_to_update.append(j) # mark the jth obstacle group in the groups which are going to be updated
+                        p_obs_group = robots_plans_to_go[obs_group_id][0] # spheres positions of the "plan to go" for the jth obstacle group
                         # if the plan to go is shorter than the robot horizon, repeat the last step of the plan to go
-                        obs_plan_to_go_len = p_obs_group.shape[0]
+                        n_steps_obs_group_plan = p_obs_group.shape[0]
                         robot_horizon = robots[i].get_trajopt_horizon() # works for both mpc and cumotion
-                        tail_len = robot_horizon - obs_plan_to_go_len
+                        tail_len = robot_horizon - n_steps_obs_group_plan
                         if tail_len > 0:
                             tail = p_obs_group[-1].unsqueeze(0).repeat(tail_len, 1, 1) # repeat the last step of the obstacle plan
-                            p_obs_group = torch.cat([p_obs_group, tail],dim=0)
-                             
+                            p_obs_group = torch.cat([p_obs_group, tail],dim=0) # now we have a prediction for H steps ahead as we wanted
                         p_obs_groups.append(p_obs_group)
+                        if VISUALIZE_PREDICTED_OBS_PATHS:
+                            global_plan_points = {'points': p_obs_group, 'color': 'green'}
+                            point_visualzer_inputs.append(global_plan_points)       
                 col_pred.update_obs_groups(p_obs_groups, obs_groups_to_update)
 
 

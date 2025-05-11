@@ -25,7 +25,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_opt=None, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100, obs_groups_nspheres=[]):
+    def __init__(self, tensor_args, step_dt_traj_opt=None, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100.0, obs_groups_nspheres=[], manually_express_p_own_in_world_frame=False, p_R=torch.zeros(3)):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -39,6 +39,7 @@ class DynamicObsCollPredictor:
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
             obs_groups_nspheres: list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
+            manually_express_p_own_in_world_frame: if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
             """
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
@@ -61,6 +62,7 @@ class DynamicObsCollPredictor:
         
         # Buffers for own spheres: position and radius
         self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        
         self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
         self.rad_own_buf = torch.zeros(self.n_own_spheres, device=self.tensor_args.device) # [n_own] Own spheres radii buffer
         self.rad_own_buf_unsqueezed = self.rad_own_buf.reshape(*self.rad_own_buf.shape, 1) # [n_own x 1] added 1 dimension for intermediate calculations
@@ -74,9 +76,11 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] A tensor for the collision cost for each rollout and time step in the horizon. This is the output of the cost function.
 
         # flags
-        # self.init_obs = torch.tensor([0]) # [1] If 1, the obstacles are initialized.
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
-        # self.is_active = torch.tensor([0]) # [1] If 1, the collision checker is active.
+        self.manually_express_p_own_in_world_frame = manually_express_p_own_in_world_frame # if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
+        if self.manually_express_p_own_in_world_frame:
+            self.p_R = torch.tensor(p_R, device=self.tensor_args.device) # xyz of own base in world frame
+            self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
     
     def get_obs_group_idx_range(self, obs_group_idx:int):
         """
@@ -169,7 +173,10 @@ class DynamicObsCollPredictor:
             self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
         
         # Every time
+        
         self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        if self.manually_express_p_own_in_world_frame: # shift the robot spheres positions to the world frame, if not already in world frame (if manually_express_p_own_in_world_frame is True).
+            torch.add(self.p_own_buf, self.p_R_broadcasted_buf, out=self.p_own_buf)
         self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
         self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs,3)) # Copy the reshaped version 
         torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
@@ -178,7 +185,11 @@ class DynamicObsCollPredictor:
         self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
         torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
         
+        if (self.cost_mat_buf.sum() / (self.n_rollouts * self.n_obs * self.n_own_spheres)) > 0:
+            print(f'Debug: violations per rollout and col sphere obstacle (on average) =  {(self.cost_mat_buf.sum() / (self.n_rollouts * self.n_obs * self.H))} ')
+
         self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
+        
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
 
      
