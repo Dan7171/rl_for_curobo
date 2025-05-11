@@ -1,7 +1,7 @@
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
-ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
+ENABLE_GPU_DYNAMICS = False # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
@@ -79,10 +79,21 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import torch
     import numpy as np
     import threading
-
-    # Isaac Sim app initiation and isaac sim modules
+    # initialization of isaac sim
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
     simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
+    # optimization of isaac sim 
+    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
+    # See: https://docs.isaacsim.omniverse.nvidia.com/latest/development_tools/carb_settings.html
+    import carb
+    settings = carb.settings.get_settings()
+    settings.set_int("/rtx/post/dlss/execMode", 0) # the most performant setting, reducing VRAM consumption and rendering time but decreasing render quality. This is the default value in Isaac Sim.
+    settings.set("rtx-transient/resourcemanager/texturestreaming/memoryBudget", 0.1) # educe the Texture Streaming Budget (0.6 is the default value))
+    settings.set("/rtx/rendermode", 0)  # Disable RTX
+    settings.set("/app/renderer/enableRayTracing", False)
+    torch.set_default_dtype(torch.float32)
+
+    # isaac sim modules
     from omni.isaac.core import World 
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
@@ -101,6 +112,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
+    
 ######################### HELPER ##########################
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     def wrapper(*args, **kwargs):
@@ -274,7 +286,7 @@ def main():
     X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [1.8, 0, 0.2, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     
     if OBS_PREDICTION:
-        col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+        col_pred_with = [[1], []] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
@@ -295,7 +307,10 @@ def main():
             robot_cfgs[i], my_world, usd_help, 
             p_R=X_Robots[i][:3],q_R=X_Robots[i][3:], p_T=X_Targets[i][:3],
             q_T=X_Targets[i][3:], target_color=np.array([0,0.5,0]),
-            dilation_factor=None))
+            dilation_factor=None,
+            # num_trajopt_seeds=12
+            )
+        )
     
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
@@ -314,25 +329,11 @@ def main():
         # init dynamic obs coll predictors
         if OBS_PREDICTION:
             obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
-            robot.init_col_predictor(obs_groups_nspheres, cost_weight=10000, manually_express_p_own_in_world_frame=True)
-            col_pred = robot.dynamic_obs_col_pred
-        else:
-            col_pred = None
-        # col_preds.append(col_pred)
-    
-    # init solvers
-    threads = []
-    print('Initializing solvers (in threads)...')
-    for i in range(n_robots):
-        t = threading.Thread(target=robots[i].init_solver, args=(robot_world_models[i],robots_collision_caches[i],robot.dynamic_obs_col_pred, DEBUG))
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-    print('Solvers initialized.')
-    
-    for i in range(n_robots):
-        # robots[i].init_solver(robot_world_models[i],robots_collision_caches[i],col_pred, DEBUG)
+            if len(col_pred_with[i]): # if we set to the robot at least one dynamic obstacle group to account for  
+                robot.init_col_predictor(obs_groups_nspheres, cost_weight=100000000, manually_express_p_own_in_world_frame=True)
+        
+        # init solver
+        robot.init_solver(robot_world_models[i],robots_collision_caches[i], DEBUG)
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
         robots[i].robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
@@ -347,7 +348,6 @@ def main():
     for i in range(n_robots):
         if hasattr(robots[i], 'dynamic_obs_col_pred'): 
             col_pred = robots[i].dynamic_obs_col_pred
-            # p_spheresColwithS0 = torch.concat([robots_spheres_s0[other][0] for other in col_pred_with[i]])
             rad_spheresColwithS0 = torch.concat([robots_spheres_s0[other][1] for other in col_pred_with[i]])
             col_pred.set_obs_rads(rad_spheresColwithS0)
         

@@ -79,7 +79,7 @@ class DynamicObsCollPredictor:
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
         self.manually_express_p_own_in_world_frame = manually_express_p_own_in_world_frame # if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
         if self.manually_express_p_own_in_world_frame:
-            self.p_R = torch.tensor(p_R, device=self.tensor_args.device) # xyz of own base in world frame
+            self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
             self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
     
     def get_obs_group_idx_range(self, obs_group_idx:int):

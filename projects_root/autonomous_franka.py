@@ -759,7 +759,7 @@ class FrankaCumotion(AutonomousFranka):
 
     
     
-    def init_solver(self, world_model, collision_cache, dynamic_obs_coll_predictor=None, debug=False):
+    def init_solver(self, world_model, collision_cache, debug=False):
         """Initialize the motion generator (cumotion global planner).
 
         Args:
@@ -768,7 +768,10 @@ class FrankaCumotion(AutonomousFranka):
             tensor_args (_type_): _description_
         """
     
-
+        if hasattr(self, 'dynamic_obs_col_pred'):
+            dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
+        else:
+            dynamic_obs_coll_predictor = None
         # See very good explainations for all the paramerts here: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenConfig
         motion_gen_config = MotionGenConfig.load_from_robot_config( # solver config
             self.robot_cfg, # robot_cfg – Robot configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of RobotConfig. See Supported Robots for a list of available robots. You can also create a a configuration file for your robot using Configuring a New Robot.
@@ -789,7 +792,7 @@ class FrankaCumotion(AutonomousFranka):
         self.solver = MotionGen(motion_gen_config)
         if not self.reactive:
             print("warming up...")
-            self.solver.warmup(enable_graph=True, warmup_js_trajopt=False)
+            self.solver.warmup(enable_graph=not debug, warmup_js_trajopt=False)
         
         self.plan_config = self._init_plan_config()
         print("Curobo is Ready")
@@ -937,12 +940,14 @@ class FrankaCumotion(AutonomousFranka):
             _type_: _description_
         """
         if self.cmd_plan is None: # robot is not following any plan at the moment
-            return None
-        
+            return 
         if plan_stage == 'optimized': # Optimized plan: this is the plan right after optimization part in the motion generator. Length should be as trajopt_tsteps (todo: verify that).
             plan = self.last_motion_gen_result.optimized_plan # fixed size (trajopt_tsteps x dof_num)
+            if plan is None:
+                return 
         elif plan_stage == 'final': # Final plan: this is the plan which will be sent to controller (optimized, interpoladed, and time-dilated if applied)
             plan = self.cmd_plan # variable size (generated from the optimized plan)
+        
         else:
             raise ValueError(f"Invalid plan stage: {plan_stage}")
         
