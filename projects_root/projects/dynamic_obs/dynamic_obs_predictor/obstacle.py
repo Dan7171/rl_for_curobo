@@ -122,7 +122,7 @@ class Obstacle:
                 cchecking_enabled=True,
                 usd_path=None,
                 mesh_file_sub=None,
-                # usd_helper=None
+                dynamic_obs_prediction_enabled=False,
                 ): 
         """
         Creates the representations of the obstacle in the simulation form and in the curobo form (making equivalent representations).
@@ -162,13 +162,12 @@ class Obstacle:
         self.cchecking_enabled = cchecking_enabled
         self.usd_path = usd_path
         self.mesh_file_sub = mesh_file_sub 
-        # self.usd_helper = usd_helper
         self.registered_world_models = [] # world models that the obstacle is added to
         self.indices_in_registered_world_models = [] # indices of the obstacle in the registered world models
         self.registered_Wmo_transforms = [] # transforms from world to world model origin for all registered world models
         self.registered_ccheckers = [] # all collision checkers that the obstacle is added to and their transforms       
-        
-      
+        self.dynamic_obs_prediction_enabled = dynamic_obs_prediction_enabled
+    
     # def update_dims(self, dims):
     #     self.dims = dims
     #     if self.simulation_enabled:
@@ -197,11 +196,44 @@ class Obstacle:
         color = np.array(color)
         if sim_type == DynamicCuboid:
             obstacle = self._init_DynamicCuboid_for_simulation(world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
-        
+        elif sim_type == DynamicSphere:
+            obstacle = self._init_DynamicSphere_for_simulation(world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity)
         elif sim_type == XFormPrim:
             obstacle = self._init_XFormPrim_for_simulation(world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity, usd_path)
         
         return obstacle
+    
+    def _specify_prim_attributes(self, world, prim, material, linear_velocity, angular_velocity, gravity_enabled, sim_collision_enabled):
+        
+        if material is None:
+            material = PhysicsMaterial( # https://www.youtube.com/watch?v=tHOM-OCnBLE
+                prim_path=self.path+"/aluminum",  # path to the material prim to create
+                dynamic_friction=0,
+                static_friction=0,
+                restitution=0
+            )
+
+        prim.apply_physics_material(material)
+        if not np.array_equal(linear_velocity, np.array([0,0,0])):
+            prim.set_linear_velocity(linear_velocity)
+        if not np.array_equal(angular_velocity, np.array([0,0,0])):
+            prim.set_angular_velocity(angular_velocity)
+        if not gravity_enabled:
+            self.disable_gravity(self.path, world.stage)
+
+        if not sim_collision_enabled: # Disable collision for the obstacle in the simulation
+            prim.set_collision_enabled(False)
+        world.scene.add(prim)
+    
+    def _init_DynamicSphere_for_simulation(self,world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity):
+        """
+        Initialize a sphere obstacle.
+        """
+
+        prim = DynamicSphere(prim_path=self.path,name=self.name, position=position,orientation=orientation,size=1,color=color,mass=mass,density=0.9,visual_material=visual_material, scale=dims)         
+        self._specify_prim_attributes(world, prim, None, linear_velocity, angular_velocity, gravity_enabled, sim_collision_enabled)
+        return prim
+        
     
     def _init_DynamicCuboid_for_simulation(self,world, position, orientation, dims, color,  mass, gravity_enabled,sim_collision_enabled,visual_material, linear_velocity, angular_velocity):
         """
@@ -217,23 +249,7 @@ class Obstacle:
             gravity_enabled: If False, disables gravity for the obstacle
         """
         prim = DynamicCuboid(prim_path=self.path,name=self.name, position=position,orientation=orientation,size=1,color=color,mass=mass,density=0.9,visual_material=visual_material, scale=dims)         
-        material = PhysicsMaterial( # https://www.youtube.com/watch?v=tHOM-OCnBLE
-            prim_path=self.path+"/aluminum",  # path to the material prim to create
-            dynamic_friction=0,
-            static_friction=0,
-            restitution=0
-        )
-        prim.apply_physics_material(material)
-        if not np.array_equal(linear_velocity, np.array([0,0,0])):
-            prim.set_linear_velocity(linear_velocity)
-        if not np.array_equal(angular_velocity, np.array([0,0,0])):
-            prim.set_angular_velocity(angular_velocity)
-        if not gravity_enabled:
-            self.disable_gravity(self.path, world.stage)
-
-        if not sim_collision_enabled: # Disable collision for the obstacle in the simulation
-            prim.set_collision_enabled(False)
-        world.scene.add(prim)
+        self._specify_prim_attributes(world, prim, None, linear_velocity, angular_velocity, gravity_enabled, sim_collision_enabled)        
         return prim
 
     
@@ -392,8 +408,9 @@ class Obstacle:
         """
         Add the obstacle to a given world model. side not: this is currently happening before solvers are initialized (we pass each solver its world model with the initial pose of the obstacles).
         """
+        assert self.cchecking_enabled, "Error: Collision checking must be enabled to add the obstacle to the world model"
+
         cuObs_Wmo = self._make_world_model_representation(T_Wmo, custom_pose) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
-        
         cu_world_model.add_obstacle(cuObs_Wmo) # adding the curobo obs representation to the world model (inplace)
         self.registered_world_models.append(cu_world_model) # Register the world model that the obstacle is added to and the transform from world to world moedl origin
         self.registered_Wmo_transforms.append(T_Wmo)
@@ -405,8 +422,8 @@ class Obstacle:
         """
         Update the pose of the obstacle in a given collision checker (cchecker must be registered first).
         """
+        assert self.cchecking_enabled, "Error: Collision checking must be enabled to update the obstacle in the collision checker"
         cchecker = self.registered_ccheckers[cchecker_idx]
-        
         # pose update:
         T_Wmo = self.registered_Wmo_transforms[cchecker_idx]
         X_Wmo = self.get_X_Wmo(T_Wmo, custom_pose) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
@@ -417,6 +434,8 @@ class Obstacle:
         if self.simulation_enabled:
             if self.sim_type == DynamicCuboid:
                 cur_dims = self.simulation_representation.get_world_scale()* self.simulation_representation.get_size() 
+            elif self.sim_type == DynamicSphere:
+                cur_dims = None # TODO
             elif self.sim_type == XFormPrim:
                 cur_dims = self.simulation_representation.get_local_scale()
         else:
@@ -445,6 +464,7 @@ class Obstacle:
         Update all registered collision checkers with the new pose and dims of the obstacle.
         You must register the collision checkers with the obstacle first using the register_ccheckers method.
         """
+        assert self.cchecking_enabled, "Error: Collision checking must be enabled to update the obstacle in the collision checker"
         # custom pose (if passed) should be expressed in world frame
         for cchecker_idx in range(len(self.registered_ccheckers)):
             self.update_cchecker(cchecker_idx, custom_pose, custom_dims)
@@ -456,10 +476,26 @@ class Obstacle:
         Args:
             ccheckers (_type_): _description_
         """
+        assert self.cchecking_enabled, "Error: Collision checking must be enabled to register the collision checkers with the obstacle"
         for cchecker in ccheckers:
             self.registered_ccheckers.append(cchecker)
             
-
+    def get_const_vel_plan(self, horizon:int, dt:float):
+        """
+        Get the plan of the obstacle, based on the current pose and velocity.
+        """
+        ans = torch.zeros(horizon, 7) # [x, y, z, qw, qx, qy, qz]
+        assert self.sim_type == DynamicSphere, "Error: Only sphere can be planned for now"
+        # rot = [1,0,0,0] 
+        assert self.simulation_enabled, "Error: Simulation must be enabled to plan the obstacle"
+        cur_pose = self.simulation_representation.get_world_pose()
+        cur_vel = self.simulation_representation.get_linear_velocity()
+        # cur_ang_vel = self.simulation_representation.get_angular_velocity()
+        
+        for i in range(horizon):
+            ans[i, :3] = cur_pose[:3] + cur_vel * dt * i
+            ans[i, 3:] = cur_pose[3:]
+        
 # class PrimWrapper:
 #     def __init__(self, prim_path: str):
 #         # Init after the prim is added to the stage!

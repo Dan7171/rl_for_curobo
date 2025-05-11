@@ -11,7 +11,31 @@
   sim_collision_enabled: False
   visual_material: null
 
- 
+- name: simple_cube
+  curobo_type: cuboid  
+  pose: [1.2, 0.0, 0.5, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+  dims: [0.05, 0.1, 0.05] # x, y, z
+  color: [0, 0, 0]
+  mass: 5000
+  linear_velocity: [-0.1, 0.0, 0.0] # [0.15, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: True
+  visual_material: null
+
+# - name: sphere_for_dynamic_obs_prediction
+#   curobo_type: sphere  
+#   pose: [1.2, 0.0, 0.5, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+#   dims: [0.05] # x, y, z
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [-0.1, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: True
+#   visual_material: null
+#   cchecking_enabled: False
+#   dynamic_obs_prediction_enabled: True
 # - name: bin_wall_1
 #   curobo_type: cuboid  
 #   pose: [0.6, -0.2, 0.2, 1, 0, 0, 0.0] # center of the wall
@@ -68,15 +92,3 @@
 #   dims: [2, 2, 2] 
 #   gravity_enabled: False
 
-- name: simple_cube
-  curobo_type: cuboid  
-  pose: [-1, 0.0, 0.7, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
-  dims: [0.05, 0.1, 0.05] # x, y, z
-  color: [0, 0, 0]
-  mass: 5000
-  linear_velocity: [0.0, 0.0, 0.0] # [0.15, 0, 0]
-  angular_velocity: [0, 0, 0]
-  gravity_enabled: False
-  sim_collision_enabled: False
-  visual_material: null
- 

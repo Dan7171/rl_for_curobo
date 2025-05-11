@@ -163,6 +163,10 @@ class MotionGenConfig:
     #: tried again until :attr:`MotionGenPlanConfig.finetune_attempts`.
     optimize_dt: bool = True
 
+
+    #: instance of dynamic obstacle collision checker.
+    dynamic_obs_checker: Optional[object] = None  # Add this field
+
     @staticmethod
     def load_from_robot_config(
         robot_cfg: Union[Union[str, Dict], RobotConfig],
@@ -245,6 +249,7 @@ class MotionGenConfig:
         use_cuda_graph_trajopt_metrics: bool = False,
         trajopt_fix_terminal_action: bool = True,
         trajopt_js_fix_terminal_action: bool = True,
+        dynamic_obs_checker: Optional[object] = None,
     ):
         """Create a motion generation configuration from robot and world configuration.
 
@@ -739,6 +744,7 @@ class MotionGenConfig:
             project_pose_to_goal_frame=project_pose_to_goal_frame,
             use_cuda_graph_metrics=use_cuda_graph_trajopt_metrics,
             fix_terminal_action=trajopt_fix_terminal_action,
+            dynamic_obs_checker=dynamic_obs_checker, # new
         )
         trajopt_solver = TrajOptSolver(trajopt_cfg)
 

@@ -1,6 +1,8 @@
+import threading
 from curobo.geom.sdf.world import CollisionQueryBuffer
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
 from curobo.geom.types import Cuboid, Sphere, WorldConfig
+from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from typing import List
 import numpy as np
@@ -23,7 +25,7 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_opt, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100):
+    def __init__(self, tensor_args, step_dt_traj_opt=None, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100, obs_groups_nspheres=[]):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -32,21 +34,24 @@ class DynamicObsCollPredictor:
             tensor_args: pytorch tensor arguments.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
             step_dt_traj_opt (float): Time passes between each step in the trajectory. This is what the mpc/curobo solver assumes time delta between steps in horizon is when parforming path planning.
-            H (int, optional): Defaults to 30. The horizon length. TODO: Should be taken from the mpc config.
+            H (int, optional): Defaults to 30. The horizon length- number of states in the trajectory during trajectory optimization.
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
-            # REMOVED FOR NOW:mask_decreasing_cost_entries: if True, the cost matrix will be modified so that only the first violation of the safety margin is considered.
+            obs_groups_nspheres: list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
             """
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
-        self.H = H 
+        self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
         self.n_rollouts = n_rollouts 
         self.step_dt_traj_opt = step_dt_traj_opt 
         self.cost_weight = cost_weight
-
         self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
         self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
+        self.obs_groups_nspheres = obs_groups_nspheres # list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
+        if len(obs_groups_nspheres) > 0:
+            assert sum(obs_groups_nspheres) == self.n_obs, "Error: The sum of the number of obstacles in the groups must be equal to the total number of obstacles"
+            self.obs_groups_start_idx_list = ([0] + list(np.cumsum(obs_groups_nspheres)))[:-1] # list of ints, each int is the start index of the group in the world.
         
         # Buffers for obstacles (spheres): position and radius
         self.rad_obs_buf = torch.zeros(self.n_obs, device=self.tensor_args.device) # [n_obs] obstacles radii buffer
@@ -70,31 +75,52 @@ class DynamicObsCollPredictor:
 
         # flags
         # self.init_obs = torch.tensor([0]) # [1] If 1, the obstacles are initialized.
-        self.init_rad_buffs = torch.tensor([0]) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
+        self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
         # self.is_active = torch.tensor([0]) # [1] If 1, the collision checker is active.
     
-    def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
+    def get_obs_group_idx_range(self, obs_group_idx:int):
         """
-        Activate the collision checker.
+        Get the start (inclusive) and end (exclusive) indices of the obstacles in the group.
+        For example, if the group is the first group, then the start index is 2 and its length is 2, returns (2,4).
         """
-        # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
-        self.p_obs_buf.copy_(p_obs)
-        self.rad_obs_buf.copy_(rad_obs)
-        self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-        # self.is_active[0] = 1 
-
-    # def reset_obs(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
+        return self.obs_groups_start_idx_list[obs_group_idx], (self.obs_groups_start_idx_list[obs_group_idx+1] if (obs_group_idx + 1) < len(self.obs_groups_start_idx_list) else self.n_obs) # self.obs_groups_nspheres[obs_group_idx]
+    
+    def get_n_obs(self):
+        return self.n_obs
+    
+    # def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
     #     """
-    #     Initialize the obstacles.
+    #     Activate the collision checker.
+    #     p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
+    #     rad_obs: tensor of shape [n_obs]. The radii of the obstacles.
     #     """
-    #     # self.p_obs_buf = torch.cat([self.p_obs_buf, p_obs], dim=1)
-    #     # self.rad_obs_buf = torch.cat([self.rad_obs_buf, rad_obs], dim=0)
+    #     # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
+    #     assert p_obs.ndim == 3, "Error: The obstacle poses must be a 3D tensor"
+    #     assert p_obs.shape[0] == self.H, "Error: The number of time steps in the obstacle poses must be equal to the horizon length"
+    #     assert p_obs.shape[1] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle poses"
+    #     assert p_obs.shape[2] == 3, "Error: The obstacle poses must be in 3D"
         
+    #     assert rad_obs.ndim == 1, "Error: The obstacle radii must be a 1D tensor"
+    #     assert rad_obs.shape[0] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
+
     #     self.p_obs_buf.copy_(p_obs)
     #     self.rad_obs_buf.copy_(rad_obs)
-    #     self.init_obs[0] = 1
+    #     self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
+
         
-    
+    def set_obs_rads(self, rad_obs:torch.Tensor):
+        """
+        rad_obs: tensor of shape [n_obs]. The radii of the obstacles.
+        """
+        
+        # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
+        assert rad_obs.ndim == 1, "Error: The obstacle radii must be a 1D tensor"
+        assert rad_obs.shape[0] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
+
+        self.rad_obs_buf.copy_(rad_obs)
+        self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
+
+        
     def update(self, p_obs:torch.Tensor):
         """
         Update the poses of the obstacles.
@@ -104,6 +130,16 @@ class DynamicObsCollPredictor:
         # self.p_obs = p_obs
         self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
     
+    
+    def update_obs_groups(self, p_obs:list[torch.Tensor],obs_groups_to_update:list[int]):
+        """
+        Update the poses of the obstacles in the groups.
+        """
+        for obs_group_id in obs_groups_to_update:
+            range_start, range_end = self.get_obs_group_idx_range(obs_group_id)
+            self.p_obs_buf[:, range_start:range_end, :].copy_(p_obs[obs_group_id][:, range_start:range_end,:]) # copy p_obs to self.p_obs in place.
+
+
     def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
         """
         Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
@@ -141,19 +177,179 @@ class DynamicObsCollPredictor:
         self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
         self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
         torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+        
         self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
 
      
+# class BatchDynamicObsCollChecker:
+#     def __init__(self, tensor_args, col_pred_list:List[DynamicObsCollPredictor]):
+#         """
+#         Initialize a batch of dynamic obstacle collision checkers.
+#         Args:
+#             tensor_args: pytorch tensor arguments.
+#         """
+#         self.tensor_args = tensor_args
+#         self.n_colliders = len(col_pred_list) 
+        
+#         self.streams = [torch.cuda.Stream() for _ in range(self.n_colliders)]
+#         self.graphs:List[torch.cuda.CUDAGraph] = [torch.cuda.CUDAGraph() for _ in range(self.n_colliders)]
+#         self.collision_checkers:List[DynamicObsCollPredictor] = [DynamicObsCollPredictor(self.tensor_args,None,self.H_list[i],self.n_rollouts_list[i],self.n_own_spheres_list[i],self.n_obs_list[i]) for i in range(self.n_colliders)]  #
+
+
+#     def capture(self):
+        
+#         for i in range(self.n_colliders):
+#             prad_obs_static = self.prad_obs_static_list[i]
+#             self.collision_checkers[i].update(prad_obs_static[:3])
+
+#             prad_own_static = self.prad_own_static_list[i]  # use dummy data with same shape as runtime data
+#             stream = self.streams[i]
+#             graph = self.graphs[i]
+#             checker = self.collision_checkers[i]
+
+#             with torch.cuda.stream(stream):
+#                 torch.cuda.synchronize()  # ensure the stream is idle
+#                 with torch.cuda.graph(graph):
+#                     checker.cost_fn(prad_own_static)
+
+    
+
+#     def run_graph(self, i, prad_own):
+#         stream = self.streams[i]
+#         checker = self.collision_checkers[i]
+#         # Copy the actual input to the pre-allocated buffer
+#         checker.prad_own_buf.copy_(prad_own)  # `prad_own_input` used inside `cost_fn`
+#         with torch.cuda.stream(stream):
+#             self.graphs[i].replay()
+
+
+
+# # In your timestep loop:
+# if __name__ == "__main__":
+#     h_list = [10, 10]
+#     n_rollouts_list = [20, 20]
+#     n_own_spheres_list = [12,12]
+#     n_obs_list = [12,23]
+#     batch_dynamic_obs_coll_checker = BatchDynamicObsCollChecker(TensorDeviceType(), H_list=h_list, n_rollouts_list=n_rollouts_list, n_own_spheres_list=n_own_spheres_list, n_obs_list=n_obs_list)
+#     batch_dynamic_obs_coll_checker.capture()
+#     threads = []
+
+#     while True:
+#         for i in range(batch_dynamic_obs_coll_checker.n_colliders):
+#             new_prad_own = torch.randn(h_list[i], n_own_spheres_list[i], 4, device=batch_dynamic_obs_coll_checker.tensor_args.device)
+#             t = threading.Thread(target=batch_dynamic_obs_coll_checker.run_graph, args=(i, new_prad_own))
+#             t.start()
+#             threads.append(t)
+
+#         for t in threads:
+#             t.join()
+
+#         # Optionally synchronize
+#         torch.cuda.synchronize()
+
+
+
 
         
+# class BatchDynamicObsCollChecker:
+#     def __init__(self, tensor_args, H_list:list[int], n_rollouts_list:list[int], n_own_spheres_list:list[int], n_obs_list:list[int]):
+#         """
+#         Initialize a batch of dynamic obstacle collision checkers.
+#         Args:
+#             tensor_args: pytorch tensor arguments.
+#             n_colliders: number of robots to check collision for
+#             H: horizon length
+#             n_rollouts: number of rollouts ()
+#             n_own_spheres: number of own spheres
+#             n_obs: number of obstacles
+#         """
+#         self.tensor_args = tensor_args
+#         self.n_colliders = len(H_list) 
+#         self.H_list = H_list # list of horizons, one for each robot
+#         self.n_rollouts_list = n_rollouts_list # list of number of rollouts, one for each robot
+#         self.n_own_spheres_list = n_own_spheres_list # list of number of own spheres, one for each robot
+#         self.n_obs_list = n_obs_list # list of number of obstacles, one for each robot
+
+#         self.prad_own_static_list:List[torch.Tensor] = [torch.zeros(
+#             self.n_rollouts_list[i], # number of rollouts
+#             self.H_list[i], # horizon length
+#             self.n_own_spheres_list[i], # number of own spheres
+#             4, # 4: position and radius
+#             device=self.tensor_args.device) for i in range(self.n_colliders)]
+        
+#         self.prad_obs_static_list:List[torch.Tensor] = [torch.zeros(
+#             self.n_rollouts_list[i], # number of rollouts
+#             self.H_list[i], # horizon length
+#             self.n_obs_list[i], # number of obstacles
+#             4, # 4: position and radius
+#             device=self.tensor_args.device) for i in range(self.n_colliders)]
+        
+            
+#         self.streams = [torch.cuda.Stream() for _ in range(self.n_colliders)]
+#         self.graphs:List[torch.cuda.CUDAGraph] = [torch.cuda.CUDAGraph() for _ in range(self.n_colliders)]
+#         self.collision_checkers:List[DynamicObsCollPredictor] = [DynamicObsCollPredictor(self.tensor_args,None,self.H_list[i],self.n_rollouts_list[i],self.n_own_spheres_list[i],self.n_obs_list[i]) for i in range(self.n_colliders)]  #
 
 
+#         for i in range(self.n_colliders):
+#             self.collision_checkers[i].activate(self.prad_obs_static_list[i][0,...,:3], self.prad_obs_static_list[i][0,0,...,3].flatten())
+        
+    
+#     def capture(self):
+        
+#         for i in range(self.n_colliders):
+#             prad_obs_static = self.prad_obs_static_list[i]
+#             self.collision_checkers[i].update(prad_obs_static[:3])
 
+#             prad_own_static = self.prad_own_static_list[i]  # use dummy data with same shape as runtime data
+#             stream = self.streams[i]
+#             graph = self.graphs[i]
+#             checker = self.collision_checkers[i]
+
+#             with torch.cuda.stream(stream):
+#                 torch.cuda.synchronize()  # ensure the stream is idle
+#                 with torch.cuda.graph(graph):
+#                     checker.cost_fn(prad_own_static)
 
     
 
-    
+#     def run_graph(self, i, prad_own):
+#         stream = self.streams[i]
+#         checker = self.collision_checkers[i]
+#         # Copy the actual input to the pre-allocated buffer
+#         checker.prad_own_buf.copy_(prad_own)  # `prad_own_input` used inside `cost_fn`
+#         with torch.cuda.stream(stream):
+#             self.graphs[i].replay()
 
 
 
+# # In your timestep loop:
+# if __name__ == "__main__":
+#     h_list = [10, 10]
+#     n_rollouts_list = [20, 20]
+#     n_own_spheres_list = [12,12]
+#     n_obs_list = [12,23]
+#     batch_dynamic_obs_coll_checker = BatchDynamicObsCollChecker(TensorDeviceType(), H_list=h_list, n_rollouts_list=n_rollouts_list, n_own_spheres_list=n_own_spheres_list, n_obs_list=n_obs_list)
+#     batch_dynamic_obs_coll_checker.capture()
+#     threads = []
+
+#     while True:
+#         for i in range(batch_dynamic_obs_coll_checker.n_colliders):
+#             new_prad_own = torch.randn(h_list[i], n_own_spheres_list[i], 4, device=batch_dynamic_obs_coll_checker.tensor_args.device)
+#             t = threading.Thread(target=batch_dynamic_obs_coll_checker.run_graph, args=(i, new_prad_own))
+#             t.start()
+#             threads.append(t)
+
+#         for t in threads:
+#             t.join()
+
+#         # Optionally synchronize
+#         torch.cuda.synchronize()
+
+
+
+
+
+if __name__ == "__main__":
+    x = [0] + list(np.cumsum([1,3,4]))[:-1]
+    print(x)

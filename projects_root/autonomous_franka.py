@@ -41,9 +41,9 @@ from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
 from curobo.types.tensor import T_DOF
 from curobo.types.state import FilterCoeff
-from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig,PoseCostMetric,)
+from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig, MotionGenResult,PoseCostMetric,)
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
-
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
 def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
@@ -84,7 +84,8 @@ class AutonomousFranka:
         self.robot_name = f'robot_{self.instance_id}'
         self.subroot_path = f'{self.world_root}/world_{self.robot_name}'
 
-        self.n_coll_spheres = 65
+        self.n_coll_spheres = 65 # num of self spheres which can be used for collision checking
+        self.valid_coll_spheres_idx = np.arange(self.n_coll_spheres - 4)
         self.n_coll_spheres_valid = self.n_coll_spheres - 4 # Should be number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
         
         # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
@@ -114,7 +115,10 @@ class AutonomousFranka:
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
         AutonomousFranka.instance_counter += 1
-        
+    
+    def get_num_of_sphers(self, valid_only:bool=True):
+        return self.n_coll_spheres if not valid_only else self.n_coll_spheres_valid
+    
     def get_world_model(self):
         return self.solver.world_coll_checker.world_model
 
@@ -432,7 +436,7 @@ class FrankaMpc(AutonomousFranka):
   
 
     
-    def init_solver(self,world_model, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor,debug=False):
+    def init_solver(self,world_model, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor=None,debug=False):
         """Initialize the MPC solver.
 
         Args:
@@ -441,7 +445,6 @@ class FrankaMpc(AutonomousFranka):
             step_dt_traj_mpc (_type_): _description_
             dynamic_obs_coll_predictor (_type_): _description_
         """
-        dynamic_obs_checker = dynamic_obs_coll_predictor # New
         
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
@@ -457,7 +460,7 @@ class FrankaMpc(AutonomousFranka):
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
             store_rollouts=True,  # Store trajectories for visualization
             step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
-            dynamic_obs_checker=dynamic_obs_checker, # New
+            dynamic_obs_checker=dynamic_obs_coll_predictor, # New
             override_particle_file=self.override_particle_file # New
         )
         
@@ -539,6 +542,8 @@ class FrankaMpc(AutonomousFranka):
             ans = self.articulation_controller.apply_action(art_action)
         return ans
     
+    def get_trajopt_horizon(self):
+        return self.H
 
     def set_new_target_for_solver(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
         solver_target_was_reset =  super().set_new_target_for_solver(real_target_position, real_target_orientation, sim_js)
@@ -566,7 +571,7 @@ class FrankaMpc(AutonomousFranka):
     
     def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True):
         """
-        Get the H steps plan from the solver.
+        Get the H steps plan from the solver. All positions are in the world frame.
         Args:
             in_task_space (bool): if True, return the plan in task space, otherwise return the plan in joint space.
             H (int, optional): the number of steps in the plan. If -1, return the entire plan. Defaults to -1.
@@ -658,31 +663,89 @@ class FrankaMpc(AutonomousFranka):
        
 
 class FrankaCumotion(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, reactive=False):
+    def __init__(self, 
+                # robot basic parameters
+                robot_cfg, 
+                world:World, 
+                usd_help:UsdHelper, 
+                p_R=np.array([0.0,0.0,0.0]), 
+                q_R=np.array([1,0,0,0]), 
+                p_T=np.array([0.5, 0.0, 0.5]), 
+                q_T=np.array([0, 1, 0, 0]), 
+                target_color=np.array([0, 0.5, 0]), 
+                target_size=0.05, 
+                # general parameters for planner
+                reactive=False, 
+                # Trajopt parameters
+                trajopt_tsteps=32,
+                trajopt_dt=0.15, 
+                optimize_dt=True, 
+                num_trajopt_seeds=12,
+                num_graph_seeds=12,
+                enable_graph_planner=False, 
+                interpolation_dt=0.05,
+                # Post trajectory optimization parameters
+                dilation_factor=0.5,
+                ):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
-
-        Args:
-            world (_type_): _description_
-            robot_name (_type_): _description_
-            p_R (_type_): _description_
+        
+        Args: (FOR MORE INFO SEE: https://curobo.org/_api/curobo.wrap.reacher.trajopt.html)
+            world (_type_): World of the simulation
+            robot_name (str): 
+            p_R: initial position of the robot
+            q_R: initial orientation of the robot
+            p_T: initial position of the target
+            q_T: initial orientation of the target
+            target_color (np.ndarray, optional): color of the target. Defaults to np.array([0, 0.5, 0]).
+            target_size (float, optional): size of the target. Defaults to 0.05.
             reactive (bool, optional): _description_. Defaults to False.
+            
+            # solver parameters:
+            trajopt_tsteps (int, optional):trajopt_tsteps – Number of waypoints (time steps, states) to use for (in each of the trajectories during) trajectory optimization. Default of 32 is found to be a good number for most cases. # Includes first and last states.
+            trajopt_dt (float, optional): trajopt_dt – Time step in seconds to use for trajectory optimization. A good value to start with is 0.15 seconds. This value is used to compute velocity, acceleration, and jerk values for waypoints through finite difference. Defaults to 0.15.
+            optimize_dt (bool, optional): # Optimize dt during trajectory optimization. Default of True is recommended to find time-optimal trajectories. Setting this to False will use the provided trajopt_dt for trajectory optimization. Setting to False is required when optimizing from a non-static start state.. Defaults to True.
+            num_trajopt_seeds (int, optional): _description_. Defaults to 12.
+            num_graph_seeds (int, optional): _description_. Defaults to 12.
+            interpolation_dt (float, optional): Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints. Defaults to 0.05.
+            enable_graph_planner (bool, optional): _description_. Defaults to False.
+            dilation_factor(float, optional): Slowing down the final plan by this factor. Probably for debugging. Belongs to the "re-timing" process after trajectory optimization. See comment in init_plan_config(). See https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult.retime_trajectory
+
         """
         super().__init__(robot_cfg, world, p_R, q_R, p_T, q_T, target_color, target_size)
 
-        self.solver = None
-        self.past_cmd:JointState = None
-        self.reactive = reactive
+        self.solver = None # motion generator
+        self.past_cmd:JointState = None # last commanded joint state
+        self.reactive = reactive # can start planning without waiting for the robot to be static (experimental and not recommended)
         self.num_targets = 0 # the number of the targets which are defined by curobo (after being static and ready to plan to) and have a successfull a plan for.
         self.max_attempts = 4 if not self.reactive else 1
         self.enable_finetune_trajopt = True if not self.reactive else False
+        self.trim_steps = None if not self.reactive else [1, None]
         self.pose_metric = None
         self.constrain_grasp_approach = False
         self.reach_partial_pose = None
         self.hold_partial_pose = None
-        self.cmd_plan = None
-        self.cmd_idx = 0
-     
+        self.cmd_plan = None # the global plan (commanded trajectory) while the robot is executing a plan, and None when its idle
+        self.cmd_idx = 0 # pointer to the current timestep in the command plan (don't change this)
+
+        # IK RELATED PARAMETERS:
+        # todo: add ik parameters here
+        
+        # GRAPH PLANNER RELATED PARAMETERS: (for graph planner (optional)- generating seeds for trajectory optimization)
+        self.enable_graph_planner = enable_graph_planner
+        self.num_graph_seeds = num_graph_seeds
+        
+        # TRAJECTORY OPTIMIZATION RELATED PARAMETERS:
+        # For full docs and more variables see: https://curobo.org/_api/curobo.wrap.reacher.trajopt.html
+        self.num_trajopt_seeds = num_trajopt_seeds # Num of seeds (inputs, initial trajectories) for trajectory optimization.
+        self.trajopt_tsteps = trajopt_tsteps if not self.reactive else 40 # trajopt_tsteps – Number of waypoints to use for trajectory optimization. Default of 32 is found to be a good number for most cases.
+        self.trajopt_dt = trajopt_dt if not self.reactive else 0.04 # time delta between steps in the trajectory during trajectory optimization.
+        self.optimize_dt = optimize_dt if not self.reactive else False
+        self.interpolation_dt = interpolation_dt if not self.reactive else self.trajopt_dt
+        # AFTER TRAJECTORY OPTIMIZATION RELATED PARAMETERS:
+        self.dilation_factor = dilation_factor if not self.reactive else 1.0 
+
+        # ---- Spawn the robot and target ----
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         
@@ -695,7 +758,8 @@ class FrankaCumotion(AutonomousFranka):
         return self.articulation_controller.apply_action(art_action)
 
     
-    def init_solver(self,world_model, collision_cache):
+    
+    def init_solver(self, world_model, collision_cache, dynamic_obs_coll_predictor=None, debug=False):
         """Initialize the motion generator (cumotion global planner).
 
         Args:
@@ -703,51 +767,43 @@ class FrankaCumotion(AutonomousFranka):
             collision_cache (_type_): _description_
             tensor_args (_type_): _description_
         """
-        tensor_args = self.tensor_args
-        trajopt_dt = None
-        optimize_dt = True
-        trajopt_tsteps = 32
-        trim_steps = None
-        
-        interpolation_dt = 0.05
-        if self.reactive:
-            trajopt_tsteps = 40
-            trajopt_dt = 0.04
-            optimize_dt = False
-            trim_steps = [1, None]
-            interpolation_dt = trajopt_dt
+    
+
         # See very good explainations for all the paramerts here: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenConfig
         motion_gen_config = MotionGenConfig.load_from_robot_config( # solver config
             self.robot_cfg, # robot_cfg – Robot configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of RobotConfig. See Supported Robots for a list of available robots. You can also create a a configuration file for your robot using Configuring a New Robot.
             world_model, # world_model – World configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of WorldConfig. See Collision World Representation for more details.
-            tensor_args, # tensor_args - Numerical precision and compute device to use for motion generation
+            self.tensor_args, # tensor_args - Numerical precision and compute device to use for motion generation
             collision_checker_type=CollisionCheckerType.MESH, # collision_checker_type – Type of collision checker to use for motion generation. Default of CollisionCheckerType.MESH supports world represented by Cuboids and Meshes. See Collision World Representation for more details.
-            num_trajopt_seeds=12, # num_trajopt_seeds – Number of seeds to use for trajectory optimization per problem query. Default of 4 is found to be a good number for most cases. Increasing this will increase memory usage.
-            num_graph_seeds=24, # num_graph_seeds – Number of seeds to use for graph planner per problem query. When graph planning is used to generate seeds for trajectory optimization, graph planner will attempt to find collision-free paths from the start state to the many inverse kinematics solutions.
-            interpolation_dt=interpolation_dt, # interpolation_dt – Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints.
+            num_trajopt_seeds=self.num_trajopt_seeds, # num_trajopt_seeds – Number of seeds to use for trajectory optimization per problem query. Default of 4 is found to be a good number for most cases. Increasing this will increase memory usage.
+            num_graph_seeds=self.num_graph_seeds, # num_graph_seeds – Number of seeds to use for graph planner per problem query. When graph planning is used to generate seeds for trajectory optimization, graph planner will attempt to find collision-free paths from the start state to the many inverse kinematics solutions.
+            interpolation_dt=self.interpolation_dt, # interpolation_dt – Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints.
             collision_cache=collision_cache, # collision_cache – Cache of obstacles to create to load obstacles between planning calls. An example: {"obb": 10, "mesh": 10}, to create a cache of 10 cuboids and 10 meshes.
-            optimize_dt=optimize_dt, # optimize_dt – Optimize dt during trajectory optimization. Default of True is recommended to find time-optimal trajectories. Setting this to False will use the provided trajopt_dt for trajectory optimization. Setting to False is required when optimizing from a non-static start state.
-            trajopt_dt=trajopt_dt, # trajopt_dt – Time step in seconds to use for trajectory optimization. A good value to start with is 0.15 seconds. This value is used to compute velocity, acceleration, and jerk values for waypoints through finite difference.
-            trajopt_tsteps=trajopt_tsteps, # trajopt_tsteps – Number of waypoints to use for trajectory optimization. Default of 32 is found to be a good number for most cases.
-            trim_steps=trim_steps, # trim_steps – Trim waypoints from optimized trajectory. The optimized trajectory will contain the start state at index 0 and have the last two waypoints be the same as T-2 as trajectory optimization implicitly optimizes for zero acceleration and velocity at the last waypoint. An example: [1,-2] will trim the first waypoint and last 3 waypoints from the optimized trajectory.
+            optimize_dt=self.optimize_dt, # optimize_dt – Optimize dt during trajectory optimization. Default of True is recommended to find time-optimal trajectories. Setting this to False will use the provided trajopt_dt for trajectory optimization. Setting to False is required when optimizing from a non-static start state.
+            trajopt_dt=self.trajopt_dt, # trajopt_dt – Time step in seconds to use for trajectory optimization. A good value to start with is 0.15 seconds. This value is used to compute velocity, acceleration, and jerk values for waypoints through finite difference.
+            trajopt_tsteps=self.trajopt_tsteps, # trajopt_tsteps – Number of waypoints to use for trajectory optimization. Default of 32 is found to be a good number for most cases.
+            trim_steps=self.trim_steps, # trim_steps – Trim waypoints from optimized trajectory. The optimized trajectory will contain the start state at index 0 and have the last two waypoints be the same as T-2 as trajectory optimization implicitly optimizes for zero acceleration and velocity at the last waypoint. An example: [1,-2] will trim the first waypoint and last 3 waypoints from the optimized trajectory.
+            use_cuda_graph=not debug, # Record compute ops as cuda graphs and replay recorded graphs where implemented. This can speed up execution by upto 10x. Default of True is recommended. Enabling this will prevent changing solve type or batch size after the first call to the solver.
+            dynamic_obs_checker=dynamic_obs_coll_predictor, # New!
         )
         self.solver = MotionGen(motion_gen_config)
         if not self.reactive:
             print("warming up...")
             self.solver.warmup(enable_graph=True, warmup_js_trajopt=False)
         
+        self.plan_config = self._init_plan_config()
         print("Curobo is Ready")
 
-    def init_plan_config(self):
+    def _init_plan_config(self):
         """Initialize the plan config for the motion generator.
         See all the documentation here: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenPlanConfig
         """
-        self.plan_config = MotionGenPlanConfig(
-            enable_graph=False, # Use graph planner to generate collision-free seed for trajectory optimization.
+        return MotionGenPlanConfig(
+            enable_graph=self.enable_graph_planner, # Use graph planner to generate collision-free seed for trajectory optimization.
             enable_graph_attempt=2, # Number of failed attempts at which to fallback to a graph planner for obtaining trajectory seeds.
             max_attempts=self.max_attempts, # Maximum number of attempts allowed to solve the motion generation problem.
             enable_finetune_trajopt=self.enable_finetune_trajopt, # Run finetuning trajectory optimization after running 100 iterations of trajectory optimization. This will provide shorter and smoother trajectories. When MotionGenConfig.optimize_dt is True, this flag will also scale the trajectory optimization by a new dt. Leave this to True for most cases. If you are not interested in finding time-optimal solutions and only want to use motion generation as a feasibility check, set this to False. Note that when set to False, the resulting trajectory is only guaranteed to be collision-free and within joint limits. When False, it’s not guaranteed to be smooth and might not execute on a real robot.
-            time_dilation_factor=0.5 if not self.reactive else 1.0, # Slow down optimized trajectory by re-timing with a dilation factor. This is useful to execute trajectories at a slower speed for debugging. Use this to generate slower trajectories instead of reducing MotionGenConfig.velocity_scale or MotionGenConfig.acceleration_scale as those parameters will require re-tuning of the cost terms while MotionGenPlanConfig.time_dilation_factor will only post-process the trajectory.
+            time_dilation_factor=self.dilation_factor, # Slow down optimized trajectory by re-timing with a dilation factor. This is useful to execute trajectories at a slower speed for debugging. Use this to generate slower trajectories instead of reducing MotionGenConfig.velocity_scale or MotionGenConfig.acceleration_scale as those parameters will require re-tuning of the cost terms while MotionGenPlanConfig.time_dilation_factor will only post-process the trajectory.
         )
     
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position, real_target_orientation,sim_js) -> bool:
@@ -756,6 +812,15 @@ class FrankaCumotion(AutonomousFranka):
         return robot_prerequisites and target_prerequisites
         
     def reset_command_plan(self, cu_js):
+
+        """
+        Replanning a new global plan and updating the command plan.
+
+        To better understand the code, see:
+        MotionGenResult: https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult.optimized_plan
+            interpolated_plan: interpolated solution, useful for visualization.
+
+        """
         print("reset_command_planning a new global plan - goal pose has changed!")
             
         # Set EE teleop goals, use cube for simple non-vr init:
@@ -770,6 +835,7 @@ class FrankaCumotion(AutonomousFranka):
         goal_pose = ik_goal # ik_goal is the updated target pose (which has moved)
         
         result: MotionGenResult = self.solver.plan_single(start_state, goal_pose, self.plan_config) # https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGen.plan_single:~:text=GraphResult-,plan_single,-( , https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult:~:text=class-,MotionGenResult,-(
+        self.last_motion_gen_result = result 
         succ = result.success.item()  # an attribute of this returned object that signifies whether a trajectory was successfully generated. success tensor with index referring to the batch index.
         
         if self.num_targets == 1: # it's 1 only immediately after the first time it found a successfull plan for the FIRST time (first target).
@@ -796,7 +862,7 @@ class FrankaCumotion(AutonomousFranka):
         if succ: 
             print(f"target counter - targets with a reachible plan = {self.num_targets}") 
             self.num_targets += 1
-            cmd_plan = result.get_interpolated_plan() # TODO: To clarify myself what get_interpolated_plan() is doing to the initial "result"  does. Also see https://curobo.org/get_started/2a_python_examples.html#:~:text=result%20%3D%20motion_gen.plan_single(start_state%2C%20goal_pose%2C%20MotionGenPlanConfig(max_attempts%3D1))%0Atraj%20%3D%20result.get_interpolated_plan()%20%20%23%20result.interpolation_dt%20has%20the%20dt%20between%20timesteps%0Aprint(%22Trajectory%20Generated%3A%20%22%2C%20result.success)
+            cmd_plan = result.get_interpolated_plan() # Get interpolated trajectory from the result. https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult.get_interpolated_plan https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult.interpolation_dt
             cmd_plan = self.solver.get_full_js(cmd_plan) # get the full joint state from the interpolated plan
             # get only joint names that are in both:
             self.idx_list = []
@@ -807,29 +873,29 @@ class FrankaCumotion(AutonomousFranka):
                     self.common_js_names.append(x)
 
             cmd_plan = cmd_plan.get_ordered_joint_state(self.common_js_names)
-            
             self.cmd_plan = cmd_plan # global plan
             self.cmd_idx = 0 # commands executed from the global plan (counter)
         else:
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             cmd_plan = None
 
-    def get_plan(self, in_task_space:bool, n_steps:int=-1):
+    def get_plan(self, include_task_space:bool=True,to_go_only=True, plan_stage='final'):
         # TODO: SEE get_plan() implementation OF MPC and projects_root/examples/mpc_moving_obstacles_mpc_cumotion.py
-        plan = self.get_current_plan_as_tensor()            
+        plan = self.get_current_plan_as_tensor(to_go_only, plan_stage)            
         if plan is not None: # new plan is availabe    
-            p_jsplan, vel_jsplan = robot2_plan[0], robot2_plan[1] # from current time step t to t+H-1 inclusive
-            # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
+            p_jsplan, vel_jsplan = plan[0], plan[1] # from current time step t to t+H-1 inclusive
+            # Compute FK on plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
             p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(p_jsplan, vel_jsplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
             valid_only = True # remove spheres that are not valid (i.e. negative radius)
             if valid_only:
-                prad_spheresPlan = prad_spheresPlan[:, :self.n_coll_spheres_valid]
-
+                prad_spheresPlan = prad_spheresPlan[:, self.valid_coll_spheres_idx]
             # convert to world frame (W):
-            p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
-            p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
-            p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
-            rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
+            p_rad_spheresfullplan = prad_spheresPlan[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
+            p_rad_spheresfullplan[:,:,:3] = p_rad_spheresfullplan[:,:,:3] + self.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
+            p_spheresfullplan = p_rad_spheresfullplan[:,:,:3]
+            rad_spheres = p_rad_spheresfullplan[0,:,3] 
+
+            return p_spheresfullplan, rad_spheres
 
     def get_curobo_joint_state(self, sim_js=None,zero_vel=False) -> JointState:
         """
@@ -857,8 +923,10 @@ class FrankaCumotion(AutonomousFranka):
 
         return cu_js    
     
+    def get_trajopt_horizon(self):
+        return self.trajopt_tsteps
 
-    def get_current_plan_as_tensor(self, to_go_only=True) -> torch.Tensor:
+    def get_current_plan_as_tensor(self, to_go_only=True, plan_stage='final') -> torch.Tensor:
         """
         Returns the joint states at at the start of each command in the current plan and the joint velocity commands in the current plan.
 
@@ -868,16 +936,37 @@ class FrankaCumotion(AutonomousFranka):
         Returns:
             _type_: _description_
         """
+        
         if self.cmd_plan is None:
             return None # robot is not following any plan at the moment
-        n_total = len(self.cmd_plan) # total num of commands (actions) to apply to controller in current command (global) plan
+        
+        if plan_stage == 'optimized': # Optimized plan: this is the plan right after optimization part in the motion generator. Length should be as trajopt_tsteps (todo: verify that).
+            plan = self.last_motion_gen_result.optimized_plan
+        elif plan_stage == 'final': # Final plan: this is the plan which will be sent to controller (optimized, interpoladed, and time-dilated if applied)
+            plan = self.cmd_plan
+        else:
+            raise ValueError(f"Invalid plan stage: {plan_stage}")
+        n_total = len(plan) # total num of commands (actions) to apply to controller in current command (global) plan
         n_applied = self.cmd_idx # number of applied actions from total command plan
-        n_to_go = n_total - n_applied # num of commands left to execute 
+        # n_to_go = n_total - n_applied # num of commands left to execute 
         start_idx = 0 if not to_go_only else n_applied
-        start_q = self.cmd_plan.position[start_idx:] # at index i: joint positions just before applying the ith command
-        vel_cmd = self.cmd_plan.velocity[start_idx:] # at index i: joint velocities to apply to the ith command
+        start_q = plan.position[start_idx:] # at index i: joint positions just before applying the ith command
+        vel_cmd = plan.velocity[start_idx:] # at index i: joint velocities to apply to the ith command
         return torch.stack([start_q, vel_cmd]) # shape: (2, len(plan), dof_num)
     
+    def get_plan_dt(self, dt_type='optimized'):
+        """
+        Returns the time step of the plan.
+        dt_type:
+        optimized_dt – Time between steps in the optimized trajectory.
+        interpolation_dt – Time between steps in the interpolated trajectory. If None, MotionGenResult.interpolation_dt is used.
+
+        """
+        if dt_type == 'optimized':
+            return self.last_motion_gen_result.optimized_dt
+        elif dt_type == 'interpolation':
+            return self.last_motion_gen_result.interpolation_dt 
+
     def get_next_articulation_action(self,idx_list):
         next_cmd = self.cmd_plan[self.cmd_idx] # get the next joint command from the plan
         self.past_cmd = next_cmd.clone() # save the past command for future use
@@ -908,3 +997,10 @@ class FrankaCumotion(AutonomousFranka):
             self.cmd_joint_state.jerk[:] = qdd_des * 0.0
         return self.cmd_joint_state.clone()
         
+    def init_col_predictor(self,obs_groups_nspheres:list[int]=[]) -> DynamicObsCollPredictor:
+        n_particles = self.num_trajopt_seeds 
+        H = self.trajopt_tsteps # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
+        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args, None, H, n_particles, self.n_coll_spheres_valid, sum(obs_groups_nspheres), obs_groups_nspheres=obs_groups_nspheres)
+        return self.dynamic_obs_col_pred
+    
+    

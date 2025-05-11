@@ -96,6 +96,7 @@ class TrajOptSolverConfig:
     store_debug_in_result: bool = False
     optimize_dt: bool = True
     use_cuda_graph: bool = True
+    dynamic_obs_checker: Optional[object] = None
 
     @staticmethod
     @profiler.record_function("trajopt_config/load_from_robot_config")
@@ -150,6 +151,7 @@ class TrajOptSolverConfig:
         project_pose_to_goal_frame: bool = True,
         use_cuda_graph_metrics: bool = False,
         fix_terminal_action: bool = False,
+        dynamic_obs_checker: Optional[object] = None,
     ):
         """Load TrajOptSolver configuration from robot configuration.
 
@@ -296,7 +298,7 @@ class TrajOptSolverConfig:
                 trajectories after trajectory optimization. If interpolation_buffer is smaller
                 than interpolated trajectory, then the buffers will be re-created. This can cause
                 existing cuda graph to be invalid.
-
+            dynamic_obs_checker: Instance of DynamicObsCollPredictor to use for in trajectory optimization (optional).
         Returns:
             TrajOptSolverConfig: Trajectory optimization configuration.
         """
@@ -674,6 +676,14 @@ class TrajOptSolver(TrajOptSolverConfig):
         self._kin_list = None
         self._rollout_list = None
 
+        # Set the dynamic obstacle checker in all rollout functions
+        # new
+        self.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        self.solver.safety_rollout.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        for optimizer in self.solver.optimizers:
+            optimizer.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+    
+        
     def get_all_rollout_instances(self) -> List[RolloutBase]:
         """Get all rollout instances in the solver.
 

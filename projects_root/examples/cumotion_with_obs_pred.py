@@ -8,7 +8,8 @@ HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles 
 DEBUG_GPU_MEM = False # If True, then the GPU memory usage will be printed on every call to my_world.step()
 RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
 PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
-
+OBS_PREDICTION = True # same as MODIFY_MPC_COST_FN_FOR_DYNAMIC_OBS in past scripts using mpc...
+DEBUG = True
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
     # arg parsing:
@@ -77,6 +78,8 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from typing import List, Optional
     import torch
     import numpy as np
+    import threading
+
     # Isaac Sim app initiation and isaac sim modules
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
     simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
@@ -258,77 +261,106 @@ def main():
     
     # Adding two frankas to the scene
     # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batch motion gen reacher example is for multiple worlds)
-    n_robots = 1
-    robots_cu_js: List[Optional[JointState]] =[None] * n_robots # for visualization of robot spheres
-    robots_collision_caches = [{"obb": 100, "mesh": 100}] * n_robots
+    X_Robots = [
+        np.array([0,0,0,1,0,0,0], dtype=np.float32),
+        np.array([1.2,0,0,1,0,0,0], dtype=np.float32)
+        ] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
+    n_robots = len(X_Robots)
+    robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
+    robots_collision_caches = [{"obb": 100, "mesh": 100} for _ in range(n_robots)]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
-    robot_idx_lists:List[Optional[List]] = [None] * n_robots
-    X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
+    robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
     robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    X_binCenter = np.array([0.6, 0, 0.2, 1, 0, 0, 0], dtype=np.float32)
-    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0]]
-
-    # X_target = X_binCenter.copy()
-    # X_target[3:5] = [0,1] # upside down
-    # X_Targets = [X_target.copy(), X_target.copy()] 
-    # bin_dim = 0.4 # depends on the cfg file
-    # p_infront, p_behind, p_on_left, p_on_right = X_binCenter[:3] + np.array([0,0.75 * bin_dim,bin_dim]),  X_binCenter[:3] + np.array([0,-0.75 * bin_dim,bin_dim]), X_binCenter[:3] + np.array([0.75 * bin_dim,0,bin_dim]), X_binCenter[:3] + np.array([- 0.75 * bin_dim,0,bin_dim])
-    # valid_neihborhood = [[p_infront, p_behind, X_binCenter[:3]], [p_infront, p_behind, X_binCenter[:3]]]
+    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [1.8, 0, 0.2, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
+    
+    if OBS_PREDICTION:
+        col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+   
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
     env_obstacles = [] # list of obstacles in the world
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
-            print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
+            if obstacle.cchecking_enabled:
+                world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
+                print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")            
         env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
-    robots = [ 
-        FrankaCumotion(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], q_T=X_Targets[0][3:], target_color=np.array([0,0.5,0]))]
-        
+    robots:List[FrankaCumotion] = []
+    for i in range(n_robots):
+        robots.append(FrankaCumotion(
+            robot_cfgs[i], my_world, usd_help, 
+            p_R=X_Robots[i][:3],q_R=X_Robots[i][3:], p_T=X_Targets[i][:3],
+            q_T=X_Targets[i][3:], target_color=np.array([0,0.5,0]),
+            dilation_factor=None))
     
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
-    
-    ################ PRE PLAYING SIM ###################
-
-    
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
     
     ################# SIM IS PLAYING ###################    
-    dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
+    # dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
     ccheckers = []
     # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    obs_viz_init = False
-    total_obs_all_robots = sum([robots[i].n_coll_spheres_valid for i in range(n_robots)])
     
+    col_preds = []
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
-        # init solver
-        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i])
-        robots[i].init_plan_config() # TODO: Can probably be move to constructor.
+        
+        # init dynamic obs coll predictors
+        if OBS_PREDICTION:
+            obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
+            robot.init_col_predictor(obs_groups_nspheres)
+            col_pred = robot.dynamic_obs_col_pred
+        else:
+            col_pred = None
+        col_preds.append(col_pred)
+    
+    # init solvers
+    threads = []
+    for i in range(n_robots):
+        t = threading.Thread(target=robots[i].init_solver, args=(robot_world_models[i],robots_collision_caches[i],col_preds[i], DEBUG))
+        threads.append(t)
+        t.start()
+    
+    for t in threads:
+        t.join()
+    
+    for i in range(n_robots):
+        # robots[i].init_solver(robot_world_models[i],robots_collision_caches[i],col_pred, DEBUG)
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
         robots[i].robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
 
     # register ccheckers for environment obstacles
     for i in range(len(env_obstacles)):
-        env_obstacles[i].register_ccheckers(ccheckers)
-            
+        if env_obstacles[i].cchecking_enabled:
+            env_obstacles[i].register_ccheckers(ccheckers)
+
+    # initialize (activate) dynamic obs col predictors, each with its own obstacles       
+    robots_spheres_s0 = [robot.get_current_spheres_state() for robot in robots]
+    for i in range(n_robots):
+        if hasattr(robots[i], 'dynamic_obs_col_pred'): 
+            col_pred = robots[i].dynamic_obs_col_pred
+            # p_spheresColwithS0 = torch.concat([robots_spheres_s0[other][0] for other in col_pred_with[i]])
+            rad_spheresColwithS0 = torch.concat([robots_spheres_s0[other][1] for other in col_pred_with[i]])
+            col_pred.set_obs_rads(rad_spheresColwithS0)
+        
     t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     ctrl_loop_start_time = time.time()
+    
     while simulation_app.is_running():                 
-        
+        point_visualzer_inputs = []
         my_world.step(render=True)  
-        
         # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
         for i in range(len(env_obstacles)): 
             env_obstacles[i].update_registered_ccheckers()
 
+        
         for i in range(n_robots):
             # get joint state
             sim_js = robots[i].get_sim_joint_state() # robot2.robot.get_joints_state() # reading current joint state from robot
@@ -337,29 +369,47 @@ def main():
                 continue
             # get real (most updated) position of target
             p_T, q_T = robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose        
-                
+
+            # update target and replan if needed
             if robots[i].set_new_target_for_solver(p_T, q_T, sim_js):
-                print("robot2 target changed!, updating plan")
                 robots[i].reset_command_plan(robots_cu_js[i]) # replanning a new global plan and setting robot2.cmd_plan to point the new plan.
-            
+        
+        all_plans_to_go = [robot.get_plan(plan_stage='optimized') for robot in robots] # arr[i] is None if no plan for robot i
+        for i in range(n_robots):
+            if VISUALIZE_PREDICTED_OBS_PATHS:
+                if all_plans_to_go[i] is not None:
+                    global_plan_points = {'points': all_plans_to_go[i][0], 'color': 'green'}
+                    point_visualzer_inputs.append(global_plan_points)        
+        
+            # update dynamic obs col predictor
+            if hasattr(robots[i], 'dynamic_obs_col_pred'):
+                col_pred = robots[i].dynamic_obs_col_pred 
+                obs_groups_to_update = []
+                p_obs_groups = []
+                for j, obs_group_id in enumerate(col_pred_with[i]):
+                    if all_plans_to_go[obs_group_id] is not None:
+                        obs_groups_to_update.append(j)
+                        p_obs_group = all_plans_to_go[obs_group_id][0]
+
+                        # if the plan to go is shorter than the robot horizon, repeat the last step of the plan to go
+                        obs_plan_to_go_len = p_obs_group.shape[0]
+                        robot_horizon = robots[i].get_trajopt_horizon() # works for both mpc and cumotion
+                        tail_len = robot_horizon - obs_plan_to_go_len
+                        if tail_len > 0:
+                            tail = p_obs_group[-1].unsqueeze(0).repeat(tail_len, 1, 1) # repeat the last step of the obstacle plan
+                            p_obs_group = torch.cat([p_obs_group, tail],dim=0)
+                             
+                        p_obs_groups.append(p_obs_group)
+                col_pred.update_obs_groups(p_obs_groups, obs_groups_to_update)
+
+
+        for i in range(n_robots):
+            # execute the next action in the plan if plan is not over
             if robots[i].cmd_plan is not None:
                 art_action = robots[i].get_next_articulation_action(idx_list=robot_idx_lists[i])
                 robots[i].apply_articulation_action(art_action)
-        
-                    
-                    # pos_jsfullplan, vel_jsfullplan = plan[0], plan[1] # from current time step t to t+H-1 inclusive
-                    # # Compute FK on robot2 plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
-                    # p_eefullplan_R, q_eefullplan_R, _, _, p_linksfullplan_R, q_linksfullplan_R, p_rad_spheresfullplan_R = robots[i].crm.forward(pos_jsfullplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-                    # valid_only = True # remove spheres that are not valid (i.e. negative radius)
-                    # if valid_only:
-                    #     p_rad_spheresfullplan_R = p_rad_spheresfullplan_R[:,:-4]
 
-                    # # convert to world frame (W):
-                    # p_rad_spheresR2fullplan = p_rad_spheresR2fullplan_R2[:,:,:].cpu() # copy of the spheres in robot2 frame (R2)
-                    # p_rad_spheresR2fullplan[:,:,:3] = p_rad_spheresR2fullplan[:,:,:3] + robot2.p_R # # offset of robot2 origin in world frame (only position, radius is not affected)
-                    # p_spheresR2fullplan = p_rad_spheresR2fullplan[:,:,:3]
-                    # rad_spheresR2 = p_rad_spheresR2fullplan[0,:,3] # 65x4 sphere centers (x,y,z) and radii (4th column)
-                    
+                
 
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
         
@@ -367,8 +417,10 @@ def main():
             print("t = ", t_idx)
             ctrl_loop_freq = t_idx / (time.time() - ctrl_loop_start_time) 
             print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
+
+        if len(point_visualzer_inputs):
+            draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")() 
  
-       
 if __name__ == "__main__":
     if DEBUG_GPU_MEM:
         signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
