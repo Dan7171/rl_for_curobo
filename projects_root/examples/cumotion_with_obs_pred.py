@@ -81,17 +81,17 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import threading
     # initialization of isaac sim
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
-    simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
+    simulation_app = init_app({"headless": args.headless_mode is not None, "width": "1920", "height": "1080"}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
     # optimization of isaac sim 
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
     # See: https://docs.isaacsim.omniverse.nvidia.com/latest/development_tools/carb_settings.html
-    import carb
-    settings = carb.settings.get_settings()
-    settings.set_int("/rtx/post/dlss/execMode", 0) # the most performant setting, reducing VRAM consumption and rendering time but decreasing render quality. This is the default value in Isaac Sim.
-    settings.set("rtx-transient/resourcemanager/texturestreaming/memoryBudget", 0.1) # educe the Texture Streaming Budget (0.6 is the default value))
-    settings.set("/rtx/rendermode", 0)  # Disable RTX
-    settings.set("/app/renderer/enableRayTracing", False)
-    torch.set_default_dtype(torch.float32)
+    #import carb
+    # settings = carb.settings.get_settings()
+    # settings.set_int("/rtx/post/dlss/execMode", 0) # the most performant setting, reducing VRAM consumption and rendering time but decreasing render quality. This is the default value in Isaac Sim.
+    # settings.set("rtx-transient/resourcemanager/texturestreaming/memoryBudget", 0.1) # educe the Texture Streaming Budget (0.6 is the default value))
+    # settings.set("/rtx/rendermode", 0)  # Disable RTX
+    # settings.set("/app/renderer/enableRayTracing", False)
+    # # torch.set_default_dtype(torch.float32)
 
     # isaac sim modules
     from omni.isaac.core import World 
@@ -308,6 +308,8 @@ def main():
             p_R=X_Robots[i][:3],q_R=X_Robots[i][3:], p_T=X_Targets[i][:3],
             q_T=X_Targets[i][3:], target_color=np.array([0,0.5,0]),
             dilation_factor=None,
+            num_ik_seeds=500,
+            evaluate_interpolated_trajectory=True
             # num_trajopt_seeds=12
             )
         )
@@ -330,7 +332,7 @@ def main():
         if OBS_PREDICTION:
             obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
             if len(col_pred_with[i]): # if we set to the robot at least one dynamic obstacle group to account for  
-                robot.init_col_predictor(obs_groups_nspheres, cost_weight=100000000, manually_express_p_own_in_world_frame=True)
+                robot.init_col_predictor(obs_groups_nspheres, cost_weight=10000, manually_express_p_own_in_world_frame=True)
         
         # init solver
         robot.init_solver(robot_world_models[i],robots_collision_caches[i], DEBUG)

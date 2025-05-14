@@ -676,7 +676,9 @@ class FrankaCumotion(AutonomousFranka):
                 target_size=0.05, 
                 # general parameters for planner
                 reactive=False, 
-                # Trajopt parameters
+                
+                # Solver configuration parameters (parameters for MotionGenConfig)
+                num_ik_seeds=32,
                 trajopt_tsteps=32,
                 trajopt_dt=0.15, 
                 optimize_dt=True, 
@@ -686,6 +688,7 @@ class FrankaCumotion(AutonomousFranka):
                 interpolation_dt=0.05,
                 # Post trajectory optimization parameters
                 dilation_factor=0.5,
+                evaluate_interpolated_trajectory=True
                 ):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
@@ -707,10 +710,11 @@ class FrankaCumotion(AutonomousFranka):
             optimize_dt (bool, optional): # Optimize dt during trajectory optimization. Default of True is recommended to find time-optimal trajectories. Setting this to False will use the provided trajopt_dt for trajectory optimization. Setting to False is required when optimizing from a non-static start state.. Defaults to True.
             num_trajopt_seeds (int, optional): _description_. Defaults to 12.
             num_graph_seeds (int, optional): _description_. Defaults to 12.
+            num_ik_seeds (int, optional): num_ik_seeds Number of seeds to use for solving inverse kinematics. Default of 32 is found to be a good number for most cases. In sparse environments, a lower number of 16 can also be used. Note: in paper they advise to start with 500 for tuning. See in https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenConfig
             interpolation_dt (float, optional): Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints. Defaults to 0.05.
             enable_graph_planner (bool, optional): _description_. Defaults to False.
             dilation_factor(float, optional): Slowing down the final plan by this factor. Probably for debugging. Belongs to the "re-timing" process after trajectory optimization. See comment in init_plan_config(). See https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult.retime_trajectory
-
+            evaluate_interpolated_trajectory(bool, optional): I set it to False for the dynamic obstacles. Original docs: evaluate_interpolated_trajectory – Evaluate interpolated trajectory after optimization. Default of True is recommended to ensure the optimized trajectory is not passing through very thin obstacles.
         """
         super().__init__(robot_cfg, world, p_R, q_R, p_T, q_T, target_color, target_size)
 
@@ -730,7 +734,7 @@ class FrankaCumotion(AutonomousFranka):
 
         # IK RELATED PARAMETERS:
         # todo: add ik parameters here
-        
+        self.num_ik_seeds = num_ik_seeds
         # GRAPH PLANNER RELATED PARAMETERS: (for graph planner (optional)- generating seeds for trajectory optimization)
         self.enable_graph_planner = enable_graph_planner
         self.num_graph_seeds = num_graph_seeds
@@ -742,8 +746,10 @@ class FrankaCumotion(AutonomousFranka):
         self.trajopt_dt = trajopt_dt if not self.reactive else 0.04 # time delta between steps in the trajectory during trajectory optimization.
         self.optimize_dt = optimize_dt if not self.reactive else False
         self.interpolation_dt = interpolation_dt if not self.reactive else self.trajopt_dt
+        self.evaluate_interpolated_trajectory = evaluate_interpolated_trajectory
         # AFTER TRAJECTORY OPTIMIZATION RELATED PARAMETERS:
         self.dilation_factor = dilation_factor if not self.reactive else 1.0 
+
 
         # ---- Spawn the robot and target ----
         self._spawn_robot_and_target(usd_help)
@@ -778,6 +784,7 @@ class FrankaCumotion(AutonomousFranka):
             world_model, # world_model – World configuration to use for motion generation. This can be a path to a yaml file, a dictionary, or an instance of WorldConfig. See Collision World Representation for more details.
             self.tensor_args, # tensor_args - Numerical precision and compute device to use for motion generation
             collision_checker_type=CollisionCheckerType.MESH, # collision_checker_type – Type of collision checker to use for motion generation. Default of CollisionCheckerType.MESH supports world represented by Cuboids and Meshes. See Collision World Representation for more details.
+            num_ik_seeds=self.num_ik_seeds, # num_ik_seeds – Number of seeds to use for solving inverse kinematics. Default of 32 is found to be a good number for most cases. In sparse environments, a lower number of 16 can also be used. Note: in paper they advise to start with 500 for tuning.   
             num_trajopt_seeds=self.num_trajopt_seeds, # num_trajopt_seeds – Number of seeds to use for trajectory optimization per problem query. Default of 4 is found to be a good number for most cases. Increasing this will increase memory usage.
             num_graph_seeds=self.num_graph_seeds, # num_graph_seeds – Number of seeds to use for graph planner per problem query. When graph planning is used to generate seeds for trajectory optimization, graph planner will attempt to find collision-free paths from the start state to the many inverse kinematics solutions.
             interpolation_dt=self.interpolation_dt, # interpolation_dt – Time step in seconds to use for generating interpolated trajectory from optimized trajectory. Change this if you want to generate a trajectory with a fixed timestep between waypoints.
@@ -787,6 +794,7 @@ class FrankaCumotion(AutonomousFranka):
             trajopt_tsteps=self.trajopt_tsteps, # trajopt_tsteps – Number of waypoints to use for trajectory optimization. Default of 32 is found to be a good number for most cases.
             trim_steps=self.trim_steps, # trim_steps – Trim waypoints from optimized trajectory. The optimized trajectory will contain the start state at index 0 and have the last two waypoints be the same as T-2 as trajectory optimization implicitly optimizes for zero acceleration and velocity at the last waypoint. An example: [1,-2] will trim the first waypoint and last 3 waypoints from the optimized trajectory.
             use_cuda_graph=not debug, # Record compute ops as cuda graphs and replay recorded graphs where implemented. This can speed up execution by upto 10x. Default of True is recommended. Enabling this will prevent changing solve type or batch size after the first call to the solver.
+            evaluate_interpolated_trajectory=self.evaluate_interpolated_trajectory, # evaluate_interpolated_trajectory – Evaluate interpolated trajectory after optimization. Default of True is recommended to ensure the optimized trajectory is not passing through very thin obstacles.
             dynamic_obs_checker=dynamic_obs_coll_predictor, # New!
         )
         self.solver = MotionGen(motion_gen_config)

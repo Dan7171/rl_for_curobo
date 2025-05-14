@@ -1759,7 +1759,7 @@ class TrajOptSolver(TrajOptSolverConfig):
         Args:
             traj_state: Optimized trajectories of shape [num_seeds * batch, action_horizon, dof].
 
-        Returns:
+        Returns:1
             Tuple[JointState, torch.Tensor, torch.Tensor]: Interpolated trajectory, last time step
                 for each trajectory in batch, optimal dt for each trajectory in batch.
         """

@@ -378,6 +378,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 )
                 cost_list.append(coll_cost)
         
+        
         # Dynamic obstacle predictive collision checking.
         dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
         if dynamic_obs_col_checker is not None:
@@ -385,6 +386,9 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
                 dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
                 cost_list.append(dynamic_coll_cost) 
+
+
+      
        
         if return_list:
             return cost_list
@@ -426,6 +430,10 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         ):
             self_constraint = self.robot_self_collision_constraint.forward(state.robot_spheres)
             constraint_list.append(self_constraint)
+        
+        if (dynamic_obs_col_checker := self.get_dynamic_obs_coll_predictor()) is not None: # new
+            constraint_list.append(dynamic_obs_col_checker.cost_fn(state.robot_spheres))
+        
         constraint = cat_sum(constraint_list)
 
         feasible = constraint == 0.0
