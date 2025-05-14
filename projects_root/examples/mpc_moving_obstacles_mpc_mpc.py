@@ -55,10 +55,12 @@ Example options:
 """
 
 # ############################## Run settings ##############################
+
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-MODIFY_MPC_COST_FN_FOR_DYN_OBS  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+OBS_PREDICTION  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
 VISUALIZE_PREDICTED_OBS_PATHS = False # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
@@ -138,6 +140,8 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from typing import List, Optional
     import torch
     import numpy as np
+    from dataclasses import dataclass
+
     # Isaac Sim app initiation and isaac sim modules
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
     simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
@@ -157,9 +161,20 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from curobo.util_file import  load_yaml
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
+    from projects_root.autonomous_franka import AutonomousFranka
     a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
 ######################### HELPER ##########################
+@dataclass
+class TargetColors:
+    red: np.ndarray = np.array([0.5,0,0])
+    green: np.ndarray = np.array([0,0.5,0])
+    blue: np.ndarray = np.array([0,0,0.5])
+    yellow: np.ndarray = np.array([0.5,0.5,0])
+    purple: np.ndarray = np.array([0.5,0,0.5])
+    orange: np.ndarray = np.array([0.5,0.3,0])
+    pink: np.ndarray = np.array([0.5,0.3,0.5])
+  
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     def wrapper(*args, **kwargs):
         duration, rate = None, None
@@ -177,7 +192,7 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
             return result
     return wrapper
 
-def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,step_dt_traj_mpc):
+def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,MPC_DT):
     """Prints information about the control loop frequncy (desired vs measured) and warns if it's too different.
     Args:
         t_idx (_type_): _description_   
@@ -203,7 +218,7 @@ def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_
     if ctrl_freq_ratio > 1.05 or ctrl_freq_ratio < 0.95:
         print(f"WARNING! Control frequency ratio is {ctrl_freq_ratio:.5f}. \
             But MPC is 'thinks' that the frequency of sending commands to the robot is {expected_ctrl_freq_at_mpc:.5f} Hz, {cfm_avg_control_freq:.5f} Hz was assigned.\n\
-                You probably need to change mpc_config.step_dt(step_dt_traj_mpc) from {step_dt_traj_mpc} to {cfm_avg_step_dt})")
+                You probably need to change mpc_config.step_dt(MPC_DT) from {MPC_DT} to {cfm_avg_step_dt})")
 
 def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch.Tensor, sphere_names:list, tensor_args:TensorDeviceType) -> list[Sphere]:
     """
@@ -324,25 +339,36 @@ def main():
     # Adding two frankas to the scene
     # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batch motion gen reacher example is for multiple worlds)
     
-    robots: List[FrankaMpc] = [None, None]
-    robots_cu_js: List[Optional[JointState]] =[None, None] # for visualization of robot spheres
-    robots_collision_caches = [{"obb": 100, "mesh": 100}, {"obb": 100, "mesh": 100}]
-    robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,3)]
-    robot_idx_lists:List[Optional[List]] = [None, None]
-    X_Robots = [np.array([0,0,0,1,0,0,0], dtype=np.float32), np.array([1.2,0,0,1,0,0,0], dtype=np.float32)] # X_RobotOrigin (x,y,z,qw, qx,qy,qz) (expressed in world frame)
-    robot_world_models = [WorldConfig() for _ in range(len(robots))]
-    X_binCenter = np.array([0.6, 0, 0.2, 1, 0, 0, 0], dtype=np.float32)
-    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [0.6, 0, 0.2, 0, 1, 0, 0]]
+    X_Robots = [
+        np.array([0,0,0,1,0,0,0], dtype=np.float32),
+        np.array([1.2,0,0,1,0,0,0], dtype=np.float32)
+        ] # (x,y,z,qw, qx,qy,qz) expressed in world frame
+    n_robots = len(X_Robots)
+    robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
+    robots_collision_caches = [{"obb": 100, "mesh": 100} for _ in range(n_robots)]
+    robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
+    robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
+    robot_world_models = [WorldConfig() for _ in range(n_robots)]
+    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [1.8, 0, 0.2, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
+    target_colors = [TargetColors.green, TargetColors.red]
+    if OBS_PREDICTION:
+        col_pred_with = [[1], []] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+   
 
-
-    # X_target = X_binCenter.copy()
-    # X_target[3:5] = [0,1] # upside down
-    # X_Targets = [X_target.copy(), X_target.copy()] 
-    # bin_dim = 0.4 # depends on the cfg file
-    # p_infront, p_behind, p_on_left, p_on_right = X_binCenter[:3] + np.array([0,0.75 * bin_dim,bin_dim]),  X_binCenter[:3] + np.array([0,-0.75 * bin_dim,bin_dim]), X_binCenter[:3] + np.array([0.75 * bin_dim,0,bin_dim]), X_binCenter[:3] + np.array([- 0.75 * bin_dim,0,bin_dim])
-    # valid_neihborhood = [[p_infront, p_behind, X_binCenter[:3]], [p_infront, p_behind, X_binCenter[:3]]]
-
-    
+    robots:List[AutonomousFranka] = []
+    for i in range(n_robots):
+        robots.append(FrankaMpc(
+            robot_cfgs[i], 
+            my_world, 
+            usd_help, 
+            p_R=X_Robots[i][:3],
+            q_R=X_Robots[i][3:], 
+            p_T=X_Targets[i][:3],
+            q_T=X_Targets[i][3:], 
+            target_color=target_colors[i],
+            )
+        )
+    # ENVIRONMENT OBSTACLES - INITIALIZATION
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
     env_obstacles = [] # list of obstacles in the world
@@ -352,57 +378,35 @@ def main():
             world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
-
-
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
-    
-    robots = [ 
-        FrankaMpc(robot_cfgs[0], my_world, usd_help, p_R=X_Robots[0][:3],q_R=X_Robots[0][3:], p_T=X_Targets[0][:3], q_T=X_Targets[0][3:], target_color=np.array([0,0.5,0])) ,
-        FrankaMpc(robot_cfgs[1], my_world, usd_help, p_R=X_Robots[1][:3],q_R=X_Robots[1][3:], p_T=X_Targets[1][:3], q_T=X_Targets[1][3:], target_color=np.array([0.5,0,0]))     
-    ]    
-    
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     
-    ################ PRE PLAYING SIM ###################
-    if args.print_ctrl_rate and SIMULATING:
-        real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
+    # ################ PRE PLAYING SIM ###################
+    # if args.print_ctrl_rate and SIMULATING:
+    #     real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
     
-    if not SIMULATING:
-        real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
-        real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
-        real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
+    # if not SIMULATING:
+    #     real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
+    #     real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
+    #     real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
 
-    
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
-    
-    ################# SIM IS PLAYING ###################    
-    # step_dt_traj_mpc = RENDER_DT if SIMULATING else REAL_TIME_EXPECTED_CTRL_DT  
-    step_dt_traj_mpc = MPC_DT
-    dynamic_obs_coll_predictors:List[DynamicObsCollPredictor] = []
+    print("Play button was pressed in simulation!")
+    # expected_ctrl_freq_at_mpc = 1 / MPC_DT # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
+    # obs_viz_init = False
     ccheckers = []
-    # expected_ctrl_freq_at_mpc = 1 / step_dt_traj_mpc # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    obs_viz_init = False
-    total_obs_all_robots = sum([robots[i].n_coll_spheres_valid for i in range(len(robots))])
-
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
-         
-        if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
-            n_obs_roboti = total_obs_all_robots - robots[i].n_coll_spheres_valid
-            col_pred_roboti = DynamicObsCollPredictor(tensor_args, step_dt_traj_mpc,robot.H,robot.num_particles, robot.n_coll_spheres_valid, n_obs_roboti)
-            dynamic_obs_coll_predictors.append(col_pred_roboti) # Now if we are modifying the MPC cost function to predict poses of moving obstacles, we need to initialize the mechanism which does it. That's the  DynamicObsCollPredictor() class.
-            # p_obs = torch.zeros((robots[i].H, n_obs_roboti, 3), device=robots[i].tensor_args.device)
-            # rad_obs = torch.zeros(n_obs_roboti, device=robots[i].tensor_args.device)
-            # col_pred_roboti.reset_obs(p_obs, rad_obs)
- 
-        else:
-            dynamic_obs_coll_predictors.append(None)
+        # init dynamic obs coll predictors
+        if OBS_PREDICTION and len(col_pred_with[i]):
+            obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
+            robot.init_col_predictor(obs_groups_nspheres, cost_weight=10000, manually_express_p_own_in_world_frame=True)
         
-        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], step_dt_traj_mpc, dynamic_obs_coll_predictors[i], DEBUG)
+        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
         robots[i].robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
@@ -411,7 +415,7 @@ def main():
     for i in range(len(env_obstacles)):
         env_obstacles[i].register_ccheckers(ccheckers)
 
-    if not MODIFY_MPC_COST_FN_FOR_DYN_OBS: 
+    if not OBS_PREDICTION: 
         # Treat spheres of other robots as static obstacles 
         # (update the ccheckers of each robot with all other robots spheres 
         # everytime the spheres of other robots change, but no prediction of path in the rollouts)
@@ -429,37 +433,61 @@ def main():
             checkers_to_reg_on_robot_i_spheres = [ccheckers[j] for j in range(len(ccheckers)) if j != i] # checkers of other robots except i
             for sphere_obs in spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
                 sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
-            
-    t_idx = 0 # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    ctrl_loop_start_time = time.time()
-    while simulation_app.is_running():                 
+
+    # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
+    t_idx = 0 
+    
+    # debugging timers
+    ctrl_loop_timer = 0
+    world_step_timer = 0
+    mpc_solver_timer = 0
+    targets_update_timer = 0
+    joint_state_timer = 0
+    action_timer = 0
+    robots_as_obs_timer = 0
+    env_obstacles_timer = 0
+    visualizations_timer = 0
+
+    # main loop
+    while simulation_app.is_running():
+        point_visualzer_inputs = [] # here we store inputs for draw_points()
+        ctrl_loop_timer_start = time.time()
         
-        # Update simulation
-        # print("(debug) t_idx= ", t_idx)
+        # WORLD STEP
+        world_step_timer_start = time.time()                 
         my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
-        
+        world_step_timer += time.time() - world_step_timer_start
+
         # Measure control frequency
-        if args.print_ctrl_rate and not SIMULATING:
-            real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
-            real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
-            if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
-                real_robot_cfm_start_time = time.time()
-                real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
+        # if args.print_ctrl_rate and not SIMULATING:
+        #     real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
+        #     real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
+        #     if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
+        #         real_robot_cfm_start_time = time.time()
+        #         real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
         
+        # ENVIRONMENT OBSTACLES - READ STATES AND UPDATE ROBOTS
         # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
+        env_obstacles_update_timer_start = time.time()
         for i in range(len(env_obstacles)): 
             env_obstacles[i].update_registered_ccheckers()
-               
-        if MODIFY_MPC_COST_FN_FOR_DYN_OBS:         
+        env_obstacles_timer += time.time() - env_obstacles_update_timer_start
+
+        # ROBOTS AS OBSTACLES - READ STATES/PLANS
+        # get other robots states (no prediction) or plans (with prediction) for collision checking
+        robots_as_obs_timer_start = time.time()
+        if OBS_PREDICTION:         
             plans = [robots[i].get_plan() for i in range(len(robots))]
         else:
             sphere_states_all_robots:list[torch.Tensor] = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
+        robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
-        point_visualzer_inputs = []
-
+        # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
+        # update robots with other robots as obstacles (robot spheres as obstacles)
         for i in range(len(robots)):
-            # update obstacles (robot spheres as obstacles)
-            if MODIFY_MPC_COST_FN_FOR_DYN_OBS:
+            # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
+            if OBS_PREDICTION and len(col_pred_with[i]): # using prediction of other robots plans
+                robots_as_obs_timer_start = time.time()
                 p_spheresOthersH = None
                 for j in range(len(robots)):
                     if j != i: 
@@ -472,69 +500,130 @@ def main():
                         else:
                             p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
-                
+                col_pred:DynamicObsCollPredictor = robots[i].dynamic_obs_col_pred
                 if t_idx == 0:
                     # dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
-                    dynamic_obs_coll_predictors[i].set_obs_rads(rad_spheresOthersH)
+                    col_pred.set_obs_rads(rad_spheresOthersH)
+                    col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
                 else:
-                    dynamic_obs_coll_predictors[i].update(p_spheresOthersH)
-                
-                if HIGHLIGHT_OBS and t_idx % HIGHLIGHT_OBS_H == 0: # 
-                    if not obs_viz_init:
-                        material = glass_material
-                        for h in range(HIGHLIGHT_OBS_H):
-                            for j in range(p_spheresOthersH.shape[1]):
-                                robots[i].add_obs_viz(p_spheresOthersH[h][j].cpu(),rad_spheresOthersH[j].cpu(),f"o{j}t{h}",h=h,h_max=robots[i].H,material=material)
-                        if i == len(robots) - 1:
-                            obs_viz_init = True
-                    else:
-                        robots[i].update_obs_viz(p_spheresOthersH[:HIGHLIGHT_OBS_H].reshape(-1, 3).cpu()) # collapse first two dimensions
+                    col_pred.update(p_spheresOthersH)
+                robots_as_obs_timer += time.time() - robots_as_obs_timer_start
+
+                # if HIGHLIGHT_OBS and t_idx % HIGHLIGHT_OBS_H == 0: # 
+                #     if not obs_viz_init:
+                #         material = None # glass_material
+                #         for h in range(HIGHLIGHT_OBS_H):
+                #             for j in range(p_spheresOthersH.shape[1]):
+                #                 robots[i].add_obs_viz(p_spheresOthersH[h][j].cpu(),rad_spheresOthersH[j].cpu(),f"o{j}t{h}",h=h,h_max=robots[i].H,material=material)
+                #         if i == len(robots) - 1:
+                #             obs_viz_init = True
+                #     else:
+                #         robots[i].update_obs_viz(p_spheresOthersH[:HIGHLIGHT_OBS_H].reshape(-1, 3).cpu()) # collapse first two dimensions
                 
                 if VISUALIZE_PREDICTED_OBS_PATHS:
+                    visualizations_timer_start = time.time()
                     point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
-            else:
-                for i in range(len(robots)):    
-                    spheres_as_obs_i = spheres_as_obs_grouped_by_robot[i] 
-                    for sphere_idx in range(len(spheres_as_obs_i)):
-                        updated_sphere_pose = np.array(sphere_states_all_robots[i][sphere_idx].tolist() + [1,0,0,0])
-                        obs:Obstacle = spheres_as_obs_i[sphere_idx]
+                    visualizations_timer += time.time() - visualizations_timer_start
+            elif not OBS_PREDICTION: # using current state of other robots (no prediction)
+                robots_as_obs_timer_start = time.time()
+                for j in range(len(robots)):    
+                    spheres_as_obs = spheres_as_obs_grouped_by_robot[j] 
+                    for sphere_idx in range(len(spheres_as_obs)):
+                        updated_sphere_pose = np.array(sphere_states_all_robots[j][sphere_idx].tolist() + [1,0,0,0])
+                        obs:Obstacle = spheres_as_obs[sphere_idx]
                         obs.update_registered_ccheckers(custom_pose=updated_sphere_pose) 
-                    
-            # update robot state and target
+                robots_as_obs_timer += time.time() - robots_as_obs_timer_start    
+            
+            # UPDATE STATE IN SOLVER
+            joint_state_timer_start = time.time()
             robots_cu_js[i] = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())
             robots[i].update_current_state(robots_cu_js[i])    
+            joint_state_timer += time.time() - joint_state_timer_start
+            
+            # UPDATE TARGET IN SOLVER
+            targets_update_timer_start = time.time()
             p_T, q_T = robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
             if robots[i].set_new_target_for_solver(p_T, q_T):
                 print(f"robot {i} target changed!")
                 robots[i].update_solver_target()
-            
-            # mpc step
+            targets_update_timer += time.time() - targets_update_timer_start
+
+            # MPC STEP
+            mpc_solver_timer_start = time.time()
             mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
+            mpc_solver_timer += time.time() - mpc_solver_timer_start
+            
+            # APPLY ACTION
+            action_timer_start = time.time()
             art_action = robots[i].get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
             robots[i].apply_articulation_action(art_action,num_times=1) # Note: I chhanged it to 1 instead of 3
+            action_timer += time.time() - action_timer_start
             
-            # visualization
+            # VISUALIZATION
             if VISUALIZE_MPC_ROLLOUTS:
+                visualizations_timer_start = time.time()
                 visual_rollouts = robots[i].solver.get_visual_rollouts()
                 visual_rollouts += torch.tensor(robots[i].p_R,device=robots[i].tensor_args.device)
                 rollouts_for_visualization = {'points':  visual_rollouts, 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
+                visualizations_timer += time.time() - visualizations_timer_start
             
             if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
+                visualizations_timer_start = time.time()
                 robots[i].visualize_robot_as_spheres(robots_cu_js[i])
+                visualizations_timer += time.time() - visualizations_timer_start
 
-            
+        # VISUALIZATION
         if len(point_visualzer_inputs):
-            draw_points(point_visualzer_inputs) # print_rate_decorator(l
-
-
-
+            visualizations_timer_start = time.time()
+            draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")()
+            visualizations_timer += time.time() - visualizations_timer_start
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
+        ctrl_loop_timer += time.time() - ctrl_loop_timer_start
         
-        if t_idx % 100 == 0:
-            print("t = ", t_idx)
-            ctrl_loop_freq = t_idx / (time.time() - ctrl_loop_start_time) 
-            print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
+        # PRINT TIME STATISTICS
+        k_print = 100
+        if t_idx % k_print == 0:    
+            print(f"t = {t_idx}")
+            print(f"ctrl freq in last {k_print} steps:  {k_print / ctrl_loop_timer}")
+            print(f"robots as obs ops freq in last {k_print} steps: {k_print / robots_as_obs_timer}")
+            print(f"env obs ops freq in last {k_print} steps: {k_print / env_obstacles_timer}")
+            print(f"mpc solver freq in last {k_print} steps: {k_print / mpc_solver_timer}")
+            print(f"world step freq in last {k_print} steps: {k_print / world_step_timer}")
+            print(f"targets update freq in last {k_print} steps: {k_print / targets_update_timer}")
+            print(f"joint states updates freq in last {k_print} steps: {k_print / joint_state_timer}")
+            print(f"actions freq in last {k_print} steps: {k_print / action_timer}")
+            print(f"visualization ops freq in last {k_print} steps: {k_print / visualizations_timer}")
+            
+            total_time_measured = mpc_solver_timer + world_step_timer + targets_update_timer + \
+            joint_state_timer + action_timer + visualizations_timer + robots_as_obs_timer + env_obstacles_timer
+            total_time_actual = ctrl_loop_timer
+            delta = total_time_actual - total_time_measured
+            print(f"total time actual: {total_time_actual}")
+            print(f"total time measured: {total_time_measured}")
+            print(f"delta: {delta}")
+            print("In percentage %:")
+            print(f"mpc solver: {100 * mpc_solver_timer / total_time_actual}")
+            print(f"world step: {100 * world_step_timer / total_time_actual}")
+            print(f"robots as obs: {100 * robots_as_obs_timer / total_time_actual}")
+            print(f"env obs: {100 * env_obstacles_timer / total_time_actual}")
+            print(f"targets update: {100 * targets_update_timer / total_time_actual}")
+            print(f"joint state: {100 * joint_state_timer / total_time_actual}")
+            print(f"action: {100 * action_timer / total_time_actual}")
+            print(f"visualizations: {100 * visualizations_timer / total_time_actual}")
+            # reset timers
+            ctrl_loop_timer = 0
+            mpc_solver_timer = 0
+            world_step_timer = 0
+            targets_update_timer = 0
+            joint_state_timer = 0
+            action_timer = 0
+            visualizations_timer = 0
+            robots_as_obs_timer = 0
+            env_obstacles_timer = 0
+            # print("t = ", t_idx)
+            # ctrl_loop_freq = t_idx / (time.time() - ctrl_loop_start_time) 
+            # print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
  
        
 if __name__ == "__main__":

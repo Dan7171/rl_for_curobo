@@ -178,9 +178,9 @@ class AutonomousFranka:
         return None
 
     @abstractmethod
-    def init_solver(self, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor):
+    def init_solver(self, *args, **kwargs):
         pass
-
+    
     def _check_target_pose_changed(self, real_target_position, real_target_orientation) -> bool:
         return np.linalg.norm(real_target_position - self.p_solverTarget) > 1e-3 or np.linalg.norm(real_target_orientation - self.q_solverTarget) > 1e-3
 
@@ -414,6 +414,10 @@ class AutonomousFranka:
         js_state_new.jerk[:] = filter_coefficients.jerk * js_state_new.jerk + (1.0 - filter_coefficients.jerk) * js_state_prev.jerk
         return js_state_new
     
+    @abstractmethod
+    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
+        pass
+    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """
@@ -436,7 +440,7 @@ class FrankaMpc(AutonomousFranka):
   
 
     
-    def init_solver(self,world_model, collision_cache, step_dt_traj_mpc, dynamic_obs_coll_predictor=None,debug=False):
+    def init_solver(self,world_model, collision_cache, step_dt_traj_mpc,debug=False):
         """Initialize the MPC solver.
 
         Args:
@@ -445,7 +449,11 @@ class FrankaMpc(AutonomousFranka):
             step_dt_traj_mpc (_type_): _description_
             dynamic_obs_coll_predictor (_type_): _description_
         """
-        
+        if hasattr(self, "dynamic_obs_col_pred"):
+            dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
+        else:
+            dynamic_obs_coll_predictor = None
+
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
             world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
@@ -661,7 +669,21 @@ class FrankaMpc(AutonomousFranka):
         return plan 
         
        
-
+    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
+        n_particles = self.num_particles 
+        H = self.H # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
+        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
+                                                            None,
+                                                            H,
+                                                            n_particles,
+                                                            self.n_coll_spheres_valid,
+                                                            sum(obs_groups_nspheres),
+                                                            cost_weight,
+                                                            obs_groups_nspheres,
+                                                            manually_express_p_own_in_world_frame,
+                                                            torch.from_numpy(self.p_R))
+        return self.dynamic_obs_col_pred
+    
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, 
                 # robot basic parameters

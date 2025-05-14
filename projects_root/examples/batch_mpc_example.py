@@ -58,6 +58,7 @@ simulation_app = SimulationApp(
 # Third Party
 import carb
 import numpy as np
+import time
 from helper import add_extensions, add_robot_to_scene
 from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid
@@ -102,9 +103,32 @@ def tmp_helper_get_full_js(robot_list, tensor_args):
         full_js = full_js.stack(cu_js)
     
     return full_js
-def main():
 
-    mode_debug= 'mpc' # 'motion_gen'
+# # optimized version:
+# def tmp_helper_get_full_js(robot_list, tensor_args):
+#     # Batch get all joint states first
+#     all_positions = []
+#     all_velocities = []
+#     for robot in robot_list:
+#         sim_js = robot.get_joints_state()
+#         # Convert numpy arrays to torch tensors immediately
+#         all_positions.append(torch.from_numpy(sim_js.positions))
+#         all_velocities.append(torch.from_numpy(sim_js.velocities))
+    
+#     # Stack on CPU first then move to device
+#     positions_tensor = torch.vstack(all_positions).to(device=tensor_args.device, dtype=tensor_args.dtype)
+#     velocities_tensor = torch.vstack(all_velocities).to(device=tensor_args.device, dtype=tensor_args.dtype)
+    
+#     # Create full joint state in one go
+#     return JointState(
+#         position=positions_tensor,
+#         velocity=velocities_tensor * 0.0,
+#         acceleration=velocities_tensor * 0.0,
+#         jerk=velocities_tensor * 0.0,
+#         joint_names=robot_list[0].dof_names,
+#     )
+
+def main():
 
     usd_help = UsdHelper()
     act_distance = 0.2
@@ -174,79 +198,63 @@ def main():
         world_cfg.randomize_color(r=[0.2, 0.3], b=[0.0, 0.05], g=[0.2, 0.3])
         usd_help.add_world_to_stage(world_cfg, base_frame="/World/world_" + str(i))
         world_cfg_list.append(world_cfg)
+         
+    """
+    https://curobo.org/_api/curobo.wrap.reacher.mpc.html#curobo.wrap.reacher.mpc.MpcSolver._update_batch_size
+    High-level interface for Model Predictive Control (MPC).
+    MPC can reach Cartesian poses and joint configurations while avoiding obstacles. The solver uses Model Predictive Path Integral (MPPI) optimization as the solver. MPC only optimizes locally so the robot can get stuck near joint limits or behind obstacles. To generate global trajectories, use MotionGen.
+    See Model Predictive Control (MPC) for an example. This MPC solver implementation can be used in the following steps:
+    Create a Goal object with the target pose or joint configuration.
+    Create a goal buffer for the problem type using setup_solve_single, setup_solve_goalset, setup_solve_batch, setup_solve_batch_goalset, setup_solve_batch_env, or setup_solve_batch_env_goalset. Pass the goal object from the previous step to this function. This function will update the internal solve state of MPC and also the goal for MPC. An augmented goal buffer is returned.
+    Call step with the current joint state to get the next action.
+    To change the goal, create a Pose object with new pose or JointState object with new joint configuration. Then copy the target into the augmented goal buffer using goal_buffer.goal_pose.copy_(new_pose) or goal_buffer.goal_state.copy_(new_state).
+    Call update_goal with the augmented goal buffer to update the goal for MPC.
+    Call step with the current joint state to get the next action.
+    To dynamically change the type of goal reached between pose and joint configuration targets, create the goal object in step 1 with both targets and then use enable_cspace_cost and enable_pose_cost to enable or disable reaching joint configuration cost and pose cost.
+    Initializes the MPC solver.
+    """
 
-    if mode_debug == 'motion_gen':
-        motion_gen_config = MotionGenConfig.load_from_robot_config(
-            robot_cfg,
-            world_cfg_list,
-            tensor_args,
-            collision_checker_type=CollisionCheckerType.MESH,
-            use_cuda_graph=True,
-            interpolation_dt=0.03,
-            collision_cache={"obb": 10, "mesh": 10},
-            collision_activation_distance=0.025,
-            maximum_trajectory_dt=0.25,
-        )
-        motion_gen = MotionGen(motion_gen_config)
-        
-        print("warming up...")
+    # This is a configuration for a solver for batch of robots
+    mpc_config = MpcSolverConfig.load_from_robot_config(
+        robot_cfg,
+        world_cfg_list,
+        use_cuda_graph=True,
+        use_cuda_graph_metrics=True,
+        use_cuda_graph_full_step=False,
+        self_collision_check=True,
+        collision_checker_type=CollisionCheckerType.MESH,
+        collision_cache={"obb": 30, "mesh": 10},
+        use_mppi=True,
+        use_lbfgs=False,
+        use_es=False,
+        store_rollouts=True,
+        step_dt=0.02,
+        n_collision_envs=n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
+)
+    mpc = MpcSolver(mpc_config) # batch solver, solve (n robots) mpc problem in parallel on every .step() call
+    add_extensions(simulation_app, args.headless_mode)
+    
+    # 1 x 7
+    retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
+    # n robots x 7
+    retract_cfg_batch = retract_cfg.repeat(n_envs, 1)
+    # 7
+    joint_names = mpc.rollout_fn.joint_names
+    from curobo.rollout.rollout_base import Goal
 
-    else:
-        
-        """
-        https://curobo.org/_api/curobo.wrap.reacher.mpc.html#curobo.wrap.reacher.mpc.MpcSolver._update_batch_size
-        High-level interface for Model Predictive Control (MPC).
-        MPC can reach Cartesian poses and joint configurations while avoiding obstacles. The solver uses Model Predictive Path Integral (MPPI) optimization as the solver. MPC only optimizes locally so the robot can get stuck near joint limits or behind obstacles. To generate global trajectories, use MotionGen.
-        See Model Predictive Control (MPC) for an example. This MPC solver implementation can be used in the following steps:
-        Create a Goal object with the target pose or joint configuration.
-        Create a goal buffer for the problem type using setup_solve_single, setup_solve_goalset, setup_solve_batch, setup_solve_batch_goalset, setup_solve_batch_env, or setup_solve_batch_env_goalset. Pass the goal object from the previous step to this function. This function will update the internal solve state of MPC and also the goal for MPC. An augmented goal buffer is returned.
-        Call step with the current joint state to get the next action.
-        To change the goal, create a Pose object with new pose or JointState object with new joint configuration. Then copy the target into the augmented goal buffer using goal_buffer.goal_pose.copy_(new_pose) or goal_buffer.goal_state.copy_(new_state).
-        Call update_goal with the augmented goal buffer to update the goal for MPC.
-        Call step with the current joint state to get the next action.
-        To dynamically change the type of goal reached between pose and joint configuration targets, create the goal object in step 1 with both targets and then use enable_cspace_cost and enable_pose_cost to enable or disable reaching joint configuration cost and pose cost.
-        Initializes the MPC solver.
-        """
-        mpc_config = MpcSolverConfig.load_from_robot_config(
-            robot_cfg,
-            world_cfg_list,
-            use_cuda_graph=True,
-            use_cuda_graph_metrics=True,
-            use_cuda_graph_full_step=False,
-            self_collision_check=True,
-            collision_checker_type=CollisionCheckerType.MESH,
-            collision_cache={"obb": 30, "mesh": 10},
-            use_mppi=True,
-            use_lbfgs=False,
-            use_es=False,
-            store_rollouts=True,
-            step_dt=0.02,
-            n_collision_envs=n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
-    )
-        mpc = MpcSolver(mpc_config)
-        add_extensions(simulation_app, args.headless_mode)
-        
-        # 1 x 7
-        retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
-        # n robots x 7
-        retract_cfg_batch = retract_cfg.repeat(n_envs, 1)
-        # 7
-        joint_names = mpc.rollout_fn.joint_names
-        from curobo.rollout.rollout_base import Goal
+    # n robots x 7
+    
+    current_state_batch = JointState.from_position(retract_cfg_batch, joint_names=joint_names) # tmp_helper_get_full_js(robot_list, tensor_args)         # # n robots x 9
+    current_state_batch.position = current_state_batch.position.contiguous()
+    current_state_batch.velocity = current_state_batch.velocity.contiguous()
+    current_state_batch.acceleration = current_state_batch.acceleration.contiguous()
+    current_state_batch.jerk = current_state_batch.jerk.contiguous()
+    
+    # n robots x 7
+    state = mpc.rollout_fn.compute_kinematics(current_state_batch)
 
-        # n robots x 7
-        
-        current_state_batch = JointState.from_position(retract_cfg_batch, joint_names=joint_names) # tmp_helper_get_full_js(robot_list, tensor_args)         # # n robots x 9
-        current_state_batch.position = current_state_batch.position.contiguous()
-        current_state_batch.velocity = current_state_batch.velocity.contiguous()
-        current_state_batch.acceleration = current_state_batch.acceleration.contiguous()
-        current_state_batch.jerk = current_state_batch.jerk.contiguous()
-        
-        # n robots x 7
-        state = mpc.rollout_fn.compute_kinematics(current_state_batch)
-
-        # n robots x 3
-        retract_pose_batch = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+    # n robots x 3
+    retract_pose_batch = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
         
         
 
@@ -273,7 +281,7 @@ def main():
     setup_solve_batch_env_goalset: Creates a goal buffer to solve for a batch of robots in different collision worlds.
     """
     different_env_for_each_robot = True 
-    num_seeds = 1 # todo shold be 1?
+    num_seeds = 1 # TODO: should stay 1 as in the setup_solve_single case for 1 mpc robot?
     
     # n robots x 7
     goal_state_batch = JointState.from_position(retract_cfg_batch, joint_names=joint_names)
@@ -317,8 +325,19 @@ def main():
     past_goal = None
     # 174 - 190 END
     art_controllers = [r.get_articulation_controller() for r in robot_list]
+    
+    t = 0
+    ctrl_loop_timer = 0
+    world_step_timer = 0
+    mpc_solver_timer = 0
+    targets_update_timer = 0
+    joint_state_timer = 0
+    action_timer = 0
     while simulation_app.is_running():
+        ctrl_loop_timer_start = time.time()
+        world_step_timer_start = time.time()
         my_world.step(render=True)
+        world_step_timer += time.time() - world_step_timer_start
         if not my_world.is_playing():
             if i % 100 == 0:
                 print("**** Click Play to start simulation *****")
@@ -338,13 +357,17 @@ def main():
                 )
         if step_index < 20:
             continue
+
+        # get target poses from simulation
+        targets_update_timer_start = time.time()
         sp_buffer = []
         sq_buffer = []
         for k in target_list:
             sph_position, sph_orientation = k.get_local_pose()
             sp_buffer.append(sph_position)
             sq_buffer.append(sph_orientation)
-
+        
+        # make a batch of new target poses for batch solver 
         ik_goal = Pose(
             position=tensor_args.to_device(sp_buffer),
             quaternion=tensor_args.to_device(sq_buffer),
@@ -354,17 +377,28 @@ def main():
         if past_goal is None:
             past_goal = ik_goal.clone()
         
-        # prev_distance = ik_goal.distance(prev_goal)
-        # past_distance = ik_goal.distance(past_goal)
-
+        # update solver with new target poses from simulation
         goal_buffer.goal_pose.copy_(ik_goal)
         mpc.update_goal(goal_buffer)
-
-        current_state_batch = tmp_helper_get_full_js(robot_list, tensor_args) # full_js.get_ordered_joint_state(motion_gen.kinematics.joint_names)
-        current_state_batch = current_state_batch.get_ordered_joint_state(mpc.kinematics.joint_names)
+        targets_update_timer += time.time() - targets_update_timer_start
+        
+        
+        # get batch of current joint states from simulation
+        joint_state_timer_start = time.time()
+        # n robots x 9 
+        current_state_batch:JointState = tmp_helper_get_full_js(robot_list, tensor_args) # full_js.get_ordered_joint_state(motion_gen.kinematics.joint_names)        
+        # n robots x 7 or n robots x 9? to check
+        current_state_batch:JointState = current_state_batch.get_ordered_joint_state(mpc.kinematics.joint_names)
+        joint_state_timer += time.time() - joint_state_timer_start
+        
+        # solve mpc problem for batch of robots 
+        mpc_solver_time_start = time.time()
         result = mpc.step(current_state_batch, max_attempts=2)
-
-        for i  in range(len(robot_list)):
+        mpc_solver_timer += time.time() - mpc_solver_time_start
+        
+        # create action for each robot 
+        action_timer_start = time.time()
+        for i in range(len(robot_list)):
             sim_js_names = robot_list[i].dof_names # 9
             cmd_state_full = result.js_action[i] # 9
             common_js_names = [] # 9
@@ -382,9 +416,39 @@ def main():
                 joint_indices=idx_list,
             )
             art_controllers[i].apply_action(art_action)
-        for _ in range(len(robot_list)):
-            my_world.step(render=False)
-
-
+        action_timer += time.time() - action_timer_start
+        # for _ in range(len(robot_list)):
+        #     my_world.step(render=False)
+        ctrl_loop_timer += time.time() - ctrl_loop_timer_start
+        t += 1
+        if t % 100 == 0:
+            print(f"t = {t}")
+            print(f"avg ctrl freq in last 100 steps:  {100 / ctrl_loop_timer}")
+            print(f"mpc solver freq in last 100 steps: {100 / mpc_solver_timer}")
+            print(f"world step freq in last 100 steps: {100 / world_step_timer}")
+            print(f"targets update freq in last 100 steps: {100 / targets_update_timer}")
+            print(f"joint state freq in last 100 steps: {100 / joint_state_timer}")
+            print(f"action freq in last 100 steps: {100 / action_timer}")
+        
+            total_time_measured = mpc_solver_timer + world_step_timer + targets_update_timer + joint_state_timer + action_timer
+            total_time_actual = ctrl_loop_timer
+            delta = total_time_measured - total_time_actual
+            print(f"total time measured: {total_time_measured}")
+            print(f"total time actual: {total_time_actual}")
+            print(f"delta: {delta}")
+            print("In percentage %:")
+            print(f"mpc solver: {100 * mpc_solver_timer / total_time_actual}")
+            print(f"world step: {100 * world_step_timer / total_time_actual}")
+            print(f"targets update: {100 * targets_update_timer / total_time_actual}")
+            print(f"joint state: {100 * joint_state_timer / total_time_actual}")
+            print(f"action: {100 * action_timer / total_time_actual}")
+            # reset timers
+            ctrl_loop_timer = 0
+            mpc_solver_timer = 0
+            world_step_timer = 0
+            targets_update_timer = 0
+            joint_state_timer = 0
+            action_timer = 0
+        
 if __name__ == "__main__":
     main()
