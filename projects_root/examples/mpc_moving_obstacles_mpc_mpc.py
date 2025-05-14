@@ -61,7 +61,7 @@ SIMULATING = True # if False, then we are running the robot in real time (i.e. t
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 OBS_PREDICTION  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
+DEBUG = False # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
 VISUALIZE_PREDICTED_OBS_PATHS = False # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
@@ -327,8 +327,8 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")  # Root transform for all objects
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
-    setup_curobo_logger("warn")
-
+    setup_curobo_logger("info") # "warn" 
+    
 
     
     # world_model = get_world_model_from_current_stage(stage)
@@ -352,7 +352,7 @@ def main():
     X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [1.8, 0, 0.2, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
     if OBS_PREDICTION:
-        col_pred_with = [[1], []] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+        col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
 
     robots:List[AutonomousFranka] = []
@@ -404,7 +404,7 @@ def main():
         # init dynamic obs coll predictors
         if OBS_PREDICTION and len(col_pred_with[i]):
             obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
-            robot.init_col_predictor(obs_groups_nspheres, cost_weight=10000, manually_express_p_own_in_world_frame=True)
+            robot.init_col_predictor(obs_groups_nspheres, cost_weight=100, manually_express_p_own_in_world_frame=True)
         
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
         checker = robots[i].get_cchecker() # available only after init_solver
@@ -502,7 +502,6 @@ def main():
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
                 col_pred:DynamicObsCollPredictor = robots[i].dynamic_obs_col_pred
                 if t_idx == 0:
-                    # dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
                     col_pred.set_obs_rads(rad_spheresOthersH)
                     col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
                 else:
