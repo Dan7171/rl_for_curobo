@@ -151,7 +151,7 @@ class Obstacle:
         assert curobo_type in ["cuboid", "sphere", "mesh", "capsule", "cylinder", "cone"]
         self.obs_type_to_sim_type = {"cuboid": DynamicCuboid, "sphere": DynamicSphere, "mesh": XFormPrim, "capsule": DynamicCapsule, "cylinder": DynamicCylinder}
         self.name = name
-        self.path = f'/World/curobo_world_cfg_obs_visual_twins/{name}' # path to the obstacle in the simulation
+        self.path = f'/World/obstacles/{name}' # path to the obstacle in the simulation
         self.dims: list[float] = list(dims)
         self.curobo_type = curobo_type
         self.sim_type = self.obs_type_to_sim_type[curobo_type]
@@ -174,7 +174,9 @@ class Obstacle:
     #         self.simulation_representation.set_size(dims)
     #     if self.cchecking_enabled:
     #         self.curobo_obstacle.dims = dims
-            
+
+    def get_prim_path(self):
+        return self.path    
     def set_simulation_refernce(self, simulation_refernce):
         self.simulation_refernce = simulation_refernce
     
@@ -412,6 +414,8 @@ class Obstacle:
 
         cuObs_Wmo = self._make_world_model_representation(T_Wmo, custom_pose) # curobo representation of the obstacle expressdd in the provided world model frame (Twmo)
         cu_world_model.add_obstacle(cuObs_Wmo) # adding the curobo obs representation to the world model (inplace)
+        
+        
         self.registered_world_models.append(cu_world_model) # Register the world model that the obstacle is added to and the transform from world to world moedl origin
         self.registered_Wmo_transforms.append(T_Wmo)
         self.indices_in_registered_world_models.append(len(self.registered_world_models[-1].objects) - 1)
@@ -479,7 +483,16 @@ class Obstacle:
         assert self.cchecking_enabled, "Error: Collision checking must be enabled to register the collision checkers with the obstacle"
         for cchecker in ccheckers:
             self.registered_ccheckers.append(cchecker)
-            
+
+    def re_register_cchecker(self, i, new_cchecker):
+        """
+        Re-register the collision checker with the obstacle.
+        """
+        assert self.cchecking_enabled, "Error: Collision checking must be enabled to re-register the collision checker with the obstacle"
+        self.registered_ccheckers[i] = new_cchecker
+        self.registered_world_models[i] = new_cchecker.world_model
+
+        
     def get_const_vel_plan(self, horizon:int, dt:float):
         """
         Get the plan of the obstacle, based on the current pose and velocity.

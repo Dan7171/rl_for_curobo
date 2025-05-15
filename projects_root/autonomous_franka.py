@@ -83,7 +83,7 @@ class AutonomousFranka:
         self.world_root ='/World'
         self.robot_name = f'robot_{self.instance_id}'
         self.subroot_path = f'{self.world_root}/world_{self.robot_name}'
-
+        self.target_prim_path = self.world_root+f'/target_{self.robot_name}'
         self.n_coll_spheres = 65 # num of self spheres which can be used for collision checking
         self.valid_coll_spheres_idx = np.arange(self.n_coll_spheres - 4)
         self.n_coll_spheres_valid = self.n_coll_spheres - 4 # Should be number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
@@ -115,12 +115,12 @@ class AutonomousFranka:
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
         AutonomousFranka.instance_counter += 1
-    
+
     def get_num_of_sphers(self, valid_only:bool=True):
         return self.n_coll_spheres if not valid_only else self.n_coll_spheres_valid
     
     def get_world_model(self):
-        return self.solver.world_coll_checker.world_model
+        return self.get_cchecker().world_model
 
     def get_cchecker(self):
         return self.solver.world_coll_checker
@@ -130,8 +130,8 @@ class AutonomousFranka:
         usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
         
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, subroot=self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R, initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
-        self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
-        
+        self.target = spawn_target(self.get_target_prim_path(), self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
+        self.target.set_world_pose(position=self._p_initTarget, orientation=self._q_initTarget)
 
     @abstractmethod
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
@@ -171,11 +171,28 @@ class AutonomousFranka:
         else:
             return False
     
+    def get_target_prim_path(self):
+        return self.target_prim_path
+    
+    def get_prim_path(self):
+        return self.prim_path
+    
     def get_last_synced_target_pose(self):
         return Pose(position=self.tensor_args.to_device(self.p_solverTarget),quaternion=self.tensor_args.to_device(self.q_solverTarget),)
             
     def _post_init_solver(self):
         return None
+    
+
+    def reset_world_model(self, new_world_model:WorldConfig):
+                
+        # here: put objects to keep from old model to the new model
+        obstacle_to_keep = [] # [self.get_world_model().cuboid[0]]
+        for obstacle in obstacle_to_keep:
+            new_world_model.add_obstacle(obstacle)
+        self.get_cchecker().load_collision_model(new_world_model) # projects_root/examples/mpc_example.py
+        
+    
 
     @abstractmethod
     def init_solver(self, *args, **kwargs):
@@ -417,7 +434,10 @@ class AutonomousFranka:
     @abstractmethod
     def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
         pass
-    
+
+    @abstractmethod
+    def get_plan(self, *args, **kwargs):
+        pass
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """

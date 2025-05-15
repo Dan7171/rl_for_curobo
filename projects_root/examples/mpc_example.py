@@ -237,7 +237,6 @@ def main():
     state = mpc.rollout_fn.compute_kinematics(
         JointState.from_position(retract_cfg, joint_names=joint_names)
     )
-    # 1 x 7
     current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
     retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
     goal = Goal(

@@ -11,17 +11,24 @@
   sim_collision_enabled: False
   visual_material: null
 
-- name: simple_cube
-  curobo_type: cuboid  
-  pose: [1.2, 0.0, 0.5, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
-  dims: [0.05, 0.1, 0.05] # x, y, z
-  color: [0, 0, 0]
-  mass: 5000
-  linear_velocity: [-0.1, 0.0, 0.0] # [0.15, 0, 0]
-  angular_velocity: [0, 0, 0]
-  gravity_enabled: False
-  sim_collision_enabled: True
-  visual_material: null
+# - name: simple_cube
+#   curobo_type: cuboid  
+#   pose: [1.2, 0.0, 0.5, 1, 0, 0, 0.0] #  x y z qw qx qy qz (like all curobo Obstcles)
+#   dims: [0.05, 0.1, 0.05] # x, y, z
+#   color: [0, 0, 0]
+#   mass: 5000
+#   linear_velocity: [-0.1, 0.0, 0.0] # [0.15, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: True
+#   visual_material: null
+
+# - name: klt_simplified_mesh
+#   curobo_type: mesh  
+#   pose: [0.5, 0.00, 0.2, 1, 0, 0, 0.0]
+#   usd_path: projects_root/usd/assets/small_KLT_visual_collision.usd # /home/dan/Desktop/small_KLT.usd
+#   mesh_file_sub: /home/dan/Desktop/jke.obj # other/small_KLT_visual_collision/small_KLT_visual_collision.obj # mesh file path (must be a subpath under curobo/src/curobo/content/assets)
+#   gravity_enabled: False
 
 # - name: sphere_for_dynamic_obs_prediction
 #   curobo_type: sphere  
@@ -84,11 +91,4 @@
 #   sim_collision_enabled: False
 #   visual_material: null
 
-# - name: small_KLT
-#   curobo_type: mesh  
-#   pose: [0.5, 0.00, 0.2, 1, 0, 0, 0.0]
-#   usd_path: projects_root/usd/assets/small_KLT_visual_collision.usd # /home/dan/Desktop/small_KLT.usd
-#   mesh_file_sub: other/small_KLT_visual_collision/small_KLT_visual_collision.obj # mesh file path (must be a subpath under curobo/src/curobo/content/assets)
-#   dims: [2, 2, 2] 
-#   gravity_enabled: False
 

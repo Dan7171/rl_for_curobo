@@ -11,7 +11,11 @@ def init_app(app_settings:dict={"headless": False}):
     except ImportError:
         pass
     from omni.isaac.kit import SimulationApp 
-    return SimulationApp(app_settings)
+    
+    app = SimulationApp(app_settings)
+ 
+    return app
+
 
 
 def wait_for_playing(my_world, simulation_app, autoplay=False):

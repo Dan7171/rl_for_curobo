@@ -71,7 +71,8 @@ DEBUG_GPU_MEM = False # If True, then the GPU memory usage will be printed on ev
 RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
 PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
 MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
-
+SUPPORT_ASSETS_OUTSIDE_CONFIG = True # Turn on if you want to "drag and drop" assets to the stage manually. Turn otherwise because it takes longer to load the assets.
+ASSET_FIXATION_T = 10 # If using SUPPORT_ASSETS_OUTSIDE_CONFIG, After this time step, no updates to collision models will be made, even if they are changed in the stage. This is to prevent the collision model from being updated too frequently after some point. Set to -1 to disable.
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
     # arg parsing:
@@ -141,13 +142,21 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import torch
     import numpy as np
     from dataclasses import dataclass
-
+    import copy
     # Isaac Sim app initiation and isaac sim modules
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
-    simulation_app = init_app({"headless": args.headless_mode is not None}) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
+    simulation_app = init_app(
+        {
+        "headless": args.headless_mode is not None, 
+        "width": "1920",
+        "height": "1080"
+        }
+    ) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
     from omni.isaac.core import World 
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
+    from pxr import UsdGeom, Gf, PhysxSchema, UsdPhysics, Sdf
+    # from omni.usd import get_context
     # Our modules
     from projects_root.utils.helper import add_extensions
     from projects_root.autonomous_franka import FrankaMpc
@@ -162,6 +171,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     from projects_root.autonomous_franka import AutonomousFranka
+    from projects_root.utils.curobo_world_models import update_world_model
     a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
 ######################### HELPER ##########################
@@ -327,7 +337,7 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")  # Root transform for all objects
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
-    setup_curobo_logger("info") # "warn" 
+    setup_curobo_logger("error") # "warn" 
     
 
     
@@ -371,7 +381,7 @@ def main():
     # ENVIRONMENT OBSTACLES - INITIALIZATION
     collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
-    env_obstacles = [] # list of obstacles in the world
+    env_obstacles:List[Obstacle] = [] # list of obstacles in the world
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
@@ -381,22 +391,14 @@ def main():
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
+    # add extensions
     add_extensions(simulation_app, args.headless_mode) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     
-    # ################ PRE PLAYING SIM ###################
-    # if args.print_ctrl_rate and SIMULATING:
-    #     real_robot_cfm_is_initialized, real_robot_cfm_start_t_idx, real_robot_cfm_start_time = None, None, None
-    
-    # if not SIMULATING:
-    #     real_robot_cfm_start_time:float = np.nan # system time when control frequency measurement has started (not yet started if np.nan)
-    #     real_robot_cfm_start_t_idx:int = -1 # actual step index when control frequency measurement has started (not yet started if -1)
-    #     real_robot_cfm_min_start_t_idx:int = 10 # minimal step index allowed to start measuring control frequency. The reason for this is that the first steps are usually not representative of the control frequency (due to the overhead at the times of the first steps which include initialization of the simulation, etc.).
-
+    # wait for the play button to be pressed
     wait_for_playing(my_world, simulation_app,args.autoplay) # wait for the play button to be pressed
     print("Play button was pressed in simulation!")
-    # expected_ctrl_freq_at_mpc = 1 / MPC_DT # This is what the mpc "thinks" the control frequency should be. It uses that to generate the rollouts.                
-    # obs_viz_init = False
-    ccheckers = []
+    
+    # initialize robots
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
@@ -405,13 +407,12 @@ def main():
         if OBS_PREDICTION and len(col_pred_with[i]):
             obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
             robot.init_col_predictor(obs_groups_nspheres, cost_weight=100, manually_express_p_own_in_world_frame=True)
-        
-        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
-        checker = robots[i].get_cchecker() # available only after init_solver
-        ccheckers.append(checker)
-        robots[i].robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
+        # initialize solver
+        robot.init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
+        robot.robot._articulation_view.initialize() # new (isac 4.5) https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
 
-        
+    # register ccheckers of robots with environment obstacles
+    ccheckers = [robot.get_cchecker() for robot in robots] # available only after init_solver
     for i in range(len(env_obstacles)):
         env_obstacles[i].register_ccheckers(ccheckers)
 
@@ -433,6 +434,48 @@ def main():
             checkers_to_reg_on_robot_i_spheres = [ccheckers[j] for j in range(len(ccheckers)) if j != i] # checkers of other robots except i
             for sphere_obs in spheres_as_obs_grouped_by_robot[i]: # for each sphere of robot i register the checkers of other robots (so they will treat i's spheres as obstacles)
                 sphere_obs.register_ccheckers(checkers_to_reg_on_robot_i_spheres)
+    
+    if SUPPORT_ASSETS_OUTSIDE_CONFIG:
+        robots_prim_paths = [robot.get_prim_path() for robot in robots]
+        targets_prim_paths = [robot.get_target_prim_path() for robot in robots]
+        obstacles_prim_paths = [obstacle.get_prim_path() for obstacle in env_obstacles]
+        ignore_prefix = [        
+            *robots_prim_paths,
+            *targets_prim_paths, # "/World/target",
+            # *obstacles_prim_paths,
+            "/World/defaultGroundPlane",
+            "/curobo"
+        ]
+        load_klt = True 
+        
+        if load_klt:
+            gravity_klt = False
+            klt_position = Gf.Vec3d(0.6, 0, 0.2)
+            klt_rotation_euler = Gf.Vec3f(0, 0, 0)
+            sim_collision_klt = True
+
+            # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/py/source/extensions/isaacsim.core.prims/docs/index.html
+            klt_prim_path = load_asset_to_prim_path("Props/KLT_Bin/small_KLT_visual.usd")
+            klt_prim = stage.GetPrimAtPath(klt_prim_path)
+            xform = UsdGeom.XformCommonAPI(klt_prim)
+            # Apply translation and rotation
+            xform.SetTranslate(klt_position)
+            xform.SetRotate(klt_rotation_euler)  # Rotation in degrees (XYZ order)
+            if sim_collision_klt:
+                # prim = stage.GetPrimAtPath(klt_prim_path)
+                # Apply collision APIs
+                UsdPhysics.CollisionAPI.Apply(klt_prim)
+                PhysxSchema.PhysxCollisionAPI.Apply(klt_prim)
+                rigid_api = UsdPhysics.RigidBodyAPI.Apply(klt_prim)  
+                # Set the approximation type (using token type)
+                attr = klt_prim.CreateAttribute("physxCollision:approximation", Sdf.ValueTypeNames.Token)
+                attr.Set("meshSimplification")
+                
+                if not gravity_klt:
+                    rigid_api.CreateKinematicEnabledAttr().Set(True)                
+            # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/physics/physics_static_collision.html
+            # else: # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/physics/physics_static_collision.html
+            #     load_asset_to_prim_path("Props/KLT_Bin/small_KLT_visual.usd")
 
     # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     t_idx = 0 
@@ -458,19 +501,25 @@ def main():
         my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
         world_step_timer += time.time() - world_step_timer_start
 
-        # Measure control frequency
-        # if args.print_ctrl_rate and not SIMULATING:
-        #     real_robot_cfm_is_initialized = not np.isnan(real_robot_cfm_start_time) # is the control frequency measurement already initialized?
-        #     real_robot_cfm_can_be_initialized = t_idx > real_robot_cfm_min_start_t_idx # is it valid to start measuring control frequency now?
-        #     if not real_robot_cfm_is_initialized and real_robot_cfm_can_be_initialized:
-        #         real_robot_cfm_start_time = time.time()
-        #         real_robot_cfm_start_t_idx = t_idx # my_world.current_time_step_index is "t", current time step. Num of *completed* control steps (actions) in *played* simulation (after play button is pressed)
-        
+
         # ENVIRONMENT OBSTACLES - READ STATES AND UPDATE ROBOTS
-        # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
         env_obstacles_update_timer_start = time.time()
-        for i in range(len(env_obstacles)): 
-            env_obstacles[i].update_registered_ccheckers()
+        if SUPPORT_ASSETS_OUTSIDE_CONFIG and (t_idx < ASSET_FIXATION_T or (ASSET_FIXATION_T == -1)): 
+            if t_idx % 10 == 0: # less frequent updates because it takes longer to load the assets)
+                for i in range(len(robots)):
+                    new_world_model:WorldConfig = usd_help.get_obstacles_from_stage(
+                        only_paths=["/World"], # only what is under the world prim
+                        ignore_substring=ignore_prefix, # expcept these prims (targets, robots, obstacles)
+                        reference_prim_path=robots[i].prim_path, # To express the objects in robot's frame (set false to express in world frame)
+                    )
+                    robots[i].reset_world_model(new_world_model) # replace the current world model with the new one
+                    print(f'robot {i} new cchecker: num of obstacles: {len(robots[i].get_world_model().objects)}')
+
+        # obstacles from config
+        # update obstacles poses in registed ccheckers (for environment (shared) obstacles) 
+        else: # because without this condition, there is a bug
+            for i in range(len(env_obstacles)): 
+                env_obstacles[i].update_registered_ccheckers()
         env_obstacles_timer += time.time() - env_obstacles_update_timer_start
 
         # ROBOTS AS OBSTACLES - READ STATES/PLANS
@@ -523,6 +572,7 @@ def main():
                     visualizations_timer_start = time.time()
                     point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
                     visualizations_timer += time.time() - visualizations_timer_start
+            
             elif not OBS_PREDICTION: # using current state of other robots (no prediction)
                 robots_as_obs_timer_start = time.time()
                 for j in range(len(robots)):    
