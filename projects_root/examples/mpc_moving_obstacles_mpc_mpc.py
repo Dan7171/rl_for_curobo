@@ -57,6 +57,9 @@ Example options:
 # ############################## Run settings ##############################
 
 
+from dataclasses import fields
+
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -72,7 +75,8 @@ RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one
 PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
 MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
 SUPPORT_ASSETS_OUTSIDE_CONFIG = True # Turn on if you want to "drag and drop" assets to the stage manually. Turn otherwise because it takes longer to load the assets.
-ASSET_FIXATION_T = 10 # If using SUPPORT_ASSETS_OUTSIDE_CONFIG, After this time step, no updates to collision models will be made, even if they are changed in the stage. This is to prevent the collision model from being updated too frequently after some point. Set to -1 to disable.
+ASSET_FIXATION_T = -1 # If using SUPPORT_ASSETS_OUTSIDE_CONFIG, After this time step, no updates to collision models will be made, even if they are changed in the stage. This is to prevent the collision model from being updated too frequently after some point. Set to -1 to disable.
+CUROBO_WORLD_MODELS_RESET_T = 100 # If the world models are not updated for a long time, they will be restarted. Set to -1 to disable.
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
     # arg parsing:
@@ -153,8 +157,10 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         }
     ) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
     from omni.isaac.core import World 
-    from omni.isaac.core.utils.stage import add_reference_to_stage
-    from omni.isaac.core.utils.nucleus import get_assets_root_path
+    from  isaacsim.core.api.materials import OmniPBR, OmniGlass
+    from isaacsim.core.api.objects import VisualCuboid, DynamicCuboid, VisualSphere, DynamicSphere, VisualCapsule, DynamicCapsule, VisualCone, DynamicCone, VisualCylinder, DynamicCylinder
+    # from omni.isaac.core.utils.stage import add_reference_to_stage
+    # from omni.isaac.core.utils.nucleus import get_assets_root_path
     from pxr import UsdGeom, Gf, PhysxSchema, UsdPhysics, Sdf
     # from omni.usd import get_context
     # Our modules
@@ -170,13 +176,19 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from curobo.util_file import  load_yaml
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
+    from projects_root.utils.sim_prims.klt import Klt
+    from projects_root.utils.sim_prims.seattle_lab_table import SeattleLabTable
+    # from projects_root.utils.sim_prims.packing_table import PackingTable # currently curobo cant read this because meshes are not triangulated!!!!!!
+    from projects_root.utils.sim_prims.stand import Stand
+    from projects_root.utils.sim_prims.self_made.simple_table import SimpleTable
+
     from projects_root.autonomous_franka import AutonomousFranka
     from projects_root.utils.curobo_world_models import update_world_model
     a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
 ######################### HELPER ##########################
 @dataclass
-class TargetColors:
+class NPColors:
     red: np.ndarray = np.array([0.5,0,0])
     green: np.ndarray = np.array([0,0.5,0])
     blue: np.ndarray = np.array([0,0,0.5])
@@ -184,6 +196,10 @@ class TargetColors:
     purple: np.ndarray = np.array([0.5,0,0.5])
     orange: np.ndarray = np.array([0.5,0.3,0])
     pink: np.ndarray = np.array([0.5,0.3,0.5])
+    white: np.ndarray = np.array([1,1,1])
+    black: np.ndarray = np.array([0,0,0])
+    # data: list[np.ndarray] = [red, green, blue, yellow, purple, orange, pink, white, black]
+    # names: list[str] = ["red", "green", "blue", "yellow", "purple", "orange", "pink", "white", "black"]
   
 def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     def wrapper(*args, **kwargs):
@@ -243,54 +259,54 @@ def get_sphere_list_from_sphere_tensor(p_spheres:torch.Tensor, rad_spheres:torch
         spheres.append(Sphere(name=name_sphere, pose=X_sphere, radius=r_sphere))
     return spheres
 
-def get_full_path_to_asset(asset_subpath):
-    return get_assets_root_path() + '/Isaac/' + asset_subpath
+# def get_full_path_to_asset(asset_subpath):
+#     return get_assets_root_path() + '/Isaac/' + asset_subpath
 
-def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
-    """
-    Loads an asset to a prim path.
-    Source: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.replicator.isaac/docs/index.html?highlight=add_reference_to_stage
+# def load_asset_to_prim_path(asset_subpath, prim_path='', is_fullpath=False):
+#     """
+#     Loads an asset to a prim path.
+#     Source: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.replicator.isaac/docs/index.html?highlight=add_reference_to_stage
 
-    asset_subpath: sub-path to the asset to load. Must end with .usd or .usda. Normally starts with /Isaac/...
-    To browse, go to: asset browser in simulator and add /Issac/% your subpath% where %your subpath% is the path to the asset you want to load.
-    Note: to get the asset exact asset_subpath, In the simulator, open: Isaac Assets -> brows to the asset (usd file) -> right click -> copy url path and paste it here (the subpath is the part after the last /Isaac/).
-    Normally the assets are coming from web, but this tutorial can help you use local assets: https://docs.omniverse.nvidia.com/launcher/latest/it-managed-launcher/content_install.html.
+#     asset_subpath: sub-path to the asset to load. Must end with .usd or .usda. Normally starts with /Isaac/...
+#     To browse, go to: asset browser in simulator and add /Issac/% your subpath% where %your subpath% is the path to the asset you want to load.
+#     Note: to get the asset exact asset_subpath, In the simulator, open: Isaac Assets -> brows to the asset (usd file) -> right click -> copy url path and paste it here (the subpath is the part after the last /Isaac/).
+#     Normally the assets are coming from web, but this tutorial can help you use local assets: https://docs.omniverse.nvidia.com/launcher/latest/it-managed-launcher/content_install.html.
 
-    For example: http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/Mugs/SM_Mug_A2.usd -> asset_subpath should be: Props/Mugs/SM_Mug_A2.usd
+#     For example: http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/Mugs/SM_Mug_A2.usd -> asset_subpath should be: Props/Mugs/SM_Mug_A2.usd
         
-    prim_path: path to the prim to load the asset to. If not provided, the asset will be loaded to the prim path /World/%asset_subpath%    
-    is_fullpath: if True, the asset_subpath is a full path to the asset. If False, the asset_subpath is a subpath to the assets folder in the simulator.
-    This is useful if you want to load an asset that is not in the {get_assets_root_path() + '/Isaac/'} folder (which is the root folder for Isaac Sim assets (see asset browser in simulator) but custom assets in your project from a local path.
+#     prim_path: path to the prim to load the asset to. If not provided, the asset will be loaded to the prim path /World/%asset_subpath%    
+#     is_fullpath: if True, the asset_subpath is a full path to the asset. If False, the asset_subpath is a subpath to the assets folder in the simulator.
+#     This is useful if you want to load an asset that is not in the {get_assets_root_path() + '/Isaac/'} folder (which is the root folder for Isaac Sim assets (see asset browser in simulator) but custom assets in your project from a local path.
 
 
 
-    Examples:
-    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd") will load the asset to the prim path /World/Promps_Mugs_SM_Mug_A2
-    load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd", "/World/Mug") will load the asset to the prim path /World/Mug
-    load_asset_to_prim_path("/home/me/some_folder/SM_Mug_A2.usd", "/World/Mug", is_fullpath=True) will load the asset to the prim path /World/Mug
-    load_asset_to_prim_path("http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/KLT_Bin/small_KLT_visual_collision.usd", "/World/KLT_Bin", is_fullpath=True) will load the asset to the prim path /World/KLT_Bin
-    """
+#     Examples:
+#     load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd") will load the asset to the prim path /World/Promps_Mugs_SM_Mug_A2
+#     load_asset_to_prim_path("Props/Mugs/SM_Mug_A2.usd", "/World/Mug") will load the asset to the prim path /World/Mug
+#     load_asset_to_prim_path("/home/me/some_folder/SM_Mug_A2.usd", "/World/Mug", is_fullpath=True) will load the asset to the prim path /World/Mug
+#     load_asset_to_prim_path("http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.0/Isaac/Props/KLT_Bin/small_KLT_visual_collision.usd", "/World/KLT_Bin", is_fullpath=True) will load the asset to the prim path /World/KLT_Bin
+#     """
 
-    # validate asset 
-    if not prim_path:
-        # prim_name = asset_subpath.split('/')[-1].split('.')[0]
-        asset_subpath_as_prim_name = asset_subpath.replace('/', '_').split('.')[0]
-        prim_path = f'/World/{asset_subpath_as_prim_name}'
-    else:
-        prim_path = prim_path
+#     # validate asset 
+#     if not prim_path:
+#         # prim_name = asset_subpath.split('/')[-1].split('.')[0]
+#         asset_subpath_as_prim_name = asset_subpath.replace('/', '_').split('.')[0]
+#         prim_path = f'/World/{asset_subpath_as_prim_name}'
+#     else:
+#         prim_path = prim_path
     
-    # define full path to asset
-    if not is_fullpath:
-        asset_fullpath = get_full_path_to_asset(asset_subpath)
-    else:
-        asset_fullpath = asset_subpath 
+#     # define full path to asset
+#     if not is_fullpath:
+#         asset_fullpath = get_full_path_to_asset(asset_subpath)
+#     else:
+#         asset_fullpath = asset_subpath 
     
-    # validate asset path
-    assert asset_fullpath.endswith('.usd') or asset_fullpath.endswith('.usda'), "Asset path must end with .usd or .usda"
+#     # validate asset path
+#     assert asset_fullpath.endswith('.usd') or asset_fullpath.endswith('.usda'), "Asset path must end with .usd or .usda"
     
-    # load asset to prim path (adds the asset to the stage)
-    add_reference_to_stage(asset_fullpath, prim_path)
-    return prim_path 
+#     # load asset to prim path (adds the asset to the stage)
+#     add_reference_to_stage(asset_fullpath, prim_path)
+#     return prim_path 
 
 def write_stage_to_usd_file(stage,file_path):
     stage.Export(file_path) # export the stage to a temporary USD file
@@ -301,8 +317,13 @@ def handle_sigint_gpu_mem_debug(signum, frame):
     print("Snapshot dumped to dump_snapshot.pickle, you can upload it to the server: https://docs.pytorch.org/memory_viz")
     print("Now raising KeyboardInterrupt to let the original KeyboardInterrupt handler (of nvidia) to close the app")
     raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
-    
 
+def get_robots_mid_posotion(X_Robots:List[np.ndarray]) -> np.ndarray:
+    """
+    Returns the mid point of the two robots.
+    """
+    p_mid = (X_Robots[0][:3] + X_Robots[1][:3])/2
+    return p_mid
 def main():
     """
     Main simulation loop that demonstrates Model Predictive Control (MPC) with moving obstacles.
@@ -359,8 +380,8 @@ def main():
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
     robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
     robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [1.8, 0, 0.2, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
-    target_colors = [TargetColors.green, TargetColors.red]
+    X_Targets = [[0.6, 0, 0.5, 0, 1, 0, 0], [0.6, 0, 0.5, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
+    target_colors = [NPColors.green, NPColors.red]
     if OBS_PREDICTION:
         col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
@@ -440,43 +461,56 @@ def main():
         targets_prim_paths = [robot.get_target_prim_path() for robot in robots]
         obstacles_prim_paths = [obstacle.get_prim_path() for obstacle in env_obstacles]
         ignore_prefix = [        
-            *robots_prim_paths,
-            *targets_prim_paths, # "/World/target",
-            # *obstacles_prim_paths,
+            *robots_prim_paths, # robots
+            *targets_prim_paths, # targets
             "/World/defaultGroundPlane",
             "/curobo"
+            "/World/Looks", # visual materials
+            "/World/target" # targets
         ]
-        load_klt = True 
+
+
+        # from projects_root.utils.sim_materials.visual_materials.utils import create_material
+
+   
+        # klt = Klt(stage, position=[0.6, 0, 0.2], collision=True, gravity=False, scale=[2]*3)
+        # seattle_lab_table = SeattleLabTable(stage, position=[0.6, 1, 1], collision=True, gravity=False, scale=[0.1]*3)
+        # packing_table = PackingTable(stage, position=[0.6, 0.0, 0.0],rotation=[0,0,90], collision=True, gravity=False, scale=[0.005]*3)
+        # stand = Stand(stage, position=[0.6, 0.0, 0.0],collision=False, gravity=False)
+        visual_materials = {}
+        for field in fields(NPColors):
+            visual_materials[field.name] = OmniPBR(f"/World/Looks/{field.name}", color=getattr(NPColors, field.name))
+
         
-        if load_klt:
-            gravity_klt = False
-            klt_position = Gf.Vec3d(0.6, 0, 0.2)
-            klt_rotation_euler = Gf.Vec3f(0, 0, 0)
-            sim_collision_klt = True
+        mid_point_robots = get_robots_mid_posotion(X_Robots)
+        central_task_table = SimpleTable(stage,  path="/World/simple_table_center", position=mid_point_robots, collision=True, gravity=False, scale=[0.3,0.3,0.3])
+        central_task_table.apply_visual_material(visual_materials["white"], True)
 
-            # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/py/source/extensions/isaacsim.core.prims/docs/index.html
-            klt_prim_path = load_asset_to_prim_path("Props/KLT_Bin/small_KLT_visual.usd")
-            klt_prim = stage.GetPrimAtPath(klt_prim_path)
-            xform = UsdGeom.XformCommonAPI(klt_prim)
-            # Apply translation and rotation
-            xform.SetTranslate(klt_position)
-            xform.SetRotate(klt_rotation_euler)  # Rotation in degrees (XYZ order)
-            if sim_collision_klt:
-                # prim = stage.GetPrimAtPath(klt_prim_path)
-                # Apply collision APIs
-                UsdPhysics.CollisionAPI.Apply(klt_prim)
-                PhysxSchema.PhysxCollisionAPI.Apply(klt_prim)
-                rigid_api = UsdPhysics.RigidBodyAPI.Apply(klt_prim)  
-                # Set the approximation type (using token type)
-                attr = klt_prim.CreateAttribute("physxCollision:approximation", Sdf.ValueTypeNames.Token)
-                attr.Set("meshSimplification")
-                
-                if not gravity_klt:
-                    rigid_api.CreateKinematicEnabledAttr().Set(True)                
-            # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/physics/physics_static_collision.html
-            # else: # https://docs.isaacsim.omniverse.nvidia.com/4.5.0/physics/physics_static_collision.html
-            #     load_asset_to_prim_path("Props/KLT_Bin/small_KLT_visual.usd")
+        
+        personal_tables_positions = [robots[0].p_R - mid_point_robots, robots[1].p_R + mid_point_robots]
+        personal_tables_scale = [0.25,0.75,0.5]
+        personal_tables = []
+        for i, position in enumerate(personal_tables_positions):
+            personal_table = SimpleTable(stage,  path=f"/World/personal_table_{i}", position=position, collision=True, gravity=False, scale=personal_tables_scale)
+            personal_table.apply_visual_material(visual_materials["white"], True)
+            personal_tables.append(personal_table)
 
+        targets:list[list[VisualSphere]] = [[] for _ in range(len(robots))]
+        radius = 0.05
+        for robot_idx in range(len(targets)):
+            for i, field in enumerate(fields(NPColors)):
+                step_y = personal_tables_scale[1] / len(fields(NPColors))
+                table_top_z = 1.05 * personal_tables_scale[2]
+                start_y = personal_tables_positions[robot_idx][1] - (personal_tables_scale[1] / 2)
+                # https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.objects.VisualSphere
+                target = VisualSphere(prim_path=f"/World/target_{field.name}_R{robot_idx}", position=[0,0,0],  radius=radius, visual_material=visual_materials[field.name])
+                targets[robot_idx].append(target)
+                x = personal_tables_positions[robot_idx][0]
+                y = start_y + i * step_y
+                z = table_top_z + radius / 2
+                target.set_world_pose([x,y,z], [0, 1, 0, 0])
+
+       
     # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     t_idx = 0 
     
@@ -501,11 +535,22 @@ def main():
         my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
         world_step_timer += time.time() - world_step_timer_start
 
+        if t_idx % 50 == 0:
+            next_target_idx = np.random.randint(0, len(targets[0])) # randomly select a target index
+            for robot_idx in range(len(targets)): # for each robot
+                next_target = targets[robot_idx][next_target_idx] # get the next target at the index (same index, same color)
+                p_T, q_T = next_target.get_world_pose() # get the pose of the next target
+                robots[robot_idx].target.set_world_pose(p_T,q_T) # teleport cube to next target so the pose in solver will be updated too
+                # robots[robot_idx].set_new_target_for_solver(p_T, q_T) # update the target in the solver
+                for i,target in enumerate(targets[robot_idx]):
+                    target.set_visibility(True) if i == next_target_idx else target.set_visibility(False)
+
+            print(f"robots {robot_idx} target changed! to {fields(NPColors)[next_target_idx].name}")
 
         # ENVIRONMENT OBSTACLES - READ STATES AND UPDATE ROBOTS
         env_obstacles_update_timer_start = time.time()
         if SUPPORT_ASSETS_OUTSIDE_CONFIG and (t_idx < ASSET_FIXATION_T or (ASSET_FIXATION_T == -1)): 
-            if t_idx % 10 == 0: # less frequent updates because it takes longer to load the assets)
+            if t_idx % CUROBO_WORLD_MODELS_RESET_T == 0: # less frequent updates because it takes longer to load the assets)
                 for i in range(len(robots)):
                     new_world_model:WorldConfig = usd_help.get_obstacles_from_stage(
                         only_paths=["/World"], # only what is under the world prim
