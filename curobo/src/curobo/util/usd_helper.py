@@ -512,6 +512,8 @@ class UsdHelper:
                 m_data = get_mesh_attrs(x, cache=self._xform_cache, transform=r_T_w)
                 if m_data is not None:
                     obstacles["mesh"].append(m_data)
+                else:
+                    print(f"Curobo can't read mesh at {x.GetPath()} as obstacle because it is not triangulated")
             elif x.IsA(UsdGeom.Cylinder):
                 if obstacles["cylinder"] is None:
                     obstacles["cylinder"] = []
