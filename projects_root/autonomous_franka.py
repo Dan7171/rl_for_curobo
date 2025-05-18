@@ -21,6 +21,7 @@ from omni.isaac.core.objects import VisualSphere
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.types import JointsState as isaac_JointsState
+from isaacsim.core.prims  import XFormPrim, SingleXFormPrim, SingleGeometryPrim, GeometryPrim
 import omni.kit.commands as cmd
 from pxr import Gf
 
@@ -146,6 +147,13 @@ class AutonomousFranka:
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         pass
 
+    def get_ee_pose(self) -> np.ndarray[np.ndarray, np.ndarray]:
+        """
+        See: https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.prims/docs/index.html#isaacsim.core.prims.XFormPrim.get_world_poses:~:text=True%2C%20False%2C%20True%5D-,get_world_poses(,-indices%3A%20ndarray
+        """
+        p, q = XFormPrim(self.get_prim_path() + '/ee_link').get_world_poses()
+        return p, q
+        
     def set_new_target_for_solver(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
         
         """ 
@@ -447,6 +455,11 @@ class AutonomousFranka:
     @abstractmethod
     def get_plan(self, *args, **kwargs):
         pass
+
+    
+    
+    
+    
 class FrankaMpc(AutonomousFranka):
     def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
         """

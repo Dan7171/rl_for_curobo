@@ -25,8 +25,12 @@ from omni.isaac.core import World
 # This extension has franka related tasks and controllers as well
 from omni.isaac.franka import Franka
 from omni.isaac.core.objects import DynamicCuboid
-from omni.isaac.franka.controllers import PickPlaceController
-from omni.isaac.franka.tasks import PickPlace # NOTE here is the change from the previous example
+# from omni.isaac.franka.tasks import PickPlace # NOTE here is the change from the previous example
+
+# isaac 4.5 https://docs.isaacsim.omniverse.nvidia.com/latest/overview/extensions_renaming.html
+from isaacsim.robot.manipulators.examples.franka.controllers import PickPlaceController # omni.isaac.franka.controllers import PickPlaceController
+from isaacsim.robot.manipulators.examples.franka.tasks import PickPlace 
+
 import numpy as np
 
 ##################  Implementing a built in task for pick and place   #########################

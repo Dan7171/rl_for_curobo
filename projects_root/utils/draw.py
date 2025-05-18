@@ -58,3 +58,5 @@ def draw_points(points_dicts: List[dict], color='green'):
     
     draw.draw_points(unified_points, unified_colors, unified_sizes)
         
+
+ 
