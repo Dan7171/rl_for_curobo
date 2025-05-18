@@ -125,6 +125,15 @@ class AutonomousFranka:
     def get_cchecker(self):
         return self.solver.world_coll_checker
     
+    def set_target_color(self, color:np.ndarray):
+        self.target.set_color(color)
+
+    def set_target_visibility(self, visibility:bool):
+        self.target.set_visibility(visibility)
+        
+    def set_target_pose(self, position:np.ndarray, orientation:np.ndarray):
+        self.target.set_world_pose(position, orientation)
+
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
         X_R = Pose.from_list(list(self.p_R) + list(self.q_R)) # 
         usd_help.add_subroot(self.world_root, self.subroot_path, X_R)

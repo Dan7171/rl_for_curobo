@@ -157,7 +157,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         }
     ) # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
     from omni.isaac.core import World 
-    from  isaacsim.core.api.materials import OmniPBR, OmniGlass
+    from isaacsim.core.api.materials import OmniPBR, OmniGlass, PreviewSurface
     from isaacsim.core.api.objects import VisualCuboid, DynamicCuboid, VisualSphere, DynamicSphere, VisualCapsule, DynamicCapsule, VisualCone, DynamicCone, VisualCylinder, DynamicCylinder
     # from omni.isaac.core.utils.stage import add_reference_to_stage
     # from omni.isaac.core.utils.nucleus import get_assets_root_path
@@ -193,11 +193,11 @@ class NPColors:
     green: np.ndarray = np.array([0,0.5,0])
     blue: np.ndarray = np.array([0,0,0.5])
     yellow: np.ndarray = np.array([0.5,0.5,0])
-    purple: np.ndarray = np.array([0.5,0,0.5])
-    orange: np.ndarray = np.array([0.5,0.3,0])
-    pink: np.ndarray = np.array([0.5,0.3,0.5])
+    # purple: np.ndarray = np.array([0.5,0,0.5])
+    # orange: np.ndarray = np.array([0.5,0.3,0])
+    # pink: np.ndarray = np.array([0.5,0.3,0.5])
     white: np.ndarray = np.array([1,1,1])
-    black: np.ndarray = np.array([0,0,0])
+    # black: np.ndarray = np.array([0,0,0])
     # data: list[np.ndarray] = [red, green, blue, yellow, purple, orange, pink, white, black]
     # names: list[str] = ["red", "green", "blue", "yellow", "purple", "orange", "pink", "white", "black"]
   
@@ -315,7 +315,7 @@ def main():
     # Adding two frankas to the scene
     # # Inspired by curobo/examples/isaac_sim/batch_motion_gen_reacher.py but this time at the same world (the batch motion gen reacher example is for multiple worlds)
     
-    include_robots = [True, False]
+    include_robots = [True, True] # to include/exclude robots in the simulation
     X_Robots = [
         np.array([0,0,0,1,0,0,0], dtype=np.float32),
         np.array([1.2,0,0,1,0,0,0], dtype=np.float32)
@@ -431,26 +431,32 @@ def main():
         # seattle_lab_table = SeattleLabTable(stage, position=[0.6, 1, 1], collision=True, gravity=False, scale=[0.1]*3)
         # packing_table = PackingTable(stage, position=[0.6, 0.0, 0.0],rotation=[0,0,90], collision=True, gravity=False, scale=[0.005]*3)
         # stand = Stand(stage, position=[0.6, 0.0, 0.0],collision=False, gravity=False)
-        visual_materials = {}
-        for field in fields(NPColors):
-            visual_materials[field.name] = OmniPBR(f"/World/Looks/{field.name}", color=getattr(NPColors, field.name))
-
-        
+        # visual_materials = {}
+        # for field in fields(NPColors):
+        #     visual_materials[field.name] = PreviewSurface(f"/World/Looks/{field.name}", color=getattr(NPColors, field.name)) # OmniPBR(f"/World/Looks/{field.name}", color=getattr(NPColors, field.name))
+            
+        color_changing_meterial = PreviewSurface(f"/World/Looks/color_changing", color=getattr(NPColors, "white"))
         mid_point_robots = get_robots_mid_posotion(X_Robots)
         central_task_table = SimpleTable(stage,  path="/World/simple_table_center", position=mid_point_robots, collision=True, gravity=False, scale=[0.3,0.3,0.3])
-        central_task_table.apply_visual_material(visual_materials["white"], True)
-
+        # central_task_table.apply_visual_material(visual_materials["white"], True)
+        prims_to_apply_to = [central_task_table] + [robots[i].target for i in range(len(robots)) if include_robots[i]]
+        for prim in prims_to_apply_to:
+            prim.apply_visual_material(color_changing_meterial, True)
         
-        personal_tables_positions = [X_Robots[0][:3] - mid_point_robots, X_Robots[1][:3] + mid_point_robots]
+        personal_tables_positions = [X_Robots[0][:3] - mid_point_robots *(2/3), X_Robots[1][:3] + mid_point_robots *(2/3)]
         personal_tables_scale = [0.25,0.75,0.5]
-        personal_tables = []
-        for i, position in enumerate(personal_tables_positions):
-            if include_robots[i]:   
-                position = personal_tables_positions[i]
-                personal_table = SimpleTable(stage,  path=f"/World/personal_table_{i}", position=position, collision=True, gravity=False, scale=personal_tables_scale)
-                personal_table.apply_visual_material(visual_materials["white"], True)
-                personal_tables.append(personal_table)
+        # personal_tables = []
+        # for i, position in enumerate(personal_tables_positions):
+        #     if include_robots[i]:   
+        #         position = personal_tables_positions[i]
+                # personal_table = SimpleTable(stage,  path=f"/World/personal_table_{i}", position=position, collision=False, gravity=False, scale=personal_tables_scale)
+                # personal_table.apply_visual_material(visual_materials["white"], True)
+                # personal_tables.append(personal_table)
 
+        next_target_idx = np.random.randint(0, len(fields(NPColors))) # randomly select a target index
+        next_target_color = fields(NPColors)[next_target_idx].name
+        print(f"start target color: {next_target_color}")
+        
         targets:list[list[VisualSphere]] = [[] for _ in range(len(include_robots))]
         radius = 0.05
         for robot_idx in range(len(targets)):
@@ -461,13 +467,15 @@ def main():
                 table_top_z = 1.05 * personal_tables_scale[2]
                 start_y = personal_tables_positions[robot_idx][1] - (personal_tables_scale[1] / 2)
                 # https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.objects.VisualSphere
-                target = VisualSphere(prim_path=f"/World/target_{field.name}_R{robot_idx}", position=[0,0,0], orientation=[0,1,0,0], radius=radius, visual_material=visual_materials[field.name])
-                targets[robot_idx].append(target)
+                # target = VisualSphere(prim_path=f"/World/target_{field.name}_R{robot_idx}", position=[0,0,0], orientation=[0,1,0,0], radius=radius, visual_material=visual_materials[field.name])
+                # targets[robot_idx].append(target)
+                # targets[robot_idx].append(target)
+                
                 x = personal_tables_positions[robot_idx][0]
                 y = start_y + i * step_y
                 z = table_top_z + radius / 2
-                target.set_world_pose([x,y,z], [0, 1, 0, 0])
-
+                target_pose = ([x,y,z], [0, 1, 0, 0])
+                targets[robot_idx].append(target_pose)
        
     # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
     t_idx = 0 
@@ -492,22 +500,33 @@ def main():
         world_step_timer_start = time.time()                 
         my_world.step(render=True) # print_rate_decorator(lambda: my_world.step(render=True), args.print_ctrl_rate, "my_world.step")() # UPDATE PHYSICS OF SIMULATION AND IF RENDER IS TRUE ALSO UPDATING UI ELEMENTS, VIEWPORTS AND CAMERAS.(Executes one physics step and one rendering step).Note: rendering means rendering a frame of the current application and not only rendering a frame to the viewports/ cameras. So UI elements of Isaac Sim will be refreshed as well if running non-headless.) See: https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/tutorial_core_hello_world.html, see alse https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.world.World       
         world_step_timer += time.time() - world_step_timer_start
-
+        
         if t_idx % 200 == 0:
-            next_target_idx = np.random.randint(0, len(targets[0])) # randomly select a target index
+            # randomly select next target
+            next_target_idx = np.random.randint(0, len(fields(NPColors))) # randomly select a target index
             next_target_color = fields(NPColors)[next_target_idx].name
-            central_task_table.apply_visual_material(visual_materials[next_target_color], True)
+            color_changing_meterial.set_color(getattr(NPColors, next_target_color))
+            # update the central task table color to be as the next target color
+            # central_task_table.apply_visual_material(visual_materials[next_target_color], True)
+            # central_task_table.apply_visual_material(color_changing_meterial, True)
+            
+            # set the next target for each (included) robot to it's target with the sampled color
             for robot_idx in range(len(include_robots)): # for each robot
                 if not include_robots[robot_idx]:
                     continue
-                next_target = targets[robot_idx][next_target_idx] # get the next target at the index (same index, same color)
-                p_T, q_T = next_target.get_world_pose() # get the pose of the next target
-                robots[robot_idx].target.set_world_pose(p_T,q_T) # teleport cube to next target so the pose in solver will be updated too
-                # robots[robot_idx].set_new_target_for_solver(p_T, q_T) # update the target in the solver
-                for i,target in enumerate(targets[robot_idx]):
-                    target.set_visibility(True) if i == next_target_idx else target.set_visibility(False)
                 
-            print(f"robots {robot_idx} target changed! to {next_target_color}")
+                # set robot target
+                # next_target = targets[robot_idx][next_target_idx] # get the next target at the index (same index, same color)
+                # p_T, q_T = next_target.get_world_pose() # get the pose of the next target
+                # robots[robot_idx].target.set_world_pose(p_T,q_T) # teleport cube to next target so the pose in solver will be updated too
+                p_T,q_T = targets[robot_idx][next_target_idx]
+                robots[robot_idx].target.set_world_pose(p_T,q_T)
+                
+                # hide all targets except the next target
+                # for i,target in enumerate(targets[robot_idx]):
+                #     target.set_visibility(True) if i == next_target_idx else target.set_visibility(False)
+                
+            print(f"robots target changed! to {next_target_color}")
 
         # ENVIRONMENT OBSTACLES - READ STATES AND UPDATE ROBOTS
         env_obstacles_update_timer_start = time.time()
@@ -655,32 +674,32 @@ def main():
         k_print = 100
         if t_idx % k_print == 0:    
             print(f"t = {t_idx}")
-            print(f"ctrl freq in last {k_print} steps:  {k_print / ctrl_loop_timer}")
-            print(f"robots as obs ops freq in last {k_print} steps: {k_print / robots_as_obs_timer}")
-            print(f"env obs ops freq in last {k_print} steps: {k_print / env_obstacles_timer}")
-            print(f"mpc solver freq in last {k_print} steps: {k_print / mpc_solver_timer}")
-            print(f"world step freq in last {k_print} steps: {k_print / world_step_timer}")
-            print(f"targets update freq in last {k_print} steps: {k_print / targets_update_timer}")
-            print(f"joint states updates freq in last {k_print} steps: {k_print / joint_state_timer}")
-            print(f"actions freq in last {k_print} steps: {k_print / action_timer}")
-            print(f"visualization ops freq in last {k_print} steps: {k_print / visualizations_timer}")
+            print(f"ctrl freq in last {k_print} steps:  {k_print / ctrl_loop_timer:.2f}")
+            print(f"robots as obs ops freq in last {k_print} steps: {k_print / robots_as_obs_timer:.2f}")
+            print(f"env obs ops freq in last {k_print} steps: {k_print / env_obstacles_timer:.2f}")
+            print(f"mpc solver freq in last {k_print} steps: {k_print / mpc_solver_timer:.2f}")
+            print(f"world step freq in last {k_print} steps: {k_print / world_step_timer:.2f}")
+            print(f"targets update freq in last {k_print} steps: {k_print / targets_update_timer:.2f}")
+            print(f"joint states updates freq in last {k_print} steps: {k_print / joint_state_timer:.2f}")
+            print(f"actions freq in last {k_print} steps: {k_print / action_timer:.2f}")
+            print(f"visualization ops freq in last {k_print} steps: {k_print / visualizations_timer:.2f}")
             
             total_time_measured = mpc_solver_timer + world_step_timer + targets_update_timer + \
             joint_state_timer + action_timer + visualizations_timer + robots_as_obs_timer + env_obstacles_timer
             total_time_actual = ctrl_loop_timer
             delta = total_time_actual - total_time_measured
-            print(f"total time actual: {total_time_actual}")
-            print(f"total time measured: {total_time_measured}")
-            print(f"delta: {delta}")
+            print(f"total time actual: {total_time_actual:.2f}")
+            print(f"total time measured: {total_time_measured:.2f}")
+            print(f"delta: {delta:.2f}")
             print("In percentage %:")
-            print(f"mpc solver: {100 * mpc_solver_timer / total_time_actual:.2f}")
-            print(f"world step: {100 * world_step_timer / total_time_actual:.2f}")
-            print(f"robots as obs: {100 * robots_as_obs_timer / total_time_actual:.2f}")
-            print(f"env obs: {100 * env_obstacles_timer / total_time_actual:.2f}")
-            print(f"targets update: {100 * targets_update_timer / total_time_actual:.2f}")
-            print(f"joint state: {100 * joint_state_timer / total_time_actual:.2f}")
-            print(f"action: {100 * action_timer / total_time_actual:.2f}")
-            print(f"visualizations: {100 * visualizations_timer / total_time_actual:.2f}")
+            print(f"    mpc solver: {100 * mpc_solver_timer / total_time_actual:.2f}%")
+            print(f"    world step: {100 * world_step_timer / total_time_actual:.2f}%")
+            print(f"    robots as obs: {100 * robots_as_obs_timer / total_time_actual:.2f}%")
+            print(f"    env obs: {100 * env_obstacles_timer / total_time_actual:.2f}%")
+            print(f"    targets update: {100 * targets_update_timer / total_time_actual:.2f}%")
+            print(f"    joint state: {100 * joint_state_timer / total_time_actual:.2f}%")
+            print(f"    action: {100 * action_timer / total_time_actual:.2f}%")
+            print(f"    visualizations: {100 * visualizations_timer / total_time_actual:.2f}%")
             # reset timers
             ctrl_loop_timer = 0
             mpc_solver_timer = 0
