@@ -60,6 +60,7 @@ Example options:
 from dataclasses import fields
 
 
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -172,6 +173,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import omni.ui as ui
     # Our modules
     from projects_root.utils.helper import add_extensions
+    from projects_root.utils.quaternion import isaacsim_euler2quat
     from projects_root.autonomous_franka import FrankaMpc
     from projects_root.utils.draw import draw_points
     # CuRobo modules
@@ -211,12 +213,19 @@ class NPColors:
 
 class Task:
     
+    dst_pose:tuple[np.ndarray, np.ndarray] = None
     @staticmethod
     def sample_target():
         next_target_idx = np.random.randint(0, len(fields(NPColors))) # randomly select a target index
         next_target_color = fields(NPColors)[next_target_idx].name
         print(f"start target color: {next_target_color}")
         return next_target_idx, next_target_color
+    
+    @staticmethod
+    def set_dst_target(robot,p_T,q_T,color_changing_meterial):
+        robot.target.set_world_pose(p_T, q_T)
+        color_changing_meterial.set_color(getattr(NPColors, next_target_color))
+    
     
     
 
@@ -481,10 +490,10 @@ def main():
     # prims_to_apply_to = [target_dst_prim] + [robots[i].target for i in range(len(robots)) if include_robots[i]]
     prims_to_apply_to = [robots[i].target for i in range(len(robots)) if include_robots[i]]
     for prim in prims_to_apply_to:
-        prim.apply_visual_material(color_changing_meterial, True)
+        prim.apply_visual_materials(color_changing_meterial)
     
     # set up the private tables
-    private_tables_offset_z = np.array([0, 0, 0.5], dtype=np.float32)
+    private_tables_offset_z = np.array([0, 0, 0.45], dtype=np.float32)
     private_tables_offset_xy = mid_point_robots *(2/3)
     private_tables_positions = [X_Robots[0][:3] + private_tables_offset_z - private_tables_offset_xy, X_Robots[1][:3] + private_tables_offset_z + private_tables_offset_xy]
     private_tables_scale = [0.15, 0.75, 0.02]
@@ -496,13 +505,16 @@ def main():
     next_target_idx, next_target_color = Task.sample_target()
     # set up the source targets optional poses
     src_targets:list[list[tuple[np.ndarray, np.ndarray]]] = [[] for _ in range(len(include_robots))]
-    q_targets = np.array([0,1,0,0],dtype=np.float32)
+    
+    q_targets_euler = [180,0,0]
+    q_targets = isaacsim_euler2quat(*q_targets_euler,degrees=True,order="ZYX")
+    # np.array([0,1,0,0],dtype=np.float32)
     
     for robot_idx in range(len(src_targets)):
         if not include_robots[robot_idx]:
             continue
         p_src_targets = make_3d_grid(
-            private_tables_positions[robot_idx] + np.array([0,0, (DIM_SIZE_TARGETS + private_tables_scale[2]/2)]),
+            private_tables_positions[robot_idx] + np.array([0,0, (DIM_SIZE_TARGETS + private_tables_scale[2]/2 + 0.125)]),
             [1, len(fields(NPColors)), 1], 
             [0, private_tables_scale[1] / len(fields(NPColors)), 0]
         )
@@ -512,9 +524,9 @@ def main():
 
     # set up destination targets optional poses
     dst_targets:list[tuple[np.ndarray, np.ndarray]] = []
-    dst_targets_step_z = 0.2
+    dst_targets_step_z = 0.1
     dst_targets_step_x = 0
-    dst_targets_step_y = 0.2
+    dst_targets_step_y = 0.1
     row_dim = int(np.floor(np.sqrt(len(fields(NPColors)))))
     col_dim = row_dim
     p_dst_targets = make_3d_grid(dst_targets_center, [row_dim, 1, col_dim], [dst_targets_step_x, dst_targets_step_y, dst_targets_step_z])
@@ -526,17 +538,18 @@ def main():
     for robot_idx in range(len(include_robots)):
         if not include_robots[robot_idx]:
             continue
-        robots[robot_idx].target.set_world_pose(src_targets[robot_idx][next_target_idx][0], src_targets[robot_idx][next_target_idx][1])
+        robots[robot_idx].set_target_pose(src_targets[robot_idx][next_target_idx][0], src_targets[robot_idx][next_target_idx][1])
 
     # create ui window
     ui_window = ui.Window("Simulation Stats", width=300, height=150)
     with ui_window.frame:
-        with ui.VStack():
+        with ui.VStack(spacing=2):
             timestep_label = TextBlock("Time Step: ")
-            pose_error_label = TextBlock("Pose Error: ")
+            ee_error_label = TextBlock("Pose Error: ")
             control_freq = TextBlock("control freq: ")
             task_score = TextBlock("task scores: ")
-
+            task_status_label = TextBlock("task status: ")
+    
     # loop
     
     # time step
@@ -556,8 +569,11 @@ def main():
     # task data
     task_status = [0] * len(include_robots)
     score = [0] * len(include_robots)
-    pose_err = [np.inf] * len(include_robots)
-    
+    ee_err_pos = [np.inf] * len(include_robots)
+    ee_err_rot = [np.inf] * len(include_robots)
+    finger_targets = [None] * len(include_robots)
+
+  
     while simulation_app.is_running():
         
         # accumulate inputs for draw_points()
@@ -640,7 +656,7 @@ def main():
             
             # if target was moved in the world, update the target in the solver
             targets_update_timer_start = time.time()
-            p_T, q_T = robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
+            p_T, q_T = robots[i].get_target_pose()# robots[i].target.get_world_pose() # print_rate_decorator(lambda: , args.print_ctrl_rate, "target.get_world_pose")() # goal pose
             if robots[i].set_new_target_for_solver(p_T, q_T):
                 print(f"robot {i} target changed!")
                 robots[i].update_solver_target()
@@ -649,11 +665,12 @@ def main():
             # make mpc step (update policy and select action)
             mpc_solver_timer_start = time.time()
             mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()            
-            ee_pose = robots[i].get_ee_pose()
+            ee_pose = robots[i].get_fingers_center_pose()# get_ee_pose()
             pos_err = np.linalg.norm(ee_pose[0] - p_T)
             rot_err = np.linalg.norm(ee_pose[1] - q_T)
 
-            pose_err[i] = pos_err + rot_err # mpc_result.metrics.pose_error.item()
+            ee_err_pos[i] = pos_err 
+            ee_err_rot[i] = rot_err # mpc_result.metrics.ee_error.item()
             
             mpc_solver_timer += time.time() - mpc_solver_timer_start
             
@@ -668,37 +685,51 @@ def main():
         for i in range(len(include_robots)):
             if not include_robots[i]:
                 continue
-            if pose_err[i] < 0.2:
+            if ee_err_pos[i] < 0.1 and ee_err_rot[i] < 0.2:
                 if task_status[i] == 0: # heading to src   
                     print(f"robot {i} reached source target")
-                    p_dstT, q_dstT = dst_targets[next_target_idx]
-                    robots[i].target.set_world_pose(p_dstT, q_dstT)
+                    if Task.dst_pose is None:
+                        Task.dst_pose = dst_targets[next_target_idx]
+                    # robots[i].target.set_world_pose(*Task.dst_pose)
+                    robots[i].set_target_pose(*Task.dst_pose)
                     print(f"robot {i} reached source target")
-                    task_status[i] = 1 # reached src
-                    blinking_material.set_color(color_changing_meterial.get_color())
-                    robots[i].target.apply_visual_material(blinking_material)
+                    if all(task_status) == 0:
+                        blinking_material.set_color(color_changing_meterial.get_color())
 
+                    task_status[i] = 1 # reached src
+                    # robots[i].target.apply_visual_material(blinking_material)
+                    robots[i].target.apply_visual_materials(blinking_material)
                 elif task_status[i] == 1: # src reached, heading to dst
                     # meaning it now reached dst
                     print(f"robot {i} reached destination target")
                     print(f"resetting targets...")
-                    print(f"pose_erros:{pose_err}")
+                    print(f"ee_erros:{ee_err_pos[i]}, {ee_err_rot[i]}")
                     print(f"score:{score}")
                     score[i] +=1
                     # reset
+                    robots[i].target.apply_visual_materials(blinking_material)
+                    for blink_step in range(50):
+                        difuse_visual_material(blinking_material, NPColors.green, blink_step,T=3)
+                        my_world.step(render=True)
+                        
+
                     next_target_idx, next_target_color = Task.sample_target()
                     color_changing_meterial.set_color(getattr(NPColors, next_target_color))
+                    Task.dst_pose = None
                     for j in range(len(include_robots)):
                         if not include_robots[j]:
                             continue
                         p_target, q_target = src_targets[j][next_target_idx]
-                        robots[j].target.set_world_pose(p_target, q_target)
-                        task_status[i] = 0 
-                        robots[j].target.apply_visual_material(color_changing_meterial)
-        
+                        # robots[j].target.set_world_pose(p_target, q_target)
+                        robots[j].set_target_pose(p_target, q_target)
+                        task_status[j] = 0 
+                        # robots[j].target.apply_visual_material(color_changing_meterial)
+                        robots[j].target.apply_visual_materials(color_changing_meterial)
+                        
+                    # my_world.step(render=True)
+                    # pass
         # handle central targets if any robot is heading to the center
         if any(task_status) == 1:
-
             # make the target blink (visual only)
             difuse_visual_material(blinking_material, color_changing_meterial.get_color(), t_idx)
             
@@ -708,11 +739,14 @@ def main():
                 noise = np.random.uniform(-0.1,0.1,7).astype(np.float32)
                 p_dst_noisy += noise[:3]
                 q_dst_noisy += noise[3:]
+                Task.dst_pose = (p_dst_noisy, q_dst_noisy)
                 for robot_idx in range(len(include_robots)):
                     if not include_robots[robot_idx]:
                         continue
-                    robots[robot_idx].target.set_world_pose(p_dst_noisy, q_dst_noisy)
-                
+                    if task_status[robot_idx] == 1:
+                        # robots[robot_idx].target.set_world_pose(*Task.dst_pose)
+                        robots[robot_idx].set_target_pose(*Task.dst_pose)
+  
         # visualiations
         if VISUALIZE_MPC_ROLLOUTS:
             visualizations_timer_start = time.time()
@@ -784,10 +818,10 @@ def main():
         timestep_label.text_block.text = f"Time Step: {t_idx}"
         control_freq.text_block.text = f"Control Freq: {ctrl_freq:.2f}"
         # task data
-        pose_errs_prints = [f"{pose_err[i]:.2f}" for i in range(len(pose_err))]
-        pose_error_label.text_block.text = f"Pose Errors: {', '.join(pose_errs_prints)}"
+        ee_errs_prints = [f"({ee_err_pos[i]:.2f}, {ee_err_rot[i]:.2f})" for i in range(len(ee_err_pos))]
+        ee_error_label.text_block.text = f"Pose Errors (pos, rot): {', '.join(ee_errs_prints)}"
         task_score.text_block.text = f"task scores: {score}"
-
+        task_status_label.text_block.text = f"task status: {task_status}"
         # update time step
         t_idx += 1 
 

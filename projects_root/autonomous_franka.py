@@ -17,6 +17,7 @@ from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.objects import DynamicCuboid
 from isaacsim.util.debug_draw import _debug_draw # isaac 4.5
+import isaacsim.core.utils.prims as prims_utils
 from omni.isaac.core.objects import VisualSphere
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.nucleus import get_assets_root_path
@@ -46,21 +47,58 @@ from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenP
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
-def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
+def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05,render_solver_target=False,render_fingers_target=True):
     """ 
     Create a target pose "hologram" in the simulation. By "hologram", 
     we mean a visual representation of the target pose that is not used for collision detection or physics calculations.
     In isaac-sim they call holograms viual objects (like visual coboid and visual spheres...)
     """
-    target = cuboid.VisualCuboid(
-        path,
+
+    # xform = prims_utils.create_prim(
+    #     prim_path=path,
+    #     prim_type="Xform",
+    #     position=position,
+    #     orientation=orientation,
+    #     # color=color,     
+    # )
+    prims_utils.create_prim(
+        prim_path=path,
+        prim_type="Xform",
         position=position,
         orientation=orientation,
-        color=color,
-        size=size,
+        # color=color,     
     )
-    
-    return target
+    xform = XFormPrim(prim_paths_expr=path,
+        positions=np.array([position]),
+        orientations=np.array([orientation])
+    )
+    if render_solver_target:
+        solver_target_cube =  cuboid.VisualCuboid(
+                path + "/solver_target",
+                position=position,
+                orientation=orientation,
+                color=color,
+                size=size,
+            )
+    if render_fingers_target:
+        fingers_target_cube =  cuboid.VisualCuboid(
+                path + "/fingers_target",
+                # position=position,
+                # orientation = orientation,
+                color=color,
+                size=size,
+                translation=(0.0,0.0, 0.125),
+            )
+            
+    #     target = cuboid.VisualCuboid(
+    #     path,
+    #     position=position,
+    #     orientation=orientation,
+    #     color=color,
+    #     size=size,
+    # )
+    # return target
+    return xform
 
 class AutonomousFranka:
     
@@ -127,21 +165,28 @@ class AutonomousFranka:
         return self.solver.world_coll_checker
     
     def set_target_color(self, color:np.ndarray):
-        self.target.set_color(color)
+        # self.target.set_color(color)
+        Xform = self.target
+
 
     def set_target_visibility(self, visibility:bool):
         self.target.set_visibility(visibility)
         
     def set_target_pose(self, position:np.ndarray, orientation:np.ndarray):
-        self.target.set_world_pose(position, orientation)
-
+        # self.target.set_world_pose(position, orientation)
+        target_xform:XFormPrim = self.target
+        position = np.array([position]) # requires ndarray
+        orientation = np.array([orientation]) # requires ndarray
+        target_xform.set_world_poses(position, orientation)
+    
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
         X_R = Pose.from_list(list(self.p_R) + list(self.q_R)) # 
         usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
         
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, subroot=self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R, initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         self.target = spawn_target(self.get_target_prim_path(), self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
-        self.target.set_world_pose(position=self._p_initTarget, orientation=self._q_initTarget)
+        # self.target.set_world_pose(position=self._p_initTarget, orientation=self._q_initTarget)
+        self.set_target_pose(self._p_initTarget, self._q_initTarget)
 
     @abstractmethod
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
@@ -150,8 +195,19 @@ class AutonomousFranka:
     def get_ee_pose(self) -> np.ndarray[np.ndarray, np.ndarray]:
         """
         See: https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.prims/docs/index.html#isaacsim.core.prims.XFormPrim.get_world_poses:~:text=True%2C%20False%2C%20True%5D-,get_world_poses(,-indices%3A%20ndarray
+        Tip: aim this link to your pre-pick pose. 
         """
         p, q = XFormPrim(self.get_prim_path() + '/ee_link').get_world_poses()
+        return p, q
+    
+    def get_fingers_center_pose(self) -> np.ndarray[np.ndarray, np.ndarray]:
+        """
+        Get the pose of the midway between the two fingers.
+        """
+        p_left, q_left = XFormPrim(self.get_prim_path() + '/panda_leftfinger').get_world_poses()
+        p_right, q_right = XFormPrim(self.get_prim_path() + '/panda_rightfinger').get_world_poses()
+        p = (p_left + p_right) / 2
+        q = q_left
         return p, q
         
     def set_new_target_for_solver(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js=None):
@@ -190,6 +246,12 @@ class AutonomousFranka:
     
     def get_target_prim_path(self):
         return self.target_prim_path
+    
+    def get_target_pose(self)->tuple[np.ndarray, np.ndarray]:
+        poses =  self.target.get_world_poses()
+        p = poses[0][0]
+        q = poses[1][0]
+        return p,q
     
     def get_prim_path(self):
         return self.prim_path
