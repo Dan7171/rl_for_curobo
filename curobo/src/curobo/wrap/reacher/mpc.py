@@ -494,7 +494,33 @@ class MpcSolver(MpcSolverConfig):
         self.update_goal(goal_buffer)
 
         return goal_buffer
+    
+    def setup_solve_batch_env_custom(self, goal: Goal, num_seeds: Optional[int] = None) -> Goal:
+        """
+        **** custom function to support different collision worlds for batch MPC ****
+        
+        Motivation: custom function to support different collision worlds for batch MPC.
+        Current Running example (might be outdated in future): /projects_root/examples/batch_mpc_example.py
+        This is a custom function to support *different* collision worlds.
+        I added it as I was not able to get the original setup_solve_batch_env to allow for different collision worlds,
+        and when I used it it only used the collision world of the first environment (and its a problem if you want to solve for different collision worlds).
+        The only change I made was to the solve_state, where I set n_envs to len(goal.batch_world_idx), instead of 1, as it is in the original function.
+        I did that changed after I analyzed the scripts of /projects_root/examples/batch_mpc_example.py vs /curobo/exammples/isaac_sim/batch_motion_gen_reacher.py, 
+        where I saw that in arm_base.py row 375 (self._goal_buffer.batch_world_idx) is different for both scripts, but the rest of the goal_buffer is the same.
 
+        Without this change (see projects_root/examples/batch_mpc_example.py rows 277, 278 (with or without this change)) it supports different goals but not different collision worlds.
+        """
+        solve_state = ReacherSolveState(
+            ReacherSolveType.BATCH_ENV,
+            num_mpc_seeds=num_seeds,
+            batch_size=goal.batch,
+            n_envs=len(goal.batch_world_idx), # this is the only change I made, compared to the original function (setup_solve_batch_env)
+            n_goalset=1,
+        )
+        goal_buffer = self._update_solve_state_and_goal_buffer(solve_state, goal)
+        self.update_goal(goal_buffer)
+
+        return goal_buffer
     def setup_solve_batch_env_goalset(self, goal: Goal, num_seeds: Optional[int] = None) -> Goal:
         """Creates a goal buffer to solve for a batch of robots in different collision worlds.
 

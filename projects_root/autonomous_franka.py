@@ -1152,4 +1152,4 @@ class FrankaCumotion(AutonomousFranka):
                                                             torch.from_numpy(self.p_R))
         return self.dynamic_obs_col_pred
     
-    
+

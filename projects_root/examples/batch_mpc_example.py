@@ -1,14 +1,8 @@
-#
-# Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-#
-# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
-# property and proprietary rights in and to this material, related
-# documentation and any modifications thereto. Any use, reproduction,
-# disclosure or distribution of this material and related documentation
-# without an express license agreement from NVIDIA CORPORATION or
-# its affiliates is strictly prohibited.
-#
-
+"""
+This script was built based on the curobo/examples/isaac_sim/batch_motion_gen_reacher.py
+and modified to use MPC instead of MotionGen (global planner).
+"""
+DEBUG = True
 
 try:
     # Third Party
@@ -19,10 +13,7 @@ except ImportError:
 # Third Party
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 import torch
-
 a = torch.zeros(4, device="cuda:0")
-
-# Standard Library
 
 # Standard Library
 import argparse
@@ -35,7 +26,6 @@ parser.add_argument(
     default=None,
     help="To run headless, use one of [native, websocket], webrtc might not work.",
 )
-
 parser.add_argument(
     "--visualize_spheres",
     action="store_true",
@@ -79,6 +69,7 @@ from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.model.robot_world import RobotWorld, RobotWorldConfig
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
+from curobo.rollout.rollout_base import Goal
 
 def tmp_helper_get_full_js(robot_list, tensor_args):
     sim_js_names = robot_list[0].dof_names
@@ -104,36 +95,12 @@ def tmp_helper_get_full_js(robot_list, tensor_args):
     
     return full_js
 
-# # optimized version:
-# def tmp_helper_get_full_js(robot_list, tensor_args):
-#     # Batch get all joint states first
-#     all_positions = []
-#     all_velocities = []
-#     for robot in robot_list:
-#         sim_js = robot.get_joints_state()
-#         # Convert numpy arrays to torch tensors immediately
-#         all_positions.append(torch.from_numpy(sim_js.positions))
-#         all_velocities.append(torch.from_numpy(sim_js.velocities))
-    
-#     # Stack on CPU first then move to device
-#     positions_tensor = torch.vstack(all_positions).to(device=tensor_args.device, dtype=tensor_args.dtype)
-#     velocities_tensor = torch.vstack(all_velocities).to(device=tensor_args.device, dtype=tensor_args.dtype)
-    
-#     # Create full joint state in one go
-#     return JointState(
-#         position=positions_tensor,
-#         velocity=velocities_tensor * 0.0,
-#         acceleration=velocities_tensor * 0.0,
-#         jerk=velocities_tensor * 0.0,
-#         joint_names=robot_list[0].dof_names,
-#     )
+
 
 def main():
-
     usd_help = UsdHelper()
-    act_distance = 0.2
-
     n_envs = 2
+    tensor_args = TensorDeviceType()
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
     my_world.scene.add_default_ground_plane()
@@ -143,26 +110,27 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
-
-    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
-    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
     # Make a target to follow
     target_list = []
     target_material_list = []
-    offset_y = 2.5
+    offset_y = 2.5 # distance between the two environments on the y axis
     radius = 0.1
     pose = Pose.from_list([0, 0, 0, 1, 0, 0, 0])
     robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
+    # create robots in different environments 
     robot_list = []
     for i in range(n_envs):
+
+        # create stage subroot for the i-th environment
         if i > 0:
-            pose.position[0, 1] += offset_y
+            pose.position[0, 1] += offset_y 
         usd_help.add_subroot("/World", "/World/world_" + str(i), pose)
 
+        # create target in the i-th environment
         target = cuboid.VisualCuboid(
             "/World/world_" + str(i) + "/target",
             position=np.array([0.5, 0, 0.5]) + pose.position[0].cpu().numpy(),
@@ -171,6 +139,8 @@ def main():
             size=0.05,
         )
         target_list.append(target)
+
+        # add robot to the i-th environment
         r = add_robot_to_scene(
             robot_cfg,
             my_world,
@@ -180,15 +150,13 @@ def main():
             initialize_world=False,
         )
         robot_list.append(r[0])
-    setup_curobo_logger("warn")
-    my_world.initialize_physics()
 
-    # warmup curobo instance
+    setup_curobo_logger("warn") # not sure if this is needed
+    my_world.initialize_physics() # not sure if this is needed
 
-    tensor_args = TensorDeviceType()
-    robot_file = "franka.yml"
-
+    # load world config of each environment to the stage
     world_file = ["collision_test.yml", "collision_thin_walls.yml"]
+    world_file.reverse() # debug
     world_cfg_list = []
     for i in range(n_envs):
         world_cfg = WorldConfig.from_dict(
@@ -214,11 +182,13 @@ def main():
     Initializes the MPC solver.
     """
 
-    # This is a configuration for a solver for batch of robots
+    # init mpc *batch* solver config
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
-        world_cfg_list,
-        use_cuda_graph=True,
+        # world_cfg_list, # this is different from the 1 robot case
+        # world_cfg_list[0], # valid input
+        world_cfg_list, # although this is different from the 1 robot case, it is valid input (at least at the motion gen example)
+        use_cuda_graph=not DEBUG,
         use_cuda_graph_metrics=True,
         use_cuda_graph_full_step=False,
         self_collision_check=True,
@@ -230,28 +200,34 @@ def main():
         store_rollouts=True,
         step_dt=0.02,
         n_collision_envs=n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
-)
+    )
+    
+    # init mpc solver for batch of robots
     mpc = MpcSolver(mpc_config) # batch solver, solve (n robots) mpc problem in parallel on every .step() call
+    joint_names = mpc.rollout_fn.joint_names # 7
+    
     add_extensions(simulation_app, args.headless_mode)
+    
+    # get retract (initial) config for each robot (currently just duplicated, assuming all robots start at the same cfg but it should be unique)
     
     # 1 x 7
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
-    # n robots x 7
-    retract_cfg_batch = retract_cfg.repeat(n_envs, 1)
-    # 7
-    joint_names = mpc.rollout_fn.joint_names
-    from curobo.rollout.rollout_base import Goal
-
-    # n robots x 7
     
+    # for each robot, repeat its retract configuration (initial jointconfig)
+    retract_cfg_batch = retract_cfg.repeat(n_envs, 1) # n robots x 7
+    
+
+    # get current state for each robot
+    # n robots x 7
     current_state_batch = JointState.from_position(retract_cfg_batch, joint_names=joint_names) # tmp_helper_get_full_js(robot_list, tensor_args)         # # n robots x 9
+    # make contiguous (for memory efficiency, like cuda graphs...)
     current_state_batch.position = current_state_batch.position.contiguous()
     current_state_batch.velocity = current_state_batch.velocity.contiguous()
     current_state_batch.acceleration = current_state_batch.acceleration.contiguous()
     current_state_batch.jerk = current_state_batch.jerk.contiguous()
     
     # n robots x 7
-    state = mpc.rollout_fn.compute_kinematics(current_state_batch)
+    state = mpc.rollout_fn.compute_kinematics(current_state_batch) # FK probably
 
     # n robots x 3
     retract_pose_batch = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
@@ -262,7 +238,7 @@ def main():
     # Goal # https://curobo.org/_api/curobo.rollout.rollout_base.html#curobo.rollout.rollout_base.Goal
 
     Goal data class used to update optimization target.
-    #NOTE: We can parallelize Goal in two ways: 
+    # NOTE: We can parallelize Goal in two ways: 
     # 1. Solve for current_state, pose pair in same environment 
     # 2. Solve for current_state, pose pair in different environment 
     # For case (1),
@@ -282,18 +258,24 @@ def main():
     """
     different_env_for_each_robot = True 
     num_seeds = 1 # TODO: should stay 1 as in the setup_solve_single case for 1 mpc robot?
+    # num_seeds = 400
     
     # n robots x 7
     goal_state_batch = JointState.from_position(retract_cfg_batch, joint_names=joint_names)
 
     if different_env_for_each_robot:
         goal = Goal(
+            # batch_pose_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
             current_state=current_state_batch, # https://curobo.org/_api/curobo.rollout.rollout_base.html#curobo.rollout.rollout_base.Goal
             goal_state=goal_state_batch, 
             goal_pose=retract_pose_batch,
-            batch_world_idx=list(range(n_envs)), # optional
+            batch_world_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
+            batch_pose_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
+            batch_enable_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
+
         )
-        goal_buffer = mpc.setup_solve_batch_env(goal, num_seeds)
+        goal_buffer = mpc.setup_solve_batch_env_custom(goal, num_seeds)
+        # goal_buffer = mpc.setup_solve_batch_env(goal, num_seeds)
     else:
         goal = Goal(
             current_state=current_state_batch, # https://curobo.org/_api/curobo.rollout.rollout_base.html#curobo.rollout.rollout_base.Goal
@@ -302,26 +284,17 @@ def main():
         )
         goal_buffer = mpc.setup_solve_batch(goal, num_seeds)
     mpc.update_goal(goal_buffer)
-    mpc_result = mpc.step(current_state_batch, max_attempts=2)
-
+    # mpc.update_goal(goal)
+    _ = mpc.step(current_state_batch, max_attempts=2)
 
     # START 174 - 190 curobo/examples/isaac_sim/batch_motion_gen_reacher.py
-    config = RobotWorldConfig.load_from_config(
-        robot_file, world_cfg_list, collision_activation_distance=act_distance
-    )
-    model = RobotWorld(config)
+    # config = RobotWorldConfig.load_from_config(
+    #     robot_file, world_cfg_list, 
+    #     collision_activation_distance=act_distance
+    # )
+    # model = RobotWorld(config)
     i = 0
-    max_distance = 0.5
-    x_sph = torch.zeros((n_envs, 1, 1, 4), device=tensor_args.device, dtype=tensor_args.dtype)
-    x_sph[..., 3] = radius
-    env_query_idx = torch.arange(n_envs, device=tensor_args.device, dtype=torch.int32)
-    plan_config = MotionGenPlanConfig(
-        enable_graph=False, max_attempts=2, enable_finetune_trajopt=True
-    )
     prev_goal = None
-    cmd_plan = [None, None]
-    art_controllers = [r.get_articulation_controller() for r in robot_list]
-    cmd_idx = 0
     past_goal = None
     # 174 - 190 END
     art_controllers = [r.get_articulation_controller() for r in robot_list]
@@ -396,6 +369,7 @@ def main():
         result = mpc.step(current_state_batch, max_attempts=2)
         mpc_solver_timer += time.time() - mpc_solver_time_start
         
+        # 
         # create action for each robot 
         action_timer_start = time.time()
         for i in range(len(robot_list)):
