@@ -10,10 +10,20 @@ import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
-from concurrent.futures import ProcessPoolExecutor, wait
+from concurrent.futures import ProcessPoolExecutor, wait 
 import time
 
+def get_size_bites(tensor:torch.Tensor):
+    return tensor.element_size() * tensor.nelement()
 
+def get_size_kb(tensor:torch.Tensor):
+    return get_size_bites(tensor) / 1024
+
+def get_size_mb(tensor:torch.Tensor):
+    return get_size_kb(tensor) / 1024
+
+def get_size_gb(tensor:torch.Tensor):
+    return get_size_mb(tensor) / 1024
 
 class DynamicObsCollPredictor:
     """
@@ -91,25 +101,6 @@ class DynamicObsCollPredictor:
     def get_n_obs(self):
         return self.n_obs
     
-    # def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
-    #     """
-    #     Activate the collision checker.
-    #     p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
-    #     rad_obs: tensor of shape [n_obs]. The radii of the obstacles.
-    #     """
-    #     # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
-    #     assert p_obs.ndim == 3, "Error: The obstacle poses must be a 3D tensor"
-    #     assert p_obs.shape[0] == self.H, "Error: The number of time steps in the obstacle poses must be equal to the horizon length"
-    #     assert p_obs.shape[1] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle poses"
-    #     assert p_obs.shape[2] == 3, "Error: The obstacle poses must be in 3D"
-        
-    #     assert rad_obs.ndim == 1, "Error: The obstacle radii must be a 1D tensor"
-    #     assert rad_obs.shape[0] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
-
-    #     self.p_obs_buf.copy_(p_obs)
-    #     self.rad_obs_buf.copy_(rad_obs)
-    #     self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-
         
     def set_obs_rads(self, rad_obs:torch.Tensor):
         """
@@ -201,175 +192,312 @@ class DynamicObsCollPredictor:
         
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
 
-     
-# class BatchDynamicObsCollChecker:
-#     def __init__(self, tensor_args, col_pred_list:List[DynamicObsCollPredictor]):
+class DynamicObsCollPredictorBatch:
+
+    DTYPE = torch.float16 
+
+    def __init__(self,
+                tensor_args:TensorDeviceType,
+                n_envs:int, 
+                # n_robots_envwise:list[int],
+                H:int, 
+                b:int, # n rollouts per robot  
+                n_robot_spheres:int,
+                cost_weight:float=100.0, 
+                # p_robotBaseEnvwise_F:list[list[torch.Tensor]]=None, # robot base position (xyz) in frame F. TODO: check if F is world or env frame.
+                n_robots_envwise:list[int]=[1],
+                safety_margin:float=0.1
+                ):
+        
+        self.tensor_args = tensor_args
+        self.n_envs = n_envs
+        self.H = H
+        self.b = b
+        self.cost_weight = cost_weight
+        # self.p_robotBaseEnvwise_F = p_robotBaseEnvwise_F
+        self.n_robot_spheres = n_robot_spheres
+        self.safety_margin = safety_margin
+        self.n_robots_envwise = n_robots_envwise
+        # self.n_robots_envwise = [len(robots_bases) for robots_bases in self.p_robotBaseEnvwise_F] # num of robots in each env
+        self.n_robots_total = sum(self.n_robots_envwise) # total number of robots over all environments
+        self.n_envs = len(self.n_robots_envwise) # len(self.p_robotBaseEnvwise_F)
+        self.B = self.b * self.n_robots_total # total number of rollouts
+        
+        self._p_collider_buf = torch.empty(self.b, self.H, self.n_robot_spheres,1, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self._p_collide_with_buf = torch.empty(self.b, self.H, 1, self.n_robot_spheres, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self._rad_sum_buf = torch.empty(1, 1, self.n_robot_spheres, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x n_obs] Own spheres positions buffer
+        
+        # _idx_map_tree_to_flat[env][collider] = start idx of the collider in the flat buffer (at the input/output row num B).
+        self._idx_map_tree_to_flat = []
+        tmp_cntr = 0
+        for env in range(self.n_envs):
+            self._idx_map_tree_to_flat.append([])
+            for collider in range(self.n_robots_envwise[env]):
+                self._idx_map_tree_to_flat[env].append(tmp_cntr)
+                tmp_cntr += self.b
+
+        # self._dim0_map = []
+        # for env in range(self.n_envs):
+        #     for collider in range(self.n_robots_envwise[env]):
+        #         for collide_with in range(self.n_robots_envwise[env]):
+        #             if collider == collide_with:
+        #                 continue
+        #             self._dim0_map.append((env, collider, collide_with))
+
+        # ∑_i=0:n_envs-1 [n_robotsᵢ * (n_robotsᵢ - 1)]. 
+        # All possible ordered pairs of robots in all environments.
+        # self._n_same_env_pairs_ordered = len(self._dim0_map)  
+        
+        # self._tmp_buffer =  torch.empty(
+        #         len(self._dim0_map),
+        #         self.b, 
+        #         self.H, 
+        #         self.n_robot_spheres,
+        #         self.n_robot_spheres,
+        #         device=self.tensor_args.device,
+        #         dtype=self.DTYPE
+        #     )
+        self._sphere_centers_diff_buf =  torch.empty(
+                self.b, 
+                self.H, 
+                self.n_robot_spheres,
+                self.n_robot_spheres,
+                3,
+                device=self.tensor_args.device,
+                dtype=self.DTYPE
+            )
+        self._out_buf = torch.empty(
+            self.B,
+            self.H,
+            device=self.tensor_args.device,
+            dtype=self.DTYPE
+        )
+
+
+    def cost_fn(self, prad:torch.Tensor, env_query_idx:torch.Tensor, parallel_envs = False):
+        """
+        prad: 
+            torch.Tensor[B, H, n_own_spheres (normally 65), 4],
+                where B = b * num of all robots over all environments
+                H = horizon length
+                n_own_spheres = number of own spheres
+                n_obs_max_per_robot = max number of obstacles per robot
+            env_query_idx:
+                torch.Tensor[B, 1]
+                the environment index of each rollout in prad_batch.
+        """
+        
+        # for env in range(self.n_envs):
+        #     n_envi = self.n_robots_envwise[env]
+        #     for collider in range(n_envi):
+        #         for collide_with in range(n_envi):
+        #             if collider == collide_with:
+        #                 continue
+        #             self._tmp_buffer[env,,r_obss = prad[env_query_idx[:,0] == e,:,:,:,:]
+        if not parallel_envs:
+            for env in range(self.n_envs):
+                env_prad = prad[env_query_idx[:,0] == env,:,:,:]
+                for collider in range(self.n_robots_envwise[env]):
+                    collider_range_start, collider_range_end = self.b*collider, self.b*(collider+1)
+                    p_collider = env_prad[collider_range_start:collider_range_end,:,:,:3]
+                    rad_collider = env_prad[collider_range_start:collider_range_end,:,:,3]
+                    for collide_with in range(self.n_robots_envwise[env]):
+                        if collider == collide_with:
+                            continue
+                        collide_with_range_start, collide_with_range_end = self.b*collide_with, self.b*(collide_with+1)
+                        p_collide_with = env_prad[collide_with_range_start:collide_with_range_end,:,:,:3]
+                        rad_collide_with = env_prad[collide_with_range_start:collide_with_range_end,:,:,3]
+                        self._p_collider_buf.copy_(p_collider.reshape(self.b,self.H,self.n_robot_spheres,1,3)) # Copy the reshaped version as well.
+                        self._p_collide_with_buf.copy_(p_collide_with.reshape(self.b,self.H, 1,self.n_robot_spheres,3)) # Copy the reshaped version as well.
+                        torch.sub(self._p_collider_buf,self._p_collide_with_buf, out=self._sphere_centers_diff_buf) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
+                        torch.norm(self._sphere_centers_diff_buf, dim=-1, keepdim=True,out=self._sphere_centers_diff_buf[:,:,:,:,0]) # Compute the distance between the sphere centers
+                        torch.add(rad_collider, rad_collide_with, out=self._rad_sum_buf)
+                        torch.sub(self._sphere_centers_diff_buf[:,:,:,:,0], self._rad_sum_buf, out=self._sphere_centers_diff_buf[:,:,:,:,0]) # Compute the distance between the sphere centers minus the sum of the radii.
+                        self._sphere_centers_diff_buf[:,:,:,:,0].lt_(self.safety_margin) # 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
+                        # self._tmp_buffer[env,:,:,collider,:] = env_prad[:,:,:,collider,:]
+                        out_start_idx = self._idx_map_tree_to_flat[env][collider]
+                        torch.sum(self._sphere_centers_diff_buf[:,:,:,:,0], dim=[2,3,4], out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+        else:
+            pass    
+
+        return self._out_buf
+
+# class DynamicObsCollPredictorBatch2: 
+#     def __init__(
+#             self,
+#             tensor_args, 
+#             n_predictors_envwise:list[int]=[1,], # total number of robots {summing over all robots with prediction capabilities in all environments}
+#             H=30, 
+#             n_rollouts_per_predictor=400, 
+#             n_own_spheres=61, 
+#             n_obs_max_per_predictor=100,
+#             cost_weight=100.0, 
+#             p_R_envwise=list[list[torch.Tensor]]
+#         ):
 #         """
-#         Initialize a batch of dynamic obstacle collision checkers.
+#         Initialize a batch of dynamic obstacle collision predictors.
 #         Args:
 #             tensor_args: pytorch tensor arguments.
+#             n_predictors_envwise: list of ints, each int is the number of predictors (robots with predictive prediction capabilities) in the environment.
+#                 n_predictors_envwise[i] is the number of predictors in the i'th environment.
+#             H: int, the horizon length.
+#             n_rollouts_per_predictor: int, the number of rollouts per predictor.
+#             n_own_spheres: int, the number of self spheres for each predictor (robot).
+#             n_obs_max_per_predictor: int, each int is the maximum number of obstacles for each predictor (robot). This will be the allocated buffer size for computations
+#             cost_weight: float, the cost weight.
+#             p_R_envwise: list of list of torch.Tensors,
+#                 where p_R_envwise[i][j] is the i'th env j'thj robot base position (xyz) TODO: determine if to express in world or env frame.
 #         """
+#         self.n_envs = len(n_predictors_envwise)
+#         self.n_predictors = sum(n_predictors_envwise)
+#         self.n_rollouts_per_predictor = n_rollouts_per_predictor
+#         self.n_rollouts_total = self.n_rollouts_per_predictor * self.n_predictors # num of rows in the output cost matrix
 #         self.tensor_args = tensor_args
-#         self.n_colliders = len(col_pred_list) 
+#         self.H = H
+#         self.n_own_spheres = n_own_spheres
+#         self.n_obs_max_per_predictor = n_obs_max_per_predictor
+#         self.cost_weight = cost_weight
+#         self.p_R_envwise = p_R_envwise
+
+#         # mapping env idx i, predictor idx j (at the i'th environment) to start rollout idx in the aggregated
+#         # rollout tensor. 
+#         # (The last idx of this ij robot will be self.rollout_range_map[i][j] + self.n_rollouts_per_predictor - 1)
+#         start_idx_tmp = 0
+#         self.rollout_range_map = [] 
+#         for i in range(self.n_envs):
+#             for _ in range(n_predictors_envwise[i]):
+#                 self.rollout_range_map.append(start_idx_tmp) 
+#                 start_idx_tmp += self.n_rollouts_per_predictor
         
-#         self.streams = [torch.cuda.Stream() for _ in range(self.n_colliders)]
-#         self.graphs:List[torch.cuda.CUDAGraph] = [torch.cuda.CUDAGraph() for _ in range(self.n_colliders)]
-#         self.collision_checkers:List[DynamicObsCollPredictor] = [DynamicObsCollPredictor(self.tensor_args,None,self.H_list[i],self.n_rollouts_list[i],self.n_own_spheres_list[i],self.n_obs_list[i]) for i in range(self.n_colliders)]  #
 
-
-#     def capture(self):
         
-#         for i in range(self.n_colliders):
-#             prad_obs_static = self.prad_obs_static_list[i]
-#             self.collision_checkers[i].update(prad_obs_static[:3])
-
-#             prad_own_static = self.prad_own_static_list[i]  # use dummy data with same shape as runtime data
-#             stream = self.streams[i]
-#             graph = self.graphs[i]
-#             checker = self.collision_checkers[i]
-
-#             with torch.cuda.stream(stream):
-#                 torch.cuda.synchronize()  # ensure the stream is idle
-#                 with torch.cuda.graph(graph):
-#                     checker.cost_fn(prad_own_static)
-
     
+#         # Buffers for obstacles (spheres): position and radius
+#         self.buffers_envwise:list[dict[str, torch.Tensor]] = []
+#         for i in range(self.n_envs):
+#             env_total_obs = self.n_obs_max_per_predictor * n_predictors_envwise[i]
+#             env_rad_obs_buf = torch.zeros(env_total_obs, device=self.tensor_args.device) # [n_envs x n_obs] obstacles radii buffer
+#             env_rad_obs_buf_unsqueezed = env_rad_obs_buf.reshape(1, *env_rad_obs_buf.shape) # [1 x n_obs]  Added 1 dimension for intermediate calculations
+#             env_p_obs_buf = torch.zeros((self.H, env_total_obs, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
+#             env_p_obs_buf_unsqueezed = env_p_obs_buf.reshape(1,H,1, env_total_obs, 3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
+#             env_pairwise_ownobs_radsum_buf = env_rad_obs_buf_unsqueezed + env_rad_obs_buf_unsqueezed # [n_own x n_obs] matrix for own radius i + obstacle radius j for all possible own and obstacle sphere pairs (Note: this is broadcasted because its a sum of n_own x 1 + 1 x n_obs radii)
+#             self.buffers_envwise.append(
+#                 {
+#                     "rad_obs_buf": env_rad_obs_buf,
+#                     "rad_obs_buf_unsqueezed": env_rad_obs_buf_unsqueezed,
+#                     "p_obs_buf": env_p_obs_buf,
+#                     "p_obs_buf_unsqueezed": env_p_obs_buf_unsqueezed,
+#                 }
+#             )
 
-#     def run_graph(self, i, prad_own):
-#         stream = self.streams[i]
-#         checker = self.collision_checkers[i]
-#         # Copy the actual input to the pre-allocated buffer
-#         checker.prad_own_buf.copy_(prad_own)  # `prad_own_input` used inside `cost_fn`
-#         with torch.cuda.stream(stream):
-#             self.graphs[i].replay()
-
-
-
-# # In your timestep loop:
-# if __name__ == "__main__":
-#     h_list = [10, 10]
-#     n_rollouts_list = [20, 20]
-#     n_own_spheres_list = [12,12]
-#     n_obs_list = [12,23]
-#     batch_dynamic_obs_coll_checker = BatchDynamicObsCollChecker(TensorDeviceType(), H_list=h_list, n_rollouts_list=n_rollouts_list, n_own_spheres_list=n_own_spheres_list, n_obs_list=n_obs_list)
-#     batch_dynamic_obs_coll_checker.capture()
-#     threads = []
-
-#     while True:
-#         for i in range(batch_dynamic_obs_coll_checker.n_colliders):
-#             new_prad_own = torch.randn(h_list[i], n_own_spheres_list[i], 4, device=batch_dynamic_obs_coll_checker.tensor_args.device)
-#             t = threading.Thread(target=batch_dynamic_obs_coll_checker.run_graph, args=(i, new_prad_own))
-#             t.start()
-#             threads.append(t)
-
-#         for t in threads:
-#             t.join()
-
-#         # Optionally synchronize
-#         torch.cuda.synchronize()
-
-
-
-
+#         # Buffers for own spheres: position and radius
+#         self.p_own_buf = torch.empty(self.n_rollouts_total, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
         
-# class BatchDynamicObsCollChecker:
-#     def __init__(self, tensor_args, H_list:list[int], n_rollouts_list:list[int], n_own_spheres_list:list[int], n_obs_list:list[int]):
+#         self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
+#         self.rad_own_buf = torch.zeros(self.n_own_spheres, device=self.tensor_args.device) # [n_own] Own spheres radii buffer
+#         self.rad_own_buf_unsqueezed = self.rad_own_buf.reshape(*self.rad_own_buf.shape, 1) # [n_own x 1] added 1 dimension for intermediate calculations
+
+#         # Buffers for intermediate calculations
+#         self.pairwise_ownobs_radsum_buf = self.rad_own_buf_unsqueezed + self.rad_obs_buf_unsqueezed # [n_own x n_obs] matrix for own radius i + obstacle radius j for all possible own and obstacle sphere pairs (Note: this is broadcasted because its a sum of n_own x 1 + 1 x n_obs radii)
+#         self.pairwise_ownobs_radsum_buf_unsqueezed = self.pairwise_ownobs_radsum_buf.reshape(1,1, *self.pairwise_ownobs_radsum_buf.shape, 1) # [1 x 1 x n_own x n_obs x 1] Added 1 dimension for intermediate calculations
+    
+#         self.ownobs_diff_vector_buff = self.p_own_buf_unsqueezed - self.p_obs_buf_unsqueezed # [n_rollouts x H x n_own x n_obs x 3] A tensor for all pairs of the difference vectors between own and obstacle spheres. Each entry i,j will be storing the vector (p_own_buf[...][i] - p_obs_buf[...][j] where ... is the rollout, horizon and sphere indices)
+#         self.pairwise_ownobs_surface_dist_buf = torch.zeros(self.ownobs_diff_vector_buff.shape[:-1] + (1,), device=self.tensor_args.device) # [n_rollouts x H x n_own x n_obs x 1] A tensor for all pairs of the (non negative) distance between own and obstacle spheres. Each entry i,j will be storing the signed distance (p_own_buf[...][i] - p_obs_buf[...][j]) - (rad_own_buf[i] + rad_obs_buf[j]) where ... is the rollout, horizon and sphere indices)
+#         self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] A tensor for the collision cost for each rollout and time step in the horizon. This is the output of the cost function.
+
+#         # flags
+#         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
+#         self.manually_express_p_own_in_world_frame = manually_express_p_own_in_world_frame # if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
+#         if self.manually_express_p_own_in_world_frame:
+#             self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
+#             self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
+    
+#     def cost_fn(self, prad_own:torch.Tensor, env_query_idx:torch.Tensor):
 #         """
-#         Initialize a batch of dynamic obstacle collision checkers.
-#         Args:
-#             tensor_args: pytorch tensor arguments.
-#             n_colliders: number of robots to check collision for
-#             H: horizon length
-#             n_rollouts: number of rollouts ()
-#             n_own_spheres: number of own spheres
-#             n_obs: number of obstacles
+#         Compute the collision cost for the robot spheres.
 #         """
-#         self.tensor_args = tensor_args
-#         self.n_colliders = len(H_list) 
-#         self.H_list = H_list # list of horizons, one for each robot
-#         self.n_rollouts_list = n_rollouts_list # list of number of rollouts, one for each robot
-#         self.n_own_spheres_list = n_own_spheres_list # list of number of own spheres, one for each robot
-#         self.n_obs_list = n_obs_list # list of number of obstacles, one for each robot
-
-#         self.prad_own_static_list:List[torch.Tensor] = [torch.zeros(
-#             self.n_rollouts_list[i], # number of rollouts
-#             self.H_list[i], # horizon length
-#             self.n_own_spheres_list[i], # number of own spheres
-#             4, # 4: position and radius
-#             device=self.tensor_args.device) for i in range(self.n_colliders)]
+#         """
+#         prad_own: 
+#             torch.Tensor[n_rollouts_total, H, n_own_spheres (normally 65), 4],
+#                 where n_rollouts_total = n_rollouts_per_robot * n_robots_total (over all environments) 
+#             the robot sphere poses over the horizon, aggregated over the first dimension, matching the environments at the same row index in env_query_idx.
         
-#         self.prad_obs_static_list:List[torch.Tensor] = [torch.zeros(
-#             self.n_rollouts_list[i], # number of rollouts
-#             self.H_list[i], # horizon length
-#             self.n_obs_list[i], # number of obstacles
-#             4, # 4: position and radius
-#             device=self.tensor_args.device) for i in range(self.n_colliders)]
-        
-            
-#         self.streams = [torch.cuda.Stream() for _ in range(self.n_colliders)]
-#         self.graphs:List[torch.cuda.CUDAGraph] = [torch.cuda.CUDAGraph() for _ in range(self.n_colliders)]
-#         self.collision_checkers:List[DynamicObsCollPredictor] = [DynamicObsCollPredictor(self.tensor_args,None,self.H_list[i],self.n_rollouts_list[i],self.n_own_spheres_list[i],self.n_obs_list[i]) for i in range(self.n_colliders)]  #
-
-
-#         for i in range(self.n_colliders):
-#             self.collision_checkers[i].activate(self.prad_obs_static_list[i][0,...,:3], self.prad_obs_static_list[i][0,0,...,3].flatten())
-        
+#         env_query_idx: 
+#             torch.Tensor[n_rollouts_total, 1] 
     
-#     def capture(self):
+#             More specifically:
+#                 [{sum ij: n rollouts} # env i robot j, 1] # basically the number of rows is n rollouts per robot x total robot num (over all environments)
+#                 Example: 3 envs [0,1,2], env 0 has 2 robots [0,1], env 1 has 1 robot [0], env 2 has 3 robots [0,1,2].
+#                 So in total there are 6 robots, and env_query_idx is a tensor of shape [n_rollouts_total x 1] = [6 x num rollouts per robot,1].
+#                 assume n_rollouts_per_robot is 2, then env_query_idx is a tensor of shape [6 x 2,1] = [12,1].
+#                 and it will be 
+#                     torch.Tesor([
+#                     [0], # env 0 robot 0 rollout 0
+#                     [0], # env 0 robot 0 rollout 1
+#                     [0], # env 0 robot 1 rollout 0
+#                     [0], # env 0 robot 1 rollout 1
+#                     [1], # env 1 robot 0 rollout 0
+#                     [1], # env 1 robot 0 rollout 1
+#                     [2], # env 2 robot 0 rollout 0
+#                     [2], # env 2 robot 0 rollout 1
+#                     [2], # env 2 robot 1 rollout 0
+#                     [2], # env 2 robot 1 rollout 1
+#                     [2], # env 2 robot 2 rollout 0
+#                     [2], # env 2 robot 2 rollout 1
+#                     ])
+#                     # 12 rows, each contains the env index of the rollout.
+#                     # first 4 rows are env 0, next 2 are env 1, next 6 are env 2.
         
-#         for i in range(self.n_colliders):
-#             prad_obs_static = self.prad_obs_static_list[i]
-#             self.collision_checkers[i].update(prad_obs_static[:3])
-
-#             prad_own_static = self.prad_own_static_list[i]  # use dummy data with same shape as runtime data
-#             stream = self.streams[i]
-#             graph = self.graphs[i]
-#             checker = self.collision_checkers[i]
-
-#             with torch.cuda.stream(stream):
-#                 torch.cuda.synchronize()  # ensure the stream is idle
-#                 with torch.cuda.graph(graph):
-#                     checker.cost_fn(prad_own_static)
-
+#         """
+#         pass
     
+#     def _get_idx_range(self, env_idx:int, predictor_idx:int):
+#         """
+#         Get the start and end indices of the rollouts for a given environment and predictor.
+#         """
 
-#     def run_graph(self, i, prad_own):
-#         stream = self.streams[i]
-#         checker = self.collision_checkers[i]
-#         # Copy the actual input to the pre-allocated buffer
-#         checker.prad_own_buf.copy_(prad_own)  # `prad_own_input` used inside `cost_fn`
-#         with torch.cuda.stream(stream):
-#             self.graphs[i].replay()
-
-
-
-# # In your timestep loop:
-# if __name__ == "__main__":
-#     h_list = [10, 10]
-#     n_rollouts_list = [20, 20]
-#     n_own_spheres_list = [12,12]
-#     n_obs_list = [12,23]
-#     batch_dynamic_obs_coll_checker = BatchDynamicObsCollChecker(TensorDeviceType(), H_list=h_list, n_rollouts_list=n_rollouts_list, n_own_spheres_list=n_own_spheres_list, n_obs_list=n_obs_list)
-#     batch_dynamic_obs_coll_checker.capture()
-#     threads = []
-
-#     while True:
-#         for i in range(batch_dynamic_obs_coll_checker.n_colliders):
-#             new_prad_own = torch.randn(h_list[i], n_own_spheres_list[i], 4, device=batch_dynamic_obs_coll_checker.tensor_args.device)
-#             t = threading.Thread(target=batch_dynamic_obs_coll_checker.run_graph, args=(i, new_prad_own))
-#             t.start()
-#             threads.append(t)
-
-#         for t in threads:
-#             t.join()
-
-#         # Optionally synchronize
-#         torch.cuda.synchronize()
-
-
-
-
+#         start_inclusive = self.rollout_range_map[env_idx][predictor_idx]  
+#         end_inclusive = start_inclusive + self.n_rollouts_per_predictor
+#         return start_inclusive, end_inclusive
 
 if __name__ == "__main__":
-    x = [0] + list(np.cumsum([1,3,4]))[:-1]
-    print(x)
+    # x = [0] + list(np.cumsum([1,3,4]))[:-1]
+    # print(x)
+    
+    
+    n_envs = 3
+    H = 30
+    b = 400
+    n_robot_spheres = 61
+    cost_weight = 100.0
+    # p_R_envwise = [
+    #     [torch.zeros(3), torch.zeros(3), torch.zeros(3)],
+    #     [torch.zeros(3), torch.zeros(3)],
+    #     [torch.zeros(3), torch.zeros(3), torch.zeros(3)],
+    # ]
+    tensor_args = TensorDeviceType()
+    n_robots_envwise = [3,2,3]
+    predictor = DynamicObsCollPredictorBatch(tensor_args, n_envs, H, b, n_robot_spheres, cost_weight, n_robots_envwise)
+    print(predictor._idx_map_tree_to_flat)
+    print(predictor._out_buf.shape)
+    print(predictor._p_collider_buf.shape)
+    print(predictor._p_collide_with_buf.shape)
+    print(predictor._sphere_centers_diff_buf.shape)
+    print(get_size_mb(predictor._sphere_centers_diff_buf))
+    
+    
+    env_query_idx = torch.zeros(predictor.b*n_robots_envwise[0], 1)
+    for i in range(1, len(n_robots_envwise)):
+        env_query_idx = torch.cat([env_query_idx, torch.ones(predictor.b*n_robots_envwise[i], 1) * i], dim=0)
+
+                              
+    print(env_query_idx.shape)
+    print(env_query_idx)
+                    #   torch.cat([torch.zeros(predictor.b*len(p_R_envwise[0]), 1), 
+                    #             torch.ones(predictor.b*len(p_R_envwise[1]), 1),
+                    #             torch.ones(predictor.b*len(p_R_envwise[2]), 1) + 1], dim=0))
+    # print(predictor._sphere_centers_diff_buf.shape)
+    # print(predictor._rad_sum_buf.shape)
+    # print(predictor._sphere_centers_diff_buf[:,:,:,:,0].shape)
+    # print(predictor._sphere_centers_diff_buf[:,:,:,:,0])
+    

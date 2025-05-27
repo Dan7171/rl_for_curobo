@@ -2,7 +2,7 @@
 This script was built based on the curobo/examples/isaac_sim/batch_motion_gen_reacher.py
 and modified to use MPC instead of MotionGen (global planner).
 """
-DEBUG = False
+DEBUG = True
 
 try:
     # Third Party
@@ -11,6 +11,7 @@ except ImportError:
     pass
 
 # Third Party
+from typing import Optional
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 import torch
 a = torch.zeros(4, device="cuda:0")
@@ -70,6 +71,8 @@ from curobo.util_file import get_robot_configs_path, get_world_configs_path, joi
 from curobo.wrap.model.robot_world import RobotWorld, RobotWorldConfig
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
 from curobo.rollout.rollout_base import Goal
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictorBatch
+from scipy.spatial.transform import Rotation as R
 
 def get_batch_js(robot_list, tensor_args) -> JointState:
     """
@@ -98,26 +101,103 @@ def get_batch_js(robot_list, tensor_args) -> JointState:
     
     return full_js
 
+def transform_pose_between_frames(pose_in_f1:list[float], f1_pose:Optional[list[float]]=None, f2_pose:Optional[list[float]]=None):
+    """
+    Transforms pose expressed in f1, from frame F1 to frame F2.
+
+    If f1_pose or f2_pose is not provided, it is assumed that it is the world frame.
+    Meaning, that if f1_pose is not provided, it is assumed that the pose_in_f1 is a pose in the world frame.
+    And if f2_pose is not provided, it is assumed that we want to transform the pose_in_f1 to the world frame.
+    
+    Parameters:
+    - pose_in_f1: [px, py, pz, qw, qx, qy, qz] expressed in F1
+    - f1_pose: [px, py, pz, qw, qx, qy, qz] pose of F1 in world
+    - f2_pose: [px, py, pz, qw, qx, qy, qz] pose of F2 in world
+    
+    Returns:
+    - pose_in_f2: [px, py, pz, qw, qx, qy, qz] expressed in F2
+    """
+    
+    def decompose(pose):
+        pos = np.array(pose[:3])
+        quat = np.array(pose[3:])
+        rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]])  # convert qw,qx,qy,qz -> x,y,z,w
+        return pos, rot
+
+    def compose(pos, rot):
+        quat = rot.as_quat()  # x,y,z,w
+        return np.concatenate([pos, [quat[3], quat[0], quat[1], quat[2]]])  # to qw,qx,qy,qz
+
+    world_pose = [0.0, 0, 0, 1, 0, 0, 0]
+    if f1_pose is None:
+        f1_pose = world_pose
+    if f2_pose is None:
+        f2_pose = world_pose
+    # Decompose all poses
+    p_f1, r_f1 = decompose(f1_pose)
+    p_f2, r_f2 = decompose(f2_pose)
+    p_rel, r_rel = decompose(pose_in_f1)
+
+    # Pose in world frame: T_world = T_f1 * T_rel
+    p_world = r_f1.apply(p_rel) + p_f1
+    r_world = r_f1 * r_rel
+
+    # Inverse of F2 pose
+    r_f2_inv = r_f2.inv()
+    p_f2_inv = -r_f2_inv.apply(p_f2)
+
+    # Transform to F2: T_f2 = T_f2_inv * T_world
+    p_in_f2 = r_f2_inv.apply(p_world) + p_f2_inv
+    r_in_f2 = r_f2_inv * r_world
+
+    return compose(p_in_f2, r_in_f2)
+
 
 
 def main(
-        world_file = ["collision_test.yml", "collision_thin_walls.yml"],
+        world_files = ["collision_test.yml", "collision_thin_walls.yml"],
         offset_y = 2.5,
-        X_targetsInitial_envFrame = ([0.5, 0, 0.5], [0, 1, 0, 0]),
+        # X_targetsInitial_envFrame = ([0.5, 0, 0.5], [0, 1, 0, 0]),
         ):
     """
     Main function to run the batch MPC example.
     Args:
 
-        world_file: list of world files to load (each environment has a different world file, can use the same world file for all environments)
+        world_files: list of world files to load (each environment has a different world file, can use the same world file for all environments)
         offset_y: distance between adjacent environments on the y axis. TODO: modify to include offset_x, offset_z, etc.
-        X_targetsInitial_enviFrame: Initial pose of the robot targets expressed in the i'th environment (same for all i)  frame (each pose is a tuple of [position, orientation])
+        # X_targetsInitial_enviFrame: Initial pose of the robot targets expressed in the i'th environment (same for all i)  frame (each pose is a tuple of [position, orientation])
 
     """
     setup_curobo_logger("warn") # not sure if I want this
 
     # number of environments
-    n_envs = len(world_file)
+    n_envs = len(world_files)
+
+    # envs frames poses (expressed in the world frame)
+    X_envs  = []
+    for i in range(n_envs):
+        X_envs.append(Pose.from_list([0, i*offset_y, 0, 1, 0, 0, 0]))
+
+    # define robot base poses. 
+    # Xlist_rbase_Fenv[i][j] = i'th env robot j's base pose expressed in the i'th environment frame
+    Xlist_rbase_Fenv = [
+        [[0, 0, 0, 1, 0, 0, 0], [1.2, 0, 0, 1, 0, 0, 0]], 
+        [[0, 0, 0, 1, 0, 0, 0]]
+    ]
+
+    Xlist_target_Fenv = [
+        [[0.5, 0, 0.5, 0, 1, 0, 0], [0.5, 0.5, 0.5, 0, 1, 0, 0]], 
+        [[0.5, 0, 0.5, 0, 1, 0, 0]]
+    ]
+    
+
+    n_robots_envwise = [len(Xlist_rbase_Fenv[i]) for i in range(n_envs)] # number of robots in each environment
+    assert len(n_robots_envwise) == n_envs
+    n_robots_total = sum(n_robots_envwise) # all robots in all environments
+    
+    # list of env idx for each robot in the total robot count
+    robot_to_env_idx = [env_idx for env_idx in range(n_envs) for _ in range(n_robots_envwise[env_idx])]
+    
     # curobo wrapper on torch tensor device type
     tensor_args = TensorDeviceType()
     
@@ -149,38 +229,44 @@ def main(
     # LOOP OVER ENVIRONMENTS:
     # robots in different environments 
     robot_list = []
-    # target for each robot (modifiable)
+    robot_list_by_env = []
     target_list = []
-    # pose of the i'th environment base frame (in the world frame), (modifiable)
-    X_env_i = Pose.from_list([0, 0, 0, 1, 0, 0, 0]) 
+    target_list_by_env = []
     for i in range(n_envs):
-        if i > 0:
-            # offset the i'th environment base frame in the y direction by offset_y
-            X_env_i.position[0, 1] += offset_y 
-        
+        robot_list_by_env.append([])
+        target_list_by_env.append([])
+
         # create stage subroot for the i'th environment, at X_env_i (pose in the world frame)
-        usd_help.add_subroot("/World", "/World/world_" + str(i), X_env_i)
+        world_i_subroot = "/World/world_" + str(i)
+        usd_help.add_subroot("/World", world_i_subroot, X_envs[i])
 
-        # create target in the i-th environment
-        target_i = cuboid.VisualCuboid(
-            "/World/world_" + str(i) + "/target",
-            position=np.array(X_targetsInitial_envFrame[0]) + X_env_i.position[0].cpu().numpy(),
-            orientation=np.array(X_targetsInitial_envFrame[1]),
-            color=np.array([1.0, 0, 0]),
-            size=0.05,
-        )
-        target_list.append(target_i)
+        for j in range(n_robots_envwise[i]):
+            # create stage subroot for the i'th environment, at X_env_i (pose in the world frame)
+            # usd_help.add_subroot("/World", "/World/world_" + str(i), X_envs[i])
 
-        # add robot to the i-th environment
-        r_i = add_robot_to_scene(
-            robot_cfg,
-            my_world,
-            "/World/world_" + str(i) + "/",
-            robot_name="robot_" + str(i),
-            position=X_env_i.position[0].cpu().numpy(),
-            initialize_world=False,
-        )
-        robot_list.append(r_i[0])
+            # create target in the i-th environment
+            target = cuboid.VisualCuboid(
+                world_i_subroot + "/target" + str(j),
+                position=np.array(Xlist_target_Fenv[i][j][:3]) + X_envs[i].position[0].cpu().numpy(),
+                orientation=np.array(Xlist_target_Fenv[i][j][3:]),
+                color=np.array([1.0, 0, 0]),
+                size=0.05,
+            )
+            target_list.append(target)
+            target_list_by_env[i].append(target)
+
+            # add robot to the i-th environment
+            r = add_robot_to_scene(
+                robot_cfg,
+                my_world,
+                world_i_subroot + "/",
+                robot_name="robot_" + str(i) + "_" + str(j),
+                # position=Xlist_rbase_Fenv[i][j].position[0].cpu().numpy(),  # X_env_i.position[0].cpu().numpy(),
+                position=Pose.from_list(Xlist_rbase_Fenv[i][j]).position[0].cpu().numpy() + X_envs[i].position[0].cpu().numpy(), # position passed here expressed in the world frame, so its shifted from by X_env_i
+                initialize_world=False,
+            )
+            robot_list.append(r[0])
+            robot_list_by_env[i].append(r[0])
 
     my_world.initialize_physics() # seems to be needed
 
@@ -188,12 +274,13 @@ def main(
     world_cfg_list = []
     for i in range(n_envs):
         world_cfg = WorldConfig.from_dict(
-            load_yaml(join_path(get_world_configs_path(), world_file[i]))
+            load_yaml(join_path(get_world_configs_path(), world_files[i]))
         )  # .get_mesh_world()
         world_cfg.objects[0].pose[2] -= 0.02
         world_cfg.randomize_color(r=[0.2, 0.3], b=[0.0, 0.05], g=[0.2, 0.3])
         usd_help.add_world_to_stage(world_cfg, base_frame="/World/world_" + str(i))
-        world_cfg_list.append(world_cfg)
+        for j in range(n_robots_envwise[i]):
+            world_cfg_list.append(world_cfg)
          
     """
     https://curobo.org/_api/curobo.wrap.reacher.mpc.html#curobo.wrap.reacher.mpc.MpcSolver._update_batch_size
@@ -211,6 +298,7 @@ def main(
     """
 
     # init mpc *batch* solver config
+    b = 400 # TODO: change to n_rollouts of each robot
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg_list, # although its a list and lists are not shown in the valid inputs, it is valid input and there is no error (like in the motion gen example).
@@ -225,10 +313,19 @@ def main(
         use_es=False,
         store_rollouts=True,
         step_dt=0.02,
-        n_collision_envs=n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
+        n_collision_envs= n_envs, # len(world_cfg_list), # n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
+        # dynamic_obs_checker=DynamicObsCollPredictorBatch(
+        #     tensor_args=tensor_args,
+        #     n_envs=n_envs,
+        #     b=b,
+        #     H=30, # TODO: change to H of the mpc solver
+        #     n_robot_spheres=65,
+        #     n_robots_envwise=[1,1]
+        # )
     )
     
     # init mpc solver for batch of robots
+
     mpc = MpcSolver(mpc_config) # batch solver, solve (n robots) mpc problem in parallel on every .step() call
     joint_names = mpc.rollout_fn.joint_names # 7
     
@@ -240,7 +337,7 @@ def main(
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
     
     # for each robot, repeat its retract configuration (initial jointconfig)
-    retract_cfg_batch = retract_cfg.repeat(n_envs, 1) # n robots x 7
+    retract_cfg_batch = retract_cfg.repeat(n_robots_total, 1) # n robots x 7
     
 
     # get current state for each robot
@@ -294,13 +391,13 @@ def main(
             current_state=current_state_batch, # https://curobo.org/_api/curobo.rollout.rollout_base.html#curobo.rollout.rollout_base.Goal
             goal_state=goal_state_batch, 
             goal_pose=retract_pose_batch,
-            batch_world_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
-            batch_pose_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
-            batch_enable_idx=torch.tensor(list(range(n_envs)), device=tensor_args.device), # optional
+            batch_world_idx=torch.tensor(robot_to_env_idx, device=tensor_args.device), # optional
+            batch_pose_idx=torch.tensor(robot_to_env_idx, device=tensor_args.device), # optional
+            batch_enable_idx=torch.tensor(robot_to_env_idx, device=tensor_args.device), # optional
 
         )
-        goal_buffer = mpc.setup_solve_batch_env_custom(goal, num_seeds)
-        # goal_buffer = mpc.setup_solve_batch_env(goal, num_seeds)
+        goal_buffer = mpc.setup_solve_batch_env_custom(goal, num_seeds, n_envs)
+
     else:
         goal = Goal(
             current_state=current_state_batch, # https://curobo.org/_api/curobo.rollout.rollout_base.html#curobo.rollout.rollout_base.Goal
@@ -319,8 +416,7 @@ def main(
     # )
     # model = RobotWorld(config)
     i = 0
-    prev_goal = None
-    past_goal = None
+
     # 174 - 190 END
     art_controllers = [r.get_articulation_controller() for r in robot_list]
     
@@ -357,23 +453,30 @@ def main(
             continue
 
         # get target poses from simulation
+        
         targets_update_timer_start = time.time()
+        
+        # for each robot, get target pose in robot frame (required by mpc solver)
         sp_buffer = []
         sq_buffer = []
-        for k in target_list:
-            sph_position, sph_orientation = k.get_local_pose()
-            sp_buffer.append(sph_position)
-            sq_buffer.append(sph_orientation)
-        
+        for env in range(n_envs):
+            for robot_idx in range(len(target_list_by_env[env])):
+                target = target_list_by_env[env][robot_idx]
+                # get target in environment frame
+                sph_position_envFrame, sph_orientation_envFrame = target.get_local_pose() 
+                # transform to robot frame
+                sph_pose_list = sph_position_envFrame.tolist() + sph_orientation_envFrame.tolist()
+                sph_pose_robotFrame = transform_pose_between_frames(sph_pose_list, f1_pose=X_envs[env].tolist(), f2_pose=Xlist_rbase_Fenv[env][robot_idx])
+                sph_position_robotFrame, sph_orientation_robotFrame = sph_pose_robotFrame[:3], sph_pose_robotFrame[3:]
+                sp_buffer.append(np.array(sph_position_robotFrame))
+                sq_buffer.append(np.array(sph_orientation_robotFrame))
+
         # make a batch of new target poses for batch solver 
         ik_goal = Pose(
             position=tensor_args.to_device(sp_buffer),
             quaternion=tensor_args.to_device(sq_buffer),
         )
-        if prev_goal is None:
-            prev_goal = ik_goal.clone()
-        if past_goal is None:
-            past_goal = ik_goal.clone()
+   
         
         # update solver with new target poses from simulation
         goal_buffer.goal_pose.copy_(ik_goal)

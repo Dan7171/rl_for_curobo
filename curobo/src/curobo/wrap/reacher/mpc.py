@@ -495,7 +495,7 @@ class MpcSolver(MpcSolverConfig):
 
         return goal_buffer
     
-    def setup_solve_batch_env_custom(self, goal: Goal, num_seeds: Optional[int] = None) -> Goal:
+    def setup_solve_batch_env_custom(self, goal: Goal, num_seeds: Optional[int] = None, n_envs=None) -> Goal:
         """
         **** custom function to support different collision worlds for batch MPC ****
         
@@ -510,11 +510,13 @@ class MpcSolver(MpcSolverConfig):
 
         Without this change (see projects_root/examples/batch_mpc_example.py rows 277, 278 (with or without this change)) it supports different goals but not different collision worlds.
         """
+        if n_envs is None:
+            n_envs = len(goal.batch_world_idx)
         solve_state = ReacherSolveState(
             ReacherSolveType.BATCH_ENV,
             num_mpc_seeds=num_seeds,
             batch_size=goal.batch,
-            n_envs=len(goal.batch_world_idx), # this is the only change I made, compared to the original function (setup_solve_batch_env)
+            n_envs=n_envs, # this is the only change I made, compared to the original function (setup_solve_batch_env)
             n_goalset=1,
         )
         goal_buffer = self._update_solve_state_and_goal_buffer(solve_state, goal)

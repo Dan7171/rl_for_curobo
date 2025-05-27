@@ -592,6 +592,8 @@ class FrankaMpc(AutonomousFranka):
         goal_buffer = self.solver.setup_solve_single(goal_mpc, 1)
         self.goal_buffer = goal_buffer
         self.solver.update_goal(self.goal_buffer)
+
+        # run first solver step to initialize (capture) cuda graph if enabled (debug=False)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
 
 

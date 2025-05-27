@@ -42,7 +42,7 @@ from curobo.types.state import JointState
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import cat_sum, cat_sum_horizon
 
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor, DynamicObsCollPredictorBatch
 
 @dataclass
 class ArmCostConfig:
@@ -384,10 +384,16 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         if dynamic_obs_col_checker is not None:
             # dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
             # cost_list.append(dynamic_coll_cost) 
-            is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
-            if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
-                dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-                cost_list.append(dynamic_coll_cost) 
+            if isinstance(dynamic_obs_col_checker, DynamicObsCollPredictor):
+                is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
+                if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
+                    dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
+                    cost_list.append(dynamic_coll_cost)
+            elif isinstance(dynamic_obs_col_checker, DynamicObsCollPredictorBatch):
+                is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.B
+                if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
+                    dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres, env_query_idx=self._goal_buffer.batch_world_idx,)
+                    cost_list.append(dynamic_coll_cost) 
 
 
       

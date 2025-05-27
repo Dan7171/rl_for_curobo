@@ -2,7 +2,7 @@
 This script was built based on the curobo/examples/isaac_sim/batch_motion_gen_reacher.py
 and modified to use MPC instead of MotionGen (global planner).
 """
-DEBUG = False
+DEBUG = True
 
 try:
     # Third Party
@@ -101,7 +101,7 @@ def get_batch_js(robot_list, tensor_args) -> JointState:
 
 
 def main(
-        world_file = ["collision_test.yml", "collision_thin_walls.yml"],
+        world_files = ["collision_test.yml", "collision_thin_walls.yml"],
         offset_y = 2.5,
         X_targetsInitial_envFrame = ([0.5, 0, 0.5], [0, 1, 0, 0]),
         ):
@@ -109,7 +109,7 @@ def main(
     Main function to run the batch MPC example.
     Args:
 
-        world_file: list of world files to load (each environment has a different world file, can use the same world file for all environments)
+        world_files: list of world files to load (each environment has a different world file, can use the same world file for all environments)
         offset_y: distance between adjacent environments on the y axis. TODO: modify to include offset_x, offset_z, etc.
         X_targetsInitial_enviFrame: Initial pose of the robot targets expressed in the i'th environment (same for all i)  frame (each pose is a tuple of [position, orientation])
 
@@ -117,7 +117,7 @@ def main(
     setup_curobo_logger("warn") # not sure if I want this
 
     # number of environments
-    n_envs = len(world_file)
+    n_envs = len(world_files)
     # curobo wrapper on torch tensor device type
     tensor_args = TensorDeviceType()
     
@@ -188,7 +188,7 @@ def main(
     world_cfg_list = []
     for i in range(n_envs):
         world_cfg = WorldConfig.from_dict(
-            load_yaml(join_path(get_world_configs_path(), world_file[i]))
+            load_yaml(join_path(get_world_configs_path(), world_files[i]))
         )  # .get_mesh_world()
         world_cfg.objects[0].pose[2] -= 0.02
         world_cfg.randomize_color(r=[0.2, 0.3], b=[0.0, 0.05], g=[0.2, 0.3])
@@ -226,6 +226,7 @@ def main(
         store_rollouts=True,
         step_dt=0.02,
         n_collision_envs=n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
+        
     )
     
     # init mpc solver for batch of robots
