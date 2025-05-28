@@ -228,7 +228,7 @@ class DynamicObsCollPredictorBatch:
         self._rad_sum_buf = torch.empty(1, 1, self.n_robot_spheres, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x n_obs] Own spheres positions buffer
         
         # _idx_map_tree_to_flat[env][collider] = start idx of the collider in the flat buffer (at the input/output row num B).
-        self._idx_map_tree_to_flat = []
+        self._idx_map_tree_to_flat = [] 
         tmp_cntr = 0
         for env in range(self.n_envs):
             self._idx_map_tree_to_flat.append([])
@@ -294,19 +294,23 @@ class DynamicObsCollPredictorBatch:
         #             if collider == collide_with:
         #                 continue
         #             self._tmp_buffer[env,,r_obss = prad[env_query_idx[:,0] == e,:,:,:,:]
+        env_range_start = 0
+        # mask = torch.zeros(self.B, device=self.tensor_args.device, dtype=torch.int16) - 1 # -1 for all indices
         if not parallel_envs:
             for env in range(self.n_envs):
-                env_prad = prad[env_query_idx[:,0] == env,:,:,:]
+                env_range_end = env_range_start + self.n_robots_envwise[env] * self.b
+                env_prad = prad[env_range_start:env_range_end,:,:,:]
+                env_range_start = env_range_end # for the next iter
                 for collider in range(self.n_robots_envwise[env]):
                     collider_range_start, collider_range_end = self.b*collider, self.b*(collider+1)
                     p_collider = env_prad[collider_range_start:collider_range_end,:,:,:3]
-                    rad_collider = env_prad[collider_range_start:collider_range_end,:,:,3]
+                    rad_collider = env_prad[collider_range_start,0,:,3]
                     for collide_with in range(self.n_robots_envwise[env]):
                         if collider == collide_with:
                             continue
                         collide_with_range_start, collide_with_range_end = self.b*collide_with, self.b*(collide_with+1)
                         p_collide_with = env_prad[collide_with_range_start:collide_with_range_end,:,:,:3]
-                        rad_collide_with = env_prad[collide_with_range_start:collide_with_range_end,:,:,3]
+                        rad_collide_with = env_prad[collide_with_range_start,0,:,3]
                         self._p_collider_buf.copy_(p_collider.reshape(self.b,self.H,self.n_robot_spheres,1,3)) # Copy the reshaped version as well.
                         self._p_collide_with_buf.copy_(p_collide_with.reshape(self.b,self.H, 1,self.n_robot_spheres,3)) # Copy the reshaped version as well.
                         torch.sub(self._p_collider_buf,self._p_collide_with_buf, out=self._sphere_centers_diff_buf) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
@@ -316,7 +320,7 @@ class DynamicObsCollPredictorBatch:
                         self._sphere_centers_diff_buf[:,:,:,:,0].lt_(self.safety_margin) # 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
                         # self._tmp_buffer[env,:,:,collider,:] = env_prad[:,:,:,collider,:]
                         out_start_idx = self._idx_map_tree_to_flat[env][collider]
-                        torch.sum(self._sphere_centers_diff_buf[:,:,:,:,0], dim=[2,3,4], out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+                        torch.sum(self._sphere_centers_diff_buf[:,:,:,:,0], dim=[2,3], out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
         else:
             pass    
 

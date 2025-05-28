@@ -74,6 +74,11 @@ from curobo.rollout.rollout_base import Goal
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictorBatch
 from scipy.spatial.transform import Rotation as R
 
+
+
+
+
+
 def get_batch_js(robot_list, tensor_args) -> JointState:
     """
     Get the common joint state for a batch of robots.
@@ -101,18 +106,19 @@ def get_batch_js(robot_list, tensor_args) -> JointState:
     
     return full_js
 
-def transform_pose_between_frames(pose_in_f1:list[float], f1_pose:Optional[list[float]]=None, f2_pose:Optional[list[float]]=None):
+def transform_pose_between_frames(pose:list[float], frame_expressed_in:Optional[list[float]]=None, frame_express_at:Optional[list[float]]=None):
     """
-    Transforms pose expressed in f1, from frame F1 to frame F2.
+    Transforms pose expressed in some frame F1 (frame_expressed_in), from frame F1 to frame F2 (frame_express_at).
+    Both frame_expressed_in and frame_express_at are expressed in the world frame!
 
-    If f1_pose or f2_pose is not provided, it is assumed that it is the world frame.
-    Meaning, that if f1_pose is not provided, it is assumed that the pose_in_f1 is a pose in the world frame.
-    And if f2_pose is not provided, it is assumed that we want to transform the pose_in_f1 to the world frame.
+    If frame_expressed_in or frame_express_at is not provided, it is assumed that it is the world frame.
+    Meaning, that if frame_expressed_in is not provided, it is assumed that the pose is a pose in the world frame.
+    And if frame_express_at is not provided, it is assumed that we want to transform the pose to the world frame.
     
     Parameters:
-    - pose_in_f1: [px, py, pz, qw, qx, qy, qz] expressed in F1
-    - f1_pose: [px, py, pz, qw, qx, qy, qz] pose of F1 in world
-    - f2_pose: [px, py, pz, qw, qx, qy, qz] pose of F2 in world
+    - pose: [px, py, pz, qw, qx, qy, qz] expressed in F1
+    - frame_expressed_in: [px, py, pz, qw, qx, qy, qz] pose of F1 in world (the frame the pose is expressed in)
+    - frame_express_at: [px, py, pz, qw, qx, qy, qz] pose of F2 in world (the frame the pose is transformed to)
     
     Returns:
     - pose_in_f2: [px, py, pz, qw, qx, qy, qz] expressed in F2
@@ -129,14 +135,14 @@ def transform_pose_between_frames(pose_in_f1:list[float], f1_pose:Optional[list[
         return np.concatenate([pos, [quat[3], quat[0], quat[1], quat[2]]])  # to qw,qx,qy,qz
 
     world_pose = [0.0, 0, 0, 1, 0, 0, 0]
-    if f1_pose is None:
-        f1_pose = world_pose
-    if f2_pose is None:
-        f2_pose = world_pose
+    if frame_expressed_in is None:
+        frame_expressed_in = world_pose
+    if frame_express_at is None:
+        frame_express_at = world_pose
     # Decompose all poses
-    p_f1, r_f1 = decompose(f1_pose)
-    p_f2, r_f2 = decompose(f2_pose)
-    p_rel, r_rel = decompose(pose_in_f1)
+    p_f1, r_f1 = decompose(frame_expressed_in)
+    p_f2, r_f2 = decompose(frame_express_at)
+    p_rel, r_rel = decompose(pose)
 
     # Pose in world frame: T_world = T_f1 * T_rel
     p_world = r_f1.apply(p_rel) + p_f1
@@ -178,13 +184,24 @@ def main(
     for i in range(n_envs):
         X_envs.append(Pose.from_list([0, i*offset_y, 0, 1, 0, 0, 0]))
 
-    # define robot base poses. 
-    # Xlist_rbase_Fenv[i][j] = i'th env robot j's base pose expressed in the i'th environment frame
+    # robot base poses expressed in the i'th environment frame 
+    # (M[i][j] is the j'th robot frame expressed in the i'th environment frame)
     Xlist_rbase_Fenv = [
         [[0, 0, 0, 1, 0, 0, 0], [1.2, 0, 0, 1, 0, 0, 0]], 
         [[0, 0, 0, 1, 0, 0, 0]]
     ]
 
+    # robot base poses expressed in the world frame
+    # (M[i][j] is the j'th robot frame expressed in the world frame)
+    Xlist_rbase = [] 
+    for i in range(n_envs):
+        Xlist_rbase.append([])
+        for j in range(len(Xlist_rbase_Fenv[i])):
+            X_rbase = transform_pose_between_frames(Xlist_rbase_Fenv[i][j], frame_expressed_in=X_envs[i].tolist())
+            Xlist_rbase[i].append(X_rbase)
+
+    # target poses expressed in the i'th environment frame. 
+    # (M[i][j] is the j'th robot's target pose expressed in the i'th environment frame)
     Xlist_target_Fenv = [
         [[0.5, 0, 0.5, 0, 1, 0, 0], [0.5, 0.5, 0.5, 0, 1, 0, 0]], 
         [[0.5, 0, 0.5, 0, 1, 0, 0]]
@@ -299,6 +316,7 @@ def main(
 
     # init mpc *batch* solver config
     b = 400 # TODO: change to n_rollouts of each robot
+    H = 30 # TODO: change to H of the mpc solver
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg_list, # although its a list and lists are not shown in the valid inputs, it is valid input and there is no error (like in the motion gen example).
@@ -314,14 +332,14 @@ def main(
         store_rollouts=True,
         step_dt=0.02,
         n_collision_envs= n_envs, # len(world_cfg_list), # n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
-        # dynamic_obs_checker=DynamicObsCollPredictorBatch(
-        #     tensor_args=tensor_args,
-        #     n_envs=n_envs,
-        #     b=b,
-        #     H=30, # TODO: change to H of the mpc solver
-        #     n_robot_spheres=65,
-        #     n_robots_envwise=[1,1]
-        # )
+        dynamic_obs_checker=DynamicObsCollPredictorBatch(
+            tensor_args=tensor_args,
+            n_envs=n_envs,
+            b=b,
+            H=H, 
+            n_robot_spheres=65,
+            n_robots_envwise=n_robots_envwise
+        )
     )
     
     # init mpc solver for batch of robots
@@ -457,24 +475,31 @@ def main(
         targets_update_timer_start = time.time()
         
         # for each robot, get target pose in robot frame (required by mpc solver)
-        sp_buffer = []
-        sq_buffer = []
+        solver_target_batch_p = []
+        solver_target_batch_q = []
         for env in range(n_envs):
             for robot_idx in range(len(target_list_by_env[env])):
                 target = target_list_by_env[env][robot_idx]
                 # get target in environment frame
-                sph_position_envFrame, sph_orientation_envFrame = target.get_local_pose() 
+                p_target_envFrame, q_target_envFrame = target.get_local_pose() 
+                
+                # print("local frame ",env,robot_idx, p_target_envFrame)
                 # transform to robot frame
-                sph_pose_list = sph_position_envFrame.tolist() + sph_orientation_envFrame.tolist()
-                sph_pose_robotFrame = transform_pose_between_frames(sph_pose_list, f1_pose=X_envs[env].tolist(), f2_pose=Xlist_rbase_Fenv[env][robot_idx])
-                sph_position_robotFrame, sph_orientation_robotFrame = sph_pose_robotFrame[:3], sph_pose_robotFrame[3:]
-                sp_buffer.append(np.array(sph_position_robotFrame))
-                sq_buffer.append(np.array(sph_orientation_robotFrame))
-
+                X_target_envFrame = p_target_envFrame.tolist() + q_target_envFrame.tolist()
+                X_solverTarget = transform_pose_between_frames(
+                    X_target_envFrame, 
+                    frame_expressed_in=X_envs[env].tolist(), 
+                    frame_express_at=Xlist_rbase[env][robot_idx] # Xlist_rbase_Fenv[env][robot_idx]
+                )
+                p_solverTarget, q_solverTarget = X_solverTarget[:3], X_solverTarget[3:]
+                solver_target_batch_p.append(np.array(p_solverTarget))
+                solver_target_batch_q.append(np.array(q_solverTarget))
+                # print("solver ",env,robot_idx, p_solverTarget)
+                
         # make a batch of new target poses for batch solver 
         ik_goal = Pose(
-            position=tensor_args.to_device(sp_buffer),
-            quaternion=tensor_args.to_device(sq_buffer),
+            position=tensor_args.to_device(solver_target_batch_p),
+            quaternion=tensor_args.to_device(solver_target_batch_q),
         )
    
         
@@ -553,4 +578,5 @@ def main(
             action_timer = 0
         
 if __name__ == "__main__":
+    
     main()
