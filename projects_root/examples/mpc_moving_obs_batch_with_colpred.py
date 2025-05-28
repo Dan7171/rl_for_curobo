@@ -550,25 +550,25 @@ def main(
         t += 1
         if t % 100 == 0:
             print(f"t = {t}")
-            print(f"avg ctrl freq in last 100 steps:  {100 / ctrl_loop_timer}")
-            print(f"mpc solver freq in last 100 steps: {100 / mpc_solver_timer}")
-            print(f"world step freq in last 100 steps: {100 / world_step_timer}")
-            print(f"targets update freq in last 100 steps: {100 / targets_update_timer}")
-            print(f"joint state freq in last 100 steps: {100 / joint_state_timer}")
-            print(f"action freq in last 100 steps: {100 / action_timer}")
+            print(f"avg ctrl freq in last 100 steps:  {100 / ctrl_loop_timer:.2f}")
+            print(f"mpc solver freq in last 100 steps: {100 / mpc_solver_timer:.2f}")
+            print(f"world step freq in last 100 steps: {100 / world_step_timer:.2f}")
+            print(f"targets update freq in last 100 steps: {100 / targets_update_timer:.2f}")
+            print(f"joint state freq in last 100 steps: {100 / joint_state_timer:.2f}")
+            print(f"action freq in last 100 steps: {100 / action_timer:.2f}")
         
             total_time_measured = mpc_solver_timer + world_step_timer + targets_update_timer + joint_state_timer + action_timer
             total_time_actual = ctrl_loop_timer
             delta = total_time_measured - total_time_actual
-            print(f"total time measured: {total_time_measured}")
-            print(f"total time actual: {total_time_actual}")
-            print(f"delta: {delta}")
+            print(f"total time measured: {total_time_measured:.2f}")
+            print(f"total time actual: {total_time_actual:.2f}")
+            print(f"delta: {delta:.2f}")
             print("In percentage %:")
-            print(f"mpc solver: {100 * mpc_solver_timer / total_time_actual}")
-            print(f"world step: {100 * world_step_timer / total_time_actual}")
-            print(f"targets update: {100 * targets_update_timer / total_time_actual}")
-            print(f"joint state: {100 * joint_state_timer / total_time_actual}")
-            print(f"action: {100 * action_timer / total_time_actual}")
+            print(f"mpc solver: {100 * mpc_solver_timer / total_time_actual:.2f}")
+            print(f"world step: {100 * world_step_timer / total_time_actual:.2f}")
+            print(f"targets update: {100 * targets_update_timer / total_time_actual:.2f}")
+            print(f"joint state: {100 * joint_state_timer / total_time_actual:.2f}")
+            print(f"action: {100 * action_timer / total_time_actual:.2f}")
             # reset timers
             ctrl_loop_timer = 0
             mpc_solver_timer = 0

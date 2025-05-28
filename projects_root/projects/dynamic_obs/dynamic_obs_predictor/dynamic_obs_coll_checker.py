@@ -225,7 +225,7 @@ class DynamicObsCollPredictorBatch:
         
         self._p_collider_buf = torch.empty(self.b, self.H, self.n_robot_spheres,1, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
         self._p_collide_with_buf = torch.empty(self.b, self.H, 1, self.n_robot_spheres, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        self._rad_sum_buf = torch.empty(1, 1, self.n_robot_spheres, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x n_obs] Own spheres positions buffer
+        self._rad_sum_buf = torch.empty(self.n_robot_spheres, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x n_obs] Own spheres positions buffer
         
         # _idx_map_tree_to_flat[env][collider] = start idx of the collider in the flat buffer (at the input/output row num B).
         self._idx_map_tree_to_flat = [] 
@@ -297,6 +297,8 @@ class DynamicObsCollPredictorBatch:
         env_range_start = 0
         # mask = torch.zeros(self.B, device=self.tensor_args.device, dtype=torch.int16) - 1 # -1 for all indices
         if not parallel_envs:
+            # memory_consumption = sum([get_size_gb(prad), get_size_gb(env_query_idx), get_size_gb(self._p_collider_buf), get_size_gb(self._p_collide_with_buf), get_size_gb(self._rad_sum_buf), get_size_gb(self._sphere_centers_diff_buf), get_size_gb(self._out_buf)])
+            # print(f'Debug: memory consumption = {memory_consumption} GB')
             for env in range(self.n_envs):
                 env_range_end = env_range_start + self.n_robots_envwise[env] * self.b
                 env_prad = prad[env_range_start:env_range_end,:,:,:]
@@ -314,13 +316,23 @@ class DynamicObsCollPredictorBatch:
                         self._p_collider_buf.copy_(p_collider.reshape(self.b,self.H,self.n_robot_spheres,1,3)) # Copy the reshaped version as well.
                         self._p_collide_with_buf.copy_(p_collide_with.reshape(self.b,self.H, 1,self.n_robot_spheres,3)) # Copy the reshaped version as well.
                         torch.sub(self._p_collider_buf,self._p_collide_with_buf, out=self._sphere_centers_diff_buf) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
-                        torch.norm(self._sphere_centers_diff_buf, dim=-1, keepdim=True,out=self._sphere_centers_diff_buf[:,:,:,:,0]) # Compute the distance between the sphere centers
-                        torch.add(rad_collider, rad_collide_with, out=self._rad_sum_buf)
-                        torch.sub(self._sphere_centers_diff_buf[:,:,:,:,0], self._rad_sum_buf, out=self._sphere_centers_diff_buf[:,:,:,:,0]) # Compute the distance between the sphere centers minus the sum of the radii.
-                        self._sphere_centers_diff_buf[:,:,:,:,0].lt_(self.safety_margin) # 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
-                        # self._tmp_buffer[env,:,:,collider,:] = env_prad[:,:,:,collider,:]
+                        
+                        # Compute the distance between the sphere centers (in pairs, for all pairs i,j the "collider" i'th sphere  with "collide with" j'th sphere)
+                        # and put it in the first dimension of the buffer (for memory efficiency,to store the distance, we use the first dimension (x) 
+                        # of the points x,y,z (sphere centers) buffer and not allocating a new buffer for that.
+                        self._sphere_centers_diff_buf[..., 0].copy_(torch.norm(self._sphere_centers_diff_buf, dim=-1))
+                        # Compute the distance between the sphere centers minus the sum of the radii.
+                        torch.sub(self._sphere_centers_diff_buf[..., 0], rad_collider, out=self._sphere_centers_diff_buf[..., 0]) # Compute the distance between the sphere centers minus the sum of the radii.
+                        torch.sub(self._sphere_centers_diff_buf[..., 0], rad_collide_with, out=self._sphere_centers_diff_buf[..., 0]) # Compute the distance between the sphere centers minus the sum of the radii.
+                        
+                        # Check if the distance between the sphere centers minus the sum of the radii is less than the safety margin.
+                        self._sphere_centers_diff_buf[..., 0].lt_(self.safety_margin) # 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
+                        
+                        # Count the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).
                         out_start_idx = self._idx_map_tree_to_flat[env][collider]
-                        torch.sum(self._sphere_centers_diff_buf[:,:,:,:,0], dim=[2,3], out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+                        torch.sum(self._sphere_centers_diff_buf[..., 0], dim=[2,3], out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+                        
+                        
         else:
             pass    
 
