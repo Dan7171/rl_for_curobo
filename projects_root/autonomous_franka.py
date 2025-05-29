@@ -690,6 +690,7 @@ class FrankaMpc(AutonomousFranka):
                     qKey = X_world[...,3:]
                     plan['task_space'][key]['p'] = pKey
                     plan['task_space'][key]['q'] = qKey
+                    
                     # transform_poses_batched
                     # import itertools
                     # index_ranges = [range(s) for s in pKey.shape[:-1]]

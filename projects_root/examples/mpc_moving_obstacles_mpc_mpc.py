@@ -57,6 +57,9 @@ Example options:
 # ############################## Run settings ##############################
 
 
+from projects_root.utils.transforms import transform_poses_batched
+
+
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
@@ -562,8 +565,13 @@ def main():
             # VISUALIZATION
             if VISUALIZE_MPC_ROLLOUTS:
                 visualizations_timer_start = time.time()
-                visual_rollouts = robots[i].solver.get_visual_rollouts()
-                visual_rollouts += torch.tensor(robots[i].p_R,device=robots[i].tensor_args.device)
+                p_visual_rollouts_robotframe = robots[i].solver.get_visual_rollouts()
+                q_visual_rollouts_robotframe = torch.empty(p_visual_rollouts_robotframe.shape[:-1] + torch.Size([4]), device=p_visual_rollouts_robotframe.device)
+                q_visual_rollouts_robotframe[...,:] = torch.tensor([1,0,0,0],device=p_visual_rollouts_robotframe.device, dtype=p_visual_rollouts_robotframe.dtype) 
+                visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)
+                # visual_rollouts += torch.tensor(robots[i].p_R,device=robots[i].tensor_args.device)
+                
+                visual_rollouts = transform_poses_batched(visual_rollouts, X_Robots[i].tolist())
                 rollouts_for_visualization = {'points':  visual_rollouts, 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
                 visualizations_timer += time.time() - visualizations_timer_start
