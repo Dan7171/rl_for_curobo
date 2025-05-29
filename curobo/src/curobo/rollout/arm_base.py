@@ -390,7 +390,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 cost_list.append(dynamic_coll_cost) 
 
 
-      
+        # Note: Live plotting is handled by child classes (e.g., ArmReacher) to avoid duplicate plots
        
         if return_list:
             return cost_list
@@ -792,3 +792,122 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         self.bound_cost.update_dt(dt)
         if self.cost_cfg.primitive_collision_cfg is not None:
             self.primitive_collision_cost.update_dt(dt)
+
+    def _update_live_plot(self, cost_list):
+        """Update live plot of cost values in real-time"""
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+        from collections import deque
+        import numpy as np
+        
+        # Initialize plotting components if not already done
+        if not hasattr(self, '_plot_initialized'):
+            self._plot_initialized = True
+            self._cost_histories = {}  # Dictionary to store history for each cost component
+            self._cost_lines = {}  # Dictionary to store plot lines for each cost component
+            self._cost_labels = [
+                'Bound Cost', 'Self Collision', 'Primitive Collision', 
+                'Stop Cost', 'Dynamic Obstacles', 'Manipulability'
+            ]
+            self._colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown']
+            
+            # Set up the figure and axis
+            plt.ion()  # Turn on interactive mode
+            self._fig, self._ax = plt.subplots(1, 1, figsize=(12, 8))
+            self._fig.suptitle('Real-time Cost Monitoring - Individual Components')
+            
+            self._ax.set_title('Individual Cost Components Over Time')
+            self._ax.set_xlabel('Iteration')
+            self._ax.set_ylabel('Cost Value')
+            self._ax.grid(True)
+            
+            plt.tight_layout()
+            plt.show(block=False)
+        
+        # Process each cost component
+        for i, cost_tensor in enumerate(cost_list):
+            if cost_tensor is not None:
+                # Get cost label (use index if we don't have enough labels)
+                label = self._cost_labels[i] if i < len(self._cost_labels) else f'Cost_{i}'
+                
+                # Calculate mean of this cost component
+                cost_mean = torch.mean(cost_tensor).cpu().numpy().item()
+                
+                # Initialize history for this component if not exists
+                if label not in self._cost_histories:
+                    self._cost_histories[label] = deque(maxlen=100)  # Keep last 100 iterations
+                    color = self._colors[i % len(self._colors)]
+                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, linewidth=2)
+                
+                # Add current value to history
+                self._cost_histories[label].append(cost_mean)
+        
+        # Update all plot lines
+        for label, history in self._cost_histories.items():
+            if len(history) > 0:
+                x_data = list(range(len(history)))
+                y_data = list(history)
+                self._cost_lines[label].set_data(x_data, y_data)
+        
+        # Update plot limits and legend
+        if self._cost_histories:
+            # Get all x and y data for proper scaling
+            all_x_data = []
+            all_y_data = []
+            for history in self._cost_histories.values():
+                if len(history) > 0:
+                    all_x_data.extend(range(len(history)))
+                    all_y_data.extend(history)
+            
+            if all_x_data and all_y_data:
+                self._ax.set_xlim(0, max(all_x_data) + 1)
+                y_min, y_max = min(all_y_data), max(all_y_data)
+                y_range = y_max - y_min
+                if y_range > 0:
+                    self._ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+                else:
+                    self._ax.set_ylim(y_min - 0.1, y_max + 0.1)
+        
+        # Update legend (only once or when new components are added)
+        if not hasattr(self, '_legend_updated') or len(self._cost_lines) != getattr(self, '_last_legend_count', 0):
+            self._ax.legend(loc='upper right')
+            self._legend_updated = True
+            self._last_legend_count = len(self._cost_lines)
+        
+        # Refresh the plot
+        self._fig.canvas.draw()
+        self._fig.canvas.flush_events()
+        
+        # Optional: Save periodic snapshots
+        total_iterations = max(len(h) for h in self._cost_histories.values()) if self._cost_histories else 0
+        if total_iterations > 0 and total_iterations % 50 == 0:  # Every 50 iterations
+            self._fig.savefig(f'cost_components_iter_{total_iterations}.png', dpi=150, bbox_inches='tight')
+
+    def enable_live_plotting(self, enable: bool = True):
+        """Enable or disable live plotting of cost values
+        
+        Args:
+            enable (bool): Whether to enable live plotting. Defaults to True.
+        """
+        self._enable_live_plotting = enable
+        if not enable and hasattr(self, '_fig'):
+            # Close the figure if disabling
+            import matplotlib.pyplot as plt
+            plt.close(self._fig)
+            self._plot_initialized = False
+
+    def save_cost_plot(self, filename: str = None):
+        """Save the current cost plot to file
+        
+        Args:
+            filename (str, optional): Filename to save. If None, uses timestamp.
+        """
+        if hasattr(self, '_fig'):
+            if filename is None:
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f'cost_plot_{timestamp}.png'
+            self._fig.savefig(filename, dpi=150, bbox_inches='tight')
+            print(f"Cost plot saved to {filename}")
+        else:
+            print("No plot available to save. Enable live plotting first.")

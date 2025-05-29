@@ -140,6 +140,11 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
         self.visual_traj = None
         if self.debug_info is not None and "visual_traj" in self.debug_info.keys():
             self.visual_traj = self.debug_info["visual_traj"]
+            self.k_rollouts_debug = 20 # original value
+            if "k" in self.debug_info.keys():
+                self.k_rollouts_debug = self.debug_info["k"] # number of top trajectories to store
+                if self.k_rollouts_debug == 'all' or self.k_rollouts_debug > self.total_num_particles:
+                    self.k_rollouts_debug = self.total_num_particles
         self.top_values = None
         self.top_idx = None
         self.top_trajs = None
@@ -301,7 +306,8 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
             if self.store_rollouts and self.visual_traj is not None:
                 total_costs = self._compute_total_cost(costs)
                 vis_seq = getattr(trajectories.state, self.visual_traj)
-                top_values, top_idx = torch.topk(total_costs, 20, dim=1)
+                # top_values, top_idx = torch.topk(total_costs, 20, dim=1)
+                top_values, top_idx = torch.topk(total_costs, self.k_rollouts_debug, dim=1)
                 self.top_values = top_values
                 self.top_idx = top_idx
                 top_trajs = torch.index_select(vis_seq, 0, top_idx[0])

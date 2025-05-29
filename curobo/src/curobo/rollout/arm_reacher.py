@@ -247,7 +247,9 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         """
         state_batch = state.state_seq
         with profiler.record_function("cost/base"):
+            # get ArmBase cost
             cost_list = super(ArmReacher, self).cost_fn(state, action_batch, return_list=True)
+            
         ee_pos_batch, ee_quat_batch = state.ee_pos_seq, state.ee_quat_seq
         g_dist = None
         with profiler.record_function("cost/pose"):
@@ -325,6 +327,11 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 g_dist,
             )
             cost_list.append(z_vel)
+        
+        # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
+        if getattr(self, '_enable_live_plotting', False):
+            self._update_live_plot_reacher(cost_list)
+            
         with profiler.record_function("cat_sum"):
             if self.sum_horizon:
                 cost = cat_sum_horizon_reacher(cost_list)
@@ -471,6 +478,141 @@ class ArmReacher(ArmBase, ArmReacherConfig):
     
     def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
         return self._dynamic_obs_coll_predictor
+
+    def _update_live_plot_reacher(self, cost_list):
+        """Update live plot of cost values in real-time with comprehensive ArmReacher labeling"""
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+        from collections import deque
+        import numpy as np
+        
+        # Initialize plotting components if not already done
+        if not hasattr(self, '_plot_initialized'):
+            self._plot_initialized = True
+            self._cost_histories = {}  # Dictionary to store history for each cost component
+            self._cost_lines = {}  # Dictionary to store plot lines for each cost component
+            self._plot_counter = 0  # Counter for plotting frequency
+            self._plot_every_k = 5  # Plot every 5 iterations to save resources
+            
+            # Comprehensive cost labels for ArmReacher (covers base + reacher costs)
+            self._cost_labels = [
+                'Bound Cost',           # From ArmBase
+                'Stop Cost',            # From ArmBase  
+                'Self Collision',       # From ArmBase
+                'Primitive Collision',  # From ArmBase
+                'Dynamic Obstacles',    # From ArmBase
+                'Manipulability',       # From ArmBase
+                'Pose Cost',            # From ArmReacher
+                'Link Pose Cost',       # From ArmReacher
+                'CSpace Cost',          # From ArmReacher
+                'Straight Line Cost',   # From ArmReacher
+                'Zero Acceleration',    # From ArmReacher
+                'Zero Jerk',            # From ArmReacher
+                'Zero Velocity',        # From ArmReacher
+            ]
+            self._colors = [
+                'blue', 'red', 'green', 'orange', 'purple', 'brown',
+                'pink', 'gray', 'olive', 'cyan', 'magenta', 'yellow', 'black'
+            ]
+            
+            # Set up the figure and axis
+            plt.ion()  # Turn on interactive mode
+            self._fig, self._ax = plt.subplots(1, 1, figsize=(16, 10))
+            self._fig.suptitle('Real-time Cost Monitoring - ArmReacher All Components')
+            
+            self._ax.set_title('All Cost Components Over Time (Base + Reacher)')
+            self._ax.set_xlabel('Iteration')
+            self._ax.set_ylabel('Cost Value')
+            self._ax.grid(True)
+            
+            plt.tight_layout()
+            plt.show(block=False)
+        
+        # Increment counter and check if we should plot this iteration
+        self._plot_counter += 1
+        if self._plot_counter % self._plot_every_k != 0:
+            return  # Skip this iteration
+        
+        # Process each cost component
+        active_costs = []  # Track which costs are actually active
+        for i, cost_tensor in enumerate(cost_list):
+            if cost_tensor is not None:
+                # Get cost label (use index if we don't have enough labels)
+                label = self._cost_labels[i] if i < len(self._cost_labels) else f'Cost_{i}'
+                
+                # Calculate mean of this cost component
+                cost_mean = torch.mean(cost_tensor).cpu().numpy().item()
+                
+                # Only track costs that have non-zero values at some point
+                if cost_mean > 1e-8 or label in self._cost_histories:
+                    active_costs.append((label, cost_mean, i))
+                    
+                    # Initialize history for this component if not exists
+                    if label not in self._cost_histories:
+                        self._cost_histories[label] = deque(maxlen=200)  # Keep last 200 plot points
+                        color = self._colors[i % len(self._colors)]
+                        self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, linewidth=2, marker='o', markersize=3)
+                    
+                    # Add current value to history
+                    self._cost_histories[label].append(cost_mean)
+        
+        # Print active costs for debugging
+        if self._plot_counter == self._plot_every_k:  # First plot
+            print(f"Active cost components detected: {[label for label, _, _ in active_costs]}")
+            print(f"Total cost list length: {len(cost_list)}")
+        
+        # Update all plot lines
+        for label, history in self._cost_histories.items():
+            if len(history) > 0:
+                x_data = list(range(len(history)))
+                y_data = list(history)
+                self._cost_lines[label].set_data(x_data, y_data)
+        
+        # Update plot limits and legend
+        if self._cost_histories:
+            # Get all x and y data for proper scaling
+            all_x_data = []
+            all_y_data = []
+            for history in self._cost_histories.values():
+                if len(history) > 0:
+                    all_x_data.extend(range(len(history)))
+                    all_y_data.extend(history)
+            
+            if all_x_data and all_y_data:
+                self._ax.set_xlim(0, max(all_x_data) + 1)
+                y_min, y_max = min(all_y_data), max(all_y_data)
+                y_range = y_max - y_min
+                if y_range > 0:
+                    self._ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+                else:
+                    self._ax.set_ylim(y_min - 0.1, y_max + 0.1)
+        
+        # Update legend (only when new components are added)
+        if not hasattr(self, '_legend_updated') or len(self._cost_lines) != getattr(self, '_last_legend_count', 0):
+            self._ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=10)
+            self._legend_updated = True
+            self._last_legend_count = len(self._cost_lines)
+        
+        # Refresh the plot
+        self._fig.canvas.draw()
+        self._fig.canvas.flush_events()
+        
+        # Optional: Save periodic snapshots (less frequent)
+        if self._plot_counter % (self._plot_every_k * 20) == 0:  # Every 100 actual iterations
+            self._fig.savefig(f'armreacher_costs_iter_{self._plot_counter}.png', dpi=150, bbox_inches='tight')
+            print(f"Saved plot snapshot at iteration {self._plot_counter}")
+
+    def set_plot_frequency(self, k: int):
+        """Set how often to update the live plot (every k iterations)
+        
+        Args:
+            k (int): Update plot every k iterations
+        """
+        if hasattr(self, '_plot_every_k'):
+            self._plot_every_k = k
+            print(f"Plot frequency set to every {k} iterations")
+        else:
+            print("Live plotting not initialized yet. This will take effect when plotting starts.")
 
 
 @get_torch_jit_decorator()

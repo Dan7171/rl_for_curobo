@@ -420,7 +420,7 @@ class AutonomousFranka:
         pass
     
 class FrankaMpc(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05):
+    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, live_plotting:bool=False):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -438,6 +438,7 @@ class FrankaMpc(AutonomousFranka):
         self.cfg = load_yaml(self.override_particle_file)
         self.H = self.cfg["model"]["horizon"]
         self.num_particles = self.cfg["mppi"]["num_particles"]
+        self.live_plotting = live_plotting # live plotting of cost values
   
 
     
@@ -470,7 +471,8 @@ class FrankaMpc(AutonomousFranka):
             store_rollouts=True,  # Store trajectories for visualization
             step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
             dynamic_obs_checker=dynamic_obs_coll_predictor, # New
-            override_particle_file=self.override_particle_file # New
+            override_particle_file=self.override_particle_file, # New
+            live_plotting=self.live_plotting # New
         )
         
         self.solver = MpcSolver(mpc_config)
@@ -690,7 +692,7 @@ class FrankaMpc(AutonomousFranka):
                     qKey = X_world[...,3:]
                     plan['task_space'][key]['p'] = pKey
                     plan['task_space'][key]['q'] = qKey
-                    
+
                     # transform_poses_batched
                     # import itertools
                     # index_ranges = [range(s) for s in pKey.shape[:-1]]

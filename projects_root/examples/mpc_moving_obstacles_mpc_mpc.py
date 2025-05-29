@@ -65,7 +65,7 @@ REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). S
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 OBS_PREDICTION  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
-VISUALIZE_PREDICTED_OBS_PATHS = False # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
+VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
@@ -344,7 +344,7 @@ def main():
     
     X_Robots = [
         np.array([0,0,0,1,0,0,0], dtype=np.float32),
-        np.array([1.2,0,0,0,0,0,1.0], dtype=np.float32)
+        np.array([1.2,0,0,1,0,0,0], dtype=np.float32) # np.array([1.2,0,0,0,0,0,1.0], dtype=np.float32)
         ] # (x,y,z,qw, qx,qy,qz) expressed in world frame
     n_robots = len(X_Robots)
     robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
@@ -352,10 +352,10 @@ def main():
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
     robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
     robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    X_Targets = [[0.7, 0, 0.2, 0, 1, 0, 0], [0.5, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
+    X_Targets = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
     if OBS_PREDICTION:
-        col_pred_with = [[1], []] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+        col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
 
     robots:List[AutonomousFranka] = []
@@ -369,6 +369,7 @@ def main():
             p_T=X_Targets[i][:3],
             q_T=X_Targets[i][3:], 
             target_color=target_colors[i],
+            live_plotting=False
             )
         )
     # ENVIRONMENT OBSTACLES - INITIALIZATION
@@ -407,7 +408,7 @@ def main():
         # init dynamic obs coll predictors
         if OBS_PREDICTION and len(col_pred_with[i]):
             obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
-            robot.init_col_predictor(obs_groups_nspheres, cost_weight=10000, manually_express_p_own_in_world_frame=True)
+            robot.init_col_predictor(obs_groups_nspheres, cost_weight=100, manually_express_p_own_in_world_frame=True)
         
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
         checker = robots[i].get_cchecker() # available only after init_solver
@@ -568,9 +569,7 @@ def main():
                 p_visual_rollouts_robotframe = robots[i].solver.get_visual_rollouts()
                 q_visual_rollouts_robotframe = torch.empty(p_visual_rollouts_robotframe.shape[:-1] + torch.Size([4]), device=p_visual_rollouts_robotframe.device)
                 q_visual_rollouts_robotframe[...,:] = torch.tensor([1,0,0,0],device=p_visual_rollouts_robotframe.device, dtype=p_visual_rollouts_robotframe.dtype) 
-                visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)
-                # visual_rollouts += torch.tensor(robots[i].p_R,device=robots[i].tensor_args.device)
-                
+                visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)                
                 visual_rollouts = transform_poses_batched(visual_rollouts, X_Robots[i].tolist())
                 rollouts_for_visualization = {'points':  visual_rollouts, 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)

@@ -81,7 +81,7 @@ class DynamicObsCollPredictor:
         if self.manually_express_p_own_in_world_frame:
             self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
             self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
-    
+
     def get_obs_group_idx_range(self, obs_group_idx:int):
         """
         Get the start (inclusive) and end (exclusive) indices of the obstacles in the group.
@@ -200,6 +200,7 @@ class DynamicObsCollPredictor:
 
         self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
         
+        print(torch.sum(self.cost_mat_buf))
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
 
      

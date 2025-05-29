@@ -74,7 +74,7 @@ cost:
 
 
 mppi:
-  init_cov          : 0.8 # 0.05 #.5 #.5
+  init_cov          : 0.05 #.5 #.5
   gamma             : 0.98
   n_iters           : 1 # mpc optimization steps
   cold_start_n_iters: 5
@@ -83,7 +83,7 @@ mppi:
   beta              : 0.1
   alpha             : 1
   num_particles     : 400 #10000
-  update_cov        : False # True
+  update_cov        : True # True
   cov_type          : "DIAG_A" #
   kappa             : 0.0001
   null_act_frac     : 0.05
@@ -106,3 +106,4 @@ mppi:
     n_knots: 5
   debug_info:
     visual_traj       : 'ee_pos_seq'
+    k: 'all'
