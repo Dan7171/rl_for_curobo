@@ -1,5 +1,6 @@
 import torch
 
+
 def mask_decreasing_values(tensor):
     """
     For each row, if a value is less than the previous value, set it to 0.
@@ -40,3 +41,4 @@ def shift_tensor_left(tensor):
     shifted[:, :-1] = tensor[:, 1:]
     
     return shifted
+

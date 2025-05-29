@@ -10,7 +10,8 @@ from typing import Callable, Dict, Union
 import carb
 import numpy as np
 from abc import abstractmethod
- 
+from torch.func import vmap
+
 
 from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
 from omni.isaac.core.objects import cuboid, sphere
@@ -26,7 +27,7 @@ from pxr import Gf
 
 from projects_root.utils.helper import add_robot_to_scene
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
-
+from projects_root.utils.transforms import transform_pose_between_frames, transform_poses_batched
 # CuRobo
 from curobo.geom.sdf.world import CollisionCheckerType
 from curobo.geom.types import Sphere, WorldConfig, Cuboid, Mesh
@@ -620,7 +621,7 @@ class FrankaMpc(AutonomousFranka):
         # translate the plan from joint accelerations only to joint velocities and positions 
         # js_state = self.get_curobo_joint_state() # current joint state (including pos, vel, acc)
         apply_js_filter = True # True: Reduce the step size from prev state to new state from 1 to something smaller (depends on the filter coefficients)
-        custom_filter = True # True: Use a custom filter coefficients to play with the filter weights
+        custom_filter = False # True: Use a custom filter coefficients to play with the filter weights
         if apply_js_filter:
             if custom_filter:
                 filter_coeff = FilterCoeff(0.01, 0.01, 0.0, 0.0) # custom one to play with the filter weights
@@ -655,11 +656,63 @@ class FrankaMpc(AutonomousFranka):
 
             # express in world frame:
             for key in plan['task_space'].keys():
+                
+                # if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys() and 'q' not in plan['task_space'][key].keys():
+                #     pKey = plan['task_space'][key]['p']
+                #     pKey = pKey.cpu() 
+                #     pKey[...,:3] = pKey[...,:3] + self.p_R # # offset by robot origin to express in world frame (only position, radius is not affected)
+                #     plan['task_space'][key]['p'] = pKey
+            
+                # express in world frame:
+                # elif isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys() and 'q' in plan['task_space'][key].keys():
+                #     self_transform = [*list(self.p_R), *list(self.q_R)]
+                #     pKey = plan['task_space'][key]['p']
+                #     qKey = plan['task_space'][key]['q']
+                #     for i, p in enumerate(pKey[...,:]):
+                #         X_key_i_Robot = pKey[...,:][i].flatten().cpu().tolist() +  qKey[...,:][i].flatten().cpu().tolist()
+                #         X_key_i_world = torch.tensor(transform_pose_between_frames(X_key_i_Robot, self_transform)) 
+                #         pKey[...,:][i] = X_key_i_world[:3]
+                #         qKey[...,:][i] = X_key_i_world[3:]
+                #     plan['task_space'][key]['p'] = pKey
+                #     plan['task_space'][key]['q'] = qKey
+                
                 if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys():
+                    
+                    self_transform = [*list(self.p_R), *list(self.q_R)]
                     pKey = plan['task_space'][key]['p']
-                    pKey = pKey.cpu() 
-                    pKey[...,:3] = pKey[...,:3] + self.p_R # # offset by robot origin to express in world frame (only position, radius is not affected)
+                    if 'q' in plan['task_space'][key].keys():
+                        qKey = plan['task_space'][key]['q']
+                    else:
+                        qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
+                        qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
+                    X_world = transform_poses_batched(torch.cat([pKey, qKey], dim=-1), self_transform)
+                    pKey = X_world[...,:3]
+                    qKey = X_world[...,3:]
                     plan['task_space'][key]['p'] = pKey
+                    plan['task_space'][key]['q'] = qKey
+                    # transform_poses_batched
+                    # import itertools
+                    # index_ranges = [range(s) for s in pKey.shape[:-1]]
+    
+                    # for nd_idx in itertools.product(*index_ranges):
+                        
+                    #     if 'q' in plan['task_space'][key].keys():
+                    #         qKey = plan['task_space'][key]['q']
+                    #         qKey_i = qKey[nd_idx].flatten().cpu().tolist()
+                    #     else:
+                    #         qKey_i = [1,0,0,0]
+
+                    #     X_key_i_Robot = pKey[nd_idx].flatten().cpu().tolist() +  qKey_i
+                    #     X_key_i_world = torch.tensor(transform_pose_between_frames(X_key_i_Robot, self_transform)) 
+                    #     pKey[nd_idx] = X_key_i_world[:3]
+                    #     if 'q' in plan['task_space'][key].keys():
+                    #         qKey[nd_idx] = X_key_i_world[3:]
+                    
+                    # plan['task_space'][key]['p'] = pKey
+                    # if 'q' in plan['task_space'][key].keys():
+                    #     plan['task_space'][key]['q'] = qKey
+                
+            
             # take only the first n_steps
             if not n_steps == -1:        
                 plan = map_nested_tensors(plan, lambda x: x[:n_steps])
@@ -919,6 +972,7 @@ class FrankaCumotion(AutonomousFranka):
         p_jsplan, vel_jsplan = plan[0], plan[1] # from current time step t to t+H-1 inclusive
         # Compute FK on plan: all poses and orientations are expressed in robot2 frame (R2). Get poses of robot2's end-effector and links in robot2 frame (R2) and spheres (obstacles) in robot2 frame (R2).
         p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(p_jsplan, vel_jsplan) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+        
         valid_only = True # remove spheres that are not valid (i.e. negative radius)
         if valid_only:
             prad_spheresPlan = prad_spheresPlan[:, self.valid_coll_spheres_idx]
