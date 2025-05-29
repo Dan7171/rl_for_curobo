@@ -216,7 +216,7 @@ def main():
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
-        use_cuda_graph=True,
+        use_cuda_graph=False,
         use_cuda_graph_metrics=True,
         use_cuda_graph_full_step=False,
         self_collision_check=True,
@@ -227,6 +227,7 @@ def main():
         use_es=False,
         store_rollouts=True,
         step_dt=0.02,
+        override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_show_all_rollouts.yml'
     )
 
     mpc = MpcSolver(mpc_config)
