@@ -341,7 +341,7 @@ def main():
     
     X_Robots = [
         np.array([0,0,0,1,0,0,0], dtype=np.float32),
-        np.array([1.2,0,0,1,0,0,0], dtype=np.float32)
+        np.array([1.2,0,0,0,0,0,1.0], dtype=np.float32)
         ] # (x,y,z,qw, qx,qy,qz) expressed in world frame
     n_robots = len(X_Robots)
     robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
@@ -349,7 +349,7 @@ def main():
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
     robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
     robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    X_Targets = [[0.6, 0, 0.2, 0, 1, 0, 0], [1.8, 0, 0.2, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
+    X_Targets = [[0.7, 0, 0.2, 0, 1, 0, 0], [0.5, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
     if OBS_PREDICTION:
         col_pred_with = [[1], []] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction

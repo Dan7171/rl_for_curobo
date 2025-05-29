@@ -80,6 +80,7 @@ def add_robot_to_scene(
     subroot: str = "",
     robot_name: str = "robot",
     position: np.array = np.array([0, 0, 0]),
+    orientation: np.array = np.array([1, 0, 0, 0]),
     initialize_world: bool = True,
 ):
 
@@ -167,8 +168,8 @@ def add_robot_to_scene(
     robot_prim = robot_p.prim
     stage = robot_prim.GetStage()
     linkp = stage.GetPrimAtPath(robot_path)
-    set_prim_transform(linkp, [position[0], position[1], position[2], 1, 0, 0, 0])
-
+    # set_prim_transform(linkp, [position[0], position[1], position[2], 1, 0, 0, 0])
+    set_prim_transform(linkp, [position[0], position[1], position[2], int(orientation[0]), int(orientation[1]), int(orientation[2]), int(orientation[3])],use_float=False)
     robot = my_world.scene.add(robot_p)
     if initialize_world:
         if ISAAC_SIM_45:
