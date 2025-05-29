@@ -195,7 +195,7 @@ class DynamicObsCollPredictor:
 class DynamicObsCollPredictorBatch:
 
     DTYPE = torch.float16 
-
+    
     def __init__(self,
                 tensor_args:TensorDeviceType,
                 n_envs:int, 
@@ -206,8 +206,16 @@ class DynamicObsCollPredictorBatch:
                 cost_weight:float=100.0, 
                 # p_robotBaseEnvwise_F:list[list[torch.Tensor]]=None, # robot base position (xyz) in frame F. TODO: check if F is world or env frame.
                 n_robots_envwise:list[int]=[1],
-                safety_margin:float=0.1
+                safety_margin:float=0.1,
+                spheres_to_ignore:list[int]=[],
+                attached_objects_spheres:list[int]=[]
                 ):
+        """
+        spheres_to_ignore: list of spheres to ignore for collision checking. 
+        Pass the indices of the spheres to ignored, e.g spheres which will never collide with other spheres (e.g. the robot base spheres).
+        attachable_spheres: list of spheres to treat as ignored when robot is not picking up the object, but only when the robot is not attached to the object.
+        These spheres will not be treated until an object is attached to the robot (like picked up) and then they will be used to approximate the object shape.
+        """
         
         self.tensor_args = tensor_args
         self.n_envs = n_envs
@@ -216,18 +224,50 @@ class DynamicObsCollPredictorBatch:
         self.cost_weight = cost_weight
         # self.p_robotBaseEnvwise_F = p_robotBaseEnvwise_F
         self.n_robot_spheres = n_robot_spheres
+        self.spheres_to_ignore = spheres_to_ignore
+        self.attached_objects_spheres = attached_objects_spheres
+        
+        # all spheres except the spheres to ignore
+        self.n_col_check_spheres = self.n_robot_spheres - len(spheres_to_ignore) 
+        self.col_check_spheres_mask = torch.ones(self.n_robot_spheres, device=self.tensor_args.device, dtype=torch.bool)
+        self.col_check_spheres_mask[spheres_to_ignore] = False
+        
+        # making reindexed lists of the spheres after filtering out the ignored spheres
+        self._unignored_spheres:list[int] = [] # indices of the spheres that are not ignored
+        self._unignored_spheres_is_attachable:list[bool] = [] # whether the unignored sphere is attachable
+        self._attachable_spheres_reindexed_idx_map:dict[int, int] = {} # after filtering out the ignored spheres, the index of the attachable spheres in the new list of unignored spheres
+        for idx in range(self.n_robot_spheres):
+            if not idx in spheres_to_ignore:
+                self._unignored_spheres.append(idx)
+                if idx in attached_objects_spheres:
+                    self._unignored_spheres_is_attachable.append(True)
+                    self._attachable_spheres_reindexed_idx_map[idx] = len(self._unignored_spheres) - 1
+                else:
+                    self._unignored_spheres_is_attachable.append(False)
+        
+        # tensor of shape [n_col_check_spheres] with True for attachable spheres and False for non-attachable spheres
+        self._is_attachable_spheres_mask:torch.Tensor = torch.tensor(self._unignored_spheres_is_attachable, device=self.tensor_args.device, dtype=torch.bool)
+        
+        # tensor of shape [n_col_check_spheres] with True iff sphere is either a col check sphere or an attached sphere (which is really attached to the robot)
+        # all attachable spheres start as not attached
+        # therefore,this mask will be True only for the col check spheres now.
+        self._is_col_check_sphere_or_attached_sphere:torch.Tensor = ~self._is_attachable_spheres_mask # tensor of shape [n_col_check_spheres] with True for col check spheres and False for attached spheres
+        # self._mask2d = self._make_mask2d_for_attachable_spheres()
         self.safety_margin = safety_margin
         self.n_robots_envwise = n_robots_envwise
         # self.n_robots_envwise = [len(robots_bases) for robots_bases in self.p_robotBaseEnvwise_F] # num of robots in each env
         self.n_robots_total = sum(self.n_robots_envwise) # total number of robots over all environments
         self.n_envs = len(self.n_robots_envwise) # len(self.p_robotBaseEnvwise_F)
         self.B = self.b * self.n_robots_total # total number of rollouts
+        self._is_object_attached = False 
+        # initialize the buffers (for cuda graph if used)
+        self._p_collider_buf = torch.empty(self.b, self.H, self.n_col_check_spheres,1, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self._p_collide_with_buf = torch.empty(self.b, self.H, 1, self.n_col_check_spheres, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+
         
-        self._p_collider_buf = torch.empty(self.b, self.H, self.n_robot_spheres,1, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        self._p_collide_with_buf = torch.empty(self.b, self.H, 1, self.n_robot_spheres, 3, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        self._rad_sum_buf = torch.empty(self.n_robot_spheres, device=self.tensor_args.device, dtype=self.DTYPE) # [n_rollouts x H x n_own x n_obs] Own spheres positions buffer
-        
-        # _idx_map_tree_to_flat[env][collider] = start idx of the collider in the flat buffer (at the input/output row num B).
+        # initialize the idx map tree to flat
+        # _idx_map_tree_to_flat[env][collider] is the start idx of the collider in
+        # the flat buffer (at the input/output row num B).
         self._idx_map_tree_to_flat = [] 
         tmp_cntr = 0
         for env in range(self.n_envs):
@@ -235,6 +275,7 @@ class DynamicObsCollPredictorBatch:
             for collider in range(self.n_robots_envwise[env]):
                 self._idx_map_tree_to_flat[env].append(tmp_cntr)
                 tmp_cntr += self.b
+
 
         # self._dim0_map = []
         # for env in range(self.n_envs):
@@ -260,8 +301,8 @@ class DynamicObsCollPredictorBatch:
         self._sphere_centers_diff_buf =  torch.empty(
                 self.b, 
                 self.H, 
-                self.n_robot_spheres,
-                self.n_robot_spheres,
+                self.n_col_check_spheres,
+                self.n_col_check_spheres,
                 3,
                 device=self.tensor_args.device,
                 dtype=self.DTYPE
@@ -273,6 +314,13 @@ class DynamicObsCollPredictorBatch:
             dtype=self.DTYPE
         )
 
+    def attach_object(self):
+        self._is_object_attached = True
+        self._is_col_check_sphere_or_attached_sphere[self._is_attachable_spheres_mask] = True
+
+    def detach_object(self):
+        self._is_object_attached = False
+        self._is_col_check_sphere_or_attached_sphere[self._is_attachable_spheres_mask] = False
 
     def cost_fn(self, prad:torch.Tensor, env_query_idx:torch.Tensor, parallel_envs = False):
         """
@@ -280,8 +328,8 @@ class DynamicObsCollPredictorBatch:
             torch.Tensor[B, H, n_own_spheres (normally 65), 4],
                 where B = b * num of all robots over all environments
                 H = horizon length
-                n_own_spheres = number of own spheres
-                n_obs_max_per_robot = max number of obstacles per robot
+                n_own_spheres = number of own spheres of the robot indexed by env_query_idx
+                
             env_query_idx:
                 torch.Tensor[B, 1]
                 the environment index of each rollout in prad_batch.
@@ -294,15 +342,23 @@ class DynamicObsCollPredictorBatch:
         #             if collider == collide_with:
         #                 continue
         #             self._tmp_buffer[env,,r_obss = prad[env_query_idx[:,0] == e,:,:,:,:]
-        env_range_start = 0
+        
         # mask = torch.zeros(self.B, device=self.tensor_args.device, dtype=torch.int16) - 1 # -1 for all indices
-        if not parallel_envs:
+        if parallel_envs:
+            pass
+        else:
             # memory_consumption = sum([get_size_gb(prad), get_size_gb(env_query_idx), get_size_gb(self._p_collider_buf), get_size_gb(self._p_collide_with_buf), get_size_gb(self._rad_sum_buf), get_size_gb(self._sphere_centers_diff_buf), get_size_gb(self._out_buf)])
             # print(f'Debug: memory consumption = {memory_consumption} GB')
+            env_range_start = 0
             for env in range(self.n_envs):
                 env_range_end = env_range_start + self.n_robots_envwise[env] * self.b
-                env_prad = prad[env_range_start:env_range_end,:,:,:]
+
+                # filter the pos and radius to only include the spheres that should be checked for collision
+                # and in the range of robots belonging to the current environment
+                env_prad = prad[env_range_start:env_range_end,:,self.col_check_spheres_mask,:]
                 env_range_start = env_range_end # for the next iter
+                
+                debug_time = {}
                 for collider in range(self.n_robots_envwise[env]):
                     collider_range_start, collider_range_end = self.b*collider, self.b*(collider+1)
                     p_collider = env_prad[collider_range_start:collider_range_end,:,:,:3]
@@ -313,31 +369,80 @@ class DynamicObsCollPredictorBatch:
                         collide_with_range_start, collide_with_range_end = self.b*collide_with, self.b*(collide_with+1)
                         p_collide_with = env_prad[collide_with_range_start:collide_with_range_end,:,:,:3]
                         rad_collide_with = env_prad[collide_with_range_start,0,:,3]
-                        self._p_collider_buf.copy_(p_collider.reshape(self.b,self.H,self.n_robot_spheres,1,3)) # Copy the reshaped version as well.
-                        self._p_collide_with_buf.copy_(p_collide_with.reshape(self.b,self.H, 1,self.n_robot_spheres,3)) # Copy the reshaped version as well.
+                        
+                        time_start = time.time()
+                        # self._p_collider_buf.copy_(p_collider.reshape(self.b,self.H,self.n_robot_spheres,1,3)) # Copy the reshaped version as well.
+                        self._p_collider_buf.copy_(p_collider.reshape(self.b,self.H,self.n_col_check_spheres,1,3)) # Copy the reshaped version as well.
+                        debug_time['p_collider_buf_copy'] = time.time() - time_start
+                        
+                        time_start = time.time()
+                        # self._p_collide_with_buf.copy_(p_collide_with.reshape(self.b,self.H, 1,self.n_robot_spheres,3)) # Copy the reshaped version as well.
+                        self._p_collide_with_buf.copy_(p_collide_with.reshape(self.b,self.H, 1,self.n_col_check_spheres,3)) # Copy the reshaped version as well.
+                        debug_time['p_collide_with_buf_copy'] = time.time() - time_start
+                        
+                        time_start = time.time()
                         torch.sub(self._p_collider_buf,self._p_collide_with_buf, out=self._sphere_centers_diff_buf) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
+                        debug_time['sphere_centers_diff_buf_sub'] = time.time() - time_start
+                        
                         
                         # Compute the distance between the sphere centers (in pairs, for all pairs i,j the "collider" i'th sphere  with "collide with" j'th sphere)
                         # and put it in the first dimension of the buffer (for memory efficiency,to store the distance, we use the first dimension (x) 
                         # of the points x,y,z (sphere centers) buffer and not allocating a new buffer for that.
+                        time_start = time.time()
                         self._sphere_centers_diff_buf[..., 0].copy_(torch.norm(self._sphere_centers_diff_buf, dim=-1))
+                        debug_time['sphere_centers_diff_buf_copy_and_norm'] = time.time() - time_start
+                        
                         # Compute the distance between the sphere centers minus the sum of the radii.
+                        
+                        time_start = time.time()
                         torch.sub(self._sphere_centers_diff_buf[..., 0], rad_collider, out=self._sphere_centers_diff_buf[..., 0]) # Compute the distance between the sphere centers minus the sum of the radii.
                         torch.sub(self._sphere_centers_diff_buf[..., 0], rad_collide_with, out=self._sphere_centers_diff_buf[..., 0]) # Compute the distance between the sphere centers minus the sum of the radii.
+                        debug_time['sphere_centers_diff_buf_subtract_rads'] = time.time() - time_start
                         
                         # Check if the distance between the sphere centers minus the sum of the radii is less than the safety margin.
+                        time_start = time.time()
                         self._sphere_centers_diff_buf[..., 0].lt_(self.safety_margin) # 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
+                        debug_time['lt_safety_margin'] = time.time() - time_start
                         
                         # Count the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).
                         out_start_idx = self._idx_map_tree_to_flat[env][collider]
+
+                        # Mask out attachable but not atached:
+
+                        # here we mask out (set to 0) the entries at dims 2 and 3 (all sphere pairs of self and oter)
+                        # where the sphere is not a col check sphere or an attached sphere (which is really attached to the robot)
+                        # i.e. we set to 0 entries which are both belonging to attachable spheres but not attached to any object at this moment.
+                        if not self._is_object_attached: 
+                            time_start = time.time()
+                            keep = self._is_col_check_sphere_or_attached_sphere 
+                            keep2d = keep[:, None] & keep[None, :]  # shape [57, 57]
+                            mask2d = ~keep2d
+                            self._sphere_centers_diff_buf[..., 0].masked_fill_(mask2d, 0)
+                            debug_time['mask_attachable_not_attached'] = time.time() - time_start
+
+                        time_start = time.time()
                         torch.sum(self._sphere_centers_diff_buf[..., 0], dim=[2,3], out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+                        debug_time['sum_over_spheres'] = time.time() - time_start   
+
+                        # multiply by the cost weight
+                        time_start = time.time()
+                        torch.mul(self._out_buf[out_start_idx:out_start_idx+self.b,:], self.cost_weight, out=self._out_buf[out_start_idx:out_start_idx+self.b,:]) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+                        debug_time['mul_by_cost_weight'] = time.time() - time_start
                         
-                        
-        else:
-            pass    
+
+                        # print(f'Times: {debug_time}')
+                        print("Time in %")
+                        for key, value in debug_time.items():
+                            rate = value / sum(debug_time.values()) * 100
+                            print(f'{key}: {rate:.2f}%')
 
         return self._out_buf
 
+    def _make_mask2d_for_attachable_spheres(self):
+        keep = self._is_col_check_sphere_or_attached_sphere 
+        keep2d = keep[:, None] & keep[None, :]  # shape [57, 57]
+        mask2d = ~keep2d
+        return mask2d
 # class DynamicObsCollPredictorBatch2: 
 #     def __init__(
 #             self,

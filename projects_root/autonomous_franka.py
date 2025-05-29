@@ -726,7 +726,7 @@ class FrankaMpc(AutonomousFranka):
         # translate the plan from joint accelerations only to joint velocities and positions 
         # js_state = self.get_curobo_joint_state() # current joint state (including pos, vel, acc)
         apply_js_filter = True # True: Reduce the step size from prev state to new state from 1 to something smaller (depends on the filter coefficients)
-        custom_filter = True # True: Use a custom filter coefficients to play with the filter weights
+        custom_filter = False # True: Use a custom filter coefficients to play with the filter weights
         if apply_js_filter:
             if custom_filter:
                 filter_coeff = FilterCoeff(0.01, 0.01, 0.0, 0.0) # custom one to play with the filter weights

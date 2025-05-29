@@ -81,16 +81,16 @@ mppi:
   step_size_cov     : 0.01
   beta              : 0.1
   alpha             : 1
-  num_particles     : 400 #10000
-  update_cov        : False
+  num_particles     : 100 # 400 #10000
+  update_cov        : True
   cov_type          : "DIAG_A" #
   kappa             : 0.0001
   null_act_frac     : 0.05
-  sample_mode       : 'MEAN'
+  sample_mode       : 'BEST'
   base_action       : 'REPEAT'
   squash_fn         : 'CLAMP'
   n_problems        : 1
-  use_cuda_graph    : False
+  use_cuda_graph    : True
   seed              : 0
   store_debug       : False
   random_mean       : True
@@ -105,4 +105,3 @@ mppi:
     n_knots: 5
   debug_info:
     visual_traj       : 'ee_pos_seq'
-    k: 'all'

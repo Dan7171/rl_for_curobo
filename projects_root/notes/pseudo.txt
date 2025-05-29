@@ -1,0 +1,114 @@
+
+
+
+# This function was implemented by the authors. I did not change it at all...
+# it's is a technical but required step, since the controller is not accepting accelerations but desired joint states.
+# In: n joint acceleration vectors (nx7)
+# Out: n joint state vectors (nx7)
+def accelerations_to_controller_inputs(accelerations):
+    ...
+    ...
+    ...
+    return controller_inputs
+
+
+# This function is "querying" the robot for 
+# its estimated plan over next H steps, 
+# returns a HxNx3 tensor 
+# where N = num of collision spheres of robot
+# 3 for the position (x,y,z) 
+def get_plan(robot):        
+    # pi_means[i][j] is the mean of the i'th distribution (0=<i=<H-1, the i'th step in policy), at the 0=<j=<6 'th joint. 
+    # the value of p[i][j] represents acceleration (that's just how the mpc policy is made).
+    pi_means = get_policy_means() # matrix of H x 7. 
+    
+    # accelerations -> joint states 
+    pi_means_as_controller_commands = accelerations_to_controller_inputs(pi_means)
+    
+    # joint states -> collision spheres
+    plan = joint_states_to_sphere_positions(pi_means_as_controller_commands)
+    return plan
+
+# this is the mpc planning step
+def mpc_step(state, other_plan):
+    
+    # read current policy
+    pi_means = get_policy_means(policy)
+    
+    # run rollouts
+    costs = generate_rollouts(state, n_rollouts, rollout_horizon, other_plan) # sample actions, modeling transitions and calculating costs
+    
+    # update policy
+    update_pi(pi_means, costs) # update the mpc policy
+    
+    # make next controller command:
+    pi_means_as_controller_commands = accelerations_to_controller_inputs(pi_means)
+    controller_command = get_first_command(pi_means_as_controller_commands)
+    return controller_command
+
+# calculate predictive collision cost
+def get_obstacles_cost(states, other_plan):
+    # 1. initialize a tensor T_positions with given input dimensions (using "states" (planning robot rollouts) and other_plan (other robot plan)):
+    
+    T_positions = new tensor(n_rollouts x H x n_collision_spheres x n_collision_spheres x 3)
+    T_positions[i][j][k][l][m] = i'th rollout, j'th step, k'th own sphere, l'th other robot sphere position at axis m = 0/1/2 for x/y/z corespondingly         
+
+    # 2. calculate distance between spheres: 
+    T_dist = new tensor(n_rollouts x H x n_collision_spheres x n_collision_spheres)
+    T_dist = dist(T_positions) # T_dist[i,j,k,l] is the occlidian distance between each pair of own (k) vs obs (l) radii, (minus radius k + radius l to get the distancebetween the surfaces)
+
+    # 3. calculate number of violations. Violation occures when distance between two spheres < threshold (currently 0.1 meters)  
+    # meaning: T_violation[i,j,k,l] = True <=>  T_dist[i,j,k,l] < threshold
+    T_violation = new tensor(n_rollouts x H x n_collision_spheres x n_collision_spheres)
+    
+    # count number of violations for each i,j 
+    T_cost = new tensor(n_rollouts x H)
+    for each i
+        for each j:
+            T_cost[i][j] = count_true(T_violation[i][j])
+
+    # multiply by weight (as every other cost term...)
+    T_cost = weight x T_cost # (weight is currently 100)
+    return T_cost
+
+def generate_rollouts(n_rollouts, H, other_plan):
+    actions = sample(n_rollouts,rollout_horizon) # n_rollouts x H x 7
+    states = model_kinematics(actions) # n_rollouts x H x 7
+    original_cost = calculate_cost_matrix(states) # n_rollouts x H (all the original cost terms...)   
+    cost = original_cost + get_obstacles_cost(states, other_plan) # Our Change! (matrix addition)
+    return cost
+
+
+
+
+# initialize
+t = 0
+robots = [r1, r2]
+while true:
+
+    # controller actions for this time step
+    control_commands = []
+
+    for self in robots:
+
+        # specify the other robot
+        if self == r1:
+            other = r2
+        else:
+            other = r1
+
+        # sense (read joints state of robot. A vector in length 7)
+        state = get_state(self)
+        
+        # query "other"'s (the other robot) plan over self's planning horizon 
+        other_plan = get_plan(other) # Hx7 matrix
+
+        # mpc planning step 
+        # (sample rollouts -> compute costs -> optimize policy -> select action from policy)
+        command = mpc_step(state, other_plan) 
+
+        control_commands.add(command)
+
+    # concurrently applying control commands simulator controllers / real world controllers 
+    apply_commands_in_parallel(robots, control_commands)
+    t++ 

@@ -3,7 +3,7 @@ This script was built based on the curobo/examples/isaac_sim/batch_motion_gen_re
 and modified to use MPC instead of MotionGen (global planner).
 """
 DEBUG = True
-
+COL_PRED = True
 try:
     # Third Party
     import isaacsim
@@ -12,7 +12,6 @@ except ImportError:
 
 # Third Party
 from typing import Optional
-from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 import torch
 a = torch.zeros(4, device="cuda:0")
 
@@ -59,7 +58,7 @@ from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.kit import SimulationApp
 
 # CuRobo
-# from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
+from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from curobo.geom.sdf.world import CollisionCheckerType
 from curobo.geom.types import WorldConfig
 from curobo.types.base import TensorDeviceType
@@ -68,8 +67,6 @@ from curobo.types.state import JointState
 from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
-from curobo.wrap.model.robot_world import RobotWorld, RobotWorldConfig
-from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
 from curobo.rollout.rollout_base import Goal
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictorBatch
 from scipy.spatial.transform import Rotation as R
@@ -314,9 +311,31 @@ def main(
     Initializes the MPC solver.
     """
 
+    
+    # TODO: currently not used, has some bug RuntimeError: shape '[1, 1, 95, 30, 7]' is invalid for input of size 19740
+    # overide_cfg =  'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_batch.yml'
+    # with open(overide_cfg, 'r') as f:
+    #     cfg = load_yaml(overide_cfg)
+    #     b = cfg['mppi']['num_particles']
+    #     H = cfg['model']['horizon']
+
     # init mpc *batch* solver config
     b = 400 # TODO: change to n_rollouts of each robot
     H = 30 # TODO: change to H of the mpc solver
+    
+    if COL_PRED:
+        dynamic_obs_checker=DynamicObsCollPredictorBatch(
+            tensor_args=tensor_args,
+            n_envs=n_envs,
+            b=b,
+            H=H, 
+            n_robot_spheres=65,
+            n_robots_envwise=n_robots_envwise,
+            spheres_to_ignore= list(range(50)),# [0,1,2,3,4,5,6,7], # spheres to ignore for collision checking, see projects_root/utils/ FRANKA_COL_SPHERES.png
+            attached_objects_spheres=[61,62,63,64] # spheres to treat as ignored when robot is not picking up the object, but only when the robot is not attached to the object.
+        )
+    else:
+        dynamic_obs_checker = None
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg_list, # although its a list and lists are not shown in the valid inputs, it is valid input and there is no error (like in the motion gen example).
@@ -332,14 +351,8 @@ def main(
         store_rollouts=True,
         step_dt=0.02,
         n_collision_envs= n_envs, # len(world_cfg_list), # n_envs, # n_collision_envs – Number of collision environments to create for batched planning across different environments. Only used for MpcSolver.setup_solve_batch_env and MpcSolver.setup_solve_batch_env_goalset.
-        dynamic_obs_checker=DynamicObsCollPredictorBatch(
-            tensor_args=tensor_args,
-            n_envs=n_envs,
-            b=b,
-            H=H, 
-            n_robot_spheres=65,
-            n_robots_envwise=n_robots_envwise
-        )
+        dynamic_obs_checker=dynamic_obs_checker,
+        # override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_batch.yml'
     )
     
     # init mpc solver for batch of robots

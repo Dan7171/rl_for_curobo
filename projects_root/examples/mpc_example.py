@@ -216,7 +216,7 @@ def main():
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
-        use_cuda_graph=False,
+        use_cuda_graph=True,
         use_cuda_graph_metrics=True,
         use_cuda_graph_full_step=False,
         self_collision_check=True,
@@ -285,7 +285,7 @@ def main():
             init_curobo = True
         step += 1
         step_index = step
-        if step_index % 100 == 0:
+        if step_index % 300 == 0:
             print("Updating world")
             obstacles = usd_help.get_obstacles_from_stage(
                 only_paths=["/World"],
