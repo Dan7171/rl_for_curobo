@@ -200,7 +200,6 @@ class DynamicObsCollPredictor:
 
         self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
         
-        print(torch.sum(self.cost_mat_buf))
         return self.cost_mat_buf # dynamic_coll_cost_matrix 
 
      

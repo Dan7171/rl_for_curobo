@@ -15,7 +15,10 @@ from typing import Any, Dict, List, Optional
 # Third Party
 import torch
 import torch.autograd.profiler as profiler
-
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from collections import deque
+import numpy as np
 # CuRobo
 from curobo.geom.sdf.world import WorldCollision
 from curobo.rollout.cost.cost_base import CostConfig
@@ -481,10 +484,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
 
     def _update_live_plot_reacher(self, cost_list):
         """Update live plot of cost values in real-time with comprehensive ArmReacher labeling"""
-        import matplotlib.pyplot as plt
-        import matplotlib.animation as animation
-        from collections import deque
-        import numpy as np
+        
         
         # Initialize plotting components if not already done
         if not hasattr(self, '_plot_initialized'):
@@ -493,27 +493,6 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self._cost_lines = {}  # Dictionary to store plot lines for each cost component
             self._plot_counter = 0  # Counter for plotting frequency
             self._plot_every_k = 5  # Plot every 5 iterations to save resources
-            
-            # Comprehensive cost labels for ArmReacher (covers base + reacher costs)
-            self._cost_labels = [
-                'Bound Cost',           # From ArmBase
-                'Stop Cost',            # From ArmBase  
-                'Self Collision',       # From ArmBase
-                'Primitive Collision',  # From ArmBase
-                'Dynamic Obstacles',    # From ArmBase
-                'Manipulability',       # From ArmBase
-                'Pose Cost',            # From ArmReacher
-                'Link Pose Cost',       # From ArmReacher
-                'CSpace Cost',          # From ArmReacher
-                'Straight Line Cost',   # From ArmReacher
-                'Zero Acceleration',    # From ArmReacher
-                'Zero Jerk',            # From ArmReacher
-                'Zero Velocity',        # From ArmReacher
-            ]
-            self._colors = [
-                'blue', 'red', 'green', 'orange', 'purple', 'brown',
-                'pink', 'gray', 'olive', 'cyan', 'magenta', 'yellow', 'black'
-            ]
             
             # Set up the figure and axis
             plt.ion()  # Turn on interactive mode
@@ -533,33 +512,95 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         if self._plot_counter % self._plot_every_k != 0:
             return  # Skip this iteration
         
+        # Debug: Print cost information on first few iterations
+        if self._plot_counter <= self._plot_every_k * 3:  # First 3 plot updates
+            print(f"\n=== Iteration {self._plot_counter} Cost Debug ===")
+            print(f"Total cost components: {len(cost_list)}")
+            for i, cost_tensor in enumerate(cost_list):
+                if cost_tensor is not None:
+                    cost_mean = torch.mean(cost_tensor).cpu().numpy().item()
+                    cost_max = torch.max(cost_tensor).cpu().numpy().item()
+                    cost_min = torch.min(cost_tensor).cpu().numpy().item()
+                    print(f"Cost {i}: mean={cost_mean:.6f}, min={cost_min:.6f}, max={cost_max:.6f}, shape={cost_tensor.shape}")
+                else:
+                    print(f"Cost {i}: None")
+        
+        # Dynamic cost labeling based on what's actually enabled
+        cost_labels_dynamic = []
+        
+        # Check which costs are enabled and create appropriate labels
+        base_cost_count = 0
+        if hasattr(self, 'bound_cost') and self.bound_cost.enabled:
+            cost_labels_dynamic.append('Bound Cost')
+            base_cost_count += 1
+        if hasattr(self, 'stop_cost') and self.stop_cost.enabled:
+            cost_labels_dynamic.append('Stop Cost')
+            base_cost_count += 1
+        if hasattr(self, 'robot_self_collision_cost') and self.robot_self_collision_cost.enabled:
+            cost_labels_dynamic.append('Self Collision')
+            base_cost_count += 1
+        if hasattr(self, 'primitive_collision_cost') and self.primitive_collision_cost.enabled:
+            cost_labels_dynamic.append('Primitive Collision')
+            base_cost_count += 1
+        if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
+            cost_labels_dynamic.append('Dynamic Obstacles')
+            base_cost_count += 1
+        if hasattr(self, 'manipulability_cost') and self.manipulability_cost.enabled:
+            cost_labels_dynamic.append('Manipulability')
+            base_cost_count += 1
+            
+        # Add ArmReacher specific costs
+        if hasattr(self, 'goal_cost') and self.goal_cost.enabled:
+            cost_labels_dynamic.append('Goal/Pose Cost')
+        if hasattr(self, '_link_pose_costs'):
+            for link_name in self._link_pose_costs:
+                if self._link_pose_costs[link_name].enabled:
+                    cost_labels_dynamic.append(f'Link Pose ({link_name})')
+        if hasattr(self, 'dist_cost') and self.dist_cost.enabled:
+            cost_labels_dynamic.append('CSpace Cost')
+        if hasattr(self, 'straight_line_cost') and self.straight_line_cost.enabled:
+            cost_labels_dynamic.append('Straight Line Cost')
+        if hasattr(self, 'zero_acc_cost') and self.zero_acc_cost.enabled:
+            cost_labels_dynamic.append('Zero Acceleration')
+        if hasattr(self, 'zero_jerk_cost') and self.zero_jerk_cost.enabled:
+            cost_labels_dynamic.append('Zero Jerk')
+        if hasattr(self, 'zero_vel_cost') and self.zero_vel_cost.enabled:
+            cost_labels_dynamic.append('Zero Velocity')
+        
+        # Colors for plotting
+        colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta', 'yellow', 'black', 'darkred', 'darkgreen', 'darkblue']
+        
         # Process each cost component
         active_costs = []  # Track which costs are actually active
         for i, cost_tensor in enumerate(cost_list):
             if cost_tensor is not None:
-                # Get cost label (use index if we don't have enough labels)
-                label = self._cost_labels[i] if i < len(self._cost_labels) else f'Cost_{i}'
+                # Get cost label
+                if i < len(cost_labels_dynamic):
+                    label = cost_labels_dynamic[i]
+                else:
+                    label = f'Unknown_Cost_{i}'
                 
                 # Calculate mean of this cost component
                 cost_mean = torch.mean(cost_tensor).cpu().numpy().item()
                 
-                # Only track costs that have non-zero values at some point
-                if cost_mean > 1e-8 or label in self._cost_histories:
-                    active_costs.append((label, cost_mean, i))
+                # Track all costs, even very small ones, but highlight significant ones
+                active_costs.append((label, cost_mean, i))
                     
-                    # Initialize history for this component if not exists
-                    if label not in self._cost_histories:
-                        self._cost_histories[label] = deque(maxlen=200)  # Keep last 200 plot points
-                        color = self._colors[i % len(self._colors)]
-                        self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, linewidth=2, marker='o', markersize=3)
-                    
-                    # Add current value to history
-                    self._cost_histories[label].append(cost_mean)
+                # Initialize history for this component if not exists
+                if label not in self._cost_histories:
+                    self._cost_histories[label] = deque(maxlen=200)  # Keep last 200 plot points
+                    color = colors[i % len(colors)]
+                    linewidth = 3 if 'Goal' in label or 'Pose' in label else 2  # Highlight goal/pose costs
+                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, linewidth=linewidth, marker='o', markersize=4 if 'Goal' in label else 3)
+                
+                # Add current value to history
+                self._cost_histories[label].append(cost_mean)
         
-        # Print active costs for debugging
-        if self._plot_counter == self._plot_every_k:  # First plot
-            print(f"Active cost components detected: {[label for label, _, _ in active_costs]}")
-            print(f"Total cost list length: {len(cost_list)}")
+        # Print active costs for debugging (first few times)
+        if self._plot_counter <= self._plot_every_k * 2:  # First 2 plot updates
+            print(f"Active cost components: {[(label, f'{val:.6f}') for label, val, _ in active_costs]}")
+            goal_costs = [label for label, _, _ in active_costs if 'Goal' in label or 'Pose' in label]
+            print(f"Goal/Pose related costs: {goal_costs}")
         
         # Update all plot lines
         for label, history in self._cost_histories.items():
@@ -589,7 +630,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         
         # Update legend (only when new components are added)
         if not hasattr(self, '_legend_updated') or len(self._cost_lines) != getattr(self, '_last_legend_count', 0):
-            self._ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=10)
+            self._ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=9)
             self._legend_updated = True
             self._last_legend_count = len(self._cost_lines)
         
