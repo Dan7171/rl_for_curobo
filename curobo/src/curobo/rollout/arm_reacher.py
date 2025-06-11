@@ -10,6 +10,8 @@
 #
 # Standard Library
 from dataclasses import dataclass
+import datetime
+import os
 from typing import Any, Dict, List, Optional
 
 # Third Party
@@ -96,6 +98,7 @@ class ArmReacherCostConfig(ArmCostConfig):
     zero_vel_cfg: Optional[CostConfig] = None
     zero_jerk_cfg: Optional[CostConfig] = None
     link_pose_cfg: Optional[PoseCostConfig] = None
+    # custom_cfg is inherited from ArmCostConfig
 
     @staticmethod
     def _get_base_keys():
@@ -137,6 +140,11 @@ class ArmReacherCostConfig(ArmCostConfig):
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
         )
+        
+        # Handle custom costs (inherited from ArmCostConfig)
+        if "custom" in data_dict:
+            data["custom_cfg"] = ArmCostConfig._parse_custom_costs(data_dict["custom"], tensor_args)
+        
         return ArmReacherCostConfig(**data)
 
 
@@ -303,6 +311,21 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # check if g_dist is required in any of the cost terms:
         self.update_params(Goal(current_state=self._start_state))
 
+        # Initialize custom costs for arm_reacher
+        self._custom_arm_reacher_costs = {}
+        if (hasattr(self.cost_cfg, 'custom_cfg') and 
+            self.cost_cfg.custom_cfg is not None and 
+            "arm_reacher" in self.cost_cfg.custom_cfg):
+            for cost_name, cost_info in self.cost_cfg.custom_cfg["arm_reacher"].items():
+                try:
+                    cost_class = cost_info["cost_class"]
+                    cost_config = cost_info["cost_config"]
+                    cost_instance = cost_class(cost_config)
+                    self._custom_arm_reacher_costs[cost_name] = cost_instance
+                    log_info(f"Initialized custom arm_reacher cost: {cost_name}")
+                except Exception as e:
+                    log_error(f"Failed to initialize custom arm_reacher cost {cost_name}: {e}")
+
     def cost_fn(self, state: KinematicModelState, action_batch=None):
         """
         Compute cost given that state dictionary and actions
@@ -440,6 +463,17 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 g_dist,
             )
             cost_list.append(z_vel)
+        
+        # Execute custom arm_reacher costs
+        if hasattr(self, '_custom_arm_reacher_costs'):
+            for cost_name, cost_instance in self._custom_arm_reacher_costs.items():
+                if cost_instance.enabled:
+                    with profiler.record_function(f"cost/custom_arm_reacher/{cost_name}"):
+                        try:
+                            custom_cost = cost_instance.forward(state)
+                            cost_list.append(custom_cost)
+                        except Exception as e:
+                            log_error(f"Error computing custom arm_reacher cost {cost_name}: {e}")
         
         # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
         if getattr(self, '_enable_live_plotting', False):
@@ -726,7 +760,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self._fig, self._ax = plt.subplots(1, 1, figsize=(16, 10))
             self._fig.suptitle('Real-time Cost Monitoring - ArmReacher All Components')
             
-            self._ax.set_title('All Cost Components Over Time (Base + Reacher)')
+            self._ax.set_title('All Cost Components Over Time (Base + Reacher + Custom)')
             self._ax.set_xlabel('Iteration')
             self._ax.set_ylabel('Cost Value')
             self._ax.grid(True)
@@ -755,7 +789,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Dynamic cost labeling based on what's actually enabled
         cost_labels_dynamic = []
         
-        # Check which costs are enabled and create appropriate labels
+        # Check which base costs are enabled and create appropriate labels
         base_cost_count = 0
         if hasattr(self, 'bound_cost') and self.bound_cost.enabled:
             cost_labels_dynamic.append('Bound Cost')
@@ -769,6 +803,17 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         if hasattr(self, 'primitive_collision_cost') and self.primitive_collision_cost.enabled:
             cost_labels_dynamic.append('Primitive Collision')
             base_cost_count += 1
+        
+        # Add custom arm_base costs with their class names
+        if hasattr(self, '_custom_arm_base_costs'):
+            for cost_name, cost_instance in self._custom_arm_base_costs.items():
+                if cost_instance.enabled:
+                    # Extract class name from the cost instance
+                    class_name = cost_instance.__class__.__name__
+                    cost_labels_dynamic.append(f'Custom Base: {class_name}')
+                    base_cost_count += 1
+        
+        # Check for dynamic obstacles (added after custom arm_base costs)
         if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
             cost_labels_dynamic.append('Dynamic Obstacles')
             base_cost_count += 1
@@ -794,11 +839,19 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         if hasattr(self, 'zero_vel_cost') and self.zero_vel_cost.enabled:
             cost_labels_dynamic.append('Zero Velocity')
         
+        # Add custom arm_reacher costs with their class names
+        if hasattr(self, '_custom_arm_reacher_costs'):
+            for cost_name, cost_instance in self._custom_arm_reacher_costs.items():
+                if cost_instance.enabled:
+                    # Extract class name from the cost instance
+                    class_name = cost_instance.__class__.__name__
+                    cost_labels_dynamic.append(f'Custom Reacher: {class_name}')
+        
         # Colors for plotting
         colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta', 'yellow', 'black', 'darkred', 'darkgreen', 'darkblue']
         
         # Process each cost component
-        active_costs = []  # Track which costs are actually active
+        active_costs = []
         for i, cost_tensor in enumerate(cost_list):
             if cost_tensor is not None:
                 # Get cost label
@@ -817,8 +870,23 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 if label not in self._cost_histories:
                     self._cost_histories[label] = deque(maxlen=200)  # Keep last 200 plot points
                     color = colors[i % len(colors)]
-                    linewidth = 3 if 'Goal' in label or 'Pose' in label else 2  # Highlight goal/pose costs
-                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, linewidth=linewidth, marker='o', markersize=4 if 'Goal' in label else 3)
+                    
+                    # Special styling for different cost types
+                    if 'Goal' in label or 'Pose' in label:
+                        linewidth = 3
+                        marker = 'o'
+                        markersize = 4
+                    elif 'Custom' in label:
+                        linewidth = 2.5
+                        marker = 's'  # Square markers for custom costs
+                        markersize = 4
+                    else:
+                        linewidth = 2
+                        marker = 'o'
+                        markersize = 3
+                    
+                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, 
+                                                           linewidth=linewidth, marker=marker, markersize=markersize)
                 
                 # Add current value to history
                 self._cost_histories[label].append(cost_mean)
@@ -826,6 +894,9 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Print active costs for debugging (first few times)
         if self._plot_counter <= self._plot_every_k * 2:  # First 2 plot updates
             print(f"Active cost components: {[(label, f'{val:.6f}') for label, val, _ in active_costs]}")
+            custom_costs = [label for label, _, _ in active_costs if 'Custom' in label]
+            if custom_costs:
+                print(f"Custom costs detected: {custom_costs}")
             goal_costs = [label for label, _, _ in active_costs if 'Goal' in label or 'Pose' in label]
             print(f"Goal/Pose related costs: {goal_costs}")
         
@@ -866,8 +937,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         self._fig.canvas.flush_events()
         
         # Optional: Save periodic snapshots (less frequent)
-        if self._plot_counter % (self._plot_every_k * 20) == 0:  # Every 100 actual iterations
-            self._fig.savefig(f'armreacher_costs_iter_{self._plot_counter}.png', dpi=150, bbox_inches='tight')
+        if self._save_plots and self._plot_counter % (self._plot_every_k * 20) == 0:  # Every 100 actual iterations
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not hasattr(self, '_cost_plots_dir'):
+                self._cost_plots_dir = os.path.join(os.getcwd(),'tmp_artifacts', 'cost_plots', timestamp)
+                os.makedirs(self._cost_plots_dir, exist_ok=False)
+            self._fig.savefig(os.path.join(self._cost_plots_dir, f'costs_iter_{self._plot_counter}.png'), dpi=150, bbox_inches='tight')
             print(f"Saved plot snapshot at iteration {self._plot_counter}")
 
     def set_plot_frequency(self, k: int):

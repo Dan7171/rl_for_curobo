@@ -11,7 +11,10 @@
 # Standard Library
 from abc import abstractmethod
 from dataclasses import dataclass
+import os
 from typing import Dict, List, Optional, Union
+import datetime
+import matplotlib.pyplot as plt
 
 # Third Party
 import torch
@@ -22,6 +25,7 @@ from curobo.geom.sdf.utils import create_collision_checker
 from curobo.geom.sdf.world import WorldCollision, WorldCollisionConfig
 from curobo.geom.types import WorldConfig
 from curobo.rollout.cost.bound_cost import BoundCost, BoundCostConfig
+from curobo.rollout.cost.cost_base import CostBase, CostConfig
 from curobo.rollout.cost.dist_cost import DistCost, DistCostConfig
 from curobo.rollout.cost.manipulability_cost import ManipulabilityCost, ManipulabilityCostConfig
 from curobo.rollout.cost.primitive_collision_cost import (
@@ -44,6 +48,8 @@ from curobo.util.tensor_util import cat_sum, cat_sum_horizon
 
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
+import importlib
+
 @dataclass
 class ArmCostConfig:
     bound_cfg: Optional[BoundCostConfig] = None
@@ -52,6 +58,7 @@ class ArmCostConfig:
     stop_cfg: Optional[StopCostConfig] = None
     self_collision_cfg: Optional[SelfCollisionCostConfig] = None
     primitive_collision_cfg: Optional[PrimitiveCollisionCostConfig] = None
+    custom_cfg: Optional[Dict] = None  # Add custom cost terms configuration
 
     @staticmethod
     def _get_base_keys():
@@ -63,6 +70,85 @@ class ArmCostConfig:
             "bound_cfg": BoundCostConfig,
         }
         return k_list
+
+    @staticmethod
+    def _load_custom_cost_class(module_path: str, class_name: str):
+        """Dynamically load a custom cost class."""
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except (ImportError, AttributeError) as e:
+            log_error(f"Failed to load custom cost class {class_name} from {module_path}: {e}")
+            return None
+
+    @staticmethod
+    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType) -> Dict:
+        """Parse custom cost configurations for arm_base or arm_reacher."""
+        custom_costs = {}
+        
+        # Process arm_base custom costs
+        if "arm_base" in custom_dict:
+            custom_costs["arm_base"] = {}
+            for cost_name, cost_config in custom_dict["arm_base"].items():
+                if isinstance(cost_config, dict):
+                    # Extract class information
+                    module_path = cost_config.pop("module_path", None)
+                    class_name = cost_config.pop("class_name", None)
+                    config_class_name = cost_config.pop("config_class_name", None)
+                    
+                    if module_path and class_name:
+                        # Load the custom cost class
+                        cost_class = ArmCostConfig._load_custom_cost_class(module_path, class_name)
+                        if cost_class:
+                            # Load config class if specified
+                            if config_class_name:
+                                config_class = ArmCostConfig._load_custom_cost_class(module_path, config_class_name)
+                                if config_class:
+                                    cost_cfg = config_class(**cost_config, tensor_args=tensor_args)
+                                else:
+                                    # Fallback to basic CostConfig
+                                    cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                            else:
+                                # Use basic CostConfig
+                                cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                            
+                            custom_costs["arm_base"][cost_name] = {
+                                "cost_class": cost_class,
+                                "cost_config": cost_cfg
+                            }
+        
+        # Process arm_reacher custom costs
+        if "arm_reacher" in custom_dict:
+            custom_costs["arm_reacher"] = {}
+            for cost_name, cost_config in custom_dict["arm_reacher"].items():
+                if isinstance(cost_config, dict):
+                    # Extract class information
+                    module_path = cost_config.pop("module_path", None)
+                    class_name = cost_config.pop("class_name", None)
+                    config_class_name = cost_config.pop("config_class_name", None)
+                    
+                    if module_path and class_name:
+                        # Load the custom cost class
+                        cost_class = ArmCostConfig._load_custom_cost_class(module_path, class_name)
+                        if cost_class:
+                            # Load config class if specified
+                            if config_class_name:
+                                config_class = ArmCostConfig._load_custom_cost_class(module_path, config_class_name)
+                                if config_class:
+                                    cost_cfg = config_class(**cost_config, tensor_args=tensor_args)
+                                else:
+                                    # Fallback to basic CostConfig
+                                    cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                            else:
+                                # Use basic CostConfig
+                                cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                            
+                            custom_costs["arm_reacher"][cost_name] = {
+                                "cost_class": cost_class,
+                                "cost_config": cost_cfg
+                            }
+        
+        return custom_costs
 
     @staticmethod
     def from_dict(
@@ -79,6 +165,11 @@ class ArmCostConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
         )
+        
+        # Handle custom costs
+        if "custom" in data_dict:
+            data["custom_cfg"] = ArmCostConfig._parse_custom_costs(data_dict["custom"], tensor_args)
+        
         return ArmCostConfig(**data)
 
     @staticmethod
@@ -331,6 +422,21 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             self.convergence_cfg.null_space_cfg.dof = self.n_dofs
             self.null_convergence = DistCost(self.convergence_cfg.null_space_cfg)
 
+        # Initialize custom costs for arm_base
+        self._custom_arm_base_costs = {}
+        if (hasattr(self.cost_cfg, 'custom_cfg') and 
+            self.cost_cfg.custom_cfg is not None and 
+            "arm_base" in self.cost_cfg.custom_cfg):
+            for cost_name, cost_info in self.cost_cfg.custom_cfg["arm_base"].items():
+                try:
+                    cost_class = cost_info["cost_class"]
+                    cost_config = cost_info["cost_config"]
+                    cost_instance = cost_class(cost_config)
+                    self._custom_arm_base_costs[cost_name] = cost_instance
+                    log_info(f"Initialized custom arm_base cost: {cost_name}")
+                except Exception as e:
+                    log_error(f"Failed to initialize custom arm_base cost {cost_name}: {e}")
+
         # set start state:
         start_state = torch.randn(
             (1, self.dynamics_model.d_state), **(self.tensor_args.as_torch_dict())
@@ -378,6 +484,16 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 )
                 cost_list.append(coll_cost)
         
+        # Execute custom arm_base costs
+        if hasattr(self, '_custom_arm_base_costs'):
+            for cost_name, cost_instance in self._custom_arm_base_costs.items():
+                if cost_instance.enabled:
+                    with profiler.record_function(f"cost/custom_arm_base/{cost_name}"):
+                        try:
+                            custom_cost = cost_instance.forward(state)
+                            cost_list.append(custom_cost)
+                        except Exception as e:
+                            log_error(f"Error computing custom arm_base cost {cost_name}: {e}")
         
         # Dynamic obstacle predictive collision checking.
         dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
@@ -805,18 +921,15 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             self._plot_initialized = True
             self._cost_histories = {}  # Dictionary to store history for each cost component
             self._cost_lines = {}  # Dictionary to store plot lines for each cost component
-            self._cost_labels = [
-                'Bound Cost', 'Self Collision', 'Primitive Collision', 
-                'Stop Cost', 'Dynamic Obstacles', 'Manipulability'
-            ]
-            self._colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown']
+            self._plot_counter = 0  # Counter for plotting frequency
+            self._plot_every_k = 5  # Plot every 5 iterations to save resources
             
             # Set up the figure and axis
             plt.ion()  # Turn on interactive mode
             self._fig, self._ax = plt.subplots(1, 1, figsize=(12, 8))
-            self._fig.suptitle('Real-time Cost Monitoring - Individual Components')
+            self._fig.suptitle('Real-time Cost Monitoring - ArmBase Components')
             
-            self._ax.set_title('Individual Cost Components Over Time')
+            self._ax.set_title('Individual Cost Components Over Time (Base + Custom)')
             self._ax.set_xlabel('Iteration')
             self._ax.set_ylabel('Cost Value')
             self._ax.grid(True)
@@ -824,23 +937,82 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             plt.tight_layout()
             plt.show(block=False)
         
+        # Increment counter and check if we should plot this iteration
+        self._plot_counter += 1
+        if self._plot_counter % self._plot_every_k != 0:
+            return  # Skip this iteration
+        
+        # Dynamic cost labeling based on what's actually enabled
+        cost_labels_dynamic = []
+        
+        # Check which base costs are enabled and create appropriate labels
+        if hasattr(self, 'bound_cost') and self.bound_cost.enabled:
+            cost_labels_dynamic.append('Bound Cost')
+        if hasattr(self, 'stop_cost') and self.stop_cost.enabled:
+            cost_labels_dynamic.append('Stop Cost')
+        if hasattr(self, 'robot_self_collision_cost') and self.robot_self_collision_cost.enabled:
+            cost_labels_dynamic.append('Self Collision')
+        if hasattr(self, 'primitive_collision_cost') and self.primitive_collision_cost.enabled:
+            cost_labels_dynamic.append('Primitive Collision')
+        
+        # Add custom arm_base costs with their class names
+        if hasattr(self, '_custom_arm_base_costs'):
+            for cost_name, cost_instance in self._custom_arm_base_costs.items():
+                if cost_instance.enabled:
+                    # Extract class name from the cost instance
+                    class_name = cost_instance.__class__.__name__
+                    cost_labels_dynamic.append(f'Custom: {class_name}')
+        
+        # Check for dynamic obstacles and manipulability (added after custom costs)
+        if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
+            cost_labels_dynamic.append('Dynamic Obstacles')
+        if hasattr(self, 'manipulability_cost') and self.manipulability_cost.enabled:
+            cost_labels_dynamic.append('Manipulability')
+        
+        # Colors for plotting
+        colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        
         # Process each cost component
+        active_costs = []
         for i, cost_tensor in enumerate(cost_list):
             if cost_tensor is not None:
                 # Get cost label (use index if we don't have enough labels)
-                label = self._cost_labels[i] if i < len(self._cost_labels) else f'Cost_{i}'
+                if i < len(cost_labels_dynamic):
+                    label = cost_labels_dynamic[i]
+                else:
+                    label = f'Unknown_Cost_{i}'
                 
                 # Calculate mean of this cost component
                 cost_mean = torch.mean(cost_tensor).cpu().numpy().item()
+                active_costs.append((label, cost_mean, i))
                 
                 # Initialize history for this component if not exists
                 if label not in self._cost_histories:
                     self._cost_histories[label] = deque(maxlen=100)  # Keep last 100 iterations
-                    color = self._colors[i % len(self._colors)]
-                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, linewidth=2)
+                    color = colors[i % len(colors)]
+                    
+                    # Special styling for custom costs
+                    if 'Custom' in label:
+                        linewidth = 2.5
+                        marker = 's'  # Square markers for custom costs
+                        markersize = 4
+                    else:
+                        linewidth = 2
+                        marker = 'o'
+                        markersize = 3
+                    
+                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, 
+                                                           linewidth=linewidth, marker=marker, markersize=markersize)
                 
                 # Add current value to history
                 self._cost_histories[label].append(cost_mean)
+        
+        # Print active costs for debugging (first few times)
+        if self._plot_counter <= self._plot_every_k * 2:  # First 2 plot updates
+            print(f"Active ArmBase cost components: {[(label, f'{val:.6f}') for label, val, _ in active_costs]}")
+            custom_costs = [label for label, _, _ in active_costs if 'Custom' in label]
+            if custom_costs:
+                print(f"Custom arm_base costs detected: {custom_costs}")
         
         # Update all plot lines
         for label, history in self._cost_histories.items():
@@ -880,34 +1052,40 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         
         # Optional: Save periodic snapshots
         total_iterations = max(len(h) for h in self._cost_histories.values()) if self._cost_histories else 0
-        if total_iterations > 0 and total_iterations % 50 == 0:  # Every 50 iterations
-            self._fig.savefig(f'cost_components_iter_{total_iterations}.png', dpi=150, bbox_inches='tight')
+        if hasattr(self, '_save_plots') and self._save_plots and total_iterations > 0 and total_iterations % 50 == 0:  # Every 50 iterations
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not hasattr(self, '_cost_plots_dir'):
+                self._cost_plots_dir = os.path.join(os.getcwd(), 'tmp_artifacts', 'cost_plots_base', timestamp)
+                os.makedirs(self._cost_plots_dir, exist_ok=True)
+            self._fig.savefig(os.path.join(self._cost_plots_dir, f'base_costs_iter_{total_iterations}.png'), dpi=150, bbox_inches='tight')
+            print(f"Saved ArmBase plot snapshot at iteration {total_iterations}")
 
-    def enable_live_plotting(self, enable: bool = True):
+    def enable_live_plotting(self, enable: bool = True, save_plots: bool = False):
         """Enable or disable live plotting of cost values
         
         Args:
             enable (bool): Whether to enable live plotting. Defaults to True.
         """
-        self._enable_live_plotting = enable
+        self._enable_live_plotting = enable # live plotting of cost values if True
+        self._save_plots = save_plots # save plots to file if True
         if not enable and hasattr(self, '_fig'):
             # Close the figure if disabling
-            import matplotlib.pyplot as plt
             plt.close(self._fig)
             self._plot_initialized = False
 
-    def save_cost_plot(self, filename: str = None):
+    def save_cost_plot(self):
         """Save the current cost plot to file
         
         Args:
             filename (str, optional): Filename to save. If None, uses timestamp.
         """
-        if hasattr(self, '_fig'):
-            if filename is None:
-                import datetime
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f'cost_plot_{timestamp}.png'
-            self._fig.savefig(filename, dpi=150, bbox_inches='tight')
-            print(f"Cost plot saved to {filename}")
+        if hasattr(self, '_fig') and self._save_plots:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not hasattr(self, '_cost_plots_dir'):
+                self._cost_plots_dir = os.path.join(os.getcwd(), 'cost_plots', timestamp)
+                os.makedirs(self._cost_plots_dir, exist_ok=False)
+            filename = f'cost_plot_{timestamp}.png'
+            self._fig.savefig(os.path.join(self._cost_plots_dir, filename), dpi=150, bbox_inches='tight')
+            print(f"Cost plot saved to {os.path.join(self._cost_plots_dir, filename)}")
         else:
             print("No plot available to save. Enable live plotting first.")

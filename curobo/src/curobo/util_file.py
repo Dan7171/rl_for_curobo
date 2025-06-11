@@ -369,6 +369,8 @@ def merge_dict_a_into_b(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     """
     for k, v in a.items():
         if isinstance(v, dict):
+            if k not in b:
+                b[k] = {}
             merge_dict_a_into_b(v, b[k])
         else:
             b[k] = v
