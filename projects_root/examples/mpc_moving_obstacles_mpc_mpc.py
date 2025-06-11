@@ -344,8 +344,8 @@ def main():
     
     # robot base frames, expressed in world frame
     X_Robots = [
-        np.array([0,0,0,1,0,0,0], dtype=np.float32),
-        np.array([1.2,0,0,0,0,0,1], dtype=np.float32) 
+        np.array([0,0,0,1,0,0,0], dtype=np.float32), # 1,0,0,0 = 0,0,0 in euler angles
+        np.array([1.2,0,0,0,0,0,1], dtype=np.float32) # 0,0,0,1  = 0,0,180 in euler angles
         ] # (x,y,z,qw, qx,qy,qz) expressed in world frame
     n_robots = len(X_Robots)
     robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
