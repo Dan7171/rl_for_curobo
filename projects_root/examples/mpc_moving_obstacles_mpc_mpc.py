@@ -352,11 +352,11 @@ def main():
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
     robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
     robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    X_Targets = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
+    X_Targets_R = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
     show_cost_plots = [False, False]
     if OBS_PREDICTION:
-        col_pred_with = [[1], []] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+        col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
 
     robots:List[AutonomousFranka] = []
@@ -367,8 +367,8 @@ def main():
             usd_help, 
             p_R=X_Robots[i][:3],
             q_R=X_Robots[i][3:], 
-            p_T=X_Targets[i][:3],
-            q_T=X_Targets[i][3:], 
+            p_T_R=X_Targets_R[i][:3],
+            q_T_R=X_Targets_R[i][3:], 
             target_color=target_colors[i],
             live_plotting=show_cost_plots[i]
             )
@@ -591,7 +591,7 @@ def main():
         
         # PRINT TIME STATISTICS
         k_print = 100
-        if t_idx % k_print == 0:    
+        if t_idx % k_print == 0 and ctrl_loop_timer > 0:    
             print(f"t = {t_idx}")
             print(f"ctrl freq in last {k_print} steps:  {k_print / ctrl_loop_timer}")
             print(f"robots as obs ops freq in last {k_print} steps: {k_print / robots_as_obs_timer}")

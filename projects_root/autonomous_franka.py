@@ -65,7 +65,7 @@ def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orien
 class AutonomousFranka:
     
     instance_counter = 0
-    def __init__(self,robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T=np.array([0.5,0.0,0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    def __init__(self,robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T_R=np.array([0.5,0.0,0.5]), q_T_R=np.array([0, 1, 0, 0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
@@ -73,9 +73,9 @@ class AutonomousFranka:
         Args:
             world (_type_): simulator world instance.
             p_R: Position vector from Wo (W (World frame) origin (o)) to Ro (R's origin (robot's base frame)), expressed in the world frame W (implied).
-            q_R: Frame R's (second R, representing robot's base frame) orientation (first R, representing rotation) in the world frame W (implied, could be represented as R_WR). Quaternion (w,x,y,z)
-            p_T: Position vector from Wo (W (World frame) origin (o)) to To (target's origin), expressed in the world frame W (implied).
-            q_T: Frame T's (representing target's base frame) orientation (R, representing rotation) in the world frame W (implied, could be represented as R_WT). Quaternion (w,x,y,z)
+            q_R: Frame R's (second R, representing robot's base frame) orientation (first R, representing rotation) in the world frame W  . Quaternion (w,x,y,z)
+            p_T_R: Position vector from Wo (W (World frame) origin (o)) to To (target's origin), expressed in the robot frame R.
+            q_T_R: Frame T's (representing target's base frame) orientation (R, representing rotation) in the robot frame . Quaternion (w,x,y,z)
 
         """
         # simulator paths etc.
@@ -92,10 +92,13 @@ class AutonomousFranka:
         # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
         self.p_R = p_R  
         self.q_R = q_R 
+        self.X_R = list(p_R) + list(q_R) # robot base frame in world frame
         
         # target settings
-        self._p_initTarget = p_T # initial target frame position (expressed in the world frame W)
-        self._q_initTarget = q_T # initial target frame rotation (expressed in the world frame W)
+        X_target_R = list(p_T_R) + list(q_T_R)
+        X_target_W = transform_pose_between_frames(X_target_R, self.X_R) # target frame from robot frame to world frame
+        self._p_initTarget = X_target_W[:3] #.position # initial target frame position (expressed in the world frame W)
+        self._q_initTarget = X_target_W[3:] #.quaternion # initial target frame rotation (expressed in the world frame W)
         
         self.initial_target_color = target_color
         self.initial_target_size = target_size
@@ -420,7 +423,7 @@ class AutonomousFranka:
         pass
     
 class FrankaMpc(AutonomousFranka):
-    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T=np.array([0.5, 0.0, 0.5]), q_T=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, live_plotting:bool=False):
+    def __init__(self, robot_cfg, world:World, usd_help:UsdHelper, p_R=np.array([0.0,0.0,0.0]), q_R=np.array([1,0,0,0]), p_T_R=np.array([0.5, 0.0, 0.5]), q_T_R=np.array([0, 1, 0, 0]), target_color=np.array([0, 0.5, 0]), target_size=0.05, live_plotting:bool=False):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -428,8 +431,14 @@ class FrankaMpc(AutonomousFranka):
             world (_type_): _description_
             robot_name (_type_): _description_
             p_R (_type_): _description_
+            q_R (_type_): _description_
+            p_T (_type_): _description_
+            q_T_R (_type_): _description_
+            target_color (_type_): _description_
+            target_size (_type_): _description_
+            live_plotting (_type_): _description_
         """
-        super().__init__(robot_cfg, world, p_R, q_R, p_T, q_T, target_color, target_size)
+        super().__init__(robot_cfg, world, p_R, q_R, p_T_R, q_T_R, target_color, target_size)
         # self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
