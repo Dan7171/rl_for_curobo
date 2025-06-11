@@ -204,7 +204,7 @@ def main():
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
-        use_cuda_graph=True,
+        use_cuda_graph=False,
         use_cuda_graph_metrics=True,
         use_cuda_graph_full_step=False,
         self_collision_check=True,
@@ -215,6 +215,7 @@ def main():
         use_es=False,
         store_rollouts=True,
         step_dt=0.02,
+        override_particle_file='projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_dual_arm.yml'
     )
 
     mpc = MpcSolver(mpc_config)
@@ -297,20 +298,43 @@ def main():
 
         if past_pose_left is None:
             past_pose_left = left_cube_position + 1.0
+            past_pose_right = right_cube_position + 1.0
 
-        # For now, we'll track the left target as the primary goal
-        # In future iterations, this can be expanded to handle both targets
-        if np.linalg.norm(left_cube_position - past_pose_left) > 1e-3:
-            # Set EE teleop goals, use left cube for primary target:
-            ee_translation_goal = left_cube_position
-            ee_orientation_teleop_goal = left_cube_orientation
+        # For dual-arm setup, track both targets separately
+        left_changed = np.linalg.norm(left_cube_position - past_pose_left) > 1e-3
+        right_changed = np.linalg.norm(right_cube_position - getattr(globals(), 'past_pose_right', right_cube_position + 1.0)) > 1e-3
+        
+        if left_changed or right_changed:
+            # Create multi-arm goals: [num_arms, 3] for positions, [num_arms, 4] for quaternions
+            # Arm 0 = left arm, Arm 1 = right arm
+            dual_arm_positions = torch.stack([
+                tensor_args.to_device(left_cube_position),   # Left arm target
+                tensor_args.to_device(right_cube_position)   # Right arm target
+            ], dim=0)  # Shape: [2, 3]
+            
+            dual_arm_quaternions = torch.stack([
+                tensor_args.to_device(left_cube_orientation),   # Left arm orientation
+                tensor_args.to_device(right_cube_orientation)   # Right arm orientation  
+            ], dim=0)  # Shape: [2, 4]
+            
+            # Create dual-arm pose goal
             ik_goal = Pose(
-                position=tensor_args.to_device(ee_translation_goal),
-                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+                position=dual_arm_positions,     # [2, 3] tensor for both arms
+                quaternion=dual_arm_quaternions  # [2, 4] tensor for both arms
             )
-            goal_buffer.goal_pose.copy_(ik_goal)
+            
+            # IMPORTANT: Direct assignment instead of copy_() to preserve multi-arm structure
+            goal_buffer.goal_pose = ik_goal
             mpc.update_goal(goal_buffer)
+            
             past_pose_left = left_cube_position
+            past_pose_right = right_cube_position
+            
+            print(f"Updated dual-arm goals:")
+            print(f"  Left arm target:  {left_cube_position}")
+            print(f"  Right arm target: {right_cube_position}")
+            print(f"  Goal position shape: {goal_buffer.goal_pose.position.shape}")
+            print(f"  Goal quaternion shape: {goal_buffer.goal_pose.quaternion.shape}")
 
         # Get robot current state:
         sim_js = robot.get_joints_state()

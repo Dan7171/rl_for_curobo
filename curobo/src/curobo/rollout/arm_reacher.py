@@ -24,6 +24,7 @@ from curobo.geom.sdf.world import WorldCollision
 from curobo.rollout.cost.cost_base import CostConfig
 from curobo.rollout.cost.dist_cost import DistCost, DistCostConfig
 from curobo.rollout.cost.pose_cost import PoseCost, PoseCostConfig, PoseCostMetric
+from curobo.rollout.cost.pose_cost_multi_arm import PoseCostMultiArm, PoseCostMultiArmConfig
 from curobo.rollout.cost.straight_line_cost import StraightLineCost
 from curobo.rollout.cost.zero_cost import ZeroCost
 from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
@@ -101,7 +102,7 @@ class ArmReacherCostConfig(ArmCostConfig):
         base_k = ArmCostConfig._get_base_keys()
         # add new cost terms:
         new_k = {
-            "pose_cfg": PoseCostConfig,
+            "pose_cfg": PoseCostConfig,  # Revert to single config
             "cspace_cfg": DistCostConfig,
             "straight_line_cfg": CostConfig,
             "zero_acc_cfg": CostConfig,
@@ -120,6 +121,15 @@ class ArmReacherCostConfig(ArmCostConfig):
         tensor_args: TensorDeviceType = TensorDeviceType(),
     ):
         k_list = ArmReacherCostConfig._get_base_keys()
+        
+        # Handle multi-arm pose configuration conditionally
+        if "pose_cfg" in data_dict and isinstance(data_dict["pose_cfg"], dict):
+            pose_cfg = data_dict["pose_cfg"]
+            if "num_arms" in pose_cfg and pose_cfg["num_arms"] > 1:
+                # Use PoseCostMultiArmConfig for multi-arm setup
+                k_list = k_list.copy()  # Make a copy to avoid modifying the original
+                k_list["pose_cfg"] = PoseCostMultiArmConfig
+        
         data = ArmCostConfig._get_formatted_dict(
             data_dict,
             k_list,
@@ -184,7 +194,17 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self.dist_cost = DistCost(self.cost_cfg.cspace_cfg)
         if self.cost_cfg.pose_cfg is not None:
             self.cost_cfg.pose_cfg.waypoint_horizon = self.horizon
-            self.goal_cost = PoseCost(self.cost_cfg.pose_cfg)
+            
+            # Check if this is a multi-arm setup
+            num_arms = getattr(self.cost_cfg.pose_cfg, 'num_arms', 1)
+            if num_arms > 1:
+                # Convert PoseCostConfig to PoseCostMultiArmConfig
+                multi_arm_config = PoseCostMultiArmConfig(**vars(self.cost_cfg.pose_cfg))
+                multi_arm_config.num_arms = num_arms
+                self.goal_cost = PoseCostMultiArm(multi_arm_config)
+            else:
+                self.goal_cost = PoseCost(self.cost_cfg.pose_cfg)
+                
             if self.cost_cfg.link_pose_cfg is None:
                 log_info(
                     "Deprecated: Add link_pose_cfg to your rollout config. Using pose_cfg instead."
@@ -193,9 +213,31 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         self._link_pose_costs = {}
 
         if self.cost_cfg.link_pose_cfg is not None:
+            # For link pose costs, always use regular PoseCostConfig even if main pose cost is multi-arm
+            link_pose_config = self.cost_cfg.link_pose_cfg
+            if hasattr(link_pose_config, 'num_arms'):
+                # Convert multi-arm config to regular config for individual link poses
+                link_pose_config = PoseCostConfig(
+                    cost_type=link_pose_config.cost_type,
+                    use_metric=link_pose_config.use_metric,
+                    project_distance=link_pose_config.project_distance,
+                    run_vec_weight=getattr(link_pose_config, 'run_vec_weight', None),
+                    use_projected_distance=link_pose_config.use_projected_distance,
+                    offset_waypoint=getattr(link_pose_config, 'offset_waypoint', [0, 0, 0, 0, 0, 0]),
+                    offset_tstep_fraction=link_pose_config.offset_tstep_fraction,
+                    waypoint_horizon=link_pose_config.waypoint_horizon,
+                    weight=link_pose_config.weight,
+                    vec_weight=link_pose_config.vec_weight,
+                    vec_convergence=link_pose_config.vec_convergence,
+                    run_weight=link_pose_config.run_weight,
+                    return_loss=link_pose_config.return_loss,
+                    terminal=link_pose_config.terminal,
+                    tensor_args=link_pose_config.tensor_args
+                )
+            
             for i in self.kinematics.link_names:
                 if i != self.kinematics.ee_link:
-                    self._link_pose_costs[i] = PoseCost(self.cost_cfg.link_pose_cfg)
+                    self._link_pose_costs[i] = PoseCost(link_pose_config)
         if self.cost_cfg.straight_line_cfg is not None:
             self.straight_line_cost = StraightLineCost(self.cost_cfg.straight_line_cfg)
         if self.cost_cfg.zero_vel_cfg is not None:
@@ -229,9 +271,31 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 self.convergence_cfg.link_pose_cfg = self.convergence_cfg.pose_cfg
 
         if self.convergence_cfg.link_pose_cfg is not None:
+            # For convergence link pose costs, always use regular PoseCostConfig even if main pose cost is multi-arm
+            conv_link_pose_config = self.convergence_cfg.link_pose_cfg
+            if hasattr(conv_link_pose_config, 'num_arms'):
+                # Convert multi-arm config to regular config for individual link poses
+                conv_link_pose_config = PoseCostConfig(
+                    cost_type=conv_link_pose_config.cost_type,
+                    use_metric=conv_link_pose_config.use_metric,
+                    project_distance=conv_link_pose_config.project_distance,
+                    run_vec_weight=getattr(conv_link_pose_config, 'run_vec_weight', None),
+                    use_projected_distance=conv_link_pose_config.use_projected_distance,
+                    offset_waypoint=getattr(conv_link_pose_config, 'offset_waypoint', [0, 0, 0, 0, 0, 0]),
+                    offset_tstep_fraction=conv_link_pose_config.offset_tstep_fraction,
+                    waypoint_horizon=conv_link_pose_config.waypoint_horizon,
+                    weight=conv_link_pose_config.weight,
+                    vec_weight=conv_link_pose_config.vec_weight,
+                    vec_convergence=conv_link_pose_config.vec_convergence,
+                    run_weight=conv_link_pose_config.run_weight,
+                    return_loss=conv_link_pose_config.return_loss,
+                    terminal=conv_link_pose_config.terminal,
+                    tensor_args=conv_link_pose_config.tensor_args
+                )
+                
             for i in self.kinematics.link_names:
                 if i != self.kinematics.ee_link:
-                    self._link_pose_convergence[i] = PoseCost(self.convergence_cfg.link_pose_cfg)
+                    self._link_pose_convergence[i] = PoseCost(conv_link_pose_config)
         if self.convergence_cfg.cspace_cfg is not None:
             self.convergence_cfg.cspace_cfg.dof = self.d_action
             self.cspace_convergence = DistCost(self.convergence_cfg.cspace_cfg)
@@ -261,17 +325,63 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 and self.cost_cfg.pose_cfg is not None
                 and self.goal_cost.enabled
             ):
+                # Check if this is a multi-arm pose cost that needs special handling
+                from curobo.rollout.cost.pose_cost_multi_arm import PoseCostMultiArm
+                is_multi_arm_pose_cost = isinstance(self.goal_cost, PoseCostMultiArm)
+                
+                # Format end-effector data for multi-arm pose cost if needed
+                if is_multi_arm_pose_cost:
+                    # For multi-arm pose cost, construct 4D tensors from link poses
+                    num_arms = getattr(self.goal_cost, 'num_arms', 2)  # Default to 2 for dual-arm
+                    multi_arm_ee_pos, multi_arm_ee_quat = self._format_multi_arm_ee_data(state, num_arms)
+                    ee_pos_for_cost = multi_arm_ee_pos
+                    ee_quat_for_cost = multi_arm_ee_quat
+                    
+                    # Debug: Track both arms' poses over batch x horizon (first few times)
+                    if not hasattr(self, '_debug_ee_poses_count'):
+                        self._debug_ee_poses_count = 0
+                    self._debug_ee_poses_count += 1
+                    
+                    if self._debug_ee_poses_count <= 3:  # Debug first 3 cost function calls
+                        print(f"\n=== EE Poses Debug #{self._debug_ee_poses_count} ===")
+                        batch_size, horizon, num_arms_tensor, _ = multi_arm_ee_pos.shape
+                        print(f"Multi-arm EE data shape: pos={multi_arm_ee_pos.shape}, quat={multi_arm_ee_quat.shape}")
+                        
+                        for arm_idx in range(min(num_arms_tensor, 2)):  # Only debug first 2 arms
+                            print(f"\n--- Arm {arm_idx} EE Poses Over Horizon ---")
+                            for t in range(min(horizon, 5)):  # First 5 time steps
+                                arm_pos = multi_arm_ee_pos[0, t, arm_idx, :]  # [3]
+                                arm_quat = multi_arm_ee_quat[0, t, arm_idx, :]  # [4]
+                                print(f"  t={t}: pos={arm_pos.cpu().numpy()}, quat={arm_quat.cpu().numpy()}")
+                        
+                        # Also print goal targets for comparison
+                        if hasattr(self._goal_buffer, 'goal_pose') and self._goal_buffer.goal_pose.position is not None:
+                            goal_pos = self._goal_buffer.goal_pose.position
+                            goal_quat = self._goal_buffer.goal_pose.quaternion
+                            print(f"\n--- Goal Targets ---")
+                            if goal_pos.dim() == 2 and goal_pos.shape[0] >= 2:  # Multi-arm goals
+                                for arm_idx in range(min(goal_pos.shape[0], 2)):
+                                    print(f"  Arm {arm_idx} goal: pos={goal_pos[arm_idx, :].cpu().numpy()}, quat={goal_quat[arm_idx, :].cpu().numpy()}")
+                            else:
+                                print(f"  Single goal: pos={goal_pos.cpu().numpy()}, quat={goal_quat.cpu().numpy()}")
+                        
+                        print("=== End EE Poses Debug ===\n")
+                else:
+                    # For single-arm pose cost, use the regular ee_pos_batch and ee_quat_batch
+                    ee_pos_for_cost = ee_pos_batch
+                    ee_quat_for_cost = ee_quat_batch
+                
                 if self._compute_g_dist:
                     goal_cost, rot_err_norm, goal_dist = self.goal_cost.forward_out_distance(
-                        ee_pos_batch,
-                        ee_quat_batch,
+                        ee_pos_for_cost,
+                        ee_quat_for_cost,
                         self._goal_buffer,
                     )
 
                     g_dist = _compute_g_dist_jit(rot_err_norm, goal_dist)
                 else:
                     goal_cost = self.goal_cost.forward(
-                        ee_pos_batch, ee_quat_batch, self._goal_buffer
+                        ee_pos_for_cost, ee_quat_for_cost, self._goal_buffer
                     )
                 cost_list.append(goal_cost)
         with profiler.record_function("cost/link_poses"):
@@ -350,7 +460,14 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             out_metrics = ArmReacherMetrics()
         if not isinstance(out_metrics, ArmReacherMetrics):
             out_metrics = ArmReacherMetrics(**vars(out_metrics))
-        out_metrics = super(ArmReacher, self).convergence_fn(state, out_metrics)
+        base_metrics = super(ArmReacher, self).convergence_fn(state, out_metrics)
+        
+        # Copy base metrics to our typed metrics
+        if base_metrics != out_metrics:
+            out_metrics.cost = base_metrics.cost
+            out_metrics.constraint = base_metrics.constraint
+            out_metrics.feasible = base_metrics.feasible
+            out_metrics.state = base_metrics.state
 
         # compute error with pose?
         if (
@@ -369,9 +486,9 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self._goal_buffer.links_goal_pose is not None
             and self.convergence_cfg.pose_cfg is not None
         ):
-            pose_error = [out_metrics.pose_error]
-            position_error = [out_metrics.position_error]
-            quat_error = [out_metrics.rotation_error]
+            pose_error = [out_metrics.pose_error] if out_metrics.pose_error is not None else []
+            position_error = [out_metrics.position_error] if out_metrics.position_error is not None else []
+            quat_error = [out_metrics.rotation_error] if out_metrics.rotation_error is not None else []
             link_poses = state.link_pose
 
             for k in self._goal_buffer.links_goal_pose.keys():
@@ -388,9 +505,10 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         pose_error.append(pose_err)
                         position_error.append(pos_err)
                         quat_error.append(quat_err)
-            out_metrics.pose_error = cat_max(pose_error)
-            out_metrics.rotation_error = cat_max(quat_error)
-            out_metrics.position_error = cat_max(position_error)
+            if pose_error:
+                out_metrics.pose_error = cat_max(pose_error)
+                out_metrics.rotation_error = cat_max(quat_error)
+                out_metrics.position_error = cat_max(position_error)
 
         if (
             self._goal_buffer.goal_state is not None
@@ -446,6 +564,115 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         else:
             self.dist_cost.disable_cost()
             self.cspace_convergence.disable_cost()
+
+    def _format_multi_arm_ee_data(self, state: KinematicModelState, num_arms: int):
+        """Format end-effector data for multi-arm pose cost.
+        
+        Constructs 4D tensors [batch, horizon, num_arms, 3/4] from available link poses.
+        For dual-arm setup, typically looks for 'left_panda_hand' and 'right_panda_hand'.
+        If a link is missing, fills with zeros or uses available data.
+        
+        Args:
+            state: Kinematic model state containing link poses
+            num_arms: Number of arms expected by the multi-arm pose cost
+            
+        Returns:
+            Tuple of (ee_pos_4d, ee_quat_4d) tensors in 4D format
+        """
+        # Get batch and horizon dimensions from state
+        batch_size = state.ee_pos_seq.shape[0] if state.ee_pos_seq is not None else 1
+        horizon = state.ee_pos_seq.shape[1] if state.ee_pos_seq is not None else 1
+        
+        # Initialize 4D tensors for multi-arm end-effector data
+        device = self.tensor_args.device
+        dtype = self.tensor_args.dtype
+        
+        ee_pos_4d = torch.zeros((batch_size, horizon, num_arms, 3), device=device, dtype=dtype)
+        ee_quat_4d = torch.zeros((batch_size, horizon, num_arms, 4), device=device, dtype=dtype)
+        
+        # Default quaternion (identity: w=1, x=0, y=0, z=0)
+        ee_quat_4d[:, :, :, 0] = 1.0  # Set w component to 1
+        
+        # Map arm indices to link names - adjust these based on your robot configuration
+        arm_link_mapping = []
+        if num_arms == 2:
+            # Dual-arm setup
+            arm_link_mapping = ['left_panda_hand', 'right_panda_hand']
+        else:
+            # Generic multi-arm setup
+            arm_link_mapping = [f'arm_{i}_ee' for i in range(num_arms)]
+        
+        # Debug: Print available link poses (only first few times)
+        if not hasattr(self, '_debug_link_count'):
+            self._debug_link_count = 0
+        self._debug_link_count += 1
+        
+        if self._debug_link_count <= 3:  # Print first 3 times
+            link_poses = state.link_pose
+            if link_poses is not None:
+                print(f"\n=== Multi-arm Debug {self._debug_link_count} ===")
+                print(f"Available link poses: {list(link_poses.keys())}")
+                print(f"Expected arm links: {arm_link_mapping}")
+                print(f"Primary EE data shape: pos={state.ee_pos_seq.shape if state.ee_pos_seq is not None else None}, quat={state.ee_quat_seq.shape if state.ee_quat_seq is not None else None}")
+        
+        # Fill in data for available links
+        link_poses = state.link_pose
+        if link_poses is not None:
+            for arm_idx, link_name in enumerate(arm_link_mapping):
+                if link_name in link_poses:
+                    # Extract pose data for this arm
+                    link_pose = link_poses[link_name]
+                    ee_pos_4d[:, :, arm_idx, :] = link_pose.position
+                    ee_quat_4d[:, :, arm_idx, :] = link_pose.quaternion
+                    
+                    if self._debug_link_count <= 3:
+                        print(f"Arm {arm_idx} ({link_name}): Found link pose data")
+                        print(f"  Position shape: {link_pose.position.shape}")
+                        print(f"  Position sample: {link_pose.position[0, 0, :] if link_pose.position.numel() > 3 else link_pose.position}")
+                else:
+                    # Link not found - try alternative approaches
+                    if arm_idx == 0 and state.ee_pos_seq is not None and state.ee_quat_seq is not None:
+                        # Use primary end-effector data for first arm
+                        ee_pos_4d[:, :, arm_idx, :] = state.ee_pos_seq
+                        ee_quat_4d[:, :, arm_idx, :] = state.ee_quat_seq
+                        
+                        if self._debug_link_count <= 3:
+                            print(f"Arm {arm_idx} ({link_name}): Using primary EE data as fallback")
+                    elif hasattr(self, 'kinematics') and hasattr(self.kinematics, 'get_state'):
+                        # Try to compute the missing end-effector pose using kinematics
+                        try:
+                            # Get current joint positions
+                            current_joints = state.state_seq.position
+                            if current_joints is not None:
+                                # Use kinematics to compute pose for the missing link
+                                kin_state = self.kinematics.get_state(current_joints)
+                                if hasattr(kin_state, 'link_pose') and link_name in kin_state.link_pose:
+                                    computed_pose = kin_state.link_pose[link_name]
+                                    ee_pos_4d[:, :, arm_idx, :] = computed_pose.position
+                                    ee_quat_4d[:, :, arm_idx, :] = computed_pose.quaternion
+                                    
+                                    if self._debug_link_count <= 3:
+                                        print(f"Arm {arm_idx} ({link_name}): Computed pose using kinematics")
+                                        print(f"  Computed position sample: {computed_pose.position[0, 0, :] if computed_pose.position.numel() > 3 else computed_pose.position}")
+                                else:
+                                    if self._debug_link_count <= 3:
+                                        print(f"Arm {arm_idx} ({link_name}): Kinematics computation failed - using zeros/identity")
+                            else:
+                                if self._debug_link_count <= 3:
+                                    print(f"Arm {arm_idx} ({link_name}): No joint positions available - using zeros/identity")
+                        except Exception as e:
+                            if self._debug_link_count <= 3:
+                                print(f"Arm {arm_idx} ({link_name}): Kinematics computation error: {e} - using zeros/identity")
+                    else:
+                        if self._debug_link_count <= 3:
+                            print(f"Arm {arm_idx} ({link_name}): Missing - using zeros/identity")
+                    # If all fallbacks fail, leave as zeros/identity quaternion (already initialized)
+        
+        if self._debug_link_count <= 3:
+            print(f"Final 4D tensor shapes: pos={ee_pos_4d.shape}, quat={ee_quat_4d.shape}")
+            print("=== End Multi-arm Debug ===\n")
+        
+        return ee_pos_4d, ee_quat_4d
 
     def get_pose_costs(
         self,

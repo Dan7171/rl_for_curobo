@@ -41,6 +41,7 @@ robot_cfg:
     asset_root_path: "robot/franka_dual_arm"
     base_link: "base_link"
     ee_link: "left_panda_hand"  # Primary end effector
+    link_names: ["left_panda_hand", "right_panda_hand"]  # Track both end-effectors for multi-arm pose costs
     collision_link_names:
       [
         # Left arm links
