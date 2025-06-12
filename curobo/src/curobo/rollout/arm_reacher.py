@@ -122,6 +122,7 @@ class ArmReacherCostConfig(ArmCostConfig):
         robot_cfg: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
+        enable_auto_discovery: bool = True,
     ):
         k_list = ArmReacherCostConfig._get_base_keys()
         
@@ -141,9 +142,13 @@ class ArmReacherCostConfig(ArmCostConfig):
             tensor_args=tensor_args,
         )
         
-        # Handle custom costs (inherited from ArmCostConfig)
-        if "custom" in data_dict:
-            data["custom_cfg"] = ArmCostConfig._parse_custom_costs(data_dict["custom"], tensor_args)
+        # Handle custom costs with auto-discovery (inherited from ArmCostConfig)
+        custom_dict = data_dict.get("custom", {})
+        data["custom_cfg"] = ArmCostConfig._parse_custom_costs(
+            custom_dict, 
+            tensor_args, 
+            enable_auto_discovery=enable_auto_discovery
+        )
         
         return ArmReacherCostConfig(**data)
 
@@ -160,12 +165,14 @@ class ArmReacherConfig(ArmBaseConfig):
         robot_cfg: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
+        enable_auto_discovery: bool = True,
     ):
         return ArmReacherCostConfig.from_dict(
             cost_data_dict,
             robot_cfg,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
         )
 
 

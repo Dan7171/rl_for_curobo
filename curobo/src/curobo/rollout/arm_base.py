@@ -82,11 +82,92 @@ class ArmCostConfig:
             return None
 
     @staticmethod
-    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType) -> Dict:
+    def _discover_custom_costs_in_directory(directory_type: str, tensor_args: TensorDeviceType) -> Dict:
+        """
+        Automatically discover custom cost files in arm_base or arm_reacher directories.
+        
+        Args:
+            directory_type: Either "arm_base" or "arm_reacher"
+            tensor_args: Tensor device configuration
+            
+        Returns:
+            Dictionary of discovered custom costs
+        """
+        import os
+        import importlib.util
+        import inspect
+        from curobo.rollout.cost.cost_base import CostBase, CostConfig
+        
+        discovered_costs = {}
+        
+        # Get the path to the custom cost directory
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        custom_dir = os.path.join(current_dir, "cost", "custom", directory_type)
+        custom_dir = os.path.normpath(custom_dir)
+        
+        if not os.path.exists(custom_dir):
+            log_info(f"Custom cost directory not found: {custom_dir}")
+            return discovered_costs
+            
+        # Scan for Python files (excluding __init__.py)
+        for filename in os.listdir(custom_dir):
+            if filename.endswith('.py') and filename != '__init__.py':
+                module_name = filename[:-3]  # Remove .py extension
+                file_path = os.path.join(custom_dir, filename)
+                
+                try:
+                    # Load the module
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
+                    if spec is None or spec.loader is None:
+                        continue
+                        
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    
+                    # Find cost classes in the module
+                    for name, obj in inspect.getmembers(module):
+                        if (inspect.isclass(obj) and 
+                            issubclass(obj, CostBase) and 
+                            obj is not CostBase):
+                            
+                            # Look for corresponding config class
+                            config_class_name = name + "Config"
+                            config_class = getattr(module, config_class_name, None)
+                            
+                            if config_class and issubclass(config_class, CostConfig):
+                                # Create default configuration
+                                try:
+                                    default_config = config_class(
+                                        weight=1.0,  # Default weight
+                                        terminal=False,  # Default terminal setting
+                                        tensor_args=tensor_args
+                                    )
+                                    
+                                    # Store the discovered cost
+                                    cost_key = f"auto_{module_name}_{name}"
+                                    discovered_costs[cost_key] = {
+                                        "cost_class": obj,
+                                        "cost_config": default_config,
+                                        "source_file": filename,
+                                        "auto_discovered": True
+                                    }
+                                    
+                                    log_info(f"Auto-discovered custom cost: {cost_key} from {filename}")
+                                    
+                                except Exception as e:
+                                    log_warn(f"Failed to create default config for {name}: {e}")
+                                    
+                except Exception as e:
+                    log_warn(f"Failed to load custom cost module {filename}: {e}")
+                    
+        return discovered_costs
+
+    @staticmethod
+    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType, enable_auto_discovery: bool = True) -> Dict:
         """Parse custom cost configurations for arm_base or arm_reacher."""
         custom_costs = {}
         
-        # Process arm_base custom costs
+        # Process explicitly configured arm_base custom costs
         if "arm_base" in custom_dict:
             custom_costs["arm_base"] = {}
             for cost_name, cost_config in custom_dict["arm_base"].items():
@@ -117,7 +198,17 @@ class ArmCostConfig:
                                 "cost_config": cost_cfg
                             }
         
-        # Process arm_reacher custom costs
+        # Auto-discover arm_base costs if enabled
+        if enable_auto_discovery:
+            if "arm_base" not in custom_costs:
+                custom_costs["arm_base"] = {}
+            discovered_arm_base = ArmCostConfig._discover_custom_costs_in_directory("arm_base", tensor_args)
+            # Only add discovered costs that aren't already explicitly configured
+            for cost_name, cost_info in discovered_arm_base.items():
+                if cost_name not in custom_costs["arm_base"]:
+                    custom_costs["arm_base"][cost_name] = cost_info
+        
+        # Process explicitly configured arm_reacher custom costs
         if "arm_reacher" in custom_dict:
             custom_costs["arm_reacher"] = {}
             for cost_name, cost_config in custom_dict["arm_reacher"].items():
@@ -148,6 +239,16 @@ class ArmCostConfig:
                                 "cost_config": cost_cfg
                             }
         
+        # Auto-discover arm_reacher costs if enabled
+        if enable_auto_discovery:
+            if "arm_reacher" not in custom_costs:
+                custom_costs["arm_reacher"] = {}
+            discovered_arm_reacher = ArmCostConfig._discover_custom_costs_in_directory("arm_reacher", tensor_args)
+            # Only add discovered costs that aren't already explicitly configured
+            for cost_name, cost_info in discovered_arm_reacher.items():
+                if cost_name not in custom_costs["arm_reacher"]:
+                    custom_costs["arm_reacher"][cost_name] = cost_info
+        
         return custom_costs
 
     @staticmethod
@@ -156,6 +257,7 @@ class ArmCostConfig:
         robot_config: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
+        enable_auto_discovery: bool = True,
     ):
         k_list = ArmCostConfig._get_base_keys()
         data = ArmCostConfig._get_formatted_dict(
@@ -166,9 +268,13 @@ class ArmCostConfig:
             tensor_args=tensor_args,
         )
         
-        # Handle custom costs
-        if "custom" in data_dict:
-            data["custom_cfg"] = ArmCostConfig._parse_custom_costs(data_dict["custom"], tensor_args)
+        # Handle custom costs with auto-discovery
+        custom_dict = data_dict.get("custom", {})
+        data["custom_cfg"] = ArmCostConfig._parse_custom_costs(
+            custom_dict, 
+            tensor_args, 
+            enable_auto_discovery=enable_auto_discovery
+        )
         
         return ArmCostConfig(**data)
 

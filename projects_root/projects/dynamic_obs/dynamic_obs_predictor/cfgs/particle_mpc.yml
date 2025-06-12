@@ -71,58 +71,64 @@ cost:
     weight: 100.0 #50.0
     max_nlimit: 0.25 #0.2
   
-  # CUSTOM COST TERMS - Add your custom costs here
-  custom:
-    # Custom costs that run in arm_base (general robot costs)
-    arm_base:
-      # Example: Random cost for testing
-      random_cost_example:
-        module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
-        class_name: "RandomCost"
-        config_class_name: "RandomCostConfig"
-        weight: 10000.0
-        random_scale: 0.5
-        use_terminal_only: False
-        terminal: False
-        
-      # Example: Velocity smoothness cost
-      velocity_smoothness:
-        module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
-        class_name: "VelocitySmoothnessCost"
-        config_class_name: "VelocitySmoothnessCostConfig"
-        weight: 20.0
-        smoothness_weight: 1.0
-        terminal: False
-        
-      # Add your own arm_base custom costs here...
-      # my_custom_cost:
-      #   module_path: "path.to.your.module"
-      #   class_name: "YourCustomCost"
-      #   config_class_name: "YourCustomCostConfig"  # Optional
-      #   weight: 50.0
-      #   my_parameter: 2.0
-      #   terminal: False
+  # CUSTOM COST TERMS - Now using auto-discovery from arm_base/ and arm_reacher/ directories
+  # The system will automatically discover and load custom costs from:
+  # - curobo/src/curobo/rollout/cost/custom/arm_base/
+  # - curobo/src/curobo/rollout/cost/custom/arm_reacher/
+  # To disable auto-discovery, set enable_auto_discovery: false in the solver config
+  
+  # Commented out explicit custom costs - using auto-discovery instead
+  # custom:
+  #   # Custom costs that run in arm_base (general robot costs)
+  #   arm_base:
+  #     # Example: Random cost for testing
+  #     random_cost_example:
+  #       module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
+  #       class_name: "RandomCost"
+  #       config_class_name: "RandomCostConfig"
+  #       weight: 10000.0
+  #       random_scale: 0.5
+  #       use_terminal_only: False
+  #       terminal: False
+  #       
+  #     # Example: Velocity smoothness cost
+  #     velocity_smoothness:
+  #       module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
+  #       class_name: "VelocitySmoothnessCost"
+  #       config_class_name: "VelocitySmoothnessCostConfig"
+  #       weight: 20.0
+  #       smoothness_weight: 1.0
+  #       terminal: False
+  #       
+  #     # Add your own arm_base custom costs here...
+  #     # my_custom_cost:
+  #     #   module_path: "path.to.your.module"
+  #     #   class_name: "YourCustomCost"
+  #     #   config_class_name: "YourCustomCostConfig"  # Optional
+  #     #   weight: 50.0
+  #     #   my_parameter: 2.0
+  #     #   terminal: False
 
-    # Custom costs that run in arm_reacher (task-specific costs)  
-    arm_reacher:
-      # Example: End-effector region cost
-      ee_region_cost:
-        module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
-        class_name: "EndEffectorRegionCost"
-        config_class_name: "EndEffectorRegionCostConfig"
-        weight: 30.0
-        region_center: [0.5, 0.0, 0.8]  # [x, y, z] in world frame
-        region_radius: 0.3
-        cost_outside_region: True
-        terminal: False
-        
-      # Add your own arm_reacher custom costs here...
-      # my_task_cost:
-      #   module_path: "path.to.your.module"
-      #   class_name: "YourTaskCost"
-      #   weight: 100.0
-      #   task_parameter: 1.5
-      #   terminal: True
+  #   # Custom costs that run in arm_reacher (task-specific costs)  
+  #   arm_reacher:
+  #     # Example: End-effector region cost
+  #     ee_region_cost:
+  #       module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
+  #       class_name: "EndEffectorRegionCost"
+  #       config_class_name: "EndEffectorRegionCostConfig"
+  #       weight: 30.0
+  #       region_center: [0.5, 0.0, 0.8]  # [x, y, z] in world frame
+  #       region_radius: 0.3
+  #       cost_outside_region: True
+  #       terminal: False
+  #       
+  #     # Add your own arm_reacher custom costs here...
+  #     # my_task_cost:
+  #     #   module_path: "path.to.your.module"
+  #     #   class_name: "YourTaskCost"
+  #     #   weight: 100.0
+  #     #   task_parameter: 1.5
+  #     #   terminal: True
 
 
 mppi:
