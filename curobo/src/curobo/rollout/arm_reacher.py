@@ -122,7 +122,7 @@ class ArmReacherCostConfig(ArmCostConfig):
         robot_cfg: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
-        enable_auto_discovery: bool = True,
+        enable_auto_discovery: bool = False,
     ):
         k_list = ArmReacherCostConfig._get_base_keys()
         
@@ -165,7 +165,7 @@ class ArmReacherConfig(ArmBaseConfig):
         robot_cfg: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
-        enable_auto_discovery: bool = True,
+        enable_auto_discovery: bool = False,
     ):
         return ArmReacherCostConfig.from_dict(
             cost_data_dict,

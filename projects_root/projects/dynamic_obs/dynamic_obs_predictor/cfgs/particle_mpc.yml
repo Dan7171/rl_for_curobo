@@ -70,65 +70,56 @@ cost:
   stop_cfg:
     weight: 100.0 #50.0
     max_nlimit: 0.25 #0.2
+
   
-  # CUSTOM COST TERMS - Now using auto-discovery from arm_base/ and arm_reacher/ directories
-  # The system will automatically discover and load custom costs from:
-  # - curobo/src/curobo/rollout/cost/custom/arm_base/
-  # - curobo/src/curobo/rollout/cost/custom/arm_reacher/
-  # To disable auto-discovery, set enable_auto_discovery: false in the solver config
   
-  # Commented out explicit custom costs - using auto-discovery instead
-  # custom:
-  #   # Custom costs that run in arm_base (general robot costs)
-  #   arm_base:
-  #     # Example: Random cost for testing
-  #     random_cost_example:
-  #       module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
-  #       class_name: "RandomCost"
-  #       config_class_name: "RandomCostConfig"
-  #       weight: 10000.0
-  #       random_scale: 0.5
-  #       use_terminal_only: False
-  #       terminal: False
+  # CUSTOM COST TERMS - Explicit Configuration
+  # Only custom costs listed here will be loaded (auto-discovery is disabled by default)
+  # Uncomment and modify the section below to use explicit custom costs:
+  
+  Example of explicit custom cost configuration:
+  custom:
+    # Custom costs that run in arm_base (general robot costs)
+    arm_base:
+      # Energy minimization cost from our custom file
+      energy_cost:
+        module_path: "curobo.rollout.cost.custom.arm_base.energy_cost"
+        class_name: "EnergyCost"
+        config_class_name: "EnergyCostConfig"
+        weight: 10.0  # Adjust weight as needed
+        terminal: False
   #       
-  #     # Example: Velocity smoothness cost
-  #     velocity_smoothness:
-  #       module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
-  #       class_name: "VelocitySmoothnessCost"
-  #       config_class_name: "VelocitySmoothnessCostConfig"
-  #       weight: 20.0
-  #       smoothness_weight: 1.0
-  #       terminal: False
-  #       
-  #     # Add your own arm_base custom costs here...
+  #     # Add more arm_base custom costs here...
   #     # my_custom_cost:
-  #     #   module_path: "path.to.your.module"
-  #     #   class_name: "YourCustomCost"
-  #     #   config_class_name: "YourCustomCostConfig"  # Optional
+  #     #   module_path: "curobo.rollout.cost.custom.arm_base.my_custom_file"
+  #     #   class_name: "MyCustomCost"
+  #     #   config_class_name: "MyCustomCostConfig"
   #     #   weight: 50.0
   #     #   my_parameter: 2.0
   #     #   terminal: False
 
   #   # Custom costs that run in arm_reacher (task-specific costs)  
   #   arm_reacher:
-  #     # Example: End-effector region cost
-  #     ee_region_cost:
-  #       module_path: "curobo.rollout.cost.custom_cost_term_template.example_custom_cost"
-  #       class_name: "EndEffectorRegionCost"
-  #       config_class_name: "EndEffectorRegionCostConfig"
-  #       weight: 30.0
-  #       region_center: [0.5, 0.0, 0.8]  # [x, y, z] in world frame
-  #       region_radius: 0.3
-  #       cost_outside_region: True
+  #     # Task-specific pose cost from our custom file
+  #     task_cost:
+  #       module_path: "curobo.rollout.cost.custom.arm_reacher.task_cost"
+  #       class_name: "TaskCost"
+  #       config_class_name: "TaskCostConfig"
+  #       weight: 25.0  # Adjust weight as needed
   #       terminal: False
   #       
-  #     # Add your own arm_reacher custom costs here...
+  #     # Add more arm_reacher custom costs here...
   #     # my_task_cost:
-  #     #   module_path: "path.to.your.module"
-  #     #   class_name: "YourTaskCost"
+  #     #   module_path: "curobo.rollout.cost.custom.arm_reacher.my_task_file"
+  #     #   class_name: "MyTaskCost"
   #     #   weight: 100.0
   #     #   task_parameter: 1.5
   #     #   terminal: True
+  
+  # To enable custom costs: 
+  # 1. Uncomment the 'custom:' section above
+  # 2. Uncomment the specific costs you want to use
+  # 3. Adjust weights and parameters as needed
 
 
 mppi:

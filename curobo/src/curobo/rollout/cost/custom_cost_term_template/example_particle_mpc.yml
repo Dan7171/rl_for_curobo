@@ -72,38 +72,66 @@ cost:
     weight: 100.0
     max_nlimit: 0.25
 
-  # CUSTOM COST TERMS - Now using auto-discovery!
+  # CUSTOM COST TERMS - Explicit Configuration (Recommended)
   # 
-  # NEW AUTO-DISCOVERY APPROACH (Recommended):
-  # Simply drop your custom cost .py files into these directories:
-  # - curobo/src/curobo/rollout/cost/custom/arm_base/     (for general robot costs)
-  # - curobo/src/curobo/rollout/cost/custom/arm_reacher/  (for task-specific costs)
+  # EXPLICIT CONFIGURATION (Default Behavior):
+  # Only custom costs explicitly listed below will be loaded.
+  # This gives you full control over which costs are used and their parameters.
   # 
-  # The system will automatically discover and load them with default weights.
-  # No configuration needed - just place your files and they work!
-  #
-  # To disable auto-discovery, add: enable_auto_discovery: false to your solver config
-  #
-  # EXPLICIT CONFIGURATION (Advanced):
-  # If you need specific weights or parameters, you can still use explicit config:
-  # 
+  # To use explicit configuration:
+  # 1. Uncomment the 'custom:' section below
+  # 2. Uncomment the specific costs you want to use
+  # 3. Modify weights and parameters as needed
+  # 4. Add your own custom costs following the same pattern
+  
   # custom:
+  #   # Custom costs for general robot behavior (arm_base)
   #   arm_base:
-  #     my_custom_cost:
-  #       module_path: "curobo.rollout.cost.custom.arm_base.my_cost_file"
-  #       class_name: "MyCostClass"
-  #       config_class_name: "MyCostClassConfig"  # Optional
-  #       weight: 50.0
-  #       my_parameter: 2.0
+  #     # Energy minimization cost - penalizes velocity and acceleration
+  #     energy_cost:
+  #       module_path: "curobo.rollout.cost.custom.arm_base.energy_cost"
+  #       class_name: "EnergyCost"
+  #       config_class_name: "EnergyCostConfig"
+  #       weight: 10.0
   #       terminal: False
-  #
+  #       
+  #     # Add your own arm_base custom costs here...
+  #     # my_smoothness_cost:
+  #     #   module_path: "curobo.rollout.cost.custom.arm_base.my_smoothness"
+  #     #   class_name: "SmoothnessCost"
+  #     #   config_class_name: "SmoothnessCostConfig"
+  #     #   weight: 25.0
+  #     #   smoothness_factor: 2.0
+  #     #   terminal: False
+
+  #   # Custom costs for task-specific behavior (arm_reacher)  
   #   arm_reacher:
-  #     my_task_cost:
-  #       module_path: "curobo.rollout.cost.custom.arm_reacher.my_task_file"
-  #       class_name: "MyTaskCost"
-  #       weight: 100.0
-  #       task_parameter: 1.5
-  #       terminal: True
+  #     # Task-specific pose cost - additional end-effector tracking
+  #     task_cost:
+  #       module_path: "curobo.rollout.cost.custom.arm_reacher.task_cost"
+  #       class_name: "TaskCost"
+  #       config_class_name: "TaskCostConfig"
+  #       weight: 30.0
+  #       terminal: False
+  #       
+  #     # Add your own arm_reacher custom costs here...
+  #     # my_orientation_cost:
+  #     #   module_path: "curobo.rollout.cost.custom.arm_reacher.my_orientation"
+  #     #   class_name: "OrientationCost"
+  #     #   weight: 40.0
+  #     #   orientation_penalty: 1.5
+  #     #   terminal: True
+  
+  # ALTERNATIVE: AUTO-DISCOVERY (Advanced)
+  # To enable auto-discovery instead of explicit configuration:
+  # 1. Set enable_auto_discovery: true in your solver config
+  # 2. Don't uncomment the 'custom:' section above (or leave it empty)
+  # 3. The system will automatically load all .py files from:
+  #    - curobo/src/curobo/rollout/cost/custom/arm_base/
+  #    - curobo/src/curobo/rollout/cost/custom/arm_reacher/
+  #
+  # Note: Auto-discovery uses default weights and parameters.
+  #       Use explicit configuration for fine-tuned control.
 
 mppi:
   init_cov          : 0.8

@@ -1,220 +1,179 @@
-# Custom Cost Terms
+# Custom Cost Terms for CuRobo
 
-This directory contains template and example files for creating custom cost terms in CuRobo. Custom cost terms allow you to add domain-specific penalties and rewards to the optimization process.
+This directory provides templates and examples for creating custom cost terms in CuRobo's rollout optimization system.
 
-## Quick Start (New Auto-Discovery Method)
+## Quick Start
 
-### Option 1: Auto-Discovery (Recommended)
-Simply drop your custom cost files into the appropriate directory and they will be automatically discovered and loaded:
+The CuRobo custom cost system supports two approaches:
 
-- **For general robot costs** (energy, smoothness, etc.): 
-  - Place files in: `curobo/src/curobo/rollout/cost/custom/arm_base/`
-  - Example: `energy_minimization.py`, `smoothness_cost.py`
+### 1. **Explicit Configuration (Recommended)**
 
-- **For task-specific costs** (end-effector constraints, workspace regions, etc.):
-  - Place files in: `curobo/src/curobo/rollout/cost/custom/arm_reacher/`
-  - Example: `workspace_constraint.py`, `target_tracking.py`
+This is the **default behavior** - only custom costs explicitly listed in your YAML configuration will be loaded. This gives you full control over which costs are used and their parameters.
 
-**Requirements for auto-discovery:**
-1. Your file must contain a cost class that inherits from `CostBase`
-2. Your file must contain a corresponding config class that inherits from `CostConfig`
-3. The config class name must be: `{CostClassName}Config`
+**Steps:**
+1. Create your custom cost file in the appropriate directory:
+   - `curobo/src/curobo/rollout/cost/custom/arm_base/` for general robot costs
+   - `curobo/src/curobo/rollout/cost/custom/arm_reacher/` for task-specific costs
 
-**Example:**
-```python
-# File: curobo/src/curobo/rollout/cost/custom/arm_base/my_custom_cost.py
-
-from dataclasses import dataclass
-import torch
-from curobo.rollout.cost.cost_base import CostBase, CostConfig
-from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
-
-@dataclass
-class MyCustomCostConfig(CostConfig):
-    my_parameter: float = 1.0
-
-class MyCustomCost(CostBase, MyCustomCostConfig):
-    def __init__(self, config: MyCustomCostConfig):
-        MyCustomCostConfig.__init__(self, **vars(config))
-        CostBase.__init__(self)
-    
-    def forward(self, state: KinematicModelState, **kwargs) -> torch.Tensor:
-        # Your cost computation here
-        return self._weight * torch.zeros((1, 1))  # Replace with actual cost
-```
-
-That's it! The cost will be automatically discovered and loaded with default parameters.
-
-### Option 2: Explicit Configuration (Legacy Method)
-You can still explicitly configure custom costs in your YAML configuration:
+2. Add explicit configuration to your YAML file:
 
 ```yaml
-custom:
-  arm_base:
-    my_custom_cost:
-      module_path: "path.to.your.module"
-      class_name: "MyCustomCost"
-      config_class_name: "MyCustomCostConfig"  # Optional
-      weight: 50.0
-      my_parameter: 2.0
-      terminal: False
+cost:
+  # ... other cost configurations ...
+  
+  custom:
+    arm_base:
+      my_energy_cost:
+        module_path: "curobo.rollout.cost.custom.arm_base.energy_cost"
+        class_name: "EnergyCost"
+        config_class_name: "EnergyCostConfig"
+        weight: 10.0
+        terminal: false
+        
+    arm_reacher:
+      my_task_cost:
+        module_path: "curobo.rollout.cost.custom.arm_reacher.task_cost"
+        class_name: "TaskCost"
+        config_class_name: "TaskCostConfig" 
+        weight: 25.0
+        terminal: false
 ```
+
+3. **Only the costs you explicitly configure will be loaded** - this gives you precise control.
+
+### 2. **Auto-Discovery (Advanced)**
+
+Auto-discovery automatically finds and loads all custom cost files in the directories. This is disabled by default.
+
+**To enable auto-discovery:**
+1. Set `enable_auto_discovery: true` in your solver configuration
+2. Don't include a `custom:` section in your YAML (or leave it empty)
+3. All `.py` files in the custom directories will be automatically loaded with default parameters
+
+**Note:** Auto-discovery uses default weights and parameters. Use explicit configuration for fine-tuned control.
 
 ## Directory Structure
 
 ```
-curobo/src/curobo/rollout/cost/
-├── custom_cost_term_template/          # Templates and examples
-│   ├── README.md                       # This file
-│   ├── custom_cost_template.py         # Template for creating costs
-│   └── example_custom_cost.py          # Working examples
-└── custom/                             # Auto-discovery directories
-    ├── arm_base/                       # General robot costs
-    │   ├── __init__.py
-    │   └── energy_cost.py              # Example energy cost
-    └── arm_reacher/                    # Task-specific costs
-        ├── __init__.py
-        └── task_cost.py                # Example task cost
+curobo/src/curobo/rollout/cost/custom/
+├── arm_base/                    # General robot costs (velocity, energy, etc.)
+│   ├── __init__.py
+│   └── energy_cost.py          # Example: Energy minimization cost
+├── arm_reacher/                 # Task-specific costs (pose tracking, etc.)
+│   ├── __init__.py
+│   └── task_cost.py            # Example: Task-specific pose cost
+└── custom_cost_term_template/   # Templates and examples
+    ├── README.md               # This file
+    ├── custom_cost_template.py # Template for creating new costs
+    └── example_particle_mpc.yml # Example configuration
 ```
 
-## When to Use arm_base vs arm_reacher
+## When to Use Each Directory
 
-### arm_base (General Robot Costs)
-Use for costs that apply to general robot behavior, independent of specific tasks:
+### `arm_base/` - General Robot Costs
+Use for costs that apply to general robot behavior:
 - Energy minimization
-- Smoothness constraints  
-- Joint velocity/acceleration limits
-- Robot-specific safety constraints
-- Dynamic constraints
+- Smoothness penalties
+- Joint limit avoidance
+- Velocity/acceleration constraints
+- Self-collision avoidance enhancements
 
-### arm_reacher (Task-Specific Costs)
-Use for costs that are specific to manipulation tasks:
-- End-effector position/orientation costs
+### `arm_reacher/` - Task-Specific Costs  
+Use for costs specific to reaching/manipulation tasks:
+- End-effector pose tracking
 - Workspace constraints
-- Task-specific obstacle avoidance
-- Tool orientation constraints
-- Task-dependent rewards
+- Orientation preferences
+- Task-specific collision avoidance
+- Multi-arm coordination
 
-## Creating Custom Cost Terms
+## Creating Custom Costs
 
-### 1. Copy the Template
-Start with `custom_cost_template.py` as your base:
+### Step 1: Create Your Cost Class
 
-```bash
-# Copy to arm_base for general costs
-cp custom_cost_template.py ../custom/arm_base/my_cost.py
+Use `custom_cost_template.py` as a starting point. Your cost must:
 
-# Copy to arm_reacher for task-specific costs  
-cp custom_cost_template.py ../custom/arm_reacher/my_task_cost.py
-```
-
-### 2. Implement Your Cost Function
-The key method to implement is `forward()`:
+1. **Inherit from `CostBase`**
+2. **Have a corresponding config class inheriting from `CostConfig`**
+3. **Implement the `forward()` method**
 
 ```python
-def forward(self, state: KinematicModelState, **kwargs) -> torch.Tensor:
-    """
-    Compute your custom cost.
-    
-    Args:
-        state: Contains robot state (joint positions, velocities, etc.)
-        **kwargs: Additional arguments (important for arm_reacher compatibility)
-        
-    Returns:
-        torch.Tensor: Cost values of shape [batch_size, horizon]
-    """
-    # Access robot state
-    positions = state.state_seq.position      # [batch, horizon, n_dofs]
-    velocities = state.state_seq.velocity     # [batch, horizon, n_dofs] 
-    accelerations = state.state_seq.acceleration  # [batch, horizon, n_dofs]
-    
-    # For arm_reacher, you can also access:
-    ee_positions = state.ee_pos_seq          # [batch, horizon, 3]
-    ee_quaternions = state.ee_quat_seq       # [batch, horizon, 4]
-    
-    # Compute your cost
-    cost = torch.zeros_like(positions[:, :, 0])  # [batch, horizon]
-    
-    return self._weight * cost
-```
+from curobo.rollout.cost.cost_base import CostBase, CostConfig
 
-### 3. Configuration Class
-Define parameters for your cost:
-
-```python
-@dataclass 
 class MyCostConfig(CostConfig):
-    """Configuration for my custom cost."""
+    def __init__(self, my_parameter: float = 1.0, **kwargs):
+        self.my_parameter = my_parameter
+        super().__init__(**kwargs)
+
+class MyCost(CostBase):
+    def __init__(self, config: MyCostConfig):
+        super().__init__(config)
+        self._my_parameter = config.my_parameter
     
-    # Add your parameters here
-    scale_factor: float = 1.0
-    enable_feature: bool = True
-    target_value: float = 0.0
-    
-    def __post_init__(self):
-        return super().__post_init__()
+    def forward(self, state):
+        # Implement your cost computation
+        cost = compute_my_cost(state, self._my_parameter)
+        return self._weight * cost
 ```
 
-## Advanced Features
+### Step 2: Choose Configuration Method
 
-### Disabling Auto-Discovery
-If you want to disable auto-discovery (e.g., for performance in production):
+**For precise control (recommended):**
+Add explicit configuration to your YAML as shown above.
 
-```python
-# In your configuration loading code
-cost_cfg = ArmCostConfig.from_dict(
-    cost_dict, 
-    robot_config, 
-    enable_auto_discovery=False
-)
-```
-
-### Mixing Auto-Discovery with Explicit Configuration
-- Auto-discovered costs get default parameters
-- Explicitly configured costs override auto-discovered ones
-- You can mix both approaches in the same configuration
-
-### Override Auto-Discovered Parameters
-Create a custom configuration to override default parameters of auto-discovered costs:
-
-```yaml
-custom:
-  arm_base:
-    auto_energy_cost_EnergyCost:  # Auto-discovered cost name format
-      weight: 100.0  # Override default weight
-      energy_scale: 2.0  # Override parameter
-```
+**For quick testing:**
+Enable auto-discovery in your solver config and place your file in the appropriate directory.
 
 ## Examples
 
-See the example files:
-- `example_custom_cost.py` - Complete working examples
-- `custom/arm_base/energy_cost.py` - Energy minimization cost
-- `custom/arm_reacher/task_cost.py` - Task-specific pose cost
+The system includes example custom costs:
+
+- **`arm_base/energy_cost.py`**: Energy minimization cost with velocity/acceleration penalties
+- **`arm_reacher/task_cost.py`**: Task-specific pose cost for enhanced end-effector tracking
+
+## Configuration Parameters
+
+When using explicit configuration, you can specify:
+
+- `module_path`: Path to your Python module
+- `class_name`: Name of your cost class
+- `config_class_name`: Name of your config class (optional)
+- `weight`: Cost weight (required)
+- `terminal`: Whether this is a terminal cost (optional, default: false)
+- Any custom parameters your cost needs
 
 ## Best Practices
 
-1. **Tensor Operations**: Always ensure your operations work with batched tensors
-2. **Device Handling**: Use `self.tensor_args.device` and `self.tensor_args.dtype`
-3. **Error Handling**: Add type checks for tensor inputs
-4. **Documentation**: Document your cost function's purpose and parameters
-5. **Testing**: Test with different batch sizes and horizons
-6. **Naming**: Use descriptive names for your cost files and classes
+1. **Use explicit configuration for production code** - it's more predictable and maintainable
+2. **Start with low weights** and tune gradually
+3. **Test your costs in isolation** before combining with others
+4. **Follow the naming convention**: `YourCost` and `YourCostConfig`
+5. **Document your custom parameters** in the config class
+6. **Use appropriate tensor operations** for GPU compatibility
 
 ## Troubleshooting
 
-### Cost Not Loading
-- Check that your file is in the correct directory (`arm_base` or `arm_reacher`)
-- Ensure your class inherits from `CostBase`
-- Verify the config class name follows the pattern: `{CostClass}Config`
-- Check the CuRobo logs for auto-discovery messages
+**"Custom cost not loaded":**
+- Check that the module path is correct
+- Verify class names match exactly (case-sensitive)
+- Ensure your config class inherits from `CostConfig`
+- Check that the cost is explicitly configured in your YAML
 
-### Runtime Errors
-- Verify tensor shapes match expected dimensions
-- Check that all operations are differentiable (PyTorch compatible)
-- Ensure proper device placement of tensors
+**"Import errors":**
+- Verify the module path starts with `curobo.rollout.cost.custom`
+- Check that `__init__.py` files exist in the directories
+- Ensure all dependencies are imported correctly
 
-### Performance Issues
-- Minimize expensive operations in the forward pass
-- Use efficient tensor operations
-- Consider disabling auto-discovery in production for faster startup 
+**"Cost has no effect":**
+- Check the weight value - it might be too small
+- Verify the cost is enabled (`cost_instance.enabled`)
+- Use live plotting to monitor cost values during optimization
+
+## Integration with Existing Systems
+
+Custom costs integrate seamlessly with CuRobo's existing cost system:
+- They work with MPPI, iLQR, and other optimizers
+- Compatible with CUDA graphs for performance
+- Support batched operations for multiple trajectories
+- Work with live plotting and debugging tools
+
+For more advanced usage and examples, see the template files in this directory. 

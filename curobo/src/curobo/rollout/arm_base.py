@@ -257,7 +257,7 @@ class ArmCostConfig:
         robot_config: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
-        enable_auto_discovery: bool = True,
+        enable_auto_discovery: bool = False,
     ):
         k_list = ArmCostConfig._get_base_keys()
         data = ArmCostConfig._get_formatted_dict(
