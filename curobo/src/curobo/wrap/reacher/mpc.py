@@ -245,6 +245,7 @@ class MpcSolverConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=False,
+            _num_particles_rollout_full=config_data["mppi"]["num_particles"],
         )
         safety_cfg = ArmReacherConfig.from_dict(
             robot_cfg,
@@ -257,6 +258,7 @@ class MpcSolverConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=False,
+            _num_particles_rollout_full=config_data["mppi"]["num_particles"],
         )
         aux_cfg = ArmReacherConfig.from_dict(
             robot_cfg,
@@ -269,8 +271,9 @@ class MpcSolverConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=False,
+            _num_particles_rollout_full=config_data["mppi"]["num_particles"],
         )
-
+        # cfg._num_particles_rollout_full = config_data["mppi"]["num_particles"] # added for custom cost terms
         arm_rollout_mppi = ArmReacher(cfg)
         arm_rollout_safety = ArmReacher(safety_cfg)
         arm_rollout_aux = ArmReacher(aux_cfg)

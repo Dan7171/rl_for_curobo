@@ -12,7 +12,7 @@
 from dataclasses import dataclass
 import datetime
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 # Third Party
 import torch
@@ -124,6 +124,7 @@ class ArmReacherCostConfig(ArmCostConfig):
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
         enable_auto_discovery: bool = False,
+        _num_particles_rollout_full: int = -1,
     ):
         k_list = ArmReacherCostConfig._get_base_keys()
         
@@ -141,6 +142,7 @@ class ArmReacherCostConfig(ArmCostConfig):
             robot_cfg,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         
         # Handle custom costs with auto-discovery (inherited from ArmCostConfig)
@@ -148,7 +150,8 @@ class ArmReacherCostConfig(ArmCostConfig):
         data["custom_cfg"] = ArmCostConfig._parse_custom_costs(
             custom_dict, 
             tensor_args, 
-            enable_auto_discovery=enable_auto_discovery
+            enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         
         return ArmReacherCostConfig(**data)
@@ -156,9 +159,9 @@ class ArmReacherCostConfig(ArmCostConfig):
 
 @dataclass
 class ArmReacherConfig(ArmBaseConfig):
-    cost_cfg: ArmReacherCostConfig
-    constraint_cfg: ArmReacherCostConfig
-    convergence_cfg: ArmReacherCostConfig
+    cost_cfg: Optional[ArmReacherCostConfig] = None
+    constraint_cfg: Optional[ArmReacherCostConfig] = None
+    convergence_cfg: Optional[ArmReacherCostConfig] = None
 
     @staticmethod
     def cost_from_dict(
@@ -167,6 +170,7 @@ class ArmReacherConfig(ArmBaseConfig):
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
         enable_auto_discovery: bool = False,
+        _num_particles_rollout_full: int = -1,
     ):
         return ArmReacherCostConfig.from_dict(
             cost_data_dict,
@@ -174,7 +178,81 @@ class ArmReacherConfig(ArmBaseConfig):
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
+
+    @classmethod
+    def from_dict(
+        cls,
+        robot_cfg: Union[Dict, RobotConfig],
+        model_data_dict: Dict,
+        cost_data_dict: Dict,
+        constraint_data_dict: Dict,
+        convergence_data_dict: Dict,
+        world_coll_checker_dict: Optional[Dict] = None,
+        world_model_dict: Optional[Dict] = None,
+        world_coll_checker: Optional[WorldCollision] = None,
+        tensor_args: TensorDeviceType = TensorDeviceType(),
+        enable_auto_discovery: bool = False,
+        _num_particles_rollout_full: int = -1,
+    ):
+        """Create ArmReacherConfig from dictionary, properly handling _num_particles_rollout_full parameter."""
+        
+        # Call parent from_dict method with all parameters
+        base_config = super().from_dict(
+            robot_cfg=robot_cfg,
+            model_data_dict=model_data_dict,
+            cost_data_dict=cost_data_dict,
+            constraint_data_dict=constraint_data_dict,
+            convergence_data_dict=convergence_data_dict,
+            world_coll_checker_dict=world_coll_checker_dict,
+            world_model_dict=world_model_dict,
+            world_coll_checker=world_coll_checker,
+            tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
+        )
+        
+        # Override cost configurations with ArmReacher-specific ones
+        cost = cls.cost_from_dict(
+            cost_data_dict,
+            base_config.model_cfg.robot_config,
+            world_coll_checker=base_config.world_coll_checker,
+            tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
+        )
+        constraint = cls.cost_from_dict(
+            constraint_data_dict,
+            base_config.model_cfg.robot_config,
+            world_coll_checker=base_config.world_coll_checker,
+            tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
+        )
+        convergence = cls.cost_from_dict(
+            convergence_data_dict,
+            base_config.model_cfg.robot_config,
+            world_coll_checker=base_config.world_coll_checker,
+            tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
+        )
+        
+        # Create ArmReacherConfig with the proper cost configurations
+        result = cls(
+            model_cfg=base_config.model_cfg,
+            cost_cfg=cost,
+            constraint_cfg=constraint,
+            convergence_cfg=convergence,
+            world_coll_checker=base_config.world_coll_checker,
+            tensor_args=base_config.tensor_args,
+            sum_horizon=base_config.sum_horizon,
+            sampler_seed=base_config.sampler_seed,
+            _num_particles_rollout_full=_num_particles_rollout_full,
+        )
+        
+        return result
 
 
 @get_torch_jit_decorator()
@@ -326,8 +404,11 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             "arm_reacher" in self.cost_cfg.custom_cfg):
             for cost_name, cost_info in self.cost_cfg.custom_cfg["arm_reacher"].items():
                 try:
+                    
                     cost_class = cost_info["cost_class"]
                     cost_config = cost_info["cost_config"]
+                    cost_config._horizon_rollout_full = self.horizon
+                    cost_config._num_particles_rollout_full = self._num_particles_rollout_full
                     cost_instance = cost_class(cost_config)
                     self._custom_arm_reacher_costs[cost_name] = cost_instance
                     log_info(f"Initialized custom arm_reacher cost: {cost_name}")

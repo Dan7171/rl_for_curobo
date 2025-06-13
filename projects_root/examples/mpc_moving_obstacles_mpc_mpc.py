@@ -512,7 +512,6 @@ def main():
                         else:
                             p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
-                # col_pred:DynamicObsCollPredictor = robots[i].dynamic_obs_col_pred
                 col_pred = robots[i].get_col_pred()                
                 if t_idx == 0:
                     # dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)

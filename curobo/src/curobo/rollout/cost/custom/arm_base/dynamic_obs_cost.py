@@ -31,6 +31,8 @@ class CustomCostConfig(CostConfig):
     
     # Add your custom parameters here for dynamic obstacle collision checking
     # syntax: "param: type = default_value"
+    _horizon_rollout_full: int = -1
+    _num_particles_rollout_full: int = -1
     p_R: tuple = (0, 0, 0) # position of the robot in the world frame
     n_own_spheres: int = 61 # number of spheres to check for collision
     n_coll_spheres_valid: int = 61 # number of spheres to check for collision
@@ -60,14 +62,14 @@ class DynamicObsCost(CostBase, CustomCostConfig):
         CustomCostConfig.__init__(self, **vars(config))
         CostBase.__init__(self)
 
-  
+
         assert isinstance(self.weight, torch.Tensor), "weight must be a torch.Tensor"
         weight_arg = self.weight.item() # to float
         # Initialize the dynamic obstacle collision predictor after tensor_args is set up
         self.dynamic_obs_col_pred = DynamicObsCollPredictor(
             self.tensor_args,
-            30, # TODO fixed - to change
-            400, # TODO fixed - to change
+            self._horizon_rollout_full, 
+            self._num_particles_rollout_full, 
             self.n_own_spheres,
             self.n_coll_spheres_valid,
             weight_arg,
@@ -116,7 +118,7 @@ class DynamicObsCost(CostBase, CustomCostConfig):
             dtype=self.tensor_args.dtype
         )
         
-        is_mpc_initiation_step = state.robot_spheres.shape[0] != self._batch_size # self.dynamic_obs_col_checker.n_rollouts
+        is_mpc_initiation_step = state.robot_spheres.shape[0] != self._num_particles_rollout_full# self.dynamic_obs_col_checker.n_rollouts
         if is_mpc_initiation_step:
             return dummy_output
 

@@ -417,7 +417,7 @@ class RolloutConfig:
     tensor_args: TensorDeviceType
     sum_horizon: bool = False
     sampler_seed: int = 1312
-
+    _num_particles_rollout_full: int = -1 # added for custom cost terms
 
 class RolloutBase:
     def __init__(self, config: Optional[RolloutConfig] = None):
@@ -430,6 +430,7 @@ class RolloutBase:
         self.cu_rollout_constraint_graph = None
         if config is not None:
             self.tensor_args = config.tensor_args
+            
 
     def _init_after_config_load(self):
         self.act_sample_gen = HaltonGenerator(

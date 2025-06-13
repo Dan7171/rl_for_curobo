@@ -163,12 +163,13 @@ class ArmCostConfig:
         return discovered_costs
 
     @staticmethod
-    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType, enable_auto_discovery: bool = False) -> Dict:
+    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType, enable_auto_discovery: bool = False, _num_particles_rollout_full: int = -1) -> Dict:
         """Parse custom cost configurations for arm_base or arm_reacher."""
         custom_costs = {}
         
         print(f"[DEBUG] _parse_custom_costs called with custom_dict: {custom_dict}")
         print(f"[DEBUG] enable_auto_discovery: {enable_auto_discovery}")
+        print(f"[DEBUG] _num_particles_rollout_full: {_num_particles_rollout_full}")
         
         # Check if there are any explicitly configured custom costs
         has_explicit_arm_base_costs = "arm_base" in custom_dict and custom_dict["arm_base"]
@@ -201,6 +202,12 @@ class ArmCostConfig:
                         # Create a copy of the config dict without the class info fields
                         config_params = {k: v for k, v in cost_config.items() 
                                        if k not in ['module_path', 'class_name', 'config_class_name']}
+                        
+                        # Add the _num_particles_rollout_full parameter to config_params
+                        config_params['_num_particles_rollout_full'] = _num_particles_rollout_full
+                        config_params['_horizon_rollout_full'] = -1  # Default value, should be set elsewhere
+                        
+                        print(f"[DEBUG] config_params with particles: {config_params}")
                         
                         # Load the custom cost class
                         cost_class = ArmCostConfig._load_custom_cost_class(module_path, class_name)
@@ -251,6 +258,10 @@ class ArmCostConfig:
                         config_params = {k: v for k, v in cost_config.items() 
                                        if k not in ['module_path', 'class_name', 'config_class_name']}
                         
+                        # Add the _num_particles_rollout_full parameter to config_params
+                        config_params['_num_particles_rollout_full'] = _num_particles_rollout_full
+                        config_params['_horizon_rollout_full'] = -1  # Default value, should be set elsewhere
+                        
                         # Load the custom cost class
                         cost_class = ArmCostConfig._load_custom_cost_class(module_path, class_name)
                         if cost_class:
@@ -291,6 +302,7 @@ class ArmCostConfig:
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
         enable_auto_discovery: bool = False,
+        _num_particles_rollout_full: int = -1,
     ):
         k_list = ArmCostConfig._get_base_keys()
         data = ArmCostConfig._get_formatted_dict(
@@ -299,6 +311,7 @@ class ArmCostConfig:
             robot_config,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         
         # Handle custom costs with auto-discovery
@@ -306,7 +319,8 @@ class ArmCostConfig:
         data["custom_cfg"] = ArmCostConfig._parse_custom_costs(
             custom_dict, 
             tensor_args, 
-            enable_auto_discovery=enable_auto_discovery
+            enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         
         return ArmCostConfig(**data)
@@ -318,6 +332,7 @@ class ArmCostConfig:
         robot_config: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
+        _num_particles_rollout_full: int = -1,
     ):
         data = {}
         for k in cost_key_list:
@@ -340,6 +355,7 @@ class ArmBaseConfig(RolloutConfig):
     constraint_cfg: Optional[ArmCostConfig] = None
     convergence_cfg: Optional[ArmCostConfig] = None
     world_coll_checker: Optional[WorldCollision] = None
+    _num_particles_rollout_full: int = -1
     
 
     @staticmethod
@@ -357,6 +373,7 @@ class ArmBaseConfig(RolloutConfig):
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
         enable_auto_discovery: bool = False,
+        _num_particles_rollout_full: int = -1,
     ):
         return ArmCostConfig.from_dict(
             cost_data_dict,
@@ -364,6 +381,7 @@ class ArmBaseConfig(RolloutConfig):
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
 
     @staticmethod
@@ -402,6 +420,7 @@ class ArmBaseConfig(RolloutConfig):
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
         enable_auto_discovery: bool = False,
+        _num_particles_rollout_full: int = -1,
     ):
         """Create ArmBase class from dictionary
 
@@ -418,6 +437,7 @@ class ArmBaseConfig(RolloutConfig):
             world_coll_checker (Optional[WorldCollision], optional): _description_. Defaults to None.
             tensor_args (TensorDeviceType, optional): _description_. Defaults to TensorDeviceType().
             enable_auto_discovery (bool, optional): Enable auto-discovery of custom costs. Defaults to False.
+            _num_particles_rollout_full (int, optional): Number of particles for rollout. Defaults to -1.
         Returns:
             _type_: _description_
         """
@@ -433,6 +453,7 @@ class ArmBaseConfig(RolloutConfig):
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         constraint = cls.cost_from_dict(
             constraint_data_dict,
@@ -440,6 +461,7 @@ class ArmBaseConfig(RolloutConfig):
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         convergence = cls.cost_from_dict(
             convergence_data_dict,
@@ -447,6 +469,7 @@ class ArmBaseConfig(RolloutConfig):
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
             enable_auto_discovery=enable_auto_discovery,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
         return cls(
             model_cfg=model,
@@ -455,6 +478,7 @@ class ArmBaseConfig(RolloutConfig):
             convergence_cfg=convergence,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            _num_particles_rollout_full=_num_particles_rollout_full,
         )
 
 
@@ -469,7 +493,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         if config is not None:
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
-        self._num_particles_rollout = -1  # Initialize this to avoid recursion
+        # self._num_particles_rollout = -1  # Initialize this to avoid recursion
         self._init_after_config_load()
         # self._dynamic_obs_coll_predictor: Optional[DynamicObsCollPredictor] = None
 
@@ -579,9 +603,8 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 
                 # Pass rollout parameters to custom cost config if they have safe defaults
                 # Note: num_particles is not available during initialization, will be set later by optimizer
-                if hasattr(cost_config, 'horizon_rollout'):
-                    cost_config.horizon_rollout = self.horizon
-                
+                cost_config._horizon_rollout_full = self.horizon
+                cost_config._num_particles_rollout_full = self._num_particles_rollout_full
                 # Instantiate the custom cost
                 custom_cost_instance = cost_class(cost_config)
                 self._custom_arm_base_costs[cost_name] = custom_cost_instance
@@ -1014,25 +1037,25 @@ class ArmBase(RolloutBase, ArmBaseConfig):
     def cspace_config(self) -> CSpaceConfig:
         return self.dynamics_model.robot_model.kinematics_config.cspace
 
-    @property
-    def num_particles_rollout(self):
-        return self._num_particles_rollout
+    # @property
+    # def num_particles_rollout(self):
+    #     return self._num_particles_rollout
     
-    def set_num_particles_rollout(self, num_particles: int):
-        """Set the number of particles for rollout (called by optimizer)."""
-        was_uninitialized = self._num_particles_rollout <= 0
-        self._num_particles_rollout = num_particles
+    # def set_num_particles_rollout(self, num_particles: int):
+    #     """Set the number of particles for rollout (called by optimizer)."""
+    #     was_uninitialized = self._num_particles_rollout <= 0
+    #     self._num_particles_rollout = num_particles
         
-        # Update custom costs if they exist and need this parameter
-        if hasattr(self, '_custom_arm_base_costs'):
-            for cost_name, cost_instance in self._custom_arm_base_costs.items():
-                if hasattr(cost_instance, 'num_particles_rollout'):
-                    cost_instance.num_particles_rollout = num_particles
-                    log_info(f"Updated num_particles_rollout={num_particles} for custom arm_base cost: {cost_name}")
+    #     # Update custom costs if they exist and need this parameter
+    #     if hasattr(self, '_custom_arm_base_costs'):
+    #         for cost_name, cost_instance in self._custom_arm_base_costs.items():
+    #             if hasattr(cost_instance, 'num_particles_rollout'):
+    #                 cost_instance.num_particles_rollout = num_particles
+    #                 log_info(f"Updated num_particles_rollout={num_particles} for custom arm_base cost: {cost_name}")
                     
-                    # Trigger initialization if the cost has a _initialize_predictor method
-                    if hasattr(cost_instance, '_initialize_predictor'):
-                        cost_instance._initialize_predictor()
+    #                 # Trigger initialization if the cost has a _initialize_predictor method
+    #                 if hasattr(cost_instance, '_initialize_predictor'):
+    #                     cost_instance._initialize_predictor()
 
     def get_full_dof_from_solution(self, q_js: JointState) -> JointState:
         """This function will all the dof that are locked during optimization.
