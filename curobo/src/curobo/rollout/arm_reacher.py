@@ -40,6 +40,7 @@ from curobo.util.tensor_util import cat_max
 from curobo.util.torch_utils import get_torch_jit_decorator
 
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+from curobo.rollout.cost.pose_cost_multi_arm import PoseCostMultiArm
 
 # Local Folder
 from .arm_base import ArmBase, ArmBaseConfig, ArmCostConfig
@@ -356,7 +357,6 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 and self.goal_cost.enabled
             ):
                 # Check if this is a multi-arm pose cost that needs special handling
-                from curobo.rollout.cost.pose_cost_multi_arm import PoseCostMultiArm
                 is_multi_arm_pose_cost = isinstance(self.goal_cost, PoseCostMultiArm)
                 
                 # Format end-effector data for multi-arm pose cost if needed
@@ -744,11 +744,11 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         for p in pose_costs:
             p.update_metric(metric, update_offset_waypoint=False)
 
-    def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
-        self._dynamic_obs_coll_predictor = predictor
+    # def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
+    #     self._dynamic_obs_coll_predictor = predictor
     
-    def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
-        return self._dynamic_obs_coll_predictor
+    # def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
+    #     return self._dynamic_obs_coll_predictor
 
     def _update_live_plot_reacher(self, cost_list):
         """Update live plot of cost values in real-time with comprehensive ArmReacher labeling"""
@@ -820,10 +820,11 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     cost_labels_dynamic.append(f'Custom Base: {class_name}')
                     base_cost_count += 1
         
-        # Check for dynamic obstacles (added after custom arm_base costs)
-        if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
-            cost_labels_dynamic.append('Dynamic Obstacles')
-            base_cost_count += 1
+        # # Check for dynamic obstacles (added after custom arm_base costs)
+        # if hasattr(self, 'dynamic_obs_cost') and self._dynamic_obs_coll_predictor is not None:
+        #     cost_labels_dynamic.append('Dynamic Obstacles')
+        #     base_cost_count += 1
+        
         if hasattr(self, 'manipulability_cost') and self.manipulability_cost.enabled:
             cost_labels_dynamic.append('Manipulability')
             base_cost_count += 1
@@ -904,8 +905,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             custom_costs = [label for label, _, _ in active_costs if 'Custom' in label]
             if custom_costs:
                 print(f"Custom costs detected: {custom_costs}")
-            goal_costs = [label for label, _, _ in active_costs if 'Goal' in label or 'Pose' in label]
-            print(f"Goal/Pose related costs: {goal_costs}")
+            # Only show custom costs debug info, not all goal/pose costs
         
         # Update all plot lines
         for label, history in self._cost_histories.items():

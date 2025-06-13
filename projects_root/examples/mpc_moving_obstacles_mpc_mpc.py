@@ -362,8 +362,11 @@ def main():
         col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
 
-    robots:List[AutonomousFranka] = []
+    robots:List[FrankaMpc] = []
     for i in range(n_robots):
+        # Determine which override file to use based on robot index
+        override_file = f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/override_particle_files_multiple_robots/particle_mpc{i}.yml"
+        
         robots.append(FrankaMpc(
             robot_cfgs[i], 
             my_world, 
@@ -373,7 +376,8 @@ def main():
             p_T_R=X_Targets_R[i][:3],
             q_T_R=X_Targets_R[i][3:], 
             target_color=target_colors[i],
-            cost_live_plotting_cfg=cost_live_plotting_cfgs[i]
+            cost_live_plotting_cfg=cost_live_plotting_cfgs[i],
+            override_particle_file=override_file
             )
         )
     # ENVIRONMENT OBSTACLES - INITIALIZATION
@@ -410,9 +414,9 @@ def main():
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot.init_joints(robot_idx_lists[i])
         # init dynamic obs coll predictors
-        if OBS_PREDICTION and len(col_pred_with[i]):
-            obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
-            robot.init_col_predictor(obs_groups_nspheres, cost_weight=100, manually_express_p_own_in_world_frame=True)
+        # if OBS_PREDICTION and len(col_pred_with[i]):
+        #     # obs_groups_nspheres = [robots[obs_robot_idx].get_num_of_sphers() for obs_robot_idx in col_pred_with[i]]
+        #     # robot.init_col_predictor(obs_groups_nspheres, cost_weight=100, manually_express_p_own_in_world_frame=True)
         
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
         checker = robots[i].get_cchecker() # available only after init_solver
@@ -508,7 +512,8 @@ def main():
                         else:
                             p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
-                col_pred:DynamicObsCollPredictor = robots[i].dynamic_obs_col_pred
+                # col_pred:DynamicObsCollPredictor = robots[i].dynamic_obs_col_pred
+                col_pred = robots[i].get_col_pred()                
                 if t_idx == 0:
                     # dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
                     col_pred.set_obs_rads(rad_spheresOthersH)

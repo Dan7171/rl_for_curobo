@@ -136,7 +136,7 @@ class AutonomousFranka:
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, subroot=self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R, orientation=self.q_R, initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         self.target = spawn_target(self.world_root+f'/{self.robot_name}_target', self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)
         
-
+  
     @abstractmethod
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         pass
@@ -280,7 +280,7 @@ class AutonomousFranka:
             zero_vel (bool): should multiply the velocities by 0.0 to set them to zero (differs for robot types - MPC and Cumotion).
 
         Returns:
-            JointState: the robot’s joint configuration in curobo's representation.
+            JointState: the robot's joint configuration in curobo's representation.
         """
         if sim_js is None:
             sim_js = self.get_sim_joint_state()
@@ -419,7 +419,7 @@ class AutonomousFranka:
         return js_state_new
     
     @abstractmethod
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
+    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
         pass
     
 class FrankaMpc(AutonomousFranka):
@@ -433,7 +433,9 @@ class FrankaMpc(AutonomousFranka):
                 q_T_R=np.array([0, 1, 0, 0]), 
                 target_color=np.array([0, 0.5, 0]), 
                 target_size=0.05, 
-                cost_live_plotting_cfg:dict={'live_plotting':False, 'save_plots':False}):
+                cost_live_plotting_cfg:dict={'live_plotting':False, 'save_plots':False},
+                override_particle_file:str=None
+                ):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -442,7 +444,7 @@ class FrankaMpc(AutonomousFranka):
             robot_name (_type_): _description_
             p_R (_type_): _description_
             q_R (_type_): _description_
-            p_T (_type_): _description_
+           p_T (_type_): _description_
             q_T_R (_type_): _description_
             target_color (_type_): _description_
             target_size (_type_): _description_
@@ -453,8 +455,23 @@ class FrankaMpc(AutonomousFranka):
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
-        self.override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        self.override_particle_file = override_particle_file # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        
+        # Debug the YAML loading issue
+        print(f"[DEBUG] override_particle_file: {self.override_particle_file}")
+        if self.override_particle_file:
+            import os
+            print(f"[DEBUG] File exists: {os.path.exists(self.override_particle_file)}")
+            if os.path.exists(self.override_particle_file):
+                print(f"[DEBUG] File size: {os.path.getsize(self.override_particle_file)} bytes")
+        
         self.cfg = load_yaml(self.override_particle_file)
+        print(f"[DEBUG] load_yaml result: {self.cfg}")
+        print(f"[DEBUG] cfg type: {type(self.cfg)}")
+        
+        if self.cfg is None:
+            raise ValueError(f"Failed to load YAML file: {self.override_particle_file}")
+            
         self.H = self.cfg["model"]["horizon"]
         self.num_particles = self.cfg["mppi"]["num_particles"]
         self.cost_live_plotting_cfg = cost_live_plotting_cfg
@@ -471,10 +488,10 @@ class FrankaMpc(AutonomousFranka):
             step_dt_traj_mpc (_type_): _description_
             dynamic_obs_coll_predictor (_type_): _description_
         """
-        if hasattr(self, "dynamic_obs_col_pred"):
-            dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
-        else:
-            dynamic_obs_coll_predictor = None
+        # if hasattr(self, "dynamic_obs_col_pred"):
+        #     dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
+        # else:
+        #     dynamic_obs_coll_predictor = None
 
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
@@ -489,8 +506,8 @@ class FrankaMpc(AutonomousFranka):
             use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
             store_rollouts=True,  # Store trajectories for visualization
-            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
-            dynamic_obs_checker=dynamic_obs_coll_predictor, # New
+            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.html
+            # dynamic_obs_checker=dynamic_obs_coll_predictor, # New
             override_particle_file=self.override_particle_file, # New
             cost_live_plotting_cfg=self.cost_live_plotting_cfg # New
         )
@@ -599,6 +616,123 @@ class FrankaMpc(AutonomousFranka):
             _type_: _description_
         """
         return self.solver.solver.optimizers[0].mean_action.squeeze(0)
+    
+    def get_col_pred(self):
+        return self.get_cost_term("dynamic_obs").dynamic_obs_col_pred
+
+    def get_arm_reacher(self):
+        return self.solver.solver.safety_rollout
+    
+    def get_cost_term(self, cost_name:str):
+        """
+        Get a cost term from the arm_reacher (which inherits from arm_base).
+        Args:
+            cost_name (str): the name of the cost term to get (e.g. "dynamic_obs", "pose_cost").
+        Returns:
+            the cost term.
+        """
+        arm_reacher = self.get_arm_reacher()
+        
+        print(f"[DEBUG] Looking for cost: '{cost_name}'")
+        print(f"[DEBUG] ArmReacher type: {type(arm_reacher).__name__}")
+        print(f"[DEBUG] ArmReacher MRO: {[cls.__name__ for cls in type(arm_reacher).__mro__]}")
+        
+        # Check all possible custom cost storage locations
+        custom_cost_attrs = ['_custom_arm_base_costs', '_custom_arm_reacher_costs']
+        for attr_name in custom_cost_attrs:
+            if hasattr(arm_reacher, attr_name):
+                custom_costs = getattr(arm_reacher, attr_name)
+                print(f"[DEBUG] {attr_name} exists: {list(custom_costs.keys()) if custom_costs else 'empty/None'}")
+                if custom_costs:
+                    for k, v in custom_costs.items():
+                        print(f"[DEBUG]   {k}: {type(v).__name__}, enabled={getattr(v, 'enabled', 'no_enabled_attr')}")
+            else:
+                print(f"[DEBUG] {attr_name} does not exist")
+        
+        # Check if cost_cfg has custom_cfg
+        if hasattr(arm_reacher, 'cost_cfg') and hasattr(arm_reacher.cost_cfg, 'custom_cfg'):
+            custom_cfg = arm_reacher.cost_cfg.custom_cfg
+            print(f"[DEBUG] cost_cfg.custom_cfg exists: {custom_cfg is not None}")
+            if custom_cfg:
+                print(f"[DEBUG] cost_cfg.custom_cfg keys: {list(custom_cfg.keys())}")
+                for section, costs in custom_cfg.items():
+                    print(f"[DEBUG]   {section}: {list(costs.keys()) if isinstance(costs, dict) else type(costs).__name__}")
+        
+        # First try to get standard cost terms as attributes
+        if hasattr(arm_reacher, cost_name):
+            attr_value = getattr(arm_reacher, cost_name)
+            if hasattr(attr_value, 'enabled') and attr_value.enabled:
+                print(f"[DEBUG] Found '{cost_name}' as direct attribute (enabled)")
+                return attr_value
+            else:
+                print(f"[DEBUG] Found '{cost_name}' as direct attribute but not enabled or no enabled attr")
+        
+        # Try custom costs using the inherited get_custom_cost method
+        if hasattr(arm_reacher, 'get_custom_cost'):
+            print(f"[DEBUG] Trying get_custom_cost method")
+            custom_cost = arm_reacher.get_custom_cost(cost_name)
+            if custom_cost is not None:
+                print(f"[DEBUG] Found '{cost_name}' via get_custom_cost: {type(custom_cost).__name__}")
+                return custom_cost
+            else:
+                print(f"[DEBUG] get_custom_cost returned None for '{cost_name}'")
+        
+        # Try direct lookup in all custom cost dictionaries
+        for attr_name in custom_cost_attrs:
+            if hasattr(arm_reacher, attr_name):
+                custom_costs = getattr(arm_reacher, attr_name)
+                if custom_costs and cost_name in custom_costs:
+                    print(f"[DEBUG] Found '{cost_name}' in {attr_name} directly")
+                    return custom_costs[cost_name]
+        
+        # Try to find by class name matching in all custom cost dictionaries
+        for attr_name in custom_cost_attrs:
+            if hasattr(arm_reacher, attr_name):
+                custom_costs = getattr(arm_reacher, attr_name)
+                if custom_costs:
+                    for cost_key, cost_instance in custom_costs.items():
+                        class_name = cost_instance.__class__.__name__
+                        print(f"[DEBUG] Checking {attr_name}['{cost_key}'] class_name='{class_name}' against '{cost_name}'")
+                        
+                        # Try various matching strategies
+                        if (cost_name == cost_key or 
+                            cost_name == class_name or
+                            cost_name.lower() == cost_key.lower() or
+                            cost_name.lower() == class_name.lower()):
+                            print(f"[DEBUG] Found match for '{cost_name}' -> '{cost_key}' ({class_name}) in {attr_name}")
+                            return cost_instance
+        
+        # Try to access custom costs from cost_cfg.custom_cfg directly
+        if hasattr(arm_reacher, 'cost_cfg') and hasattr(arm_reacher.cost_cfg, 'custom_cfg'):
+            custom_cfg = arm_reacher.cost_cfg.custom_cfg
+            if custom_cfg:
+                for section_name in ['arm_base', 'arm_reacher']:
+                    if section_name in custom_cfg:
+                        section_costs = custom_cfg[section_name]
+                        print(f"[DEBUG] Checking cost_cfg.custom_cfg['{section_name}'] for '{cost_name}'")
+                        if cost_name in section_costs:
+                            cost_info = section_costs[cost_name]
+                            print(f"[DEBUG] Found '{cost_name}' in cost_cfg.custom_cfg['{section_name}']")
+                            if isinstance(cost_info, dict) and 'cost_class' in cost_info and 'cost_config' in cost_info:
+                                # Try to instantiate the cost if it's not already instantiated
+                                cost_class = cost_info['cost_class']
+                                cost_config = cost_info['cost_config']
+                                cost_instance = cost_class(cost_config)
+                                print(f"[DEBUG] Instantiated '{cost_name}' from cost_cfg: {type(cost_instance).__name__}")
+                                return cost_instance
+                            else:
+                                print(f"[DEBUG] cost_cfg entry for '{cost_name}' is not in expected format: {type(cost_info)}")
+        
+        # Build comprehensive error message
+        available_attrs = [attr for attr in dir(arm_reacher) if not attr.startswith('_') and hasattr(getattr(arm_reacher, attr, None), 'enabled')]
+        custom_cost_info = arm_reacher.list_custom_costs() if hasattr(arm_reacher, 'list_custom_costs') else {}
+        
+        error_msg = f"Cost term '{cost_name}' not found in arm_reacher or arm_base. "
+        error_msg += f"Available arm_reacher custom costs: {list(custom_cost_info.keys())}. "
+        error_msg += f"Class names: {[info.get('class_name', 'unknown') for info in custom_cost_info.values()]}. "
+        error_msg += f"Available cost attributes: {available_attrs}"
+        
+        raise ValueError(error_msg)
     
     def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True):
         """
@@ -745,20 +879,21 @@ class FrankaMpc(AutonomousFranka):
         return plan 
         
        
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
-        n_particles = self.num_particles 
-        H = self.H # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
-        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
-                                                            None,
-                                                            H,
-                                                            n_particles,
-                                                            self.n_coll_spheres_valid,
-                                                            sum(obs_groups_nspheres),
-                                                            cost_weight,
-                                                            obs_groups_nspheres,
-                                                            manually_express_p_own_in_world_frame,
-                                                            torch.from_numpy(self.p_R))
-        return self.dynamic_obs_col_pred
+    # def init_col_predictor(self,obs_groups_nspheres:list[int]=[], manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
+    #     cost_weight = self.cfg['cost']['dynamic_obs']['weight']
+    #     n_particles = self.num_particles 
+    #     H = self.H # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
+    #     self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
+    #                                                         None,
+    #                                                         H,
+    #                                                         n_particles,
+    #                                                         self.n_coll_spheres_valid,
+    #                                                         sum(obs_groups_nspheres),
+    #                                                         cost_weight,
+    #                                                         obs_groups_nspheres,
+    #                                                         manually_express_p_own_in_world_frame,
+    #                                                         torch.from_numpy(self.p_R))
+    #     return self.dynamic_obs_col_pred
     
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, 
@@ -911,7 +1046,7 @@ class FrankaCumotion(AutonomousFranka):
             enable_graph=self.enable_graph_planner, # Use graph planner to generate collision-free seed for trajectory optimization.
             enable_graph_attempt=2, # Number of failed attempts at which to fallback to a graph planner for obtaining trajectory seeds.
             max_attempts=self.max_attempts, # Maximum number of attempts allowed to solve the motion generation problem.
-            enable_finetune_trajopt=self.enable_finetune_trajopt, # Run finetuning trajectory optimization after running 100 iterations of trajectory optimization. This will provide shorter and smoother trajectories. When MotionGenConfig.optimize_dt is True, this flag will also scale the trajectory optimization by a new dt. Leave this to True for most cases. If you are not interested in finding time-optimal solutions and only want to use motion generation as a feasibility check, set this to False. Note that when set to False, the resulting trajectory is only guaranteed to be collision-free and within joint limits. When False, it’s not guaranteed to be smooth and might not execute on a real robot.
+            enable_finetune_trajopt=self.enable_finetune_trajopt, # Run finetuning trajectory optimization after running 100 iterations of trajectory optimization. This will provide shorter and smoother trajectories. When MotionGenConfig.optimize_dt is True, this flag will also scale the trajectory optimization by a new dt. Leave this to True for most cases. If you are not interested in finding time-optimal solutions and only want to use motion generation as a feasibility check, set this to False. Note that when set to False, the resulting trajectory is only guaranteed to be collision-free and within joint limits. When False, it's not guaranteed to be smooth and might not execute on a real robot.
             time_dilation_factor=self.dilation_factor, # Slow down optimized trajectory by re-timing with a dilation factor. This is useful to execute trajectories at a slower speed for debugging. Use this to generate slower trajectories instead of reducing MotionGenConfig.velocity_scale or MotionGenConfig.acceleration_scale as those parameters will require re-tuning of the cost terms while MotionGenPlanConfig.time_dilation_factor will only post-process the trajectory.
         )
     
@@ -951,7 +1086,7 @@ class FrankaCumotion(AutonomousFranka):
             if self.constrain_grasp_approach:
                 # cuRobo also can enable constrained motions for part of a trajectory.
                 # This is useful in pick and place tasks where traditionally the robot goes to an offset pose (pre-grasp pose) and then moves 
-                # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it’s orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
+                # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it's orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
                 # https://curobo.org/advanced_examples/3_constrained_planning.html#:~:text=Grasp%20Approach%20Vector,behavior%20as%20below.
                 # Enables moving to a pregrasp and then locked orientation movement to final grasp.
                 # Since this is added as a cost, the trajectory will not reach the exact offset, instead it will try to take a blended path to the final grasp without stopping at the offset.
@@ -1110,19 +1245,19 @@ class FrankaCumotion(AutonomousFranka):
             self.cmd_joint_state.jerk[:] = qdd_des * 0.0
         return self.cmd_joint_state.clone()
         
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=True) -> DynamicObsCollPredictor:
-        n_particles = self.num_trajopt_seeds 
-        H = self.trajopt_tsteps # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
-        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
-                                                            None,
-                                                            H,
-                                                            n_particles,
-                                                            self.n_coll_spheres_valid,
-                                                            sum(obs_groups_nspheres),
-                                                            cost_weight,
-                                                            obs_groups_nspheres,
-                                                            manually_express_p_own_in_world_frame,
-                                                            torch.from_numpy(self.p_R))
-        return self.dynamic_obs_col_pred
+    # def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=True) -> DynamicObsCollPredictor:
+    #     n_particles = self.num_trajopt_seeds 
+    #     H = self.trajopt_tsteps # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
+    #     self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
+    #                                                         None,
+    #                                                         H,
+    #                                                         n_particles,
+    #                                                         self.n_coll_spheres_valid,
+    #                                                         sum(obs_groups_nspheres),
+    #                                                         cost_weight,
+    #                                                         obs_groups_nspheres,
+    #                                                         manually_express_p_own_in_world_frame,
+    #                                                         torch.from_numpy(self.p_R))
+    #     return self.dynamic_obs_col_pred
     
     

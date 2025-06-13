@@ -163,21 +163,45 @@ class ArmCostConfig:
         return discovered_costs
 
     @staticmethod
-    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType, enable_auto_discovery: bool = True) -> Dict:
+    def _parse_custom_costs(custom_dict: Dict, tensor_args: TensorDeviceType, enable_auto_discovery: bool = False) -> Dict:
         """Parse custom cost configurations for arm_base or arm_reacher."""
         custom_costs = {}
         
-        # Process explicitly configured arm_base custom costs
+        print(f"[DEBUG] _parse_custom_costs called with custom_dict: {custom_dict}")
+        print(f"[DEBUG] enable_auto_discovery: {enable_auto_discovery}")
+        
+        # Check if there are any explicitly configured custom costs
+        has_explicit_arm_base_costs = "arm_base" in custom_dict and custom_dict["arm_base"]
+        has_explicit_arm_reacher_costs = "arm_reacher" in custom_dict and custom_dict["arm_reacher"]
+        
+        print(f"[DEBUG] arm_base in custom_dict: {'arm_base' in custom_dict}")
         if "arm_base" in custom_dict:
+            print(f"[DEBUG] custom_dict['arm_base']: {custom_dict['arm_base']}")
+            print(f"[DEBUG] type of custom_dict['arm_base']: {type(custom_dict['arm_base'])}")
+            print(f"[DEBUG] bool(custom_dict['arm_base']): {bool(custom_dict['arm_base'])}")
+        
+        print(f"[DEBUG] has_explicit_arm_base_costs: {has_explicit_arm_base_costs}")
+        print(f"[DEBUG] has_explicit_arm_reacher_costs: {has_explicit_arm_reacher_costs}")
+        
+        # Process explicitly configured arm_base custom costs
+        if has_explicit_arm_base_costs:
+            print(f"[DEBUG] Processing explicit arm_base costs...")
             custom_costs["arm_base"] = {}
             for cost_name, cost_config in custom_dict["arm_base"].items():
+                print(f"[DEBUG] Processing cost: {cost_name} with config: {cost_config}")
                 if isinstance(cost_config, dict):
-                    # Extract class information
-                    module_path = cost_config.pop("module_path", None)
-                    class_name = cost_config.pop("class_name", None)
-                    config_class_name = cost_config.pop("config_class_name", None)
+                    # Extract class information (use get() instead of pop() to avoid modifying original dict)
+                    module_path = cost_config.get("module_path", None)
+                    class_name = cost_config.get("class_name", None)
+                    config_class_name = cost_config.get("config_class_name", None)
+                    
+                    print(f"[DEBUG] module_path: {module_path}, class_name: {class_name}, config_class_name: {config_class_name}")
                     
                     if module_path and class_name:
+                        # Create a copy of the config dict without the class info fields
+                        config_params = {k: v for k, v in cost_config.items() 
+                                       if k not in ['module_path', 'class_name', 'config_class_name']}
+                        
                         # Load the custom cost class
                         cost_class = ArmCostConfig._load_custom_cost_class(module_path, class_name)
                         if cost_class:
@@ -185,21 +209,25 @@ class ArmCostConfig:
                             if config_class_name:
                                 config_class = ArmCostConfig._load_custom_cost_class(module_path, config_class_name)
                                 if config_class:
-                                    cost_cfg = config_class(**cost_config, tensor_args=tensor_args)
+                                    cost_cfg = config_class(**config_params, tensor_args=tensor_args)
                                 else:
                                     # Fallback to basic CostConfig
-                                    cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                                    cost_cfg = CostConfig(**config_params, tensor_args=tensor_args)
                             else:
                                 # Use basic CostConfig
-                                cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                                cost_cfg = CostConfig(**config_params, tensor_args=tensor_args)
                             
                             custom_costs["arm_base"][cost_name] = {
                                 "cost_class": cost_class,
                                 "cost_config": cost_cfg
                             }
+                            print(f"[DEBUG] Successfully added custom cost: {cost_name}")
+        else:
+            print(f"[DEBUG] No explicit arm_base costs to process")
         
-        # Auto-discover arm_base costs if enabled
-        if enable_auto_discovery:
+        # Auto-discover arm_base costs only if enabled AND no explicit arm_base costs are configured
+        if enable_auto_discovery and not has_explicit_arm_base_costs:
+            print(f"[DEBUG] Auto-discovery enabled and no explicit arm_base costs, discovering...")
             if "arm_base" not in custom_costs:
                 custom_costs["arm_base"] = {}
             discovered_arm_base = ArmCostConfig._discover_custom_costs_in_directory("arm_base", tensor_args)
@@ -209,16 +237,20 @@ class ArmCostConfig:
                     custom_costs["arm_base"][cost_name] = cost_info
         
         # Process explicitly configured arm_reacher custom costs
-        if "arm_reacher" in custom_dict:
+        if has_explicit_arm_reacher_costs:
             custom_costs["arm_reacher"] = {}
             for cost_name, cost_config in custom_dict["arm_reacher"].items():
                 if isinstance(cost_config, dict):
-                    # Extract class information
-                    module_path = cost_config.pop("module_path", None)
-                    class_name = cost_config.pop("class_name", None)
-                    config_class_name = cost_config.pop("config_class_name", None)
+                    # Extract class information (use get() instead of pop() to avoid modifying original dict)
+                    module_path = cost_config.get("module_path", None)
+                    class_name = cost_config.get("class_name", None)
+                    config_class_name = cost_config.get("config_class_name", None)
                     
                     if module_path and class_name:
+                        # Create a copy of the config dict without the class info fields
+                        config_params = {k: v for k, v in cost_config.items() 
+                                       if k not in ['module_path', 'class_name', 'config_class_name']}
+                        
                         # Load the custom cost class
                         cost_class = ArmCostConfig._load_custom_cost_class(module_path, class_name)
                         if cost_class:
@@ -226,21 +258,21 @@ class ArmCostConfig:
                             if config_class_name:
                                 config_class = ArmCostConfig._load_custom_cost_class(module_path, config_class_name)
                                 if config_class:
-                                    cost_cfg = config_class(**cost_config, tensor_args=tensor_args)
+                                    cost_cfg = config_class(**config_params, tensor_args=tensor_args)
                                 else:
                                     # Fallback to basic CostConfig
-                                    cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                                    cost_cfg = CostConfig(**config_params, tensor_args=tensor_args)
                             else:
                                 # Use basic CostConfig
-                                cost_cfg = CostConfig(**cost_config, tensor_args=tensor_args)
+                                cost_cfg = CostConfig(**config_params, tensor_args=tensor_args)
                             
                             custom_costs["arm_reacher"][cost_name] = {
                                 "cost_class": cost_class,
                                 "cost_config": cost_cfg
                             }
         
-        # Auto-discover arm_reacher costs if enabled
-        if enable_auto_discovery:
+        # Auto-discover arm_reacher costs only if enabled AND no explicit arm_reacher costs are configured
+        if enable_auto_discovery and not has_explicit_arm_reacher_costs:
             if "arm_reacher" not in custom_costs:
                 custom_costs["arm_reacher"] = {}
             discovered_arm_reacher = ArmCostConfig._discover_custom_costs_in_directory("arm_reacher", tensor_args)
@@ -249,6 +281,7 @@ class ArmCostConfig:
                 if cost_name not in custom_costs["arm_reacher"]:
                     custom_costs["arm_reacher"][cost_name] = cost_info
         
+        print(f"[DEBUG] Final custom_costs: {custom_costs}")
         return custom_costs
 
     @staticmethod
@@ -307,6 +340,7 @@ class ArmBaseConfig(RolloutConfig):
     constraint_cfg: Optional[ArmCostConfig] = None
     convergence_cfg: Optional[ArmCostConfig] = None
     world_coll_checker: Optional[WorldCollision] = None
+    
 
     @staticmethod
     def model_from_dict(
@@ -322,12 +356,14 @@ class ArmBaseConfig(RolloutConfig):
         robot_cfg: RobotConfig,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
+        enable_auto_discovery: bool = False,
     ):
         return ArmCostConfig.from_dict(
             cost_data_dict,
             robot_cfg,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
         )
 
     @staticmethod
@@ -365,6 +401,7 @@ class ArmBaseConfig(RolloutConfig):
         world_model_dict: Optional[Dict] = None,
         world_coll_checker: Optional[WorldCollision] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
+        enable_auto_discovery: bool = False,
     ):
         """Create ArmBase class from dictionary
 
@@ -380,7 +417,7 @@ class ArmBaseConfig(RolloutConfig):
             world_model_dict (Optional[Dict], optional): _description_. Defaults to None.
             world_coll_checker (Optional[WorldCollision], optional): _description_. Defaults to None.
             tensor_args (TensorDeviceType, optional): _description_. Defaults to TensorDeviceType().
-
+            enable_auto_discovery (bool, optional): Enable auto-discovery of custom costs. Defaults to False.
         Returns:
             _type_: _description_
         """
@@ -395,18 +432,21 @@ class ArmBaseConfig(RolloutConfig):
             robot_cfg,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
         )
         constraint = cls.cost_from_dict(
             constraint_data_dict,
             robot_cfg,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
         )
         convergence = cls.cost_from_dict(
             convergence_data_dict,
             robot_cfg,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=enable_auto_discovery,
         )
         return cls(
             model_cfg=model,
@@ -425,17 +465,19 @@ class ArmBase(RolloutBase, ArmBaseConfig):
 
     @profiler.record_function("arm_base/init")
     def __init__(self, config: Optional[ArmBaseConfig] = None):
+        """Initialize ArmBase."""
         if config is not None:
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
+        self._num_particles_rollout = -1  # Initialize this to avoid recursion
         self._init_after_config_load()
-        self._dynamic_obs_coll_predictor: Optional[DynamicObsCollPredictor] = None
+        # self._dynamic_obs_coll_predictor: Optional[DynamicObsCollPredictor] = None
 
-    def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
-        self._dynamic_obs_coll_predictor = predictor
+    # def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
+    #     self._dynamic_obs_coll_predictor = predictor
     
-    def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
-        return self._dynamic_obs_coll_predictor
+    # def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
+    #     return self._dynamic_obs_coll_predictor
     
     @profiler.record_function("arm_base/init_after_config_load")
     def _init_after_config_load(self):
@@ -530,19 +572,22 @@ class ArmBase(RolloutBase, ArmBaseConfig):
 
         # Initialize custom costs for arm_base
         self._custom_arm_base_costs = {}
-        if (hasattr(self.cost_cfg, 'custom_cfg') and 
-            self.cost_cfg.custom_cfg is not None and 
-            "arm_base" in self.cost_cfg.custom_cfg):
+        if self.cost_cfg.custom_cfg is not None and "arm_base" in self.cost_cfg.custom_cfg:
             for cost_name, cost_info in self.cost_cfg.custom_cfg["arm_base"].items():
-                try:
-                    cost_class = cost_info["cost_class"]
-                    cost_config = cost_info["cost_config"]
-                    cost_instance = cost_class(cost_config)
-                    self._custom_arm_base_costs[cost_name] = cost_instance
-                    log_info(f"Initialized custom arm_base cost: {cost_name}")
-                except Exception as e:
-                    log_error(f"Failed to initialize custom arm_base cost {cost_name}: {e}")
-
+                cost_class = cost_info["cost_class"]
+                cost_config = cost_info["cost_config"]
+                
+                # Pass rollout parameters to custom cost config if they have safe defaults
+                # Note: num_particles is not available during initialization, will be set later by optimizer
+                if hasattr(cost_config, 'horizon_rollout'):
+                    cost_config.horizon_rollout = self.horizon
+                
+                # Instantiate the custom cost
+                custom_cost_instance = cost_class(cost_config)
+                self._custom_arm_base_costs[cost_name] = custom_cost_instance
+                log_info(f"Successfully loaded custom arm_base cost: {cost_name}")
+                    
+                
         # set start state:
         start_state = torch.randn(
             (1, self.dynamics_model.d_state), **(self.tensor_args.as_torch_dict())
@@ -602,14 +647,10 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                             log_error(f"Error computing custom arm_base cost {cost_name}: {e}")
         
         # Dynamic obstacle predictive collision checking.
-        dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
-        if dynamic_obs_col_checker is not None:
-            # dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-            # cost_list.append(dynamic_coll_cost) 
-            is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
-            if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
-                dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-                cost_list.append(dynamic_coll_cost) 
+        # dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
+        # if dynamic_obs_col_checker is not None:
+        #     # dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
+        #     # cost_list.append(dynamic_coll_cost) 
 
 
         # Note: Live plotting is handled by child classes (e.g., ArmReacher) to avoid duplicate plots
@@ -973,6 +1014,26 @@ class ArmBase(RolloutBase, ArmBaseConfig):
     def cspace_config(self) -> CSpaceConfig:
         return self.dynamics_model.robot_model.kinematics_config.cspace
 
+    @property
+    def num_particles_rollout(self):
+        return self._num_particles_rollout
+    
+    def set_num_particles_rollout(self, num_particles: int):
+        """Set the number of particles for rollout (called by optimizer)."""
+        was_uninitialized = self._num_particles_rollout <= 0
+        self._num_particles_rollout = num_particles
+        
+        # Update custom costs if they exist and need this parameter
+        if hasattr(self, '_custom_arm_base_costs'):
+            for cost_name, cost_instance in self._custom_arm_base_costs.items():
+                if hasattr(cost_instance, 'num_particles_rollout'):
+                    cost_instance.num_particles_rollout = num_particles
+                    log_info(f"Updated num_particles_rollout={num_particles} for custom arm_base cost: {cost_name}")
+                    
+                    # Trigger initialization if the cost has a _initialize_predictor method
+                    if hasattr(cost_instance, '_initialize_predictor'):
+                        cost_instance._initialize_predictor()
+
     def get_full_dof_from_solution(self, q_js: JointState) -> JointState:
         """This function will all the dof that are locked during optimization.
 
@@ -1070,8 +1131,8 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                     cost_labels_dynamic.append(f'Custom: {class_name}')
         
         # Check for dynamic obstacles and manipulability (added after custom costs)
-        if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
-            cost_labels_dynamic.append('Dynamic Obstacles')
+        # if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
+        #     cost_labels_dynamic.append('Dynamic Obstacles')
         if hasattr(self, 'manipulability_cost') and self.manipulability_cost.enabled:
             cost_labels_dynamic.append('Manipulability')
         
@@ -1195,3 +1256,54 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             print(f"Cost plot saved to {os.path.join(self._cost_plots_dir, filename)}")
         else:
             print("No plot available to save. Enable live plotting first.")
+
+    def get_custom_cost(self, cost_identifier: str):
+        """Get a custom cost by name or class name.
+        
+        Args:
+            cost_identifier: Can be the exact cost key, class name, or simplified name
+            
+        Returns:
+            The custom cost instance if found, None otherwise
+        """
+        if not hasattr(self, '_custom_arm_base_costs'):
+            return None
+            
+        # First try exact match
+        if cost_identifier in self._custom_arm_base_costs:
+            return self._custom_arm_base_costs[cost_identifier]
+        
+        # Try to find by class name or simplified name
+        for cost_key, cost_instance in self._custom_arm_base_costs.items():
+            class_name = cost_instance.__class__.__name__
+            
+            # Match by class name
+            if class_name == cost_identifier:
+                return cost_instance
+            
+            # Match by simplified name (e.g., "dynamic_obs_cost" matches "DynamicObsCost")
+            simplified_class_name = ''.join(['_' + c.lower() if c.isupper() else c for c in class_name]).lstrip('_')
+            if simplified_class_name == cost_identifier:
+                return cost_instance
+            
+            # Match by partial name in the key
+            if cost_identifier in cost_key:
+                return cost_instance
+                
+        return None
+
+    def list_custom_costs(self):
+        """List all available custom costs with their keys and class names."""
+        if not hasattr(self, '_custom_arm_base_costs'):
+            return {}
+            
+        cost_info = {}
+        for cost_key, cost_instance in self._custom_arm_base_costs.items():
+            class_name = cost_instance.__class__.__name__
+            simplified_name = ''.join(['_' + c.lower() if c.isupper() else c for c in class_name]).lstrip('_')
+            cost_info[cost_key] = {
+                'class_name': class_name,
+                'simplified_name': simplified_name,
+                'enabled': cost_instance.enabled if hasattr(cost_instance, 'enabled') else 'unknown'
+            }
+        return cost_info

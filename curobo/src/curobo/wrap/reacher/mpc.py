@@ -119,7 +119,7 @@ class MpcSolverConfig:
         particle_file: str = "particle_mpc.yml",
         override_particle_file: str = None,
         project_pose_to_goal_frame: bool = True,
-        dynamic_obs_checker=None,
+        # dynamic_obs_checker=None,
         cost_live_plotting_cfg: dict = {},
     ):
         """Create an MPC solver configuration from robot and world configuration.
@@ -244,6 +244,7 @@ class MpcSolverConfig:
             world_model,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=False,
         )
         safety_cfg = ArmReacherConfig.from_dict(
             robot_cfg,
@@ -255,6 +256,7 @@ class MpcSolverConfig:
             world_model,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=False,
         )
         aux_cfg = ArmReacherConfig.from_dict(
             robot_cfg,
@@ -266,13 +268,14 @@ class MpcSolverConfig:
             world_model,
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
+            enable_auto_discovery=False,
         )
 
         arm_rollout_mppi = ArmReacher(cfg)
         arm_rollout_safety = ArmReacher(safety_cfg)
         arm_rollout_aux = ArmReacher(aux_cfg)
-        if cost_live_plotting_cfg["live_plotting"]:
-            arm_rollout_mppi.enable_live_plotting(cost_live_plotting_cfg["save_plots"])
+        if cost_live_plotting_cfg.get("live_plotting", False):
+            arm_rollout_mppi.enable_live_plotting(cost_live_plotting_cfg.get("save_plots", False))
         config_data["mppi"]["store_rollouts"] = store_rollouts
         if use_cuda_graph is not None:
             config_data["mppi"]["use_cuda_graph"] = use_cuda_graph
@@ -307,6 +310,7 @@ class MpcSolverConfig:
                 world_model,
                 world_coll_checker=world_coll_checker,
                 tensor_args=tensor_args,
+                enable_auto_discovery=False,
             )
 
             arm_rollout_grad = ArmReacher(grad_cfg)
@@ -330,7 +334,7 @@ class MpcSolverConfig:
             use_cuda_graph_full_step=use_cuda_graph_full_step,
             world_coll_checker=world_coll_checker,
             rollout_fn=arm_rollout_aux,
-            dynamic_obs_checker=dynamic_obs_checker  # Include in constructor
+            # dynamic_obs_checker=dynamic_obs_checker  # Include in constructor
         )
 
 
@@ -387,10 +391,10 @@ class MpcSolver(MpcSolverConfig):
 
         # self.rollout_fn.set_dynamic_obs_checker(config.dynamic_obs_checker)
         # Set the dynamic obstacle checker in all rollout functions
-        self.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
-        self.solver.safety_rollout.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
-        for optimizer in self.solver.optimizers:
-            optimizer.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        # self.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        # self.solver.safety_rollout.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
+        # for optimizer in self.solver.optimizers:
+        #     optimizer.rollout_fn.set_dynamic_obs_coll_predictor(self.dynamic_obs_checker)
         
     def setup_solve_single(self, goal: Goal, num_seeds: Optional[int] = None) -> Goal:
         """Creates a goal buffer to solve for a robot to reach target pose or joint configuration.

@@ -25,7 +25,17 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_opt=None, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100.0, obs_groups_nspheres=[], manually_express_p_own_in_world_frame=False, p_R=torch.zeros(3)):
+    def __init__(self, 
+                tensor_args, 
+                H=30, 
+                n_rollouts=400, 
+                n_own_spheres=61, 
+                n_obs=61, 
+                cost_weight=100.0, 
+                obs_groups_nspheres=[], 
+                manually_express_p_own_in_world_frame=False, 
+                p_R=torch.zeros(3),
+                safety_margin=0.1):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -33,7 +43,6 @@ class DynamicObsCollPredictor:
         Args:
             tensor_args: pytorch tensor arguments.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
-            step_dt_traj_opt (float): Time passes between each step in the trajectory. This is what the mpc/curobo solver assumes time delta between steps in horizon is when parforming path planning.
             H (int, optional): Defaults to 30. The horizon length- number of states in the trajectory during trajectory optimization.
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
@@ -43,9 +52,9 @@ class DynamicObsCollPredictor:
             """
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
+        self.safety_margin = safety_margin
         self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
         self.n_rollouts = n_rollouts 
-        self.step_dt_traj_opt = step_dt_traj_opt 
         self.cost_weight = cost_weight
         self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
         self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
@@ -153,7 +162,7 @@ class DynamicObsCollPredictor:
             self.p_obs_buf[:, range_start:range_end, :].copy_(p_obs[obs_group_id][:, range_start:range_end,:]) # copy p_obs to self.p_obs in place.
 
 
-    def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
+    def cost_fn(self, prad_own:torch.Tensor):
         """
         Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
         Args:
@@ -183,7 +192,7 @@ class DynamicObsCollPredictor:
         #     self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
         
         # Every time
-        
+        safety_margin = self.safety_margin
         self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
         if self.manually_express_p_own_in_world_frame: # shift the robot spheres positions to the world frame, if not already in world frame (if manually_express_p_own_in_world_frame is True).
             torch.add(self.p_own_buf, self.p_R_broadcasted_buf, out=self.p_own_buf)

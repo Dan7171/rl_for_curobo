@@ -78,48 +78,16 @@ cost:
   # Uncomment and modify the section below to use explicit custom costs:
   
   # Example of explicit custom cost configuration:
-  # custom:
-  #   # Custom costs that run in arm_base (general robot costs)
-  #   arm_base:
-  #     # Energy minimization cost from our custom file
-  #     energy_cost:
-  #       module_path: "curobo.rollout.cost.custom.arm_base.energy_cost"
-  #       class_name: "EnergyCost"
-  #       config_class_name: "EnergyCostConfig"
-  #       weight: 10.0  # Adjust weight as needed
-  #       terminal: False
-  #       
-  #     # Add more arm_base custom costs here...
-  #     # my_custom_cost:
-  #     #   module_path: "curobo.rollout.cost.custom.arm_base.my_custom_file"
-  #     #   class_name: "MyCustomCost"
-  #     #   config_class_name: "MyCustomCostConfig"
-  #     #   weight: 50.0
-  #     #   my_parameter: 2.0
-  #     #   terminal: False
+  custom:
+    arm_base:
+      dynamic_obs:
+        module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
+        class_name: "DynamicObsCost"
+        config_class_name: "CustomCostConfig"
+        weight: 100.0
+        terminal: False
+        n_coll_spheres_valid: 61 # number of spheres to check for collision
 
-  #   # Custom costs that run in arm_reacher (task-specific costs)  
-  #   arm_reacher:
-  #     # Task-specific pose cost from our custom file
-  #     task_cost:
-  #       module_path: "curobo.rollout.cost.custom.arm_reacher.task_cost"
-  #       class_name: "TaskCost"
-  #       config_class_name: "TaskCostConfig"
-  #       weight: 25.0  # Adjust weight as needed
-  #       terminal: False
-  #       
-  #     # Add more arm_reacher custom costs here...
-  #     # my_task_cost:
-  #     #   module_path: "curobo.rollout.cost.custom.arm_reacher.my_task_file"
-  #     #   class_name: "MyTaskCost"
-  #     #   weight: 100.0
-  #     #   task_parameter: 1.5
-  #     #   terminal: True
-  
-  # To enable custom costs: 
-  # 1. Uncomment the 'custom:' section above
-  # 2. Uncomment the specific costs you want to use
-  # 3. Adjust weights and parameters as needed
 
 
 mppi:

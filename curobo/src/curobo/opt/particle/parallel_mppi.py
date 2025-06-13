@@ -165,6 +165,10 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
         self.info = dict(rollout_time=0.0, entropy=[])
         self._batch_size = -1
         self._store_debug = False
+        
+        # Notify rollout function about number of particles if it supports this
+        if hasattr(self.rollout_fn, 'set_num_particles_rollout') and callable(getattr(self.rollout_fn, 'set_num_particles_rollout', None)):
+            self.rollout_fn.set_num_particles_rollout(self.num_particles)
 
     def get_rollouts(self):
         return self.top_trajs
