@@ -23,6 +23,7 @@ class DynamicObsCostConfig(CostConfig):
     n_coll_spheres_valid: int = -1
     n_own_spheres: int = -1
     sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
+    sparse_spheres: dict = field(default_factory=lambda: {'exclude_self': [], 'exclude_others': []})
     col_pred: Optional[DynamicObsCollPredictor] = None
     def __post_init__(self):
         return super().__post_init__()
@@ -47,7 +48,8 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                                                             [],
                                                             False,
                                                             torch.tensor(self.p_R),
-                                                            self.sparse_steps)
+                                                            self.sparse_steps,
+                                                            self.sparse_spheres)
 
     def __post_init__(self):
         return super().__post_init__()

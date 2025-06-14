@@ -30,13 +30,14 @@ class DynamicObsCollPredictor:
                  step_dt_traj_opt=None, 
                  H=30, 
                  n_rollouts=400, 
-                 n_own_spheres=61, 
-                 n_obs=61, 
+                 n_own_spheres=65, # total number of spheres of the robot (including ones that we don't want to check for collision)
+                 n_obs=65, # total number of spheres of the obstacles in the world (including ones that we don't want to check for collision)
                  cost_weight=100.0, 
                  obs_groups_nspheres=[], 
                  manually_express_p_own_in_world_frame=False, 
                  p_R=torch.zeros(3),
-                 sparse_steps:dict={'use': False, 'ratio': 0.5}
+                 sparse_steps:dict={'use': False, 'ratio': 0.5},
+                 sparse_spheres:dict={'exclude_self': [], 'exclude_others': []} # list of ints, each int is the index of the sphere to exclude from the collision check.
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -58,6 +59,7 @@ class DynamicObsCollPredictor:
         self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
         self.n_rollouts = n_rollouts 
         
+        # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
         if self.sparse_steps['use']:
             assert self.sparse_steps['ratio'] > 0 and self.sparse_steps['ratio'] <= 1, "Error: The ratio must be between 0 and 1"
@@ -66,33 +68,43 @@ class DynamicObsCollPredictor:
         else:
             self.n_sampling_steps = self.H
             self.sampling_timesteps = np.arange(self.H)
-            
+    
+
         self.step_dt_traj_opt = step_dt_traj_opt 
         self.cost_weight = cost_weight
+
+        # control sparsity over spheres - filter out spheres which are not needed/less relevant (for efficiency)
+        self.sparse_spheres = sparse_spheres # sparse spheres config
+        
         self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        self.valid_own_spheres = torch.tensor(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])), device=self.tensor_args.device)
+        
         self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
-        self.obs_groups_nspheres = obs_groups_nspheres # list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
-        if len(obs_groups_nspheres) > 0:
-            assert sum(obs_groups_nspheres) == self.n_obs, "Error: The sum of the number of obstacles in the groups must be equal to the total number of obstacles"
-            self.obs_groups_start_idx_list = ([0] + list(np.cumsum(obs_groups_nspheres)))[:-1] # list of ints, each int is the start index of the group in the world.
+        self.valid_obs_spheres = np.array(list(set(list(range(self.n_obs))) - set(self.sparse_spheres['exclude_others'])))# torch.tensor(list(set(list(range(self.n_obs))) - set(self.sparse_spheres['exclude_others'])), device=self.tensor_args.device)
+        
+        # self.obs_groups_nspheres = obs_groups_nspheres # list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
+        # if len(obs_groups_nspheres) > 0:
+        #     assert sum(obs_groups_nspheres) == self.n_obs, "Error: The sum of the number of obstacles in the groups must be equal to the total number of obstacles"
+        #     self.obs_groups_start_idx_list = ([0] + list(np.cumsum(obs_groups_nspheres)))[:-1] # list of ints, each int is the start index of the group in the world.
         
         # Buffers for obstacles (spheres): position and radius
-        self.rad_obs_buf = torch.zeros(self.n_obs, device=self.tensor_args.device) # [n_obs] obstacles radii buffer
+        self.rad_obs_buf = torch.zeros(len(self.valid_obs_spheres), device=self.tensor_args.device) # [n_obs] obstacles radii buffer
         self.rad_obs_buf_unsqueezed = self.rad_obs_buf.reshape(1, *self.rad_obs_buf.shape) # [1 x n_obs]  Added 1 dimension for intermediate calculations
         # self.p_obs_buf = torch.zeros((self.H, self.n_obs, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
-        self.p_obs_buf = torch.zeros((self.n_sampling_steps, self.n_obs, 3), device=self.tensor_args.device)
+        self.p_obs_buf = torch.zeros((self.n_sampling_steps, len(self.valid_obs_spheres), 3), device=self.tensor_args.device)
 
         # self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,H,1,self.n_obs,3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
-        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,self.n_sampling_steps,1,self.n_obs,3)
+        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,self.n_sampling_steps,1,len(self.valid_obs_spheres),3)
 
         # Buffers for own spheres: position and radius
         # self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        # self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, len(self.valid_own_spheres), 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
         
         # self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
-        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
+        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,len(self.valid_own_spheres),1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
         
-        self.rad_own_buf = torch.zeros(self.n_own_spheres, device=self.tensor_args.device) # [n_own] Own spheres radii buffer
+        self.rad_own_buf = torch.zeros(len(self.valid_own_spheres), device=self.tensor_args.device) # [n_own] Own spheres radii buffer
         self.rad_own_buf_unsqueezed = self.rad_own_buf.reshape(*self.rad_own_buf.shape, 1) # [n_own x 1] added 1 dimension for intermediate calculations
 
         # Buffers for intermediate calculations
@@ -114,15 +126,15 @@ class DynamicObsCollPredictor:
             self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
             self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
         
-    def get_obs_group_idx_range(self, obs_group_idx:int):
-        """
-        Get the start (inclusive) and end (exclusive) indices of the obstacles in the group.
-        For example, if the group is the first group, then the start index is 2 and its length is 2, returns (2,4).
-        """
-        return self.obs_groups_start_idx_list[obs_group_idx], (self.obs_groups_start_idx_list[obs_group_idx+1] if (obs_group_idx + 1) < len(self.obs_groups_start_idx_list) else self.n_obs) # self.obs_groups_nspheres[obs_group_idx]
+    # def get_obs_group_idx_range(self, obs_group_idx:int):
+    #     """
+    #     Get the start (inclusive) and end (exclusive) indices of the obstacles in the group.
+    #     For example, if the group is the first group, then the start index is 2 and its length is 2, returns (2,4).
+    #     """
+    #     return self.obs_groups_start_idx_list[obs_group_idx], (self.obs_groups_start_idx_list[obs_group_idx+1] if (obs_group_idx + 1) < len(self.obs_groups_start_idx_list) else self.n_obs) # self.obs_groups_nspheres[obs_group_idx]
     
-    def get_n_obs(self):
-        return self.n_obs
+    # def get_n_obs(self):
+    #     return self.n_obs
     
     def _project_sparse_to_full_horizon(self, sparse_matrix: torch.Tensor, full_matrix: torch.Tensor):
         """
@@ -180,16 +192,18 @@ class DynamicObsCollPredictor:
         
         # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
         assert rad_obs.ndim == 1, "Error: The obstacle radii must be a 1D tensor"
-        assert rad_obs.shape[0] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
+        # assert rad_obs.shape[0] == self.n_obs # self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
 
-        self.rad_obs_buf.copy_(rad_obs)
+        # self.rad_obs_buf.copy_(rad_obs)
+        self.rad_obs_buf.copy_(rad_obs[self.valid_obs_spheres])
         self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
 
     def set_own_rads(self, rad_own:torch.Tensor):
         """
         Set the radii of the own spheres.
         """
-        self.rad_own_buf.copy_(rad_own) # [n_own] init own spheres radii
+        # self.rad_own_buf.copy_(rad_own) # [n_own] init own spheres radii
+        self.rad_own_buf.copy_(rad_own[self.valid_own_spheres])
         self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
         torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
         self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
@@ -202,16 +216,20 @@ class DynamicObsCollPredictor:
             p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
         """
         # self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
-        self.p_obs_buf.copy_(p_obs[self.sampling_timesteps,:,:]) # copy p_obs to self.p_obs in place.
+        # self.p_obs_buf.copy_(p_obs[self.sampling_timesteps,:,:]) # copy p_obs to self.p_obs in place.
+        # self.p_obs_buf.copy_(p_obs[self.sampling_timesteps, self.valid_obs_spheres,:])
+        
+        # First select the timesteps, then select the spheres
+        temp_obs = p_obs[self.sampling_timesteps, :, :]  # Select timesteps first
+        self.p_obs_buf.copy_(temp_obs[:, self.valid_obs_spheres, :])  # Then select valid spheres
     
-    
-    def update_obs_groups(self, p_obs:list[torch.Tensor],obs_groups_to_update:list[int]):
-        """
-        Update the poses of the obstacles in the groups.
-        """
-        for obs_group_id in obs_groups_to_update:
-            range_start, range_end = self.get_obs_group_idx_range(obs_group_id)
-            self.p_obs_buf[:, range_start:range_end, :].copy_(p_obs[obs_group_id][:, range_start:range_end,:]) # copy p_obs to self.p_obs in place.
+    # def update_obs_groups(self, p_obs:list[torch.Tensor],obs_groups_to_update:list[int]):
+    #     """
+    #     Update the poses of the obstacles in the groups.
+    #     """
+    #     for obs_group_id in obs_groups_to_update:
+    #         range_start, range_end = self.get_obs_group_idx_range(obs_group_id)
+    #         self.p_obs_buf[:, range_start:range_end, :].copy_(p_obs[obs_group_id][:, range_start:range_end,:]) # copy p_obs to self.p_obs in place.
 
 
     def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
@@ -246,17 +264,22 @@ class DynamicObsCollPredictor:
         # Every time
         
         # self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
-        self.p_own_buf.copy_(prad_own[:,self.sampling_timesteps,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        # self.p_own_buf.copy_(prad_own[:,self.sampling_timesteps,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        # self.p_own_buf.copy_(prad_own[:,self.sampling_timesteps,self.valid_own_spheres,:3])
         
+        # First select the timesteps, then select the spheres
+        temp_own = prad_own[:, self.sampling_timesteps, :, :3]  # Select timesteps first
+        self.p_own_buf.copy_(temp_own[:, :, self.valid_own_spheres, :])  # Then select valid spheres
+
         if self.manually_express_p_own_in_world_frame: # shift the robot spheres positions to the world frame, if not already in world frame (if manually_express_p_own_in_world_frame is True).
             torch.add(self.p_own_buf, self.p_R_broadcasted_buf, out=self.p_own_buf)
 
+    
+        # self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
+        self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,len(self.valid_own_spheres),1,3)) # Copy the reshaped version as well.
         
-        # self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
-        # self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs,3)) # Copy the reshaped version 
-        
-        self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
-        self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.n_sampling_steps,1,self.n_obs,3)) # Copy the reshaped version 
+        # self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.n_sampling_steps,1,self.n_obs,3)) # Copy the reshaped version 
+        self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.n_sampling_steps,1,len(self.valid_obs_spheres),3)) # Copy the reshaped version 
         
         torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1

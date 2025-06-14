@@ -592,21 +592,23 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             for cost_name, cost_instance in self._custom_arm_base_costs.items():
                 if cost_instance.enabled:
                     with profiler.record_function(f"cost/custom_arm_base/{cost_name}"):
-                        try:
-                            custom_cost = cost_instance.forward(state)
-                            cost_list.append(custom_cost)
-                        except Exception as e:
-                            log_error(f"Error computing custom arm_base cost {cost_name}: {e}")
+                        custom_cost = cost_instance.forward(state)
+                        cost_list.append(custom_cost)
+                        # try:
+                        #     custom_cost = cost_instance.forward(state)
+                        #     cost_list.append(custom_cost)
+                        # except Exception as e:
+                        #     log_error(f"Error computing custom arm_base cost {cost_name}: {e}")
         
         # Dynamic obstacle predictive collision checking.
-        dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
-        if dynamic_obs_col_checker is not None:
-            # dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-            # cost_list.append(dynamic_coll_cost) 
-            is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
-            if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
-                dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-                cost_list.append(dynamic_coll_cost) 
+        # dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
+        # if dynamic_obs_col_checker is not None:
+        #     # dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
+        #     # cost_list.append(dynamic_coll_cost) 
+        #     is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
+        #     if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
+        #         dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
+        #         cost_list.append(dynamic_coll_cost) 
 
 
         # Note: Live plotting is handled by child classes (e.g., ArmReacher) to avoid duplicate plots

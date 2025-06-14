@@ -92,11 +92,14 @@ cost:
         num_particles: 400
         horizon: 30
         p_R: [0, 0, 0]
-        n_coll_spheres_valid: 61
-        n_own_spheres: 61
+        n_coll_spheres_valid: 65
+        n_own_spheres: 65
         sparse_steps:
           use: True
           ratio: 0.5
+        sparse_spheres:
+          exclude_self: [0,1,4,5,61,62,63,64] # base link and graspped object
+          exclude_others: [0,1,4,5,61,62,63,64] # base link and graspped object
           
         
         # sparse_spheres:

@@ -197,7 +197,8 @@ def print_rate_decorator(func, print_ctrl_rate, rate_name, return_stats=False):
     return wrapper
 
 def print_ctrl_rate_info(t_idx,real_robot_cfm_start_time,real_robot_cfm_start_t_idx,expected_ctrl_freq_at_mpc,MPC_DT):
-    """Prints information about the control loop frequncy (desired vs measured) and warns if it's too different.
+    """Prints informat
+    ion about the control loop frequncy (desired vs measured) and warns if it's too different.
     Args:
         t_idx (_type_): _description_   
         real_robot_cfm_start_time (_type_): _description_
@@ -487,7 +488,7 @@ def main():
         # get other robots states (no prediction) or plans (with prediction) for collision checking
         robots_as_obs_timer_start = time.time()
         if OBS_PREDICTION:         
-            plans = [robots[i].get_plan() for i in range(len(robots))]
+            plans = [robots[i].get_plan(valid_spheres_only=False) for i in range(len(robots))]
         else:
             sphere_states_all_robots:list[torch.Tensor] = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
         robots_as_obs_timer += time.time() - robots_as_obs_timer_start
