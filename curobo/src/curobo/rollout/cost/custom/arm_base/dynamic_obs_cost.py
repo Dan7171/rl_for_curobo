@@ -1,0 +1,64 @@
+"""
+Example energy minimization cost for arm_base.
+Users can copy this file and modify it for their own needs.
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+from curobo.rollout import cost
+import torch
+from curobo.rollout.cost.cost_base import CostBase, CostConfig
+from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
+
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+
+
+@dataclass
+class DynamicObsCostConfig(CostConfig):
+    """Configuration for energy minimization cost."""
+    
+    num_particles: int = -1
+    horizon: int = -1
+    p_R: tuple[float, float, float] = (0, 0, 0)
+    n_coll_spheres_valid: int = -1
+    n_own_spheres: int = -1
+    col_pred: Optional[DynamicObsCollPredictor] = None
+    def __post_init__(self):
+        return super().__post_init__()
+
+    
+class DynamicObsCost(CostBase, DynamicObsCostConfig):
+    """
+    Energy minimization cost that penalizes high velocities and accelerations.
+    This is an arm_base cost - general robot behavior, not task-specific.
+    """
+    
+    def __init__(self, config: DynamicObsCostConfig):
+        DynamicObsCostConfig.__init__(self, **vars(config))
+        CostBase.__init__(self)
+        self.col_pred = DynamicObsCollPredictor(self.tensor_args,
+                                                            None,
+                                                            self.horizon,
+                                                            self.num_particles ,
+                                                            self.n_own_spheres,
+                                                            self.n_coll_spheres_valid,
+                                                            self.weight.cpu().item(),
+                                                            [],
+                                                            False,
+                                                            torch.tensor(self.p_R))
+
+    def __post_init__(self):
+        return super().__post_init__()
+
+    
+    def forward(self, state: KinematicModelState) -> torch.Tensor:
+        """
+        
+        Args:
+            state: Robot kinematic state containing joint information
+            
+        Returns:
+            Cost tensor of shape [batch, horizon]
+        """
+        # Get velocities and accelerations
+        return self.col_pred.cost_fn(state.robot_spheres)

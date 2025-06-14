@@ -5,6 +5,10 @@ except ImportError:
 
 from typing import List, Optional
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
+from curobo.opt.particle.parallel_mppi import ParallelMPPI
+from curobo.rollout.arm_reacher import ArmReacher
+from curobo.rollout.cost.custom.arm_base.dynamic_obs_cost import DynamicObsCost
+from curobo.wrap.wrap_mpc import WrapMpc
 import torch
 from typing import Callable, Dict, Union
 import carb
@@ -433,7 +437,9 @@ class FrankaMpc(AutonomousFranka):
                 q_T_R=np.array([0, 1, 0, 0]), 
                 target_color=np.array([0, 0.5, 0]), 
                 target_size=0.05, 
-                cost_live_plotting_cfg:dict={'live_plotting':False, 'save_plots':False}):
+                cost_live_plotting_cfg:dict={'live_plotting':False, 'save_plots':False},
+                override_particle_file:str=None,
+                ):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
 
@@ -453,7 +459,7 @@ class FrankaMpc(AutonomousFranka):
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
-        self.override_particle_file = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
+        self.override_particle_file = override_particle_file # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
         self.cfg = load_yaml(self.override_particle_file)
         self.H = self.cfg["model"]["horizon"]
         self.num_particles = self.cfg["mppi"]["num_particles"]
@@ -760,6 +766,34 @@ class FrankaMpc(AutonomousFranka):
                                                             torch.from_numpy(self.p_R))
         return self.dynamic_obs_col_pred
     
+
+    def get_solver(self) -> MpcSolver:
+        return self.solver
+
+    def get_wrap_mpc(self) -> WrapMpc:
+        return self.get_solver().solver
+    
+    # def get_rollout_fn(self) -> ArmReacher:
+    #     return self.get_wrap_mpc().rollout_fn
+    
+    def get_safety_rollout(self) -> ArmReacher:
+        return self.get_wrap_mpc().safety_rollout
+    
+    def get_wrap_mpc_optimizer(self) -> ParallelMPPI:
+        return self.get_wrap_mpc().optimizers[0]
+
+    def get_custom_arm_base_costs(self) -> dict:
+        return self.get_wrap_mpc_optimizer().rollout_fn._custom_arm_base_costs
+    
+    def get_custom_arm_reacher_costs(self) -> dict:
+        return self.get_wrap_mpc_optimizer().rollout_fn._custom_arm_reacher_costs
+    
+    def get_col_pred(self):
+        for instance in self.get_custom_arm_base_costs().values():
+            if isinstance(instance, DynamicObsCost):
+                return instance.col_pred
+        raise ValueError("No col_pred found in the rollout_fn")
+
 class FrankaCumotion(AutonomousFranka):
     def __init__(self, 
                 # robot basic parameters
