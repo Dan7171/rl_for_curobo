@@ -534,14 +534,11 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             self.cost_cfg.custom_cfg is not None and 
             "arm_base" in self.cost_cfg.custom_cfg):
             for cost_name, cost_info in self.cost_cfg.custom_cfg["arm_base"].items():
-                try:
-                    cost_class = cost_info["cost_class"]
-                    cost_config = cost_info["cost_config"]
-                    cost_instance = cost_class(cost_config)
-                    self._custom_arm_base_costs[cost_name] = cost_instance
-                    log_info(f"Initialized custom arm_base cost: {cost_name}")
-                except Exception as e:
-                    log_error(f"Failed to initialize custom arm_base cost {cost_name}: {e}")
+                cost_class = cost_info["cost_class"]
+                cost_config = cost_info["cost_config"]
+                cost_instance = cost_class(cost_config)
+                self._custom_arm_base_costs[cost_name] = cost_instance
+                log_info(f"Initialized custom arm_base cost: {cost_name}")
 
         # set start state:
         start_state = torch.randn(

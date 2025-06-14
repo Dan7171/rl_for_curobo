@@ -3,7 +3,7 @@ Example energy minimization cost for arm_base.
 Users can copy this file and modify it for their own needs.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from curobo.rollout import cost
 import torch
@@ -22,6 +22,7 @@ class DynamicObsCostConfig(CostConfig):
     p_R: tuple[float, float, float] = (0, 0, 0)
     n_coll_spheres_valid: int = -1
     n_own_spheres: int = -1
+    sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
     col_pred: Optional[DynamicObsCollPredictor] = None
     def __post_init__(self):
         return super().__post_init__()
@@ -45,7 +46,8 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                                                             self.weight.cpu().item(),
                                                             [],
                                                             False,
-                                                            torch.tensor(self.p_R))
+                                                            torch.tensor(self.p_R),
+                                                            self.sparse_steps)
 
     def __post_init__(self):
         return super().__post_init__()

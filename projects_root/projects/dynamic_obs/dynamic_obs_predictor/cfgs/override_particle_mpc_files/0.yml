@@ -94,38 +94,15 @@ cost:
         p_R: [0, 0, 0]
         n_coll_spheres_valid: 61
         n_own_spheres: 61
-  #       
-  #     # Add more arm_base custom costs here...
-  #     # my_custom_cost:
-  #     #   module_path: "curobo.rollout.cost.custom.arm_base.my_custom_file"
-  #     #   class_name: "MyCustomCost"
-  #     #   config_class_name: "MyCustomCostConfig"
-  #     #   weight: 50.0
-  #     #   my_parameter: 2.0
-  #     #   terminal: False
-
-  #   # Custom costs that run in arm_reacher (task-specific costs)  
-  #   arm_reacher:
-  #     # Task-specific pose cost from our custom file
-  #     task_cost:
-  #       module_path: "curobo.rollout.cost.custom.arm_reacher.task_cost"
-  #       class_name: "TaskCost"
-  #       config_class_name: "TaskCostConfig"
-  #       weight: 25.0  # Adjust weight as needed
-  #       terminal: False
-  #       
-  #     # Add more arm_reacher custom costs here...
-  #     # my_task_cost:
-  #     #   module_path: "curobo.rollout.cost.custom.arm_reacher.my_task_file"
-  #     #   class_name: "MyTaskCost"
-  #     #   weight: 100.0
-  #     #   task_parameter: 1.5
-  #     #   terminal: True
-  
-  # To enable custom costs: 
-  # 1. Uncomment the 'custom:' section above
-  # 2. Uncomment the specific costs you want to use
-  # 3. Adjust weights and parameters as needed
+        sparse_steps:
+          use: True
+          ratio: 0.5
+          
+        
+        # sparse_spheres:
+        #   use: True
+        #   self_spheres: [4, 2, 3, 6,7,8,10, 12, 14, 15, 16, 17, 20, ]
+        #   others_spheres: []
 
 
 mppi:

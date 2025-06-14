@@ -25,7 +25,19 @@ class DynamicObsCollPredictor:
     """
     
 
-    def __init__(self, tensor_args, step_dt_traj_opt=None, H=30, n_rollouts=400, n_own_spheres=61, n_obs=61, cost_weight=100.0, obs_groups_nspheres=[], manually_express_p_own_in_world_frame=False, p_R=torch.zeros(3)):
+    def __init__(self, 
+                 tensor_args, 
+                 step_dt_traj_opt=None, 
+                 H=30, 
+                 n_rollouts=400, 
+                 n_own_spheres=61, 
+                 n_obs=61, 
+                 cost_weight=100.0, 
+                 obs_groups_nspheres=[], 
+                 manually_express_p_own_in_world_frame=False, 
+                 p_R=torch.zeros(3),
+                 sparse_steps:dict={'use': False, 'ratio': 0.5}
+                 ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
 
@@ -45,6 +57,16 @@ class DynamicObsCollPredictor:
         self.tensor_args = tensor_args 
         self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
         self.n_rollouts = n_rollouts 
+        
+        self.sparse_steps = sparse_steps
+        if self.sparse_steps['use']:
+            assert self.sparse_steps['ratio'] > 0 and self.sparse_steps['ratio'] <= 1, "Error: The ratio must be between 0 and 1"
+            self.n_sampling_steps = int(self.H * self.sparse_steps['ratio']) # number of timesteps to sample for collision
+            self.sampling_timesteps = np.linspace(0, self.H-1, self.n_sampling_steps, dtype=int) # evenly spaced timesteps in the horizon
+        else:
+            self.n_sampling_steps = self.H
+            self.sampling_timesteps = np.arange(self.H)
+            
         self.step_dt_traj_opt = step_dt_traj_opt 
         self.cost_weight = cost_weight
         self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
@@ -57,13 +79,19 @@ class DynamicObsCollPredictor:
         # Buffers for obstacles (spheres): position and radius
         self.rad_obs_buf = torch.zeros(self.n_obs, device=self.tensor_args.device) # [n_obs] obstacles radii buffer
         self.rad_obs_buf_unsqueezed = self.rad_obs_buf.reshape(1, *self.rad_obs_buf.shape) # [1 x n_obs]  Added 1 dimension for intermediate calculations
-        self.p_obs_buf = torch.zeros((self.H, self.n_obs, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
-        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,H,1,self.n_obs,3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
-        
+        # self.p_obs_buf = torch.zeros((self.H, self.n_obs, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
+        self.p_obs_buf = torch.zeros((self.n_sampling_steps, self.n_obs, 3), device=self.tensor_args.device)
+
+        # self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,H,1,self.n_obs,3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
+        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,self.n_sampling_steps,1,self.n_obs,3)
+
         # Buffers for own spheres: position and radius
-        self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        # self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
         
-        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
+        # self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
+        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
+        
         self.rad_own_buf = torch.zeros(self.n_own_spheres, device=self.tensor_args.device) # [n_own] Own spheres radii buffer
         self.rad_own_buf_unsqueezed = self.rad_own_buf.reshape(*self.rad_own_buf.shape, 1) # [n_own x 1] added 1 dimension for intermediate calculations
 
@@ -73,7 +101,11 @@ class DynamicObsCollPredictor:
     
         self.ownobs_diff_vector_buff = self.p_own_buf_unsqueezed - self.p_obs_buf_unsqueezed # [n_rollouts x H x n_own x n_obs x 3] A tensor for all pairs of the difference vectors between own and obstacle spheres. Each entry i,j will be storing the vector (p_own_buf[...][i] - p_obs_buf[...][j] where ... is the rollout, horizon and sphere indices)
         self.pairwise_ownobs_surface_dist_buf = torch.zeros(self.ownobs_diff_vector_buff.shape[:-1] + (1,), device=self.tensor_args.device) # [n_rollouts x H x n_own x n_obs x 1] A tensor for all pairs of the (non negative) distance between own and obstacle spheres. Each entry i,j will be storing the signed distance (p_own_buf[...][i] - p_obs_buf[...][j]) - (rad_own_buf[i] + rad_obs_buf[j]) where ... is the rollout, horizon and sphere indices)
+        
+        # final output matrix, in the shape of [n_rollouts x H]
         self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] A tensor for the collision cost for each rollout and time step in the horizon. This is the output of the cost function.
+        self.tmp_cost_mat_buf_sparse = torch.zeros(n_rollouts, self.n_sampling_steps, device=self.tensor_args.device) # [n_rollouts x .
+        
 
         # flags
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
@@ -81,7 +113,7 @@ class DynamicObsCollPredictor:
         if self.manually_express_p_own_in_world_frame:
             self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
             self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
-
+        
     def get_obs_group_idx_range(self, obs_group_idx:int):
         """
         Get the start (inclusive) and end (exclusive) indices of the obstacles in the group.
@@ -91,6 +123,35 @@ class DynamicObsCollPredictor:
     
     def get_n_obs(self):
         return self.n_obs
+    
+    def _project_sparse_to_full_horizon(self, sparse_matrix: torch.Tensor, full_matrix: torch.Tensor):
+        """
+        Project a sparse matrix from (n_rollouts, n_sampling_steps) to (n_rollouts, H).
+        
+        Args:
+            sparse_matrix: Input tensor of shape (n_rollouts, n_sampling_steps)
+            full_matrix: Output tensor of shape (n_rollouts, H) to fill
+        """
+        if self.sparse_steps['use']:
+            base_repeat = self.H // self.n_sampling_steps
+            remainder = self.H % self.n_sampling_steps
+            
+            start_idx = 0
+            for j in range(self.n_sampling_steps):
+                if j < remainder:
+                    # First `remainder` columns get repeated (base_repeat + 1) times
+                    repeats = base_repeat + 1
+                else:
+                    # Remaining columns get repeated base_repeat times
+                    repeats = base_repeat
+                
+                # Fill the full_matrix with repeated values from sparse_matrix
+                end_idx = start_idx + repeats
+                full_matrix[:, start_idx:end_idx] = sparse_matrix[:, j:j+1].expand(-1, repeats)
+                start_idx = end_idx
+        else:
+            # If not using sparse steps, just copy directly
+            full_matrix.copy_(sparse_matrix)
     
     # def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
     #     """
@@ -140,8 +201,8 @@ class DynamicObsCollPredictor:
         Args:
             p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
         """
-        # self.p_obs = p_obs
-        self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
+        # self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
+        self.p_obs_buf.copy_(p_obs[self.sampling_timesteps,:,:]) # copy p_obs to self.p_obs in place.
     
     
     def update_obs_groups(self, p_obs:list[torch.Tensor],obs_groups_to_update:list[int]):
@@ -184,16 +245,27 @@ class DynamicObsCollPredictor:
         
         # Every time
         
-        self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        # self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        self.p_own_buf.copy_(prad_own[:,self.sampling_timesteps,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
+        
         if self.manually_express_p_own_in_world_frame: # shift the robot spheres positions to the world frame, if not already in world frame (if manually_express_p_own_in_world_frame is True).
             torch.add(self.p_own_buf, self.p_R_broadcasted_buf, out=self.p_own_buf)
-        self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
-        self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs,3)) # Copy the reshaped version 
+
+        
+        # self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
+        # self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.H,1,self.n_obs,3)) # Copy the reshaped version 
+        
+        self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
+        self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.n_sampling_steps,1,self.n_obs,3)) # Copy the reshaped version 
+        
         torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1
         self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
         self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
-        torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.cost_mat_buf) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+        torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.tmp_cost_mat_buf_sparse) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
+        
+        # Project tmp_cost_mat_buf_sparse from (n_rollouts, n_sampling_steps) to (n_rollouts, H)
+        self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
         
         # if (self.cost_mat_buf.sum() / (self.n_rollouts * self.n_obs * self.n_own_spheres)) > 0:
         #     print(f'Debug: violations per rollout and col sphere obstacle (on average) =  {(self.cost_mat_buf.sum() / (self.n_rollouts * self.n_obs * self.H))} ')

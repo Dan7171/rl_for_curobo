@@ -3,7 +3,8 @@
 # Prior reccomended reading:
 https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/core_api_overview.html 
 https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/manual_standalone_python.html
-https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/manual_standalone_python.html
+https://docs.isaacsim.omniverse.nvidia.com/latest/py
+thon_scripting/manual_standalone_python.html
 https://docs.isaacsim.omniverse.nvidia.com/latest/core_api_tutorials/index.html
 https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/reference_glossary.html#isaac-sim-glossary-world
 World:
