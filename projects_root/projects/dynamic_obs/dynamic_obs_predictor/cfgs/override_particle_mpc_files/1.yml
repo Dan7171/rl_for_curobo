@@ -82,18 +82,12 @@ cost:
     # Custom costs that run in arm_base (general robot costs)
     arm_base:
       # Energy minimization cost from our custom file
-      energy_cost:
-        module_path: "curobo.rollout.cost.custom.arm_base.energy_cost"
-        class_name: "EnergyCost"
-        config_class_name: "EnergyCostConfig"
-        weight: 10.0  # Adjust weight as needed
-        terminal: False
-
+      
       dynamic_obs_cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 100.0  # Adjust weight as needed
+        weight: 80.0  # Adjust weight as needed
         terminal: False
         num_particles: 400
         horizon: 30
@@ -135,7 +129,7 @@ cost:
 
 
 mppi:
-  init_cov          : 0.8 # 0.05 #.5 #.5
+  init_cov          : 0.05 # 0.05 #.5 #.5
   gamma             : 0.98
   n_iters           : 1 # mpc optimization steps
   cold_start_n_iters: 5

@@ -357,7 +357,7 @@ def main():
     # robot targets, expressed in robot frames
     X_Targets_R = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
-    cost_live_plotting_cfgs = [{'live_plotting': True, 'save_plots': True}, {'live_plotting': False, 'save_plots': False}]
+    cost_live_plotting_cfgs = [{'live_plotting': False, 'save_plots': False}, {'live_plotting': True, 'save_plots': True}]
     if OBS_PREDICTION:
         col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
