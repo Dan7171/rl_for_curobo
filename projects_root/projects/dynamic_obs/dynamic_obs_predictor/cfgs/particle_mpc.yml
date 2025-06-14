@@ -77,7 +77,7 @@ cost:
   # Only custom costs listed here will be loaded (auto-discovery is disabled by default)
   # Uncomment and modify the section below to use explicit custom costs:
   
-  Example of explicit custom cost configuration:
+  # Example of explicit custom cost configuration:
   custom:
     # Custom costs that run in arm_base (general robot costs)
     arm_base:
