@@ -81,13 +81,12 @@ cost:
   custom:
     # Custom costs that run in arm_base (general robot costs)
     arm_base:
-      # Energy minimization cost from our custom file
       
       dynamic_obs_cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 80  # Adjust weight as needed
+        weight: 0  # Adjust weight as needed
         terminal: False
         num_particles: 400
         horizon: 30
@@ -95,13 +94,13 @@ cost:
         n_coll_spheres_valid: 65
         n_own_spheres: 65
         
-        sparse_steps:
-          use: True
-          ratio: 0.5
+        # sparse_steps:
+        #   use: True
+        #   ratio: 0.5
 
-        sparse_spheres:
-          exclude_self: [0,1,4,5,61,62,63,64] # base link and graspped object
-          exclude_others: [0,1,4,5,61,62,63,64] # base link and graspped object
+        # sparse_spheres:
+        #   exclude_self: [0,1,4,5,61,62,63,64] # base link and graspped object
+        #   exclude_others: [0,1,4,5,61,62,63,64] # base link and graspped object
         
 
 

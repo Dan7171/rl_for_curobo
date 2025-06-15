@@ -38,13 +38,23 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
     def __init__(self, config: DynamicObsCostConfig):
         DynamicObsCostConfig.__init__(self, **vars(config))
         CostBase.__init__(self)
+        
+        # Extract weight value properly
+        weight_value = self.weight
+        if isinstance(weight_value, torch.Tensor):
+            weight_value = weight_value.cpu().item()
+        elif isinstance(weight_value, (list, tuple)):
+            weight_value = weight_value[0] if len(weight_value) > 0 else 1.0
+        elif not isinstance(weight_value, (int, float)):
+            weight_value = 1.0
+            
         self.col_pred = DynamicObsCollPredictor(self.tensor_args,
                                                             None,
                                                             self.horizon,
                                                             self.num_particles ,
                                                             self.n_own_spheres,
                                                             self.n_coll_spheres_valid,
-                                                            self.weight.cpu().item(),
+                                                            weight_value,
                                                             [],
                                                             False,
                                                             torch.tensor(self.p_R),
@@ -64,5 +74,11 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         Returns:
             Cost tensor of shape [batch, horizon]
         """
-        # Get velocities and accelerations
-        return self.col_pred.cost_fn(state.robot_spheres)
+        # Ensure col_pred is not None and robot_spheres is not None
+        if self.col_pred is None:
+            raise RuntimeError("Collision predictor not initialized")
+        if state.robot_spheres is None:
+            raise RuntimeError("Robot spheres not available in state")
+            
+        result = self.col_pred.cost_fn(state.robot_spheres)
+        return result

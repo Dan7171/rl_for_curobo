@@ -77,137 +77,103 @@ class DynamicObsCollPredictor:
         self.sparse_spheres = sparse_spheres # sparse spheres config
         
         self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
-        self.valid_own_spheres = torch.tensor(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])), device=self.tensor_args.device)
+        self.valid_own_spheres = np.array(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])))# torch.tensor(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])), device=self.tensor_args.device)
         
         self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
         self.valid_obs_spheres = np.array(list(set(list(range(self.n_obs))) - set(self.sparse_spheres['exclude_others'])))# torch.tensor(list(set(list(range(self.n_obs))) - set(self.sparse_spheres['exclude_others'])), device=self.tensor_args.device)
         
-        # self.obs_groups_nspheres = obs_groups_nspheres # list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
-        # if len(obs_groups_nspheres) > 0:
-        #     assert sum(obs_groups_nspheres) == self.n_obs, "Error: The sum of the number of obstacles in the groups must be equal to the total number of obstacles"
-        #     self.obs_groups_start_idx_list = ([0] + list(np.cumsum(obs_groups_nspheres)))[:-1] # list of ints, each int is the start index of the group in the world.
+        # Pre-compute index tensors for efficient indexing
+        self.sampling_timesteps_tensor = torch.tensor(self.sampling_timesteps, device=self.tensor_args.device, dtype=torch.long)
+        self.valid_own_spheres_tensor = torch.tensor(self.valid_own_spheres, device=self.tensor_args.device, dtype=torch.long)
+        self.valid_obs_spheres_tensor = torch.tensor(self.valid_obs_spheres, device=self.tensor_args.device, dtype=torch.long)
+        
+        # Compute effective dimensions after filtering
+        self.n_valid_own = len(self.valid_own_spheres)
+        self.n_valid_obs = len(self.valid_obs_spheres)
         
         # Buffers for obstacles (spheres): position and radius
-        self.rad_obs_buf = torch.zeros(len(self.valid_obs_spheres), device=self.tensor_args.device) # [n_obs] obstacles radii buffer
-        self.rad_obs_buf_unsqueezed = self.rad_obs_buf.reshape(1, *self.rad_obs_buf.shape) # [1 x n_obs]  Added 1 dimension for intermediate calculations
-        # self.p_obs_buf = torch.zeros((self.H, self.n_obs, 3), device=self.tensor_args.device) # [H x n_obs x 3] pos and radius of the obstacles (spheres) over horizon
-        self.p_obs_buf = torch.zeros((self.n_sampling_steps, len(self.valid_obs_spheres), 3), device=self.tensor_args.device)
-
-        # self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,H,1,self.n_obs,3) # [1 x H x 1 x n_obs x 3] Added 1 dimension for intermediate calculations      
-        self.p_obs_buf_unsqueezed = self.p_obs_buf.reshape(1,self.n_sampling_steps,1,len(self.valid_obs_spheres),3)
-
-        # Buffers for own spheres: position and radius
-        # self.p_own_buf = torch.empty(n_rollouts, H, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        # self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_own_spheres, 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
-        self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, len(self.valid_own_spheres), 3, device=self.tensor_args.device) # [n_rollouts x H x n_own x 3] Own spheres positions buffer
+        self.rad_obs_buf = torch.zeros(self.n_valid_obs, device=self.tensor_args.device) # [n_valid_obs] obstacles radii buffer
         
-        # self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.H,self.n_own_spheres,1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
-        self.p_own_buf_unsqueezed = self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,len(self.valid_own_spheres),1,3) # added 1 dimension for intermediate calculations [n_rollouts x H x n_own x 1 x 3]
-        
-        self.rad_own_buf = torch.zeros(len(self.valid_own_spheres), device=self.tensor_args.device) # [n_own] Own spheres radii buffer
-        self.rad_own_buf_unsqueezed = self.rad_own_buf.reshape(*self.rad_own_buf.shape, 1) # [n_own x 1] added 1 dimension for intermediate calculations
+        # Pre-allocate obstacle position buffer in the final shape to avoid reshaping
+        self.p_obs_buf = torch.zeros((self.n_sampling_steps, self.n_valid_obs, 3), device=self.tensor_args.device)
+        # Pre-allocate in broadcast-ready shape to eliminate reshaping in cost_fn
+        self.p_obs_buf_broadcast = torch.zeros((1, self.n_sampling_steps, 1, self.n_valid_obs, 3), device=self.tensor_args.device)
 
-        # Buffers for intermediate calculations
-        self.pairwise_ownobs_radsum_buf = self.rad_own_buf_unsqueezed + self.rad_obs_buf_unsqueezed # [n_own x n_obs] matrix for own radius i + obstacle radius j for all possible own and obstacle sphere pairs (Note: this is broadcasted because its a sum of n_own x 1 + 1 x n_obs radii)
-        self.pairwise_ownobs_radsum_buf_unsqueezed = self.pairwise_ownobs_radsum_buf.reshape(1,1, *self.pairwise_ownobs_radsum_buf.shape, 1) # [1 x 1 x n_own x n_obs x 1] Added 1 dimension for intermediate calculations
+        # Buffers for own spheres: position and radius  
+        self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_valid_own, 3, device=self.tensor_args.device)
+        # Pre-allocate in broadcast-ready shape to eliminate reshaping in cost_fn
+        self.p_own_buf_broadcast = torch.empty(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 1, 3, device=self.tensor_args.device)
+        
+        self.rad_own_buf = torch.zeros(self.n_valid_own, device=self.tensor_args.device) # [n_valid_own] Own spheres radii buffer
+
+        # Pre-compute radius sum matrix in final broadcast shape to avoid repeated operations
+        # Shape: [1, 1, n_valid_own, n_valid_obs, 1] - ready for broadcasting
+        self.pairwise_radsum_broadcast = torch.zeros(1, 1, self.n_valid_own, self.n_valid_obs, 1, device=self.tensor_args.device)
     
-        self.ownobs_diff_vector_buff = self.p_own_buf_unsqueezed - self.p_obs_buf_unsqueezed # [n_rollouts x H x n_own x n_obs x 3] A tensor for all pairs of the difference vectors between own and obstacle spheres. Each entry i,j will be storing the vector (p_own_buf[...][i] - p_obs_buf[...][j] where ... is the rollout, horizon and sphere indices)
-        self.pairwise_ownobs_surface_dist_buf = torch.zeros(self.ownobs_diff_vector_buff.shape[:-1] + (1,), device=self.tensor_args.device) # [n_rollouts x H x n_own x n_obs x 1] A tensor for all pairs of the (non negative) distance between own and obstacle spheres. Each entry i,j will be storing the signed distance (p_own_buf[...][i] - p_obs_buf[...][j]) - (rad_own_buf[i] + rad_obs_buf[j]) where ... is the rollout, horizon and sphere indices)
+        # Main computation buffers - pre-allocated in final shapes
+        self.ownobs_diff_vector_buff = torch.zeros(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, self.n_valid_obs, 3, device=self.tensor_args.device)
+        self.pairwise_surface_dist_buf = torch.zeros(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, self.n_valid_obs, 1, device=self.tensor_args.device)
         
-        # final output matrix, in the shape of [n_rollouts x H]
-        self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] A tensor for the collision cost for each rollout and time step in the horizon. This is the output of the cost function.
-        self.tmp_cost_mat_buf_sparse = torch.zeros(n_rollouts, self.n_sampling_steps, device=self.tensor_args.device) # [n_rollouts x .
+        # Output buffers
+        self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] 
+        self.tmp_cost_mat_buf_sparse = torch.zeros(n_rollouts, self.n_sampling_steps, device=self.tensor_args.device)
         
-
+        # Pre-compute projection parameters for sparse-to-full horizon mapping
+        if self.sparse_steps['use']:
+            self.base_repeat = self.H // self.n_sampling_steps
+            self.remainder = self.H % self.n_sampling_steps
+            if self.remainder != 0:
+                # Pre-compute repeat counts to avoid recreation each time
+                self.repeat_counts = torch.full((self.n_sampling_steps,), self.base_repeat, dtype=torch.long, device=self.tensor_args.device)
+                self.repeat_counts[:self.remainder] += 1
+        
         # flags
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
         self.manually_express_p_own_in_world_frame = manually_express_p_own_in_world_frame # if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
         if self.manually_express_p_own_in_world_frame:
             self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
-            self.p_R_broadcasted_buf = torch.zeros(self.p_own_buf.shape, device=self.tensor_args.device) + self.p_R # [n_rollouts x H x n_own x 3] A tensor for the robot spheres positions in the world frame.
+            # Pre-allocate broadcast buffer for world frame transformation
+            self.p_R_broadcast = self.p_R.view(1, 1, 1, 3).expand(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 3)
         
-    # def get_obs_group_idx_range(self, obs_group_idx:int):
-    #     """
-    #     Get the start (inclusive) and end (exclusive) indices of the obstacles in the group.
-    #     For example, if the group is the first group, then the start index is 2 and its length is 2, returns (2,4).
-    #     """
-    #     return self.obs_groups_start_idx_list[obs_group_idx], (self.obs_groups_start_idx_list[obs_group_idx+1] if (obs_group_idx + 1) < len(self.obs_groups_start_idx_list) else self.n_obs) # self.obs_groups_nspheres[obs_group_idx]
-    
-    # def get_n_obs(self):
-    #     return self.n_obs
-    
     def _project_sparse_to_full_horizon(self, sparse_matrix: torch.Tensor, full_matrix: torch.Tensor):
         """
         Project a sparse matrix from (n_rollouts, n_sampling_steps) to (n_rollouts, H).
-        
-        Args:
-            sparse_matrix: Input tensor of shape (n_rollouts, n_sampling_steps)
-            full_matrix: Output tensor of shape (n_rollouts, H) to fill
+        Optimized version with pre-computed parameters.
         """
         if self.sparse_steps['use']:
-            base_repeat = self.H // self.n_sampling_steps
-            remainder = self.H % self.n_sampling_steps
-            
-            start_idx = 0
-            for j in range(self.n_sampling_steps):
-                if j < remainder:
-                    # First `remainder` columns get repeated (base_repeat + 1) times
-                    repeats = base_repeat + 1
-                else:
-                    # Remaining columns get repeated base_repeat times
-                    repeats = base_repeat
-                
-                # Fill the full_matrix with repeated values from sparse_matrix
-                end_idx = start_idx + repeats
-                full_matrix[:, start_idx:end_idx] = sparse_matrix[:, j:j+1].expand(-1, repeats)
-                start_idx = end_idx
+            if self.remainder == 0:
+                # Simple case: all columns repeated equally
+                full_matrix.copy_(sparse_matrix.repeat_interleave(self.base_repeat, dim=1))
+            else:
+                # Complex case: use pre-computed repeat counts
+                full_matrix.copy_(sparse_matrix.repeat_interleave(self.repeat_counts, dim=1))
         else:
             # If not using sparse steps, just copy directly
             full_matrix.copy_(sparse_matrix)
-    
-    # def activate(self, p_obs:torch.Tensor, rad_obs:torch.Tensor):
-    #     """
-    #     Activate the collision checker.
-    #     p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
-    #     rad_obs: tensor of shape [n_obs]. The radii of the obstacles.
-    #     """
-    #     # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
-    #     assert p_obs.ndim == 3, "Error: The obstacle poses must be a 3D tensor"
-    #     assert p_obs.shape[0] == self.H, "Error: The number of time steps in the obstacle poses must be equal to the horizon length"
-    #     assert p_obs.shape[1] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle poses"
-    #     assert p_obs.shape[2] == 3, "Error: The obstacle poses must be in 3D"
-        
-    #     assert rad_obs.ndim == 1, "Error: The obstacle radii must be a 1D tensor"
-    #     assert rad_obs.shape[0] == self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
-
-    #     self.p_obs_buf.copy_(p_obs)
-    #     self.rad_obs_buf.copy_(rad_obs)
-    #     self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-
         
     def set_obs_rads(self, rad_obs:torch.Tensor):
         """
         rad_obs: tensor of shape [n_obs]. The radii of the obstacles.
         """
-        
-        # assert self.rad_obs_buf.sum() > 0, "Error: Must set the obstacles (radii) before activating the collision checker"
         assert rad_obs.ndim == 1, "Error: The obstacle radii must be a 1D tensor"
-        # assert rad_obs.shape[0] == self.n_obs # self.n_obs, "Error: The number of obstacles must be equal to the number of obstacle radii"
-
-        # self.rad_obs_buf.copy_(rad_obs)
+        
+        # Direct indexing and copy
         self.rad_obs_buf.copy_(rad_obs[self.valid_obs_spheres])
-        self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
 
     def set_own_rads(self, rad_own:torch.Tensor):
         """
-        Set the radii of the own spheres.
+        Set the radii of the own spheres and pre-compute radius sum matrix.
         """
-        # self.rad_own_buf.copy_(rad_own) # [n_own] init own spheres radii
+        # Copy own radii
         self.rad_own_buf.copy_(rad_own[self.valid_own_spheres])
-        self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
-        torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
-        self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
-        self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
+        
+        # Pre-compute pairwise radius sums in broadcast-ready shape
+        # Broadcasting: [n_valid_own, 1] + [1, n_valid_obs] -> [n_valid_own, n_valid_obs]
+        rad_sum = self.rad_own_buf.unsqueeze(1) + self.rad_obs_buf.unsqueeze(0)
+        # Store in final broadcast shape [1, 1, n_valid_own, n_valid_obs, 1]
+        self.pairwise_radsum_broadcast[0, 0, :, :, 0] = rad_sum
+        
+        self.init_rad_buffs[0] = 1
     
     def update(self, p_obs:torch.Tensor):
         """
@@ -215,254 +181,54 @@ class DynamicObsCollPredictor:
         Args:
             p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
         """
-        # self.p_obs_buf.copy_(p_obs) # copy p_obs to self.p_obs in place.
-        # self.p_obs_buf.copy_(p_obs[self.sampling_timesteps,:,:]) # copy p_obs to self.p_obs in place.
-        # self.p_obs_buf.copy_(p_obs[self.sampling_timesteps, self.valid_obs_spheres,:])
+        # Optimized indexing using pre-computed tensors
+        temp_obs = torch.index_select(p_obs, 0, self.sampling_timesteps_tensor)  # Select timesteps
+        temp_obs = torch.index_select(temp_obs, 1, self.valid_obs_spheres_tensor)  # Select spheres
+        self.p_obs_buf.copy_(temp_obs)
         
-        # First select the timesteps, then select the spheres
-        temp_obs = p_obs[self.sampling_timesteps, :, :]  # Select timesteps first
-        self.p_obs_buf.copy_(temp_obs[:, self.valid_obs_spheres, :])  # Then select valid spheres
-    
-    # def update_obs_groups(self, p_obs:list[torch.Tensor],obs_groups_to_update:list[int]):
-    #     """
-    #     Update the poses of the obstacles in the groups.
-    #     """
-    #     for obs_group_id in obs_groups_to_update:
-    #         range_start, range_end = self.get_obs_group_idx_range(obs_group_id)
-    #         self.p_obs_buf[:, range_start:range_end, :].copy_(p_obs[obs_group_id][:, range_start:range_end,:]) # copy p_obs to self.p_obs in place.
-
+        # Update broadcast-ready buffer
+        self.p_obs_buf_broadcast[0, :, 0, :, :] = self.p_obs_buf
 
     def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
         """
-        Compute the collision cost for the robot spheres. Called by the MPC cost function (in ArmBase).
-        Args:
-            prad_own: tensor of shape [n_rollouts, horizon, n_spheres, 4]. Collision spheres of the robot. This is the standard structure of the input to the cost function.
-            
-            env_query_idx: optional index for querying specific environments. If None, the collision cost will be computed for the one and only environment in the collision checker.
-            
-            method: the way to compute the collision cost. Currently only curobo_prim_coll_cost_fn is implemented. By curobo_prim_coll_cost_fn, we mean the collision cost function implemented in curobo, which broadlly discussed at https://curobo.org/get_started/2c_world_collision.html#:~:text=process%20is%20illustrated.-,Collision%20Metric,-%C2%B6 (and in the technical report https://curobo.org/reports/curobo_report.pdf at section 3.3).
-            NOTE: at this point, the method using signed distance is not used, since I failed to make it work.
-
-            binary: if True, cost[r,h] will be self.cost_weight if any of the robot spheres are too close to an obstacle (i.e, their "safety zone" is violated). Otherwise it will be 0.
-            If False, cost[r,h] will be the sum of the collision costs over all spheres. For now it seems that when its False, the overall performance is better, so I kept it as that.
-        
-        Returns:
-            tensor of shape [n_rollouts, horizon] containing collision costs (we denot the returned tensor by the matrix named "dynamic_coll_cost_matrix" 
-            where dynamic_coll_cost_matrix[r,h] is the  predictrive collision cost for the robot for rollout r and time step h, where r is the rollout index and h is the time step index)
+        Optimized collision cost computation with reduced memory operations and fused computations.
         """
+        # Efficient indexing and extraction in one step
+        temp_own = torch.index_select(prad_own, 1, self.sampling_timesteps_tensor)  # Select timesteps
+        temp_own = torch.index_select(temp_own, 2, self.valid_own_spheres_tensor)   # Select spheres
+        
+        # Direct copy of xyz coordinates
+        self.p_own_buf.copy_(temp_own[:, :, :, :3])
 
-       
+        # World frame transformation if needed (fused with addition)
+        if self.manually_express_p_own_in_world_frame:
+            self.p_own_buf.add_(self.p_R_broadcast)
         
-        # if not bool(self.init_rad_buffs[0]):
-        #     self.rad_own_buf.copy_(prad_own[0,0,:self.n_own_spheres,3]) # [n_own] init own spheres radii
-        #     self.rad_own_buf_unsqueezed.copy_(self.rad_own_buf.view_as(self.rad_own_buf_unsqueezed)) 
-        #     # self.rad_obs_buf_unsqueezed.copy_(self.rad_obs_buf.view_as(self.rad_obs_buf_unsqueezed)) 
-        #     torch.add(self.rad_own_buf_unsqueezed, self.rad_obs_buf_unsqueezed, out=self.pairwise_ownobs_radsum_buf) # broadcasted addition of rad_own and rad_obs
-        #     self.pairwise_ownobs_radsum_buf_unsqueezed[0,0,:,:,0].copy_(self.pairwise_ownobs_radsum_buf) 
-        #     self.init_rad_buffs[0] = 1 # so that the following code will not re-initialize the buffers again (its just for efficiency).
+        # Update broadcast-ready buffer
+        self.p_own_buf_broadcast[:, :, :, 0, :] = self.p_own_buf
         
-        # Every time
+        # Fused difference computation: own_pos - obs_pos
+        # Broadcasting: [n_rollouts, n_sampling_steps, n_valid_own, 1, 3] - [1, n_sampling_steps, 1, n_valid_obs, 3]
+        torch.sub(self.p_own_buf_broadcast, self.p_obs_buf_broadcast, out=self.ownobs_diff_vector_buff)
         
-        # self.p_own_buf.copy_(prad_own[:,:,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
-        # self.p_own_buf.copy_(prad_own[:,self.sampling_timesteps,:self.n_own_spheres,:3]) # read robot spheres positions to the "prad_own" buffer.
-        # self.p_own_buf.copy_(prad_own[:,self.sampling_timesteps,self.valid_own_spheres,:3])
+        # Compute L2 norm (distance between sphere centers)
+        torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_surface_dist_buf)
         
-        # First select the timesteps, then select the spheres
-        temp_own = prad_own[:, self.sampling_timesteps, :, :3]  # Select timesteps first
-        self.p_own_buf.copy_(temp_own[:, :, self.valid_own_spheres, :])  # Then select valid spheres
-
-        if self.manually_express_p_own_in_world_frame: # shift the robot spheres positions to the world frame, if not already in world frame (if manually_express_p_own_in_world_frame is True).
-            torch.add(self.p_own_buf, self.p_R_broadcasted_buf, out=self.p_own_buf)
-
-    
-        # self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,self.n_own_spheres,1,3)) # Copy the reshaped version as well.
-        self.p_own_buf_unsqueezed.copy_(self.p_own_buf.reshape(self.n_rollouts,self.n_sampling_steps,len(self.valid_own_spheres),1,3)) # Copy the reshaped version as well.
+        # Subtract radius sums to get surface-to-surface distance
+        self.pairwise_surface_dist_buf.sub_(self.pairwise_radsum_broadcast)
         
-        # self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.n_sampling_steps,1,self.n_obs,3)) # Copy the reshaped version 
-        self.p_obs_buf_unsqueezed.copy_(self.p_obs_buf.reshape(1,self.n_sampling_steps,1,len(self.valid_obs_spheres),3)) # Copy the reshaped version 
+        # Check collision condition and count violations
+        # Using lt_ for in-place comparison, then sum to count violations
+        collision_mask = self.pairwise_surface_dist_buf.lt_(safety_margin)
+        torch.sum(collision_mask, dim=[2, 3, 4], out=self.tmp_cost_mat_buf_sparse)
         
-        torch.sub(self.p_own_buf_unsqueezed, self.p_obs_buf_unsqueezed, out=self.ownobs_diff_vector_buff) # Compute the difference vector between own and obstacle spheres and put it in the buffer. [n_rollouts x H x n_own x n_obs x 3]
-        torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_ownobs_surface_dist_buf) # Compute the distance between each own and obstacle sphere centers and put it in the buffer. n_rollouts x H x n_own x n_obs x 1
-        self.pairwise_ownobs_surface_dist_buf.sub_(self.pairwise_ownobs_radsum_buf_unsqueezed) # subtract the sum of the radii from the distance (so we now get the distance between the spheres surfaces and not the centers). [n_rollouts x H x n_own x n_obs x 1]
-        self.pairwise_ownobs_surface_dist_buf.lt_(safety_margin) # [n_rollouts x H x n_own x n_obs x 1] 1 where the distance between surfaces is less than the safety margin (meaning: very close to collision) and 0 otherwise.
-        torch.sum(self.pairwise_ownobs_surface_dist_buf, dim=[2,3,4], out=self.tmp_cost_mat_buf_sparse) # [n_rollouts x H] (Counting the number of times the safety margin is violated, for each step in each rollout (sum over all spheres of the robot and all obstacles).)
-        
-        # Project tmp_cost_mat_buf_sparse from (n_rollouts, n_sampling_steps) to (n_rollouts, H)
+        # Project sparse results to full horizon
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
         
-        # if (self.cost_mat_buf.sum() / (self.n_rollouts * self.n_obs * self.n_own_spheres)) > 0:
-        #     print(f'Debug: violations per rollout and col sphere obstacle (on average) =  {(self.cost_mat_buf.sum() / (self.n_rollouts * self.n_obs * self.H))} ')
-
-        self.cost_mat_buf.mul_(self.cost_weight) # muliply the cost by the cost weight.
+        # Apply cost weight
+        self.cost_mat_buf.mul_(self.cost_weight)
         
-        return self.cost_mat_buf # dynamic_coll_cost_matrix 
-
-     
-# class BatchDynamicObsCollChecker:
-#     def __init__(self, tensor_args, col_pred_list:List[DynamicObsCollPredictor]):
-#         """
-#         Initialize a batch of dynamic obstacle collision checkers.
-#         Args:
-#             tensor_args: pytorch tensor arguments.
-#         """
-#         self.tensor_args = tensor_args
-#         self.n_colliders = len(col_pred_list) 
-        
-#         self.streams = [torch.cuda.Stream() for _ in range(self.n_colliders)]
-#         self.graphs:List[torch.cuda.CUDAGraph] = [torch.cuda.CUDAGraph() for _ in range(self.n_colliders)]
-#         self.collision_checkers:List[DynamicObsCollPredictor] = [DynamicObsCollPredictor(self.tensor_args,None,self.H_list[i],self.n_rollouts_list[i],self.n_own_spheres_list[i],self.n_obs_list[i]) for i in range(self.n_colliders)]  #
-
-
-#     def capture(self):
-        
-#         for i in range(self.n_colliders):
-#             prad_obs_static = self.prad_obs_static_list[i]
-#             self.collision_checkers[i].update(prad_obs_static[:3])
-
-#             prad_own_static = self.prad_own_static_list[i]  # use dummy data with same shape as runtime data
-#             stream = self.streams[i]
-#             graph = self.graphs[i]
-#             checker = self.collision_checkers[i]
-
-#             with torch.cuda.stream(stream):
-#                 torch.cuda.synchronize()  # ensure the stream is idle
-#                 with torch.cuda.graph(graph):
-#                     checker.cost_fn(prad_own_static)
-
-    
-
-#     def run_graph(self, i, prad_own):
-#         stream = self.streams[i]
-#         checker = self.collision_checkers[i]
-#         # Copy the actual input to the pre-allocated buffer
-#         checker.prad_own_buf.copy_(prad_own)  # `prad_own_input` used inside `cost_fn`
-#         with torch.cuda.stream(stream):
-#             self.graphs[i].replay()
-
-
-
-# # In your timestep loop:
-# if __name__ == "__main__":
-#     h_list = [10, 10]
-#     n_rollouts_list = [20, 20]
-#     n_own_spheres_list = [12,12]
-#     n_obs_list = [12,23]
-#     batch_dynamic_obs_coll_checker = BatchDynamicObsCollChecker(TensorDeviceType(), H_list=h_list, n_rollouts_list=n_rollouts_list, n_own_spheres_list=n_own_spheres_list, n_obs_list=n_obs_list)
-#     batch_dynamic_obs_coll_checker.capture()
-#     threads = []
-
-#     while True:
-#         for i in range(batch_dynamic_obs_coll_checker.n_colliders):
-#             new_prad_own = torch.randn(h_list[i], n_own_spheres_list[i], 4, device=batch_dynamic_obs_coll_checker.tensor_args.device)
-#             t = threading.Thread(target=batch_dynamic_obs_coll_checker.run_graph, args=(i, new_prad_own))
-#             t.start()
-#             threads.append(t)
-
-#         for t in threads:
-#             t.join()
-
-#         # Optionally synchronize
-#         torch.cuda.synchronize()
-
-
-
-
-        
-# class BatchDynamicObsCollChecker:
-#     def __init__(self, tensor_args, H_list:list[int], n_rollouts_list:list[int], n_own_spheres_list:list[int], n_obs_list:list[int]):
-#         """
-#         Initialize a batch of dynamic obstacle collision checkers.
-#         Args:
-#             tensor_args: pytorch tensor arguments.
-#             n_colliders: number of robots to check collision for
-#             H: horizon length
-#             n_rollouts: number of rollouts ()
-#             n_own_spheres: number of own spheres
-#             n_obs: number of obstacles
-#         """
-#         self.tensor_args = tensor_args
-#         self.n_colliders = len(H_list) 
-#         self.H_list = H_list # list of horizons, one for each robot
-#         self.n_rollouts_list = n_rollouts_list # list of number of rollouts, one for each robot
-#         self.n_own_spheres_list = n_own_spheres_list # list of number of own spheres, one for each robot
-#         self.n_obs_list = n_obs_list # list of number of obstacles, one for each robot
-
-#         self.prad_own_static_list:List[torch.Tensor] = [torch.zeros(
-#             self.n_rollouts_list[i], # number of rollouts
-#             self.H_list[i], # horizon length
-#             self.n_own_spheres_list[i], # number of own spheres
-#             4, # 4: position and radius
-#             device=self.tensor_args.device) for i in range(self.n_colliders)]
-        
-#         self.prad_obs_static_list:List[torch.Tensor] = [torch.zeros(
-#             self.n_rollouts_list[i], # number of rollouts
-#             self.H_list[i], # horizon length
-#             self.n_obs_list[i], # number of obstacles
-#             4, # 4: position and radius
-#             device=self.tensor_args.device) for i in range(self.n_colliders)]
-        
-            
-#         self.streams = [torch.cuda.Stream() for _ in range(self.n_colliders)]
-#         self.graphs:List[torch.cuda.CUDAGraph] = [torch.cuda.CUDAGraph() for _ in range(self.n_colliders)]
-#         self.collision_checkers:List[DynamicObsCollPredictor] = [DynamicObsCollPredictor(self.tensor_args,None,self.H_list[i],self.n_rollouts_list[i],self.n_own_spheres_list[i],self.n_obs_list[i]) for i in range(self.n_colliders)]  #
-
-
-#         for i in range(self.n_colliders):
-#             self.collision_checkers[i].activate(self.prad_obs_static_list[i][0,...,:3], self.prad_obs_static_list[i][0,0,...,3].flatten())
-        
-    
-#     def capture(self):
-        
-#         for i in range(self.n_colliders):
-#             prad_obs_static = self.prad_obs_static_list[i]
-#             self.collision_checkers[i].update(prad_obs_static[:3])
-
-#             prad_own_static = self.prad_own_static_list[i]  # use dummy data with same shape as runtime data
-#             stream = self.streams[i]
-#             graph = self.graphs[i]
-#             checker = self.collision_checkers[i]
-
-#             with torch.cuda.stream(stream):
-#                 torch.cuda.synchronize()  # ensure the stream is idle
-#                 with torch.cuda.graph(graph):
-#                     checker.cost_fn(prad_own_static)
-
-    
-
-#     def run_graph(self, i, prad_own):
-#         stream = self.streams[i]
-#         checker = self.collision_checkers[i]
-#         # Copy the actual input to the pre-allocated buffer
-#         checker.prad_own_buf.copy_(prad_own)  # `prad_own_input` used inside `cost_fn`
-#         with torch.cuda.stream(stream):
-#             self.graphs[i].replay()
-
-
-
-# # In your timestep loop:
-# if __name__ == "__main__":
-#     h_list = [10, 10]
-#     n_rollouts_list = [20, 20]
-#     n_own_spheres_list = [12,12]
-#     n_obs_list = [12,23]
-#     batch_dynamic_obs_coll_checker = BatchDynamicObsCollChecker(TensorDeviceType(), H_list=h_list, n_rollouts_list=n_rollouts_list, n_own_spheres_list=n_own_spheres_list, n_obs_list=n_obs_list)
-#     batch_dynamic_obs_coll_checker.capture()
-#     threads = []
-
-#     while True:
-#         for i in range(batch_dynamic_obs_coll_checker.n_colliders):
-#             new_prad_own = torch.randn(h_list[i], n_own_spheres_list[i], 4, device=batch_dynamic_obs_coll_checker.tensor_args.device)
-#             t = threading.Thread(target=batch_dynamic_obs_coll_checker.run_graph, args=(i, new_prad_own))
-#             t.start()
-#             threads.append(t)
-
-#         for t in threads:
-#             t.join()
-
-#         # Optionally synchronize
-#         torch.cuda.synchronize()
-
-
+        return self.cost_mat_buf
 
 
 

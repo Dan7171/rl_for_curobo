@@ -66,7 +66,7 @@ REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). S
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 OBS_PREDICTION  = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
-VISUALIZE_PREDICTED_OBS_PATHS = False # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
+VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
@@ -359,7 +359,7 @@ def main():
     # robot targets, expressed in robot frames
     X_Targets_R = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
-    cost_live_plotting_cfgs = [{'live_plotting': False, 'save_plots': False}, {'live_plotting': True, 'save_plots': True}]
+    cost_live_plotting_cfgs = [{'live_plotting': False, 'save_plots': False}, {'live_plotting': False, 'save_plots': False}]
     if OBS_PREDICTION:
         col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
@@ -489,6 +489,7 @@ def main():
         robots_as_obs_timer_start = time.time()
         if OBS_PREDICTION:         
             plans = [robots[i].get_plan(valid_spheres_only=False) for i in range(len(robots))]
+            
         else:
             sphere_states_all_robots:list[torch.Tensor] = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
         robots_as_obs_timer += time.time() - robots_as_obs_timer_start
@@ -504,6 +505,7 @@ def main():
                     if j != i: 
                         planSpheres_robotj = plans[j]['task_space']['spheres'] # robots[j].get_plan(n_steps=robots[i].H)['task_space']['spheres']
                         p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
+                        # print(f"debug: j = {j},  p_spheresRobotj.sum() = ", p_spheresRobotjH.sum())                
                         rad_spheresRobotjH = planSpheres_robotj['r'][0].to(tensor_args.device)
                         if p_spheresOthersH is None:
                             p_spheresOthersH = p_spheresRobotjH
