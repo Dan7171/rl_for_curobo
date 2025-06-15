@@ -86,7 +86,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 0 # 100.0  # Adjust weight as needed
+        weight: 10 # 100.0  # Adjust weight as needed
         terminal: False
         num_particles: 400
         horizon: 30
@@ -97,8 +97,8 @@ cost:
           use: True
           ratio: 0.5
         sparse_spheres:
-          exclude_self: [0,1,4,5,61,62,63,64] # base link and graspped object
-          exclude_others: [0,1,4,5,61,62,63,64] # base link and graspped object
+          exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60] # 0,1,4,5: base link, graspped object: 61,62,63,64, 36 or greater: end effector (sparse sampline)
+          exclude_others: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]  
 
 
 

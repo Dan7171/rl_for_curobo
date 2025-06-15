@@ -244,7 +244,7 @@ class DynamicObsCollPredictor:
         collision_mask = self.pairwise_surface_dist_buf.lt_(safety_margin)
         torch.sum(collision_mask, dim=[2, 3, 4], out=self.tmp_cost_mat_buf_sparse)
         
-        # Project sparse results to full horizon
+        # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
         
         # Apply cost weight
