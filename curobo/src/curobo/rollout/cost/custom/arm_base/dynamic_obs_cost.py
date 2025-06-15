@@ -19,7 +19,7 @@ class DynamicObsCostConfig(CostConfig):
     
     num_particles: int = -1
     horizon: int = -1
-    p_R: tuple[float, float, float] = (0, 0, 0)
+    X: tuple[float, float, float, float, float, float, float] = (0, 0, 0, 1, 0, 0, 0) # robot base pose expressed in the world frame: x,y,z qx,qy,qz,qw (default is identity quaternion)
     n_coll_spheres: int = -1 # total number of spheres of "self" (the robot in which the cost is running) 
     n_own_spheres: int = -1 # total number of spheres of "others" (the dynamic obstacles) 
     sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
@@ -56,8 +56,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                                                             self.n_coll_spheres,
                                                             weight_value,
                                                             [],
-                                                            False,
-                                                            torch.tensor(self.p_R),
+                                                            self.X,
                                                             self.sparse_steps,
                                                             self.sparse_spheres)
 

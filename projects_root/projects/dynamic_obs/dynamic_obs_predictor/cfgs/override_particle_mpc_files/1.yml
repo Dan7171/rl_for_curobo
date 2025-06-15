@@ -90,7 +90,7 @@ cost:
         terminal: False
         num_particles: 400
         horizon: 30
-        p_R: [1.2, 0, 0]
+        X: [1.2, 0, 0, 0, 0, 0, 1]
         n_coll_spheres: 65
         n_own_spheres: 65
         

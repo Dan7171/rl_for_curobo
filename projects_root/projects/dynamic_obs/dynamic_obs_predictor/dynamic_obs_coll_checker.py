@@ -13,6 +13,7 @@ from projects_root.utils.plot_spheres import SphereVisualizer
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 from concurrent.futures import ProcessPoolExecutor, wait
+from projects_root.utils.transforms import transform_poses_batched
 import time
 
 
@@ -35,10 +36,11 @@ class DynamicObsCollPredictor:
                  n_obs=65, # total number of spheres of the obstacles in the world (including ones that we don't want to check for collision)
                  cost_weight=100.0, 
                  obs_groups_nspheres=[], 
-                 manually_express_p_own_in_world_frame=False, 
-                 p_R=torch.zeros(3),
+                 # p_R=torch.zeros(3),
+                 X = [0,0,0,1,0,0,0],
                  sparse_steps:dict={'use': False, 'ratio': 0.5},
                  sparse_spheres:dict={'exclude_self': [], 'exclude_others': []} # list of ints, each int is the index of the sphere to exclude from the collision check.
+                 
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -53,18 +55,18 @@ class DynamicObsCollPredictor:
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
             obs_groups_nspheres: list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
-            manually_express_p_own_in_world_frame: if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
             """
         
-        self.debug = False
-        if self.debug:
-            self.sphere_visualizer = SphereVisualizer(
-                group_ids=[0, 1], # 0: own spheres, 1: obs spheres
-                figsize=(14, 10),
-                update_interval=1000,  # Update every 100ms
-                show_trajectory_trails=True
-            )
+        # self.debug = False
+        # if self.debug:
+        #     self.sphere_visualizer = SphereVisualizer(
+        #         group_ids=[0, 1], # 0: own spheres, 1: obs spheres
+        #         figsize=(14, 10),
+        #         update_interval=1000,  # Update every 100ms
+        #         show_trajectory_trails=True
+        #     )
 
+        self.X = X # the pose (x y z qw qx qy qz) of the robot in the world frame
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
         self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
@@ -112,6 +114,9 @@ class DynamicObsCollPredictor:
 
         # Buffers for own spheres: position and radius  
         self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_valid_own, 3, device=self.tensor_args.device)
+        self.XFiltered_own_R = torch.zeros(n_rollouts, self.n_sampling_steps, self.n_valid_own, 7, device=self.tensor_args.device)
+        self.XFiltered_own_R[:,:,:,3] = 1 # this is making the quat 1,0,0,0, which is the identity quaternion
+
         # Pre-allocate in broadcast-ready shape to eliminate reshaping in cost_fn
         self.p_own_buf_broadcast = torch.empty(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 1, 3, device=self.tensor_args.device)
         
@@ -140,11 +145,10 @@ class DynamicObsCollPredictor:
         
         # flags
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
-        self.manually_express_p_own_in_world_frame = manually_express_p_own_in_world_frame # if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
-        if self.manually_express_p_own_in_world_frame:
-            self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
-            # Pre-allocate broadcast buffer for world frame transformation
-            self.p_R_broadcast = self.p_R.view(1, 1, 1, 3).expand(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 3)
+        # if self.manually_express_p_own_in_world_frame:
+        #     self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
+        #     # Pre-allocate broadcast buffer for world frame transformation
+        #     self.p_R_broadcast = self.p_R.view(1, 1, 1, 3).expand(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 3)
         
     def _project_sparse_to_full_horizon(self, sparse_matrix: torch.Tensor, full_matrix: torch.Tensor):
         """
@@ -188,7 +192,8 @@ class DynamicObsCollPredictor:
     
     def update(self, p_obs:torch.Tensor):
         """
-        Update the poses of the obstacles.
+        Update the positions of the obstacles (sphere centers).
+        note: assuming that the poses are expressed in the world frame [0,0,0,1,0,0,0].
         Args:
             p_obs: tensor of shape [H, n_obs, 3]. The poses of the obstacles.
         """
@@ -200,21 +205,27 @@ class DynamicObsCollPredictor:
         # Update broadcast-ready buffer
         self.p_obs_buf_broadcast[0, :, 0, :, :] = self.p_obs_buf
 
-    def cost_fn(self, prad_own:torch.Tensor, safety_margin=0.1):
+    def cost_fn(self, prad_own_R:torch.Tensor, safety_margin=0.1):
         """
+        prad_own_R: tensor of shape [n_rollouts, H, n_valid_own, 3]. The poses of the own spheres, expressed in the robot base frame.
         Optimized collision cost computation with reduced memory operations and fused computations.
         """
-        # Efficient indexing and extraction in one step
-        temp_own = torch.index_select(prad_own, 1, self.sampling_timesteps_tensor)  # Select timesteps
-        temp_own = torch.index_select(temp_own, 2, self.valid_own_spheres_tensor)   # Select spheres
-        
-        # Direct copy of xyz coordinates
-        self.p_own_buf.copy_(temp_own[:, :, :, :3])
 
-        # World frame transformation if needed (fused with addition)
-        if self.manually_express_p_own_in_world_frame:
-            self.p_own_buf.add_(self.p_R_broadcast)
+        # Efficient indexing and extraction in one step
+        # Filter out the timesteps and spheres that are not needed
+        # pos, radius of own spheres, expressed in the robot base frame R
+        pradFiltered_own_R = torch.index_select(prad_own_R, 1, self.sampling_timesteps_tensor)  # Select timesteps
+        pradFiltered_own_R = torch.index_select(pradFiltered_own_R, 2, self.valid_own_spheres_tensor)   # Select spheres
+        self.XFiltered_own_R[:,:,:,:3] = pradFiltered_own_R[:,:,:,:3] # set own spheres expressed in the robot base frame (positions only, quaternion is already set to identity)
         
+        
+        # Express own spheres (except the one we already filtered) in the world frame, 
+        # so that it will be at the same frame as the obstacles (we need that to compute the distances between the own and obs spheres)
+        # and save only the positions 
+        self.p_own_buf = transform_poses_batched(self.XFiltered_own_R, self.X)[:,:,:,:3]
+
+        # NOW WE HAVE BOTH OWN AND OBS SPHERES IN THE SAME FRAME (WORLD FRAME)
+
         # Update broadcast-ready buffer
         self.p_own_buf_broadcast[:, :, :, 0, :] = self.p_own_buf
         
@@ -240,9 +251,9 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf.mul_(self.cost_weight)
         
 
-        if self.debug:
-            self.sphere_visualizer.update(self.p_own_buf[:3], 0, self.rad_own_buf)
-            self.sphere_visualizer.update(self.p_obs_buf.unsqueeze(0), 1, self.rad_obs_buf)
+        # if self.debug:
+        #     self.sphere_visualizer.update(self.p_own_buf[:3], 0, self.rad_own_buf)
+        #     self.sphere_visualizer.update(self.p_obs_buf.unsqueeze(0), 1, self.rad_obs_buf)
 
         return self.cost_mat_buf
 
