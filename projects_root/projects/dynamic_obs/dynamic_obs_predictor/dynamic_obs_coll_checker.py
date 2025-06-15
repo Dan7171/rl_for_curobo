@@ -29,7 +29,6 @@ class DynamicObsCollPredictor:
 
     def __init__(self, 
                  tensor_args, 
-                 step_dt_traj_opt=None, 
                  H=30, 
                  n_rollouts=400, 
                  n_own_spheres=65, # total number of spheres of the robot (including ones that we don't want to check for collision)
@@ -48,7 +47,6 @@ class DynamicObsCollPredictor:
         Args:
             tensor_args: pytorch tensor arguments.
             cache (dict): collision checker cache for the pre-defined dynamic primitives.
-            step_dt_traj_opt (float): Time passes between each step in the trajectory. This is what the mpc/curobo solver assumes time delta between steps in horizon is when parforming path planning.
             H (int, optional): Defaults to 30. The horizon length- number of states in the trajectory during trajectory optimization.
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
@@ -81,7 +79,6 @@ class DynamicObsCollPredictor:
             self.sampling_timesteps = np.arange(self.H)
     
 
-        self.step_dt_traj_opt = step_dt_traj_opt 
         self.cost_weight = cost_weight
 
         # control sparsity over spheres - filter out spheres which are not needed/less relevant (for efficiency)

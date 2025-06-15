@@ -41,12 +41,12 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         
         # Extract weight value properly
         weight_value = self.weight
-        if isinstance(weight_value, torch.Tensor):
-            weight_value = weight_value.cpu().item()
-        elif isinstance(weight_value, (list, tuple)):
-            weight_value = weight_value[0] if len(weight_value) > 0 else 1.0
-        elif not isinstance(weight_value, (int, float)):
-            weight_value = 1.0
+        weight_value = weight_value.cpu().item() # cost weight
+        
+        # elif isinstance(weight_value, (list, tuple)):
+        #     weight_value = weight_value[0] if len(weight_value) > 0 else 1.0
+        # elif not isinstance(weight_value, (int, float)):
+        #     weight_value = 1.0
             
         self.col_pred = DynamicObsCollPredictor(self.tensor_args,
                                                             None,
