@@ -86,12 +86,12 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 0  # Adjust weight as needed
+        weight: 100  # Adjust weight as needed
         terminal: False
         num_particles: 400
         horizon: 30
         p_R: [1.2, 0, 0]
-        n_coll_spheres_valid: 65
+        n_coll_spheres: 65
         n_own_spheres: 65
         
         # sparse_steps:

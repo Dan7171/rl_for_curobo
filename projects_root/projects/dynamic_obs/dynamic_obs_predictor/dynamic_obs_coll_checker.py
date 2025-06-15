@@ -9,6 +9,7 @@ import numpy as np
 import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
+from projects_root.utils.plot_spheres import SphereVisualizer
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 from concurrent.futures import ProcessPoolExecutor, wait
@@ -54,6 +55,16 @@ class DynamicObsCollPredictor:
             obs_groups_nspheres: list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
             manually_express_p_own_in_world_frame: if True, the robot spheres positions are expressed in the world frame, otherwise they are expressed in the robot base frame.
             """
+        
+        self.debug = False
+        if self.debug:
+            self.sphere_visualizer = SphereVisualizer(
+                group_ids=[0, 1], # 0: own spheres, 1: obs spheres
+                figsize=(14, 10),
+                update_interval=1000,  # Update every 100ms
+                show_trajectory_trails=True
+            )
+
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
         self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
@@ -228,6 +239,11 @@ class DynamicObsCollPredictor:
         # Apply cost weight
         self.cost_mat_buf.mul_(self.cost_weight)
         
+
+        if self.debug:
+            self.sphere_visualizer.update(self.p_own_buf[:3], 0, self.rad_own_buf)
+            self.sphere_visualizer.update(self.p_obs_buf.unsqueeze(0), 1, self.rad_obs_buf)
+
         return self.cost_mat_buf
 
 

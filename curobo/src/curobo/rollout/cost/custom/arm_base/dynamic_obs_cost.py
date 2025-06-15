@@ -20,8 +20,8 @@ class DynamicObsCostConfig(CostConfig):
     num_particles: int = -1
     horizon: int = -1
     p_R: tuple[float, float, float] = (0, 0, 0)
-    n_coll_spheres_valid: int = -1
-    n_own_spheres: int = -1
+    n_coll_spheres: int = -1 # total number of spheres of "self" (the robot in which the cost is running) 
+    n_own_spheres: int = -1 # total number of spheres of "others" (the dynamic obstacles) 
     sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
     sparse_spheres: dict = field(default_factory=lambda: {'exclude_self': [], 'exclude_others': []})
     col_pred: Optional[DynamicObsCollPredictor] = None
@@ -53,7 +53,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                                                             self.horizon,
                                                             self.num_particles ,
                                                             self.n_own_spheres,
-                                                            self.n_coll_spheres_valid,
+                                                            self.n_coll_spheres,
                                                             weight_value,
                                                             [],
                                                             False,
