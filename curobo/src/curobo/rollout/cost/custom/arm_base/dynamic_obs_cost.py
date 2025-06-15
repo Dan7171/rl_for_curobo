@@ -55,7 +55,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                                                             self.n_own_spheres,
                                                             self.n_coll_spheres,
                                                             weight_value,
-                                                            [],
                                                             self.X,
                                                             self.sparse_steps,
                                                             self.sparse_spheres)

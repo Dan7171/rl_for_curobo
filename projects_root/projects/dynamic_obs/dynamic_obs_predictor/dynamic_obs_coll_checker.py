@@ -35,7 +35,6 @@ class DynamicObsCollPredictor:
                  n_own_spheres=65, # total number of spheres of the robot (including ones that we don't want to check for collision)
                  n_obs=65, # total number of spheres of the obstacles in the world (including ones that we don't want to check for collision)
                  cost_weight=100.0, 
-                 obs_groups_nspheres=[], 
                  # p_R=torch.zeros(3),
                  X = [0,0,0,1,0,0,0],
                  sparse_steps:dict={'use': False, 'ratio': 0.5},
@@ -54,7 +53,6 @@ class DynamicObsCollPredictor:
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
-            obs_groups_nspheres: list of ints, each int is the number of obstacles in the group. # This is useful in cases where the obstacles are grouped together in the world (example: a group could be another robot, or an obstacle made out of multiple spheres).
             """
         
         # self.debug = False
