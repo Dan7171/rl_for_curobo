@@ -49,7 +49,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         #     weight_value = 1.0
             
         self.col_pred = DynamicObsCollPredictor(self.tensor_args,
-                                                            None,
                                                             self.horizon,
                                                             self.num_particles ,
                                                             self.n_own_spheres,
