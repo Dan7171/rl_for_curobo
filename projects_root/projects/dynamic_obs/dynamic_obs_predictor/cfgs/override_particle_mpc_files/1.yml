@@ -8,7 +8,10 @@
 ## without an express license agreement from NVIDIA CORPORATION or
 ## its affiliates is strictly prohibited.
 ##
-
+general:
+  env_id: 0
+  robot_id: 1
+  
 model:
   horizon: 30
   state_filter_cfg:
@@ -37,6 +40,9 @@ cost:
     terminal: True
     run_weight: 1.0
     use_metric: True
+    env_id: 0 
+    robot_id: 1
+    
 
   cspace_cfg: # don't think this is used (I put the pose_cfg weight to [0,0,0,0] and there was no move at all so I don't think the cspace_cfg is used)
     weight: 1000.0
@@ -78,7 +84,11 @@ cost:
   # Uncomment and modify the section below to use explicit custom costs:
   
   # Example of explicit custom cost configuration:
+  
+
   custom:
+    n_own_spheres: 65
+
     # Custom costs that run in arm_base (general robot costs)
     arm_base:
       
@@ -86,23 +96,29 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 10  # Adjust weight as needed
+        weight: 100  # Adjust weight as needed
         terminal: False
-        num_particles: 400
-        horizon: 30
+        env_id: 0
+        robot_id: 1
         X: [1.2, 0, 0, 0, 0, 0, 1]
         n_coll_spheres: 65
-        n_own_spheres: 65
-        
         sparse_steps:
           use: True
-          ratio: 0.5
+          ratio: 0.2
 
         sparse_spheres:
           exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60] # 0,1,4,5: base link, graspped object: 61,62,63,64, 36 or greater: end effector (sparse sampline)
           exclude_others: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
+        env_id: 0
+        robot_id: 1
         
-
+    arm_reacher:
+      egocentricm_cost:
+        module_path: "curobo.rollout.cost.custom.arm_reacher.egocentrism_cost"
+        class_name: "EgocentricmCost"
+        config_class_name: "EgocentricmCostConfig"
+        weight: 1.0
+        
 
 mppi:
   init_cov          : 0.05 # 0.05 #.5 #.5

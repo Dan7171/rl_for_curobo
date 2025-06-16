@@ -153,6 +153,9 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
     # Our modules
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, runtime_topics
+    init_runtime_topics() 
+    env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
     from projects_root.utils.helper import add_extensions
     from projects_root.autonomous_franka import FrankaMpc
     from projects_root.utils.draw import draw_points
@@ -166,6 +169,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     from projects_root.autonomous_franka import AutonomousFranka
+    
     a = torch.zeros(4, device="cuda:0") # prevent cuda out of memory errors (took from curobo examples)
 
 ######################### HELPER ##########################
@@ -359,7 +363,7 @@ def main():
     # robot targets, expressed in robot frames
     X_Targets_R = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]]# [[0.6, 0, 0.2, 0, 1, 0, 0] for _ in range(n_robots)]
     target_colors = [TargetColors.green, TargetColors.red]
-    cost_live_plotting_cfgs = [{'live_plotting': False, 'save_plots': False}, {'live_plotting': True, 'save_plots': True}]
+    cost_live_plotting_cfgs = [{'live_plotting': True, 'save_plots':True}, {'live_plotting': True, 'save_plots': True}]
     if OBS_PREDICTION:
         col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
    
@@ -370,6 +374,8 @@ def main():
             robot_cfgs[i], 
             my_world, 
             usd_help, 
+            env_id=0,
+            robot_id=i,
             p_R=X_Robots[i][:3],
             q_R=X_Robots[i][3:], 
             p_T_R=X_Targets_R[i][:3],
@@ -489,9 +495,11 @@ def main():
         robots_as_obs_timer_start = time.time()
         if OBS_PREDICTION:         
             plans = [robots[i].get_plan(valid_spheres_only=False) for i in range(len(robots))]
-            
+            # Store plans for each robot in the environment topics
+            for robot_idx in range(len(env_topics)):
+                env_topics[robot_idx]["plans"] = plans[robot_idx]
         else:
-            sphere_states_all_robots:list[torch.Tensor] = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
+            sphere_states_all_robots = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
         robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
         # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
@@ -515,12 +523,14 @@ def main():
                             rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
                 # col_pred:DynamicObsCollPredictor = robots[i].dynamic_obs_col_pred
                 col_pred = robots[i].get_col_pred()
-                if t_idx == 0:
-                    # dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
-                    col_pred.set_obs_rads(rad_spheresOthersH)
-                    col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
-                else:
-                    col_pred.update(p_spheresOthersH)
+                if col_pred is not None:
+                    if t_idx == 0:
+                        # dynamic_obs_coll_predictors[i].activate(p_spheresOthersH, rad_spheresOthersH)
+                        col_pred.set_obs_rads(rad_spheresOthersH)
+                        col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
+                    else:
+                        if p_spheresOthersH is not None:
+                            col_pred.update(p_spheresOthersH)
                 robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
                 # if HIGHLIGHT_OBS and t_idx % HIGHLIGHT_OBS_H == 0: # 

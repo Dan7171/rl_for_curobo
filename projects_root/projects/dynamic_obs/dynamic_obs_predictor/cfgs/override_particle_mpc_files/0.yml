@@ -8,6 +8,9 @@
 ## without an express license agreement from NVIDIA CORPORATION or
 ## its affiliates is strictly prohibited.
 ##
+general:
+  env_id: 0
+  robot_id: 0
 
 model:
   horizon: 30
@@ -26,6 +29,7 @@ model:
   teleport_mode: False
   state_finite_difference_mode: "CENTRAL"
   # return_full_act_buffer: True # experimental : trying to read the policy, Originaly false
+
 
 
 cost:
@@ -78,26 +82,39 @@ cost:
   # Uncomment and modify the section below to use explicit custom costs:
   
   # Example of explicit custom cost configuration:
+
+  
   custom:
-    # Custom costs that run in arm_base (general robot costs)
-    arm_base:
+    # Custom costs that run in arm_base (general robot costs)  
+    n_own_spheres: 65
     
+    arm_base:
       dynamic_obs_cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 10 # 100.0  # Adjust weight as needed
+        weight: 100 # 100.0  # Adjust weight as needed
         terminal: False
-        num_particles: 400
-        horizon: 30
+        env_id: 0
+        robot_id: 0
         n_coll_spheres: 65
-        n_own_spheres: 65
         sparse_steps:
           use: True
-          ratio: 0.5
+          ratio: 0.2
         sparse_spheres:
           exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60] # 0,1,4,5: base link, graspped object: 61,62,63,64, 36 or greater: end effector (sparse sampline)
           exclude_others: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]  
+
+    arm_reacher:
+      egocentricm_cost:
+        module_path: "curobo.rollout.cost.custom.arm_reacher.egocentrism_cost"
+        class_name: "EgocentricmCost"
+        config_class_name: "EgocentricmCostConfig"
+        terminal: False
+        weight: 1.0
+        sparse_spheres_exclude_self: [61,62,63,64] # graspped object: 61,62,63,64
+        env_id: 0
+        robot_id: 0
 
 
 

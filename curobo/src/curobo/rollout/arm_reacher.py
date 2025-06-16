@@ -476,11 +476,13 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             for cost_name, cost_instance in self._custom_arm_reacher_costs.items():
                 if cost_instance.enabled:
                     with profiler.record_function(f"cost/custom_arm_reacher/{cost_name}"):
-                        try:
-                            custom_cost = cost_instance.forward(state)
-                            cost_list.append(custom_cost)
-                        except Exception as e:
-                            log_error(f"Error computing custom arm_reacher cost {cost_name}: {e}")
+                        custom_cost = cost_instance.forward(state)
+                        cost_list.append(custom_cost)
+                        # try:
+                        #     custom_cost = cost_instance.forward(state)
+                        #     cost_list.append(custom_cost)
+                        # except Exception as e:
+                        #     log_error(f"Error computing custom arm_reacher cost {cost_name}: {e}")
         
         # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
         if getattr(self, '_enable_live_plotting', False):

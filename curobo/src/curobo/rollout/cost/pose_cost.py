@@ -28,6 +28,7 @@ from curobo.util.logger import log_error
 
 # Local Folder
 from .cost_base import CostBase, CostConfig
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
 
 
 class PoseErrorType(Enum):
@@ -47,7 +48,9 @@ class PoseCostConfig(CostConfig):
     offset_waypoint: List[float] = None
     offset_tstep_fraction: float = -1.0
     waypoint_horizon: int = 0
-
+    env_id: int = 0
+    robot_id: int = 0
+    
     def __post_init__(self):
         if self.run_vec_weight is not None:
             self.run_vec_weight = self.tensor_args.to_device(self.run_vec_weight)
@@ -479,6 +482,8 @@ class PoseCost(CostBase, PoseCostConfig):
         # if link_name is None and cost.shape[0]==8:
         #    print(ee_pos_batch[...,-1].squeeze())
         # print(cost.shape)
+
+        runtime_topics.topics[self.env_id][self.robot_id]["cost"]["pose"] = cost
         return cost
 
     def forward_pose(

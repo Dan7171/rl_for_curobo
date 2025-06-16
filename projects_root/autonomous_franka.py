@@ -49,6 +49,7 @@ from curobo.types.state import FilterCoeff
 from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig, MotionGenResult,PoseCostMetric,)
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
 
 def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
@@ -69,7 +70,17 @@ def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orien
 class AutonomousFranka:
     
     instance_counter = 0
-    def __init__(self,robot_cfg, world:World, p_R=np.array([0.0,0.0,0.0]),q_R=np.array([1,0,0,0]), p_T_R=np.array([0.5,0.0,0.5]), q_T_R=np.array([0, 1, 0, 0]), target_color=np.array([0.0,1.0,0.0]), target_size=0.05):
+    def __init__(self,
+                robot_cfg,
+                world:World,
+                env_id:int=0,
+                robot_id:int=0,
+                p_R=np.array([0.0,0.0,0.0]),
+                q_R=np.array([1,0,0,0]), 
+                p_T_R=np.array([0.5,0.0,0.5]), 
+                q_T_R=np.array([0, 1, 0, 0]), 
+                target_color=np.array([0.0,1.0,0.0]), 
+                target_size=0.05):
         """
         Spawns a franka robot in the scene andd setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
@@ -82,8 +93,12 @@ class AutonomousFranka:
             q_T_R: Frame T's (representing target's base frame) orientation (R, representing rotation) in the robot frame . Quaternion (w,x,y,z)
 
         """
+        
+
         # simulator paths etc.
-        self.instance_id = AutonomousFranka.instance_counter
+        # self.instance_id = AutonomousFranka.instance_counter
+        self.env_id = env_id
+        self.instance_id = robot_id
         self.world = world
         self.world_root ='/World'
         self.robot_name = f'robot_{self.instance_id}'
@@ -122,7 +137,7 @@ class AutonomousFranka:
         self.obs_viz = [] # for visualization of robot spheres
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
-        AutonomousFranka.instance_counter += 1
+        # AutonomousFranka.instance_counter += 1
     
     def get_num_of_sphers(self, valid_only:bool=True):
         return self.n_coll_spheres if not valid_only else self.n_coll_spheres_valid
@@ -431,6 +446,8 @@ class FrankaMpc(AutonomousFranka):
                 robot_cfg, 
                 world:World, 
                 usd_help:UsdHelper, 
+                env_id:int=0,
+                robot_id:int=0,
                 p_R=np.array([0.0,0.0,0.0]), 
                 q_R=np.array([1,0,0,0]), 
                 p_T_R=np.array([0.5, 0.0, 0.5]), 
@@ -454,7 +471,7 @@ class FrankaMpc(AutonomousFranka):
             target_size (_type_): _description_
             cost_live_plotting_cfgs (_type_): _description_
         """
-        super().__init__(robot_cfg, world, p_R, q_R, p_T_R, q_T_R, target_color, target_size)
+        super().__init__(robot_cfg, world,env_id, robot_id, p_R, q_R, p_T_R, q_T_R, target_color, target_size)
         # self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
@@ -477,10 +494,11 @@ class FrankaMpc(AutonomousFranka):
             step_dt_traj_mpc (_type_): _description_
             dynamic_obs_coll_predictor (_type_): _description_
         """
-        if hasattr(self, "dynamic_obs_col_pred"):
-            dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
-        else:
-            dynamic_obs_coll_predictor = None
+        # if hasattr(self, "dynamic_obs_col_pred"):
+        #     dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
+        # else:
+        #     dynamic_obs_coll_predictor = None
+        
 
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
@@ -496,10 +514,11 @@ class FrankaMpc(AutonomousFranka):
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
             store_rollouts=True,  # Store trajectories for visualization
             step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
-            dynamic_obs_checker=dynamic_obs_coll_predictor, # New
+            dynamic_obs_checker=None, # New
             override_particle_file=self.override_particle_file, # New
             cost_live_plotting_cfg=self.cost_live_plotting_cfg # New
         )
+
         
         self.solver = MpcSolver(mpc_config)
         
@@ -521,6 +540,7 @@ class FrankaMpc(AutonomousFranka):
 
 
 
+
     def update_solver_target(self):
         # Express the target in the robot's base frame instead of the world frame (required for the solver)
         p_solverTarget_R, q_solverTarget_R = FrameUtils.world_to_F(self.p_R, self.q_R, self.p_solverTarget, self.q_solverTarget)
@@ -529,6 +549,10 @@ class FrankaMpc(AutonomousFranka):
         # Update the goal buffer and the solver and in the cuda graph buffer
         self.goal_buffer.goal_pose.copy_(X_solverTarget_R) 
         self.solver.update_goal(self.goal_buffer)
+        
+        # publish the target in the runtime topics
+        X_target = np.concatenate([p_solverTarget_R, q_solverTarget_R]) # in world frame
+        runtime_topics.topics[self.env_id][self.instance_id]["target"] = X_target
 
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
@@ -713,6 +737,8 @@ class FrankaMpc(AutonomousFranka):
                     else:
                         qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
                         qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
+                    
+                    # transform all poses from robot base frame to to the world frame
                     X_world = transform_poses_batched(torch.cat([pKey, qKey], dim=-1), self_transform)
                     pKey = X_world[...,:3]
                     qKey = X_world[...,3:]

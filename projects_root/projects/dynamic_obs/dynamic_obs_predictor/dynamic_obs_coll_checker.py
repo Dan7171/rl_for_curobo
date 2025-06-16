@@ -9,11 +9,13 @@ import numpy as np
 import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
 from projects_root.utils.plot_spheres import SphereVisualizer
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 from concurrent.futures import ProcessPoolExecutor, wait
 from projects_root.utils.transforms import transform_poses_batched
+
 import time
 
 
@@ -37,8 +39,9 @@ class DynamicObsCollPredictor:
                  # p_R=torch.zeros(3),
                  X = [0,0,0,1,0,0,0],
                  sparse_steps:dict={'use': False, 'ratio': 0.5},
-                 sparse_spheres:dict={'exclude_self': [], 'exclude_others': []} # list of ints, each int is the index of the sphere to exclude from the collision check.
-                 
+                 sparse_spheres:dict={'exclude_self': [], 'exclude_others': []}, # list of ints, each int is the index of the sphere to exclude from the collision check.
+                 env_id: int = 0,
+                 robot_id: int = 0,
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -65,9 +68,19 @@ class DynamicObsCollPredictor:
         self.X = X # the pose (x y z qw qx qy qz) of the robot in the world frame
         self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
-        self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
-        self.n_rollouts = n_rollouts 
+        self.env_id = env_id
+        self.robot_id = robot_id
+        self.H = H
+        # self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
         
+        # self.n_rollouts = n_rollouts 
+        self.n_rollouts = n_rollouts
+        self.n_own_spheres = n_own_spheres
+        # self.env_id = env_id
+        # self.robot_id = robot_id
+        # self.env_id = runtime_topics.topics[env_id][robot_id]['mpc_cfg']['general']['env_id']
+        # self.robot_id = runtime_topics.topics[env_id][robot_id]['mpc_cfg']['general']['robot_id']
+
         # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
         if self.sparse_steps['use']:
@@ -84,7 +97,7 @@ class DynamicObsCollPredictor:
         # control sparsity over spheres - filter out spheres which are not needed/less relevant (for efficiency)
         self.sparse_spheres = sparse_spheres # sparse spheres config
         
-        self.n_own_spheres = n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        self.n_own_spheres = self.n_own_spheres # n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
         self.valid_own_spheres = np.array(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])))# torch.tensor(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])), device=self.tensor_args.device)
         
         self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
@@ -109,8 +122,12 @@ class DynamicObsCollPredictor:
 
         # Buffers for own spheres: position and radius  
         self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_valid_own, 3, device=self.tensor_args.device)
-        self.XFiltered_own_R = torch.zeros(n_rollouts, self.n_sampling_steps, self.n_valid_own, 7, device=self.tensor_args.device)
-        self.XFiltered_own_R[:,:,:,3] = 1 # this is making the quat 1,0,0,0, which is the identity quaternion
+        # self.XFiltered_own_R = torch.zeros(n_rollouts, self.n_sampling_steps, self.n_valid_own, 7, device=self.tensor_args.device)
+        # self.XFiltered_own_R[:,:,:,3] = 1 # this is making the quat 1,0,0,0, which is the identity quaternion
+
+        self.p_own_buf_unfiltered = torch.zeros(n_rollouts, self.H, self.n_own_spheres, 3, device=self.tensor_args.device)
+        self.X_own_R = torch.zeros(n_rollouts, self.H, self.n_own_spheres, 7, device=self.tensor_args.device)
+        self.X_own_R[:,:,:,3] = 1 # this is making the quat 1,0,0,0, which is the identity quaternion
 
         # Pre-allocate in broadcast-ready shape to eliminate reshaping in cost_fn
         self.p_own_buf_broadcast = torch.empty(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 1, 3, device=self.tensor_args.device)
@@ -209,16 +226,30 @@ class DynamicObsCollPredictor:
         # Efficient indexing and extraction in one step
         # Filter out the timesteps and spheres that are not needed
         # pos, radius of own spheres, expressed in the robot base frame R
-        pradFiltered_own_R = torch.index_select(prad_own_R, 1, self.sampling_timesteps_tensor)  # Select timesteps
-        pradFiltered_own_R = torch.index_select(pradFiltered_own_R, 2, self.valid_own_spheres_tensor)   # Select spheres
-        self.XFiltered_own_R[:,:,:,:3] = pradFiltered_own_R[:,:,:,:3] # set own spheres expressed in the robot base frame (positions only, quaternion is already set to identity)
-        
-        
+        # pradFiltered_own_R = torch.index_select(prad_own_R, 1, self.sampling_timesteps_tensor)  # Select timesteps
+        # pradFiltered_own_R = torch.index_select(pradFiltered_own_R, 2, self.valid_own_spheres_tensor)   # Select spheres
+
+        # filter out the spheres that are not needed
+        # pradFiltered_own_R = torch.index_select(prad_own_R, 2, self.valid_own_spheres_tensor)   # Select spheres
+        # self.XFiltered_own_R[:,:,:,:3] = pradFiltered_own_R[:,:,:,:3] # set own spheres expressed in the robot base frame (positions only, quaternion is already set to identity)
+        # self.X_own_R[:,:,:,:3] = pradFiltered_own_R[:,:,:,:3]
+        self.X_own_R[:,:,:,:3] = prad_own_R[:,:,:,:3]
         # Express own spheres (except the one we already filtered) in the world frame, 
         # so that it will be at the same frame as the obstacles (we need that to compute the distances between the own and obs spheres)
         # and save only the positions 
-        self.p_own_buf = transform_poses_batched(self.XFiltered_own_R, self.X)[:,:,:,:3]
+        # self.p_own_buf = transform_poses_batched(self.X_own_R, self.X)[:,:,:,:3]
+        self.p_own_buf_unfiltered = transform_poses_batched(self.X_own_R, self.X)[:,:,:,:3]
+        runtime_topics.topics[self.env_id][self.robot_id]["p_spheres_rollouts"] = self.p_own_buf_unfiltered # publish the own spheres poses in the world frame
 
+        # publish the own spheres poses in the world frame
+        # runtime_topics.topics[self.env_id][self.robot_id]["p_SpheresRolloutsFiltered"] = self.p_own_buf # publish the own spheres poses in the world frame
+        
+        # filter out the timesteps that are not needed
+        p_spheres_tmp_time_filtered = torch.index_select(self.p_own_buf_unfiltered, 1, self.sampling_timesteps_tensor) # Select timesteps
+        # filter out the spheres that are not needed
+        self.p_own_buf = torch.index_select(p_spheres_tmp_time_filtered, 2, self.valid_own_spheres_tensor)
+        
+        # runtime_topics.topics[self.env_id][self.robot_id]["rad_SpheresRolloutsFiltered"] = self.rad_own_buf
         # NOW WE HAVE BOTH OWN AND OBS SPHERES IN THE SAME FRAME (WORLD FRAME)
 
         # Update broadcast-ready buffer
