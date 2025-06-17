@@ -118,7 +118,9 @@ cost:
         class_name: "EgocentricmCost"
         config_class_name: "EgocentricmCostConfig"
         weight: 1.0
-        
+        sparse_spheres_exclude_self: [61,62,63,64] # graspped object: 61,62,63,64
+        env_id: 0
+        robot_id: 1
 
 mppi:
   init_cov          : 0.05 # 0.05 #.5 #.5

@@ -72,6 +72,18 @@ class WrapMpc(WrapBase):
         return result
 
     def _shift(self, act_seq, shift_steps=1):
+        """
+        What it does step by step:
+        act_seq.roll(-shift_steps, 1): Rolls/shifts the action sequence left by shift_steps positions along dimension 1 (time dimension)
+        If shift_steps=1: [a0, a1, a2, a3, a4] → [a1, a2, a3, a4, a0]
+        act_seq[:, -shift_steps:, :] = act_seq[:, -shift_steps - 1 : -shift_steps, :].clone(): Fills the last shift_steps positions with the second-to-last action
+        [a1, a2, a3, a4, a0] → [a1, a2, a3, a4, a4] (repeats a4)
+        Why this matters:
+        In MPC, you execute the first action (a0) and then need to plan the next sequence
+        Instead of starting from scratch, you warm-start with the remaining planned actions
+        The last action is repeated to fill the horizon (common MPC practice)
+        For MPPI specifically: Since MPPI doesn't store explicit action sequences like Newton methods, this likely resets internal state or calls the base class implementation (which might be a no-op for particle methods).
+        """
         act_seq = act_seq.roll(-shift_steps, 1)
         act_seq[:, -shift_steps:, :] = act_seq[:, -shift_steps - 1 : -shift_steps, :].clone()
         return act_seq

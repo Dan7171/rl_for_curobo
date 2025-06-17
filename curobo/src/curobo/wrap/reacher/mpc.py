@@ -70,7 +70,7 @@ from curobo.wrap.reacher.types import ReacherSolveState, ReacherSolveType
 from curobo.wrap.wrap_base import WrapResult
 from curobo.wrap.wrap_mpc import WrapConfig, WrapMpc
 try:
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 except:
     runtime_topics = None
 
@@ -187,7 +187,8 @@ class MpcSolverConfig:
         if override_particle_file is not None:
             merge_dict_a_into_b(load_yaml(override_particle_file), config_data)
         
-        if override_particle_file is not None and 'general' in config_data and runtime_topics is not None:
+        if override_particle_file is not None and 'general' in config_data and get_topics() is not None:
+            runtime_topics = get_topics()
             env_id = config_data['general']['env_id']           
             robot_id = config_data['general']['robot_id']
             runtime_topics.topics[env_id][robot_id]['mpc_cfg'] = config_data

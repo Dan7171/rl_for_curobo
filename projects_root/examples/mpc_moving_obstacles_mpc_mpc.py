@@ -153,9 +153,9 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from omni.isaac.core.utils.stage import add_reference_to_stage
     from omni.isaac.core.utils.nucleus import get_assets_root_path
     # Our modules
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, runtime_topics
-    init_runtime_topics() 
-    env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
+    # init_runtime_topics() 
+    # env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
     from projects_root.utils.helper import add_extensions
     from projects_root.autonomous_franka import FrankaMpc
     from projects_root.utils.draw import draw_points
@@ -354,6 +354,9 @@ def main():
         np.array([1.2,0,0,0,0,0,1], dtype=np.float32) # 0,0,0,1  = 0,0,180 in euler angles
         ] # (x,y,z,qw, qx,qy,qz) expressed in world frame
     n_robots = len(X_Robots)
+    init_runtime_topics(n_envs=1, robots_per_env=n_robots) 
+    runtime_topics = get_topics()
+    env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
     robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
     robots_collision_caches = [{"obb": 100, "mesh": 100} for _ in range(n_robots)]
     robot_cfgs = [load_yaml(f"projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]

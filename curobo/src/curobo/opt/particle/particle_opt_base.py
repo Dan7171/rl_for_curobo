@@ -168,6 +168,11 @@ class ParticleOptBase(Optimizer, ParticleOptConfig):
         and returns the resulting observations, costs,
         actions
 
+        # generate_rollouts():
+        # - calls sample_actions() to get candidate action sequences
+        # - Then calls rollout_fn() to simulate those actions and get costs
+        # - Returns a Trajectory object with actions, costs, and sometimes states
+
         Parameters
         ----------
         state : dict or np.ndarray
@@ -251,28 +256,58 @@ class ParticleOptBase(Optimizer, ParticleOptConfig):
     def _run_opt_iters(self, init_act: T_HDOF_float, shift_steps=0, n_iters=None):
         n_iters = n_iters if n_iters is not None else self.n_iters
 
+        # Prioir step 1: shift the policy one step left to match the current time step
+        # For more details, see wrap_mpc.py
         self._shift(shift_steps)
+
+        # Prioir step 2: update sampling distribution center
+        # Purpose: Update the sampling distribution center
+        # For more details, see parallel_mppi.py
         self.update_seed(init_act)
+
+        # Prioir step 3: Stores current best action sequence and minimum cost for debugging
         if not self.use_cuda_graph and self.store_debug:
+            # finds the lowest total cost
             self.debug.append(self._get_action_seq(mode=self.sample_mode).clone())
 
+        # NOW: Optimization LOOP FOR n_iters
         for _ in range(n_iters):
-            # generate random simulated trajectories
+
+            # Step 1: Generate Rollouts
+            # generate_rollouts():
+            # - calls sample_actions() to get candidate action sequences
+            # - Then calls rollout_fn() to simulate those actions and get costs
+            # - Returns a Trajectory object with actions, costs, and sometimes states
             trajectory = self.generate_rollouts()
+
+            # Step 2: Reshape for Parallel Processing
+            # Reshapes tensors from flat batch format to structured format
             trajectory.actions = trajectory.actions.view(
                 self.n_problems, self.particles_per_problem, self.action_horizon, self.d_action
             )
             trajectory.costs = trajectory.costs.view(
                 self.n_problems, self.particles_per_problem, self.horizon
             )
+
+            # Step 3: Update Distribution
+            # This is the key step where the optimizer learns from the rollouts
             with profiler.record_function("mppi/update_distribution"):
                 self._update_distribution(trajectory)
+
+            # Step 4: Debug Storage
+            # Stores current best action sequence and minimum cost for debugging
             if not self.use_cuda_graph and self.store_debug:
                 self.debug.append(self._get_action_seq(mode=self.sample_mode).clone())
                 self.debug_cost.append(
                     torch.min(torch.sum(trajectory.costs, dim=-1), dim=-1)[0].unsqueeze(-1).clone()
                 )
 
+        # Final Result: 
+        # Extracts the final optimized action sequence
+        # sample_mode determines how to select the final action:
+        # MEAN: Return the mean of the distribution
+        # BEST: Return the best sample found
+        # SAMPLE: Sample from the updated distribution
         curr_action_seq = self._get_action_seq(mode=self.sample_mode)
         return curr_action_seq
 

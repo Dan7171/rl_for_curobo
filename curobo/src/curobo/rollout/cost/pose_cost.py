@@ -28,7 +28,7 @@ from curobo.util.logger import log_error
 
 # Local Folder
 from .cost_base import CostBase, CostConfig
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 
 
 class PoseErrorType(Enum):
@@ -483,7 +483,7 @@ class PoseCost(CostBase, PoseCostConfig):
         #    print(ee_pos_batch[...,-1].squeeze())
         # print(cost.shape)
 
-        runtime_topics.topics[self.env_id][self.robot_id]["cost"]["pose"] = cost
+        get_topics().topics[self.env_id][self.robot_id]["cost"]["pose"] = cost
         return cost
 
     def forward_pose(

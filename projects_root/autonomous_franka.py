@@ -49,7 +49,7 @@ from curobo.types.state import FilterCoeff
 from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenPlanConfig, MotionGenResult,PoseCostMetric,)
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 
 def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
@@ -552,7 +552,7 @@ class FrankaMpc(AutonomousFranka):
         
         # publish the target in the runtime topics
         X_target = np.concatenate([p_solverTarget_R, q_solverTarget_R]) # in world frame
-        runtime_topics.topics[self.env_id][self.instance_id]["target"] = X_target
+        get_topics().topics[self.env_id][self.instance_id]["target"] = X_target
 
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)

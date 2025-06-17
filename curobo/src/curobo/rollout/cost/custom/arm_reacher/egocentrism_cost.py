@@ -10,7 +10,7 @@ import torch
 from curobo.rollout.cost.cost_base import CostBase, CostConfig
 from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 from projects_root.utils.transforms import transform_poses_batched
 
 
@@ -36,7 +36,7 @@ class EgocentricmCost(CostBase, EgocentricmCostConfig):
     def __init__(self, config: EgocentricmCostConfig):
         EgocentricmCostConfig.__init__(self, **vars(config))
         CostBase.__init__(self)
-        self.n_own_spheres = runtime_topics.topics[self.env_id][self.robot_id]['mpc_cfg']['cost']['custom']['n_own_spheres'] # n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        self.n_own_spheres = get_topics().topics[self.env_id][self.robot_id]['mpc_cfg']['cost']['custom']['n_own_spheres'] # n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
         self.valid_spheres = np.array(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres_exclude_self)))
     def __post_init__(self):
         return super().__post_init__()
@@ -53,16 +53,20 @@ class EgocentricmCost(CostBase, EgocentricmCostConfig):
         """
         eps = 1e-6
 
-        env_topics = runtime_topics.topics[self.env_id]
-        pose_cost_matrix = runtime_topics.topics[self.env_id ][self.robot_id]["cost"]["pose"]
-        pose_cost_matrix += eps
+        env_topics = get_topics().topics[self.env_id]
+        pose_cost_matrix = get_topics().topics[self.env_id ][self.robot_id]["cost"]["pose"]
+        pose_cost_matrix = pose_cost_matrix.clone().detach() # copy
+        
+        # clip the pose cost matrix to be at least 1e-3 (only so that live plotting doesn't explode)
+        pose_cost_matrix = torch.max(pose_cost_matrix, torch.tensor(1e-3, device=pose_cost_matrix.device))
+        
         # calc the cost of achieving the goal, inversely proportional to the pose cost
         goal_achievement_costs = 1 / pose_cost_matrix # the inverse of the pose cost
         ans = torch.zeros(pose_cost_matrix.shape, device=pose_cost_matrix.device)
         
         if len(ans) == 1: # initiation
-            n_cols = runtime_topics.topics[self.env_id][self.robot_id]['mpc_cfg']['model']['horizon']
-            n_rows = runtime_topics.topics[self.env_id][self.robot_id]['mpc_cfg']['mppi']['num_particles']
+            n_cols = get_topics().topics[self.env_id][self.robot_id]['mpc_cfg']['model']['horizon']
+            n_rows = get_topics().topics[self.env_id][self.robot_id]['mpc_cfg']['mppi']['num_particles']
             return torch.zeros(n_rows, n_cols, device=pose_cost_matrix.device)
 
         p_spheres_rollouts = env_topics[self.robot_id]["p_spheres_rollouts"]
@@ -86,7 +90,7 @@ class EgocentricmCost(CostBase, EgocentricmCostConfig):
 
                     # add the cost of disturbing the other robot's target to the total cost 
                     ans += cost_of_disturbing_other_target
-        
+
         # finally, multiply the total cost by the (fixed, hyperparameter) weight of the cost
         return self.weight * ans
         

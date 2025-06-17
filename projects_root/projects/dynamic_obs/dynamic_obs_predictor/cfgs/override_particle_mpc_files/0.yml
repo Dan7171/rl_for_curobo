@@ -93,7 +93,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 100 # 100.0  # Adjust weight as needed
+        weight: 0.0001 # 100.0  # Adjust weight as needed
         terminal: False
         env_id: 0
         robot_id: 0
@@ -111,7 +111,7 @@ cost:
         class_name: "EgocentricmCost"
         config_class_name: "EgocentricmCostConfig"
         terminal: False
-        weight: 1.0
+        weight: 1000.0
         sparse_spheres_exclude_self: [61,62,63,64] # graspped object: 61,62,63,64
         env_id: 0
         robot_id: 0

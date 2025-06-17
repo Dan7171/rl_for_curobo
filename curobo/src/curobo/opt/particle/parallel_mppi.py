@@ -333,7 +333,23 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
 
     @torch.no_grad()
     def sample_actions(self, init_act):
+        """
+        This is a core function in MPPI that generates all the candidate action sequences (particles) for evaluation.
+        """
+
+        # Step 1: Get Pre-computed Random Samples
+        # Gets noise samples from the pre-computed _sample_set
+        # _sample_iter tracks which batch of samples to use (for reproducibility)
+        # delta shape: [n_problems, particles_per_problem, action_horizon, d_action]
+        # These are raw noise samples (e.g., from Halton sequences, random, etc.)
         delta = torch.index_select(self._sample_set, 0, self._sample_iter).squeeze(0)
+        
+        
+        # Step 2: Update Sample Iterator
+        # Advances the sample iterator to get different noise each iteration
+        # When fixed_samples=True: uses same noise every time (for debugging/reproducibility)
+        # When fixed_samples=False: cycles through different noise samples
+        # Resets to 0 after n_iters to avoid running out of pre-computed samples
         if not self.sample_params.fixed_samples:
             self._sample_iter[:] += 1
             self._sample_iter_n += 1
@@ -343,10 +359,36 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
                 log_info(
                     "Resetting sample iterations in particle opt base to 0, this is okay during graph capture"
                 )
+
+        # Step 3: Scale the Noise
+        # Scales the unit noise by the covariance structure
+        # self.full_scale_tril is the Cholesky decomposition of the covariance matrix
+        # This transforms standard noise into noise with the desired covariance
+        # Result: Noise that respects the learned covariance structure
         scaled_delta = delta * self.full_scale_tril
+        
+        
+        # Step 4: Add Noise to Mean
+        # Creates candidate actions: mean + scaled_noise
+        # mean_action.unsqueeze(-3) adds particle dimension: [n_problems, 1, action_horizon, d_action]
+        # Broadcasting adds scaled noise to each mean
+        # Result: Main particle samples centered around the mean
+
+
         act_seq = self.mean_action.unsqueeze(-3) + scaled_delta
         cat_list = [act_seq]
 
+        # Step 5: Add Special Particles
+        # Two types of special particles:
+        # Negative Particles (neg_per_problem > 0):
+        # Purpose: Exploration in opposite direction
+        # Action: -1.0 * mean_action (negative of current mean)
+        # Why useful: Helps escape local minima by trying opposite actions
+        # Null Particles (null_per_problem > 0):
+        # Purpose: Conservative baseline
+        # Action: self.null_act_seqs (typically zeros - no action)
+        # Why useful: Provides a "do nothing" option for safety
+        
         if self.neg_per_problem > 0:
             neg_action = -1.0 * self.mean_action
             neg_act_seqs = neg_action.unsqueeze(-3).expand(-1, self.neg_per_problem, -1, -1)
@@ -358,11 +400,20 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
                 .expand(self.n_problems, -1, -1, -1)
             )
 
+        # Step 6: Concatenate All Particles
+        # Combines all particle types: [noisy_samples, negative_samples, null_samples]
+        # Reshapes from structured format to flat batch format
+        # Final shape: [total_particles, action_horizon, d_action]
         act_seq = torch.cat(
             (cat_list),
             dim=-3,
         )
         act_seq = act_seq.reshape(self.total_num_particles, self.action_horizon, self.d_action)
+        
+        # Step 7: Apply Action Bounds
+        # Clips/squashes actions to respect joint limits
+        # squash_fn determines how (clamp, tanh, etc.)
+        # Ensures all sampled actions are physically feasible
         act_seq = scale_ctrl(act_seq, self.action_lows, self.action_highs, squash_fn=self.squash_fn)
 
         # if not copy_tensor(act_seq, self.act_seq):
@@ -370,6 +421,16 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
         return act_seq  # self.act_seq
 
     def update_seed(self, init_act):
+        """
+        What it does:
+        Updates self.mean_action: Sets the center of the sampling distribution to init_act
+        Updates self.best_traj: Also initializes the best trajectory found so far
+        Handles batch dimensions: Expands init_act if needed to match n_problems
+        Why this matters:
+        Seeds the optimization with a good starting point (often the shifted previous solution)
+        Centers the random sampling around this initial guess
+        Provides warm-start - instead of sampling randomly, sample around the previous solution
+        """
         self.update_init_mean(init_act)
 
     def update_init_mean(self, init_mean):

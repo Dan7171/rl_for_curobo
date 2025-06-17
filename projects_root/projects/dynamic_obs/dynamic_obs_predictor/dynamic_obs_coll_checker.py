@@ -9,7 +9,7 @@ import numpy as np
 import copy
 import torch
 from curobo.geom.sdf.world import WorldCollisionConfig
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 from projects_root.utils.plot_spheres import SphereVisualizer
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
@@ -239,7 +239,7 @@ class DynamicObsCollPredictor:
         # and save only the positions 
         # self.p_own_buf = transform_poses_batched(self.X_own_R, self.X)[:,:,:,:3]
         self.p_own_buf_unfiltered = transform_poses_batched(self.X_own_R, self.X)[:,:,:,:3]
-        runtime_topics.topics[self.env_id][self.robot_id]["p_spheres_rollouts"] = self.p_own_buf_unfiltered # publish the own spheres poses in the world frame
+        get_topics().topics[self.env_id][self.robot_id]["p_spheres_rollouts"] = self.p_own_buf_unfiltered # publish the own spheres poses in the world frame
 
         # publish the own spheres poses in the world frame
         # runtime_topics.topics[self.env_id][self.robot_id]["p_SpheresRolloutsFiltered"] = self.p_own_buf # publish the own spheres poses in the world frame

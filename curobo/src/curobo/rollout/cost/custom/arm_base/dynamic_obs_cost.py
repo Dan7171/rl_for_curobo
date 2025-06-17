@@ -9,9 +9,8 @@ from curobo.rollout import cost
 import torch
 from curobo.rollout.cost.cost_base import CostBase, CostConfig
 from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor import runtime_topics
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import runtime_topics
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 
 @dataclass
 class DynamicObsCostConfig(CostConfig):
@@ -41,6 +40,10 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         # Extract weight value properly
         weight_value = self.weight
         weight_value = weight_value.cpu().item() # cost weight
+        
+        runtime_topics = get_topics()
+        if runtime_topics is None:
+            raise RuntimeError("Runtime topics not initialized")
         n_own_spheres = runtime_topics.topics[self.env_id][self.robot_id]['mpc_cfg']['cost']['custom']['n_own_spheres']
         horizon = runtime_topics.topics[self.env_id][self.robot_id]['mpc_cfg']['model']['horizon']
         n_rollouts = runtime_topics.topics[self.env_id][self.robot_id]['mpc_cfg']['mppi']['num_particles']
