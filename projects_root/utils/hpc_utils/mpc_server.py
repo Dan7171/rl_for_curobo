@@ -19,6 +19,13 @@ from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from curobo.util.logger import setup_curobo_logger
 from curobo.types.base import TensorDeviceType
 
+# Try to import msgpack for faster serialization
+try:
+    import msgpack
+    HAS_MSGPACK = True
+except ImportError:
+    HAS_MSGPACK = False
+
 
 class MpcSolverServer:
     """
@@ -34,29 +41,42 @@ class MpcSolverServer:
     
     def __init__(self, port: int = 10051):
         """
-        Initialize the MPC solver server.
+        Initialize the MPC server.
         
         Args:
-            port: Port to bind to
+            port: Port to bind the server to
         """
         self.port = port
         self.mpc_solver = None
         
-        # Initialize ZeroMQ with high-performance settings
+        # Initialize ZeroMQ with low-latency optimizations
         self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.REP)  # Reply socket
         
-        # OPTIMIZATION 1: Larger socket buffers for high throughput
-        self.socket.setsockopt(zmq.SNDBUF, 1024 * 1024)  # 1MB send buffer
-        self.socket.setsockopt(zmq.RCVBUF, 1024 * 1024)  # 1MB receive buffer
+        # Optimize context for low latency
+        self.context.setsockopt(zmq.MAX_SOCKETS, 1024)
+        self.context.setsockopt(zmq.IO_THREADS, 1)  # Single thread for minimal overhead
         
-        # OPTIMIZATION 2: High water marks to prevent blocking
-        self.socket.setsockopt(zmq.SNDHWM, 1000)
-        self.socket.setsockopt(zmq.RCVHWM, 1000)
+        self.socket = self.context.socket(zmq.REP)
         
-        # OPTIMIZATION 3: Fast socket cleanup
-        self.socket.setsockopt(zmq.LINGER, 0)
+        # ZMQ Low-latency optimizations matching client
+        # Aggressive socket buffer optimization
+        self.socket.setsockopt(zmq.SNDBUF, 65536)    # 64KB send buffer  
+        self.socket.setsockopt(zmq.RCVBUF, 65536)    # 64KB receive buffer
         
+        # High Water Mark - prevent queueing delays
+        self.socket.setsockopt(zmq.SNDHWM, 1)        # Only 1 message in send queue
+        self.socket.setsockopt(zmq.RCVHWM, 1)        # Only 1 message in recv queue
+        
+        # Immediate connection - don't wait for slow start
+        self.socket.setsockopt(zmq.IMMEDIATE, 1)
+        
+        # Reduce linger time for faster shutdown
+        self.socket.setsockopt(zmq.LINGER, 100)      # 100ms max linger
+        
+        # Optimize for low-latency over high-throughput
+        self.socket.setsockopt(zmq.RATE, 1000000)    # 1Mbps rate limit (prevents buffering)
+        
+        # Bind to port
         self.socket.bind(f"tcp://*:{port}")
         
         # OPTIMIZATION 4: Use fastest available pickle protocol
@@ -66,10 +86,17 @@ class MpcSolverServer:
         self.compression_level = 1  # Fast compression
         self.compression_threshold = 1024  # Only compress if > 1KB
         
-        print(f"MPC server listening on port {port} with optimized settings:")
-        print(f"  - Socket buffers: 1MB each")
+        print(f"MPC Server started on port {port} with low-latency optimizations")
+        print(f"  - Socket buffers: 64KB each")
         print(f"  - Pickle protocol: {self.pickle_protocol}")
         print(f"  - Compression: level {self.compression_level}, threshold {self.compression_threshold} bytes")
+        
+        # Serialization method selection
+        self.use_msgpack = HAS_MSGPACK
+        if self.use_msgpack:
+            print("  - Using msgpack for faster serialization")
+        else:
+            print("  - Using pickle serialization (install msgpack for better performance)")
         
     def __del__(self):
         """Clean up ZeroMQ resources."""
@@ -97,13 +124,13 @@ class MpcSolverServer:
                         serialized_request = request_data[1:]
                     
                     # OPTIMIZATION 7: Fast pickle deserialization
-                    request = pickle.loads(serialized_request)
+                    request = self._deserialize_fast(serialized_request)
                     
                     # Process request
                     response = self._process_request(request)
                     
                     # OPTIMIZATION 8: Smart compression for response
-                    serialized_response = pickle.dumps(response, protocol=self.pickle_protocol)
+                    serialized_response = self._serialize_fast(response)
                     
                     if len(serialized_response) > self.compression_threshold:
                         compressed_response = zlib.compress(serialized_response, level=self.compression_level)
@@ -123,7 +150,7 @@ class MpcSolverServer:
                         "error": str(e),
                         "traceback": traceback.format_exc()
                     }
-                    serialized_response = pickle.dumps(error_response, protocol=self.pickle_protocol)
+                    serialized_response = self._serialize_fast(error_response)
                     
                     if len(serialized_response) > self.compression_threshold:
                         compressed_response = zlib.compress(serialized_response, level=self.compression_level)
@@ -339,6 +366,29 @@ class MpcSolverServer:
     def _ping(self, data: str = "pong") -> Dict[str, Any]:
         """Simple ping response for latency testing."""
         return {"result": f"pong: {data}"}
+
+    def _serialize_fast(self, obj: Any) -> bytes:
+        """Fast serialization using msgpack if available, otherwise pickle."""
+        if self.use_msgpack:
+            try:
+                # msgpack is typically 2-3x faster than pickle
+                return msgpack.packb(obj, use_bin_type=True)
+            except (TypeError, ValueError):
+                # Fall back to pickle for complex objects
+                return pickle.dumps(obj, protocol=self.pickle_protocol)
+        else:
+            return pickle.dumps(obj, protocol=self.pickle_protocol)
+    
+    def _deserialize_fast(self, data: bytes) -> Any:
+        """Fast deserialization using msgpack if available, otherwise pickle."""
+        if self.use_msgpack:
+            try:
+                return msgpack.unpackb(data, raw=False, strict_map_key=False)
+            except (msgpack.exceptions.ExtraData, ValueError):
+                # Fall back to pickle
+                return pickle.loads(data)
+        else:
+            return pickle.loads(data)
 
 
 def main():

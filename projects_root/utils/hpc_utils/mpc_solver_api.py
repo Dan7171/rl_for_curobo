@@ -7,6 +7,13 @@ from typing import Any, Optional, Dict
 import time
 import zlib
 
+# Try to import msgpack for faster serialization
+try:
+    import msgpack
+    HAS_MSGPACK = True
+except ImportError:
+    HAS_MSGPACK = False
+
 from curobo.types.state import JointState
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 
@@ -111,26 +118,58 @@ class MpcSolverApi:
         self.server_port = server_port
         self.lightweight_response = lightweight_response
         
-        # Initialize ZeroMQ
+        # Initialize ZeroMQ with aggressive low-latency settings
         self.context = zmq.Context()
+        
+        # Optimize context for low latency
+        self.context.setsockopt(zmq.MAX_SOCKETS, 1024)
+        self.context.setsockopt(zmq.IO_THREADS, 1)  # Single thread for minimal overhead
+        
         self.socket = self.context.socket(zmq.REQ)
         
-        # Basic socket settings
-        self.socket.setsockopt(zmq.LINGER, 0)  # Don't block on close
-        self.socket.setsockopt(zmq.RCVTIMEO, 30000)  # 30 second timeout
+        # ZMQ Low-latency optimizations
+        # Note: ZMQ handles TCP_NODELAY internally for REQ/REP patterns
+        
+        # Aggressive socket buffer optimization
+        # Set small buffers to minimize memory copying and reduce latency
+        self.socket.setsockopt(zmq.SNDBUF, 65536)    # 64KB send buffer  
+        self.socket.setsockopt(zmq.RCVBUF, 65536)    # 64KB receive buffer
+        
+        # High Water Mark - prevent queueing delays
+        self.socket.setsockopt(zmq.SNDHWM, 1)        # Only 1 message in send queue
+        self.socket.setsockopt(zmq.RCVHWM, 1)        # Only 1 message in recv queue
+        
+        # Immediate connection - don't wait for slow start
+        self.socket.setsockopt(zmq.IMMEDIATE, 1)
+        
+        # Reduce linger time for faster shutdown
+        self.socket.setsockopt(zmq.LINGER, 100)      # 100ms max linger
+        
+        # Connection timeout
+        self.socket.setsockopt(zmq.CONNECT_TIMEOUT, 1000)  # 1 second timeout
+        
+        # Optimize for low-latency over high-throughput
+        self.socket.setsockopt(zmq.RATE, 1000000)    # 1Mbps rate limit (prevents buffering)
         
         # Connect to server
-        self.socket.connect(f"tcp://{server_ip}:{server_port}")
+        connection_string = f"tcp://{server_ip}:{server_port}"
+        self.socket.connect(connection_string)
         
-        # Serialization settings
+        # Use fastest pickle protocol
         self.pickle_protocol = pickle.HIGHEST_PROTOCOL
         
-        print(f"Connected to MPC server at {server_ip}:{server_port}")
-        print(f"Lightweight response mode: {lightweight_response}")
+        # Compression threshold - only compress larger payloads
+        self.compression_threshold = 1024  # 1KB threshold
         
-        # Initialize the MPC solver
-        self._send_request("init_mpc", config_params)
-        print("Remote MPC solver initialized")
+        # Serialization method selection
+        self.use_msgpack = HAS_MSGPACK
+        if self.use_msgpack:
+            print("Using msgpack for faster serialization")
+        else:
+            print("Using pickle serialization (install msgpack for better performance)")
+        
+        # Initialize remote solver
+        self._initialize_solver(config_params)
 
     def __del__(self):
         """Clean up ZeroMQ resources."""
@@ -232,12 +271,12 @@ class MpcSolverApi:
         try:
             # TIMING: Serialize request
             serialize_start = time.time()
-            pickled_request = pickle.dumps(request, protocol=self.pickle_protocol)
+            pickled_request = self._serialize_fast(request)
             serialize_time = time.time() - serialize_start
             
             # TIMING: Compress request
             compress_start = time.time()
-            if len(pickled_request) > 1024:
+            if len(pickled_request) > self.compression_threshold:
                 compressed_request = zlib.compress(pickled_request, level=1)
                 self.socket.send(b'C' + compressed_request)
                 compress_time = time.time() - compress_start
@@ -268,7 +307,7 @@ class MpcSolverApi:
             
             # TIMING: Deserialize response
             deserialize_start = time.time()
-            response = pickle.loads(serialized_response)
+            response = self._deserialize_fast(serialized_response)
             deserialize_time = time.time() - deserialize_start
             
             # TIMING: Wrap result
@@ -288,7 +327,7 @@ class MpcSolverApi:
             total_time = time.time() - total_start
             
             # DETAILED TIMING LOG (only for step requests to avoid spam)
-            if request_type == "call_method" and len(args) > 1 and args[1] == "mpc.step":
+            if request_type == "call_method" and len(args) > 0 and args[0] == "mpc.step":
                 print(f"\n=== MPC STEP TIMING BREAKDOWN ===")
                 print(f"Total time:        {total_time*1000:.2f}ms")
                 print(f"  Serialize req:   {serialize_time*1000:.2f}ms")
@@ -315,5 +354,38 @@ class MpcSolverApi:
         WARNING: This returns a local copy and should only be used for debugging.
         """
         return self._send_request("get_debug_copy")
+    
+    def _initialize_solver(self, config_params: Dict[str, Any]):
+        """Initialize the remote MPC solver with configuration parameters."""
+        print(f"Connected to MPC server at {self.server_ip}:{self.server_port}")
+        print(f"Lightweight response mode: {self.lightweight_response}")
+        
+        # Initialize the MPC solver
+        self._send_request("init_mpc", config_params)
+        print("Remote MPC solver initialized")
+    
+    def _serialize_fast(self, obj: Any) -> bytes:
+        """Fast serialization using msgpack if available, otherwise pickle."""
+        if self.use_msgpack and HAS_MSGPACK:
+            try:
+                # msgpack is typically 2-3x faster than pickle
+                result = msgpack.packb(obj, use_bin_type=True)
+                return result if result is not None else pickle.dumps(obj, protocol=self.pickle_protocol)
+            except (TypeError, ValueError):
+                # Fall back to pickle for complex objects
+                return pickle.dumps(obj, protocol=self.pickle_protocol)
+        else:
+            return pickle.dumps(obj, protocol=self.pickle_protocol)
+    
+    def _deserialize_fast(self, data: bytes) -> Any:
+        """Fast deserialization using msgpack if available, otherwise pickle."""
+        if self.use_msgpack:
+            try:
+                return msgpack.unpackb(data, raw=False, strict_map_key=False)
+            except (msgpack.exceptions.ExtraData, ValueError):
+                # Fall back to pickle
+                return pickle.loads(data)
+        else:
+            return pickle.loads(data)
     
     
