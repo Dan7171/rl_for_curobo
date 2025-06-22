@@ -41,16 +41,16 @@ pip install pyzmq
 
 ```bash
 # On the compute server (with GPU)
-cd projects_root/examples
-python mpc_server.py --port 8888
+cd projects_root/utils/hpc_utils
+python mpc_server.py --port 10051
 ```
 
 ### 2. Test Communication (Optional)
 
 ```bash
 # Test the communication without full simulation
-cd projects_root/examples
-python test_mpc_communication.py --server_ip YOUR_SERVER_IP --server_port 8888
+cd projects_root/utils/hpc_utils
+python test_mpc_communication.py --server_ip YOUR_SERVER_IP --server_port 10051
 ```
 
 ### 3. Run the Client
@@ -58,7 +58,7 @@ python test_mpc_communication.py --server_ip YOUR_SERVER_IP --server_port 8888
 ```bash
 # On the client machine (simulation)
 cd projects_root/examples  
-python mpc_example_client.py --server_ip YOUR_SERVER_IP --server_port 8888
+python mpc_example_client.py --server_ip YOUR_SERVER_IP --server_port 10051
 ```
 
 ### 3. Code Comparison
@@ -75,7 +75,7 @@ result = mpc.step(current_state, max_attempts=2)
 ```python
 from mpc_solver_api import MpcSolverApi
 
-mpc = MpcSolverApi("server_ip", 8888, mpc_config)  # Only difference!
+mpc = MpcSolverApi("server_ip", 10051, mpc_config)  # Only difference!
 result = mpc.step(current_state, max_attempts=2)   # Same API
 ```
 
@@ -91,7 +91,7 @@ result = mpc.step(current_state, max_attempts=2)   # Same API
 ### Custom Server Configuration
 
 ```bash
-python mpc_server.py --port 9999 --log_level debug
+python mpc_server.py --port 10052 --log_level debug
 ```
 
 ### Multiple Clients

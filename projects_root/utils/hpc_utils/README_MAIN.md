@@ -20,8 +20,6 @@ Choose your server machine:
 
 ## Step 2: Start the MPC Server
 
-### On the server machine:
-
 1. **Activate CuRobo environment:**
    ```bash
    conda activate %your_curobo_env%
@@ -30,12 +28,12 @@ Choose your server machine:
 2. **Navigate to server directory and run:**
    ```bash
    cd /home/dan/rl_for_curobo/projects_root/utils/hpc_utils
-   python3 mpc_server.py --port 8888
+   python3 mpc_server.py --port 10051
    ```
 
 3. **Expected output:**
    ```
-   MPC Solver Server listening on port 8888
+   MPC Solver Server listening on port 10051
    Server running... Press Ctrl+C to stop
    ```
 
@@ -43,26 +41,36 @@ Choose your server machine:
 
 ## Step 3: Run the Client Script
 
-### On the client machine:
+```bash
+cd /home/dan/rl_for_curobo/projects_root/examples
 
-1. **Activate CuRobo environment:**
-   ```bash
-   conda activate %your_curobo_env%
-   ```
+# For localhost:
+python3 mpc_example_client.py --server_ip localhost --server_port 10051
 
-2. **Navigate to examples directory and run:**
-   ```bash
-   cd /home/dan/rl_for_curobo/projects_root/examples
-   python3 mpc_example_client.py --server_ip %server ip% --server_port 8888 --headless_mode native
-   # note: if server is running locally: set %server ip% to localhost
+# For remote server (replace with your server IP):
+python3 mpc_example_client.py --server_ip %server_ip% --server_port 10051
 
-   ```
+# Example for SLURM cluster:
+python3 mpc_example_client.py --server_ip 132.72.65.138 --server_port 10051
+```
 
-### Architecture Notes
+---
 
-- **API Communication**: The client script uses `projects_root/utils/hpc_utils/mpc_solver_api.py` to communicate with the server
-- **Transparent Integration**: `mpc_example_client.py` is identical to `mpc_example.py` except for remote MPC computation
-- **Same Interface**: All MPC calls work exactly the same, but execute on the remote server
+## Performance Notes
+
+- **Local**: ~0.005s per MPC step (baseline)
+- **Remote**: ~0.035s per MPC step (network + serialization overhead)
+
+**Note**: Remote connections are ~7x slower than local due to pickle serialization of PyTorch tensors and network latency. This is the fundamental trade-off for distributed computation.
+
+---
+
+## Troubleshooting
+
+### Connection Issues:
+1. **"No route to host"**: Check firewall settings or try different ports
+2. **"Address already in use"**: Port is occupied, try `--port 10052` or similar
+3. **Slow performance**: Check network latency with `ping`
 
 ---
 

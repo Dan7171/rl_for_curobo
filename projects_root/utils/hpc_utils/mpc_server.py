@@ -9,6 +9,8 @@ import pickle
 import zmq
 import traceback
 import argparse
+import zlib
+import gc
 from typing import Any, Dict
 
 # CuRobo imports
@@ -19,29 +21,54 @@ from curobo.types.base import TensorDeviceType
 
 class MpcSolverServer:
     """
-    Server that hosts an MpcSolver and responds to client requests via ZeroMQ.
+    High-performance MPC solver server with optimized ZMQ communication.
+    
+    Optimizations applied:
+    1. Larger socket buffers for high throughput
+    2. Smart compression with markers  
+    3. Fastest pickle protocol
+    4. Garbage collection hints
+    5. Minimal response structure
     """
     
-    def __init__(self, port: int = 8888):
+    def __init__(self, port: int = 10051):
         """
-        Initialize the server.
+        Initialize the MPC solver server.
         
         Args:
-            port: Port to listen on
+            port: Port to bind to
         """
         self.port = port
         self.mpc_solver = None
         
-        # Initialize ZeroMQ
+        # Initialize ZeroMQ with high-performance settings
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)  # Reply socket
         
-        # Minimal settings for low latency
+        # OPTIMIZATION 1: Larger socket buffers for high throughput
+        self.socket.setsockopt(zmq.SNDBUF, 1024 * 1024)  # 1MB send buffer
+        self.socket.setsockopt(zmq.RCVBUF, 1024 * 1024)  # 1MB receive buffer
+        
+        # OPTIMIZATION 2: High water marks to prevent blocking
+        self.socket.setsockopt(zmq.SNDHWM, 1000)
+        self.socket.setsockopt(zmq.RCVHWM, 1000)
+        
+        # OPTIMIZATION 3: Fast socket cleanup
         self.socket.setsockopt(zmq.LINGER, 0)
         
         self.socket.bind(f"tcp://*:{port}")
         
-        print(f"MPC Solver Server listening on port {port}")
+        # OPTIMIZATION 4: Use fastest available pickle protocol
+        self.pickle_protocol = pickle.HIGHEST_PROTOCOL
+        
+        # OPTIMIZATION 5: Compression strategy (same as client)
+        self.compression_level = 1  # Fast compression
+        self.compression_threshold = 1024  # Only compress if > 1KB
+        
+        print(f"MPC server listening on port {port} with optimized settings:")
+        print(f"  - Socket buffers: 1MB each")
+        print(f"  - Pickle protocol: {self.pickle_protocol}")
+        print(f"  - Compression: level {self.compression_level}, threshold {self.compression_threshold} bytes")
         
     def __del__(self):
         """Clean up ZeroMQ resources."""
@@ -51,31 +78,58 @@ class MpcSolverServer:
             self.context.term()
     
     def run(self):
-        """Main server loop."""
+        """Main server loop with optimized request/response handling."""
         print("Server running... Press Ctrl+C to stop")
         
         try:
             while True:
-                # Receive request
+                # Receive request with smart decompression
                 try:
-                    serialized_request = self.socket.recv()
+                    # OPTIMIZATION 6: Smart decompression based on marker
+                    request_data = self.socket.recv()
+                    
+                    if request_data[0:1] == b'C':
+                        # Compressed request
+                        serialized_request = zlib.decompress(request_data[1:])
+                    else:
+                        # Uncompressed request
+                        serialized_request = request_data[1:]
+                    
+                    # OPTIMIZATION 7: Fast pickle deserialization
                     request = pickle.loads(serialized_request)
                     
                     # Process request
                     response = self._process_request(request)
                     
-                    # Send response
-                    serialized_response = pickle.dumps(response)
-                    self.socket.send(serialized_response)
+                    # OPTIMIZATION 8: Smart compression for response
+                    serialized_response = pickle.dumps(response, protocol=self.pickle_protocol)
+                    
+                    if len(serialized_response) > self.compression_threshold:
+                        compressed_response = zlib.compress(serialized_response, level=self.compression_level)
+                        # Send with compression marker
+                        self.socket.send(b'C' + compressed_response)
+                    else:
+                        # Send uncompressed with marker
+                        self.socket.send(b'U' + serialized_response)
+                    
+                    # OPTIMIZATION 9: Garbage collection hint for large responses
+                    if len(serialized_response) > 100000:  # 100KB threshold
+                        gc.collect()
                     
                 except Exception as e:
-                    # Send error response
+                    # Send error response with same compression protocol
                     error_response = {
                         "error": str(e),
                         "traceback": traceback.format_exc()
                     }
-                    serialized_response = pickle.dumps(error_response)
-                    self.socket.send(serialized_response)
+                    serialized_response = pickle.dumps(error_response, protocol=self.pickle_protocol)
+                    
+                    if len(serialized_response) > self.compression_threshold:
+                        compressed_response = zlib.compress(serialized_response, level=self.compression_level)
+                        self.socket.send(b'C' + compressed_response)
+                    else:
+                        self.socket.send(b'U' + serialized_response)
+                    
                     print(f"Error processing request: {e}")
                     
         except KeyboardInterrupt:
@@ -105,6 +159,8 @@ class MpcSolverServer:
             return self._get_attr(*args)
         elif request_type == "get_debug_copy":
             return self._get_debug_copy()
+        elif request_type == "ping":
+            return self._ping(*args)
         else:
             raise ValueError(f"Unknown request type: {request_type}")
     
@@ -241,12 +297,16 @@ class MpcSolverServer:
         # WARNING: This creates a full copy - expensive!
         import copy
         return {"result": copy.deepcopy(self.mpc_solver)}
+    
+    def _ping(self, data: str = "pong") -> Dict[str, Any]:
+        """Simple ping response for latency testing."""
+        return {"result": f"pong: {data}"}
 
 
 def main():
     """Main server entry point."""
     parser = argparse.ArgumentParser(description="MPC Solver Server")
-    parser.add_argument("--port", type=int, default=8888, help="Port to listen on")
+    parser.add_argument("--port", type=int, default=10051, help="Port to listen on")
     parser.add_argument("--log_level", type=str, default="info", help="Logging level")
     args = parser.parse_args()
     

@@ -45,7 +45,7 @@ parser.add_argument(
 
 parser.add_argument("--robot", type=str, default="franka.yml", help="robot configuration to load")
 parser.add_argument("--server_ip", type=str, default="localhost", help="MPC server IP address")
-parser.add_argument("--server_port", type=int, default=8888, help="MPC server port")
+parser.add_argument("--server_port", type=int, default=10051, help="MPC server port")
 args = parser.parse_args()
 
 ###########################################################
@@ -252,6 +252,7 @@ def main():
     
     
     mpc.update_goal(goal_buffer)
+    
     mpc_result = mpc.step(current_state, max_attempts=2)
 
     usd_help.load_stage(my_world.stage)

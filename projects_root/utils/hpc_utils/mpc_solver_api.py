@@ -5,6 +5,9 @@ import pickle
 import zmq
 from typing import Any, Optional, Dict
 import time
+import zlib
+import sys
+import gc
 
 from curobo.types.state import JointState
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
@@ -50,7 +53,14 @@ class RemoteAttribute:
 
 class MpcSolverApi:
     """
-    High-performance client API for remote MPC solver using ZeroMQ + pickle.
+    High-performance client API for remote MPC solver using optimized ZeroMQ + pickle.
+    
+    Optimizations implemented based on research:
+    1. Larger socket buffers for high throughput  
+    2. Optimized pickle protocol selection
+    3. Memory-efficient compression strategy
+    4. Garbage collection hints for large objects
+    5. Smart compression threshold
     """
 
     def __init__(self, server_ip: str, server_port: int, config_params: Dict[str, Any]):
@@ -66,15 +76,43 @@ class MpcSolverApi:
         self.server_ip = server_ip
         self.server_port = server_port
         
-        # Initialize ZeroMQ
+        # Initialize ZeroMQ with high-performance settings
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)  # Request socket
-        self.socket.connect(f"tcp://{server_ip}:{server_port}")
         
-        # Minimal settings for low latency
+        # OPTIMIZATION 1: Larger socket buffers for high throughput
+        # Based on research: larger buffers help with large message transfers
+        # Set to 1MB each for send/receive buffers
+        self.socket.setsockopt(zmq.SNDBUF, 1024 * 1024)  # 1MB send buffer
+        self.socket.setsockopt(zmq.RCVBUF, 1024 * 1024)  # 1MB receive buffer
+        
+        # OPTIMIZATION 2: High water marks to prevent blocking
+        # Allow more messages to be queued
+        self.socket.setsockopt(zmq.SNDHWM, 1000)
+        self.socket.setsockopt(zmq.RCVHWM, 1000)
+        
+        # OPTIMIZATION 3: Immediate connection (don't queue if no peer)
+        self.socket.setsockopt(zmq.IMMEDIATE, 1)
+        
+        # OPTIMIZATION 4: Fast socket cleanup
         self.socket.setsockopt(zmq.LINGER, 0)
         
-        print(f"Connected to MPC server at {server_ip}:{server_port}")
+        # Connect to server
+        self.socket.connect(f"tcp://{server_ip}:{server_port}")
+        
+        # OPTIMIZATION 5: Use fastest available pickle protocol
+        # Protocol 5 (Python 3.8+) has better performance for large objects
+        self.pickle_protocol = pickle.HIGHEST_PROTOCOL
+        
+        # OPTIMIZATION 6: Compression strategy
+        # Use fast compression level for better balance of speed vs size
+        self.compression_level = 1  # Fast compression
+        self.compression_threshold = 1024  # Only compress if > 1KB
+        
+        print(f"Connected to MPC server at {server_ip}:{server_port} with optimized settings:")
+        print(f"  - Socket buffers: 1MB each")
+        print(f"  - Pickle protocol: {self.pickle_protocol}")
+        print(f"  - Compression: level {self.compression_level}, threshold {self.compression_threshold} bytes")
         
         # Send the configuration parameters directly to server
         self._send_request("init_mpc", config_params)
@@ -175,6 +213,14 @@ class MpcSolverApi:
         """
         Send a request to the server and get response.
         
+        HEAVILY OPTIMIZED: This method was the main bottleneck.
+        Optimizations applied:
+        1. Minimal request structure 
+        2. Smart compression (only for large payloads)
+        3. Fastest pickle protocol
+        4. Memory-efficient deserialization
+        5. Garbage collection hints
+        
         Args:
             request_type: Type of request ("init_mpc", "call_method", "get_attr")
             *args: Arguments for the request
@@ -182,21 +228,64 @@ class MpcSolverApi:
         Returns:
             Deserialized response from server
         """
-        # Prepare request
+        # OPTIMIZATION 8: Minimal request structure (reduce serialization overhead)
         request = {
             "type": request_type,
             "args": args,
-            "timestamp": time.time()
+            # Removed unnecessary fields like timestamps
         }
         
-        # Serialize and send
         try:
-            serialized_request = pickle.dumps(request)
-            self.socket.send(serialized_request)
+            # OPTIMIZATION 7: Fast pickle serialization
+            pickled_request = pickle.dumps(request, protocol=self.pickle_protocol)
+            
+            # OPTIMIZATION 8: Smart compression - only compress large payloads
+            if len(pickled_request) > self.compression_threshold:
+                compressed_request = zlib.compress(pickled_request, level=self.compression_level)
+                # Send with compression marker
+                self.socket.send(b'C' + compressed_request)
+                # DEBUG: Print compression stats for requests
+                if request_type == "call_method" and len(args) > 0 and args[0] == "mpc.step":
+                    print(f"DEBUG: Request compressed {len(pickled_request)} -> {len(compressed_request)} bytes (ratio: {len(compressed_request)/len(pickled_request):.2f})")
+            else:
+                # Send uncompressed with marker
+                self.socket.send(b'U' + pickled_request)
             
             # Receive response
-            serialized_response = self.socket.recv()
+            start_recv = time.time()
+            response_data = self.socket.recv()
+            recv_time = time.time() - start_recv
+            
+            # OPTIMIZATION 9: Fast decompression path
+            start_decomp = time.time()
+            if response_data[0:1] == b'C':
+                # Compressed response
+                serialized_response = zlib.decompress(response_data[1:])
+                decomp_time = time.time() - start_decomp
+                # DEBUG: Print decompression stats for responses
+                if request_type == "call_method" and len(args) > 0 and args[0] == "mpc.step":
+                    print(f"DEBUG: Response decompressed {len(response_data)-1} -> {len(serialized_response)} bytes (ratio: {(len(response_data)-1)/len(serialized_response):.2f}), decomp_time: {decomp_time*1000:.1f}ms")
+            else:
+                # Uncompressed response
+                serialized_response = response_data[1:]
+                decomp_time = 0
+            
+            # OPTIMIZATION 10: Memory-efficient pickle deserialization
+            # This is still the main bottleneck but we've minimized the data size
+            start_pickle = time.time()
             response = pickle.loads(serialized_response)
+            pickle_time = time.time() - start_pickle
+            
+            # DEBUG: Print timing breakdown for MPC step calls
+            if request_type == "call_method" and len(args) > 0 and args[0] == "mpc.step":
+                total_time = recv_time + decomp_time + pickle_time
+                print(f"DEBUG: Timing breakdown - recv: {recv_time*1000:.1f}ms, decomp: {decomp_time*1000:.1f}ms, pickle: {pickle_time*1000:.1f}ms, total: {total_time*1000:.1f}ms")
+                print(f"DEBUG: Response size: {len(serialized_response)} bytes")
+            
+            # OPTIMIZATION 11: Explicit garbage collection hint for large objects
+            # Help Python clean up large temporary objects faster
+            if len(serialized_response) > 100000:  # 100KB threshold
+                gc.collect()
             
             # Check for errors
             if response.get("error"):

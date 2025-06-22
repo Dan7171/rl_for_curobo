@@ -9,11 +9,10 @@ import os
 import time
 import argparse
 
-# Add path for MpcSolverApi
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils', 'hpc_utils'))
+# Add path for MpcSolverAPI
+from .mpc_solver_api import MpcSolverAPI
 
 try:
-    from mpc_solver_api import MpcSolverApi
     from curobo.wrap.reacher.mpc import MpcSolverConfig
     from curobo.geom.sdf.world import CollisionCheckerType
     from curobo.geom.types import WorldConfig
@@ -55,7 +54,7 @@ def test_basic_communication(server_ip: str, server_port: int):
         
         # Test 1: Initialize MPC solver
         print("Test 1: Initializing remote MPC solver...")
-        mpc_api = MpcSolverApi(server_ip, server_port, config_params) 
+        mpc_api = MpcSolverAPI(server_ip, server_port, config_params) 
         print("✓ MPC solver initialized successfully")
         
         # Test 2: Access nested attributes
@@ -98,7 +97,7 @@ def main():
     """Main test entry point."""
     parser = argparse.ArgumentParser(description="Test MPC Client-Server Communication")
     parser.add_argument("--server_ip", type=str, default="localhost", help="Server IP address")
-    parser.add_argument("--server_port", type=int, default=8888, help="Server port")
+    parser.add_argument("--server_port", type=int, default=10051, help="Server port")
     args = parser.parse_args()
     
     print("MPC Client-Server Communication Test")
