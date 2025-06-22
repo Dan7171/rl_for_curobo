@@ -56,8 +56,8 @@ from omni.isaac.kit import SimulationApp
 simulation_app = SimulationApp(
     {
         "headless": args.headless_mode is not None,
-        "width": "1920",
-        "height": "1080",
+        "width": "800",
+        "height": "600",
     }
 )
 
@@ -65,7 +65,7 @@ simulation_app = SimulationApp(
 # Enable the layers and stage windows in the UI
 # Standard Library
 import os
-
+import time
 # Third Party
 import carb
 import numpy as np
@@ -219,39 +219,13 @@ def main():
 
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
-    # mpc_config = MpcSolverConfig.load_from_robot_config(
-    #     robot_cfg,
-    #     world_cfg,
-    #     # use_cuda_graph=True,
-    #     use_cuda_graph=False,
-    #     use_cuda_graph_metrics=True,
-    #     use_cuda_graph_full_step=False,
-    #     self_collision_check=True,
-    #     collision_checker_type=CollisionCheckerType.MESH,
-    #     collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
-    #     use_mppi=True,
-    #     use_lbfgs=False,
-    #     use_es=False,
-    #     store_rollouts=True,
-    #     step_dt=0.02,
-    # )
-
-    # Extract parameters for MpcSolverApi instead of passing full MpcSolverConfig
+    
+    # Simple configuration for remote MPC
     config_params = {
         'robot_cfg': robot_cfg,
         'world_cfg': world_cfg,
-        'use_cuda_graph': False,
-        'use_cuda_graph_metrics': True,
-        'use_cuda_graph_full_step': False,
-        'self_collision_check': True,
-        'collision_checker_type': CollisionCheckerType.MESH,
-        'collision_cache': {"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
-        'use_mppi': True,
-        'use_lbfgs': False,
-        'use_es': False,
         'store_rollouts': True,
         'step_dt': 0.02,
-        'tensor_args': tensor_args,
     }
 
     # USE MpcSolverApi instead of MpcSolver - this connects to remote server
@@ -285,6 +259,7 @@ def main():
     cmd_state_full = None
     step = 0
     add_extensions(simulation_app, args.headless_mode)
+    mpc_time = []
     while simulation_app.is_running():
         if not init_world:
             for _ in range(10):
@@ -375,8 +350,13 @@ def main():
             # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
         common_js_names = []
         current_state.copy_(cu_js)
-
-        mpc_result = mpc.step(current_state, max_attempts=2)
+        
+        st_time = time.time() # new debug
+        mpc_result = mpc.step(current_state, max_attempts=1)
+        # torch.cuda.synchronize()
+        if step_index > 50: #
+            mpc_time.append(time.time() - st_time)
+        # mpc_result = mpc.step(current_state, max_attempts=2)
         # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
         succ = True  # ik_result.success.item()
@@ -408,6 +388,8 @@ def main():
         else:
             carb.log_warn("No action is being taken.")
 
+        if step_index % 100 == 0:
+            print(f"mean MPC step time in last 20 steps: {np.mean(mpc_time[-20:])}")
 
 ############################################################
 
