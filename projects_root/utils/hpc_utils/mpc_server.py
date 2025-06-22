@@ -11,6 +11,7 @@ import traceback
 import argparse
 import zlib
 import gc
+import time
 from typing import Any, Dict
 
 # CuRobo imports
@@ -231,6 +232,9 @@ class MpcSolverServer:
         if self.mpc_solver is None:
             raise RuntimeError("MPC solver not initialized")
         
+        # TIMING: Track server-side processing
+        server_start = time.time()
+        
         # Navigate to the method/attribute
         obj = self.mpc_solver
         parts = method_path.split('.')
@@ -257,9 +261,14 @@ class MpcSolverServer:
             if callable(attr):
                 # Check if this is mpc.step and if lightweight response is requested
                 if method_path == "mpc.step" and len(args) >= 5 and args[4] is True:
+                    # TIMING: Track actual MPC computation time
+                    mpc_compute_start = time.time()
                     # Call the method with the original args (without the lightweight flag)
                     full_result = attr(*args[:4], **kwargs)
+                    mpc_compute_time = time.time() - mpc_compute_start
                     
+                    # TIMING: Track lightweight response creation time
+                    response_create_start = time.time()
                     # Return only essential data but maintain compatibility
                     lightweight_result = {
                         "action": full_result.action,
@@ -271,6 +280,17 @@ class MpcSolverServer:
                             "pose_error": getattr(full_result.metrics, 'pose_error', None) if full_result.metrics else None,
                         } if full_result.metrics else None,
                     }
+                    response_create_time = time.time() - response_create_start
+                    
+                    server_total_time = time.time() - server_start
+                    
+                    # SERVER TIMING LOG
+                    print(f"[SERVER] MPC Step Timing:")
+                    print(f"  Total server time: {server_total_time*1000:.2f}ms")
+                    print(f"  MPC computation:   {mpc_compute_time*1000:.2f}ms")
+                    print(f"  Response creation: {response_create_time*1000:.2f}ms")
+                    print(f"  MPC solve_time:    {full_result.solve_time*1000:.2f}ms")
+                    
                     result = lightweight_result
                 else:
                     result = attr(*args, **kwargs)
