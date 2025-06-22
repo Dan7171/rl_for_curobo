@@ -322,6 +322,37 @@ class MpcSolverApi:
             if (isinstance(result, dict) and 
                 'action' in result and 'js_action' in result and 'solve_time' in result):
                 result = LightweightResult(result)
+            elif (isinstance(result, dict) and result.get('ultra_lightweight')):
+                # Handle ultra-lightweight response - reconstruct JointState objects from Python lists
+                try:
+                    import torch
+                    from curobo.types.state import JointState
+                    
+                    # Reconstruct JointState objects from Python lists (avoids numpy version issues)
+                    action_tensor = torch.tensor(result['action_array'], dtype=torch.float32)
+                    js_action_tensor = torch.tensor(result['js_action_array'], dtype=torch.float32)
+                    
+                    # Create JointState with proper attributes
+                    action_state = JointState.from_position(action_tensor)
+                    js_action_state = JointState.from_position(js_action_tensor)
+                    
+                    # Set joint_names from the server response
+                    if result.get('joint_names') is not None:
+                        action_state.joint_names = result['joint_names']
+                        js_action_state.joint_names = result['joint_names']
+                    
+                    # Create compatible result object
+                    ultra_result = {
+                        'action': action_state,
+                        'js_action': js_action_state,
+                        'solve_time': result['solve_time'],
+                        'success': result['success']
+                    }
+                    result = LightweightResult(ultra_result)
+                except Exception as e:
+                    print(f"Warning: Failed to reconstruct ultra-lightweight response: {e}")
+                    # Keep the raw result if reconstruction fails
+                    pass
             wrap_time = time.time() - wrap_start
             
             total_time = time.time() - total_start

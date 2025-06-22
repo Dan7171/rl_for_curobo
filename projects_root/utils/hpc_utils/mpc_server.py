@@ -288,37 +288,41 @@ class MpcSolverServer:
             if callable(attr):
                 # Check if this is mpc.step and if lightweight response is requested
                 if method_path == "mpc.step" and len(args) >= 5 and args[4] is True:
-                    # TIMING: Track actual MPC computation time
-                    mpc_compute_start = time.time()
                     # Call the method with the original args (without the lightweight flag)
                     full_result = attr(*args[:4], **kwargs)
-                    mpc_compute_time = time.time() - mpc_compute_start
                     
-                    # TIMING: Track lightweight response creation time
-                    response_create_start = time.time()
-                    # Return only essential data but maintain compatibility
-                    lightweight_result = {
-                        "action": full_result.action,
-                        "js_action": full_result.js_action,  # Client code needs this
-                        "solve_time": full_result.solve_time,
-                        "success": getattr(full_result.metrics, 'feasible', None) if full_result.metrics else None,
-                        "metrics": {
-                            "feasible": getattr(full_result.metrics, 'feasible', None) if full_result.metrics else None,
-                            "pose_error": getattr(full_result.metrics, 'pose_error', None) if full_result.metrics else None,
-                        } if full_result.metrics else None,
-                    }
-                    response_create_time = time.time() - response_create_start
-                    
-                    server_total_time = time.time() - server_start
-                    
-                    # SERVER TIMING LOG
-                    print(f"[SERVER] MPC Step Timing:")
-                    print(f"  Total server time: {server_total_time*1000:.2f}ms")
-                    print(f"  MPC computation:   {mpc_compute_time*1000:.2f}ms")
-                    print(f"  Response creation: {response_create_time*1000:.2f}ms")
-                    print(f"  MPC solve_time:    {full_result.solve_time*1000:.2f}ms")
-                    
-                    result = lightweight_result
+                    # ULTRA-LIGHTWEIGHT: Return only raw numpy arrays
+                    # This bypasses all Python object overhead and serialization complexity
+                    if hasattr(full_result.action, 'position') and hasattr(full_result.action.position, 'cpu'):
+                        # Extract raw tensor data as Python lists (avoids numpy version issues)
+                        action_array = full_result.action.position.cpu().numpy().tolist()
+                        js_action_array = full_result.js_action.position.cpu().numpy().tolist() if full_result.js_action else action_array
+                        
+                        # Extract joint_names for compatibility
+                        joint_names = None
+                        if hasattr(full_result.action, 'joint_names') and full_result.action.joint_names is not None:
+                            joint_names = full_result.action.joint_names
+                        
+                        # Return minimal data as raw arrays
+                        ultra_lightweight_result = {
+                            "action_array": action_array,           # Python list (serializes safely)
+                            "js_action_array": js_action_array,     # Python list (serializes safely)  
+                            "joint_names": joint_names,             # Joint names for compatibility
+                            "solve_time": float(full_result.solve_time),  # Simple float
+                            "success": True,  # Simplified for ultra-lightweight mode
+                            "ultra_lightweight": True               # Flag to identify this format
+                        }
+                        return {"result": ultra_lightweight_result}
+                    else:
+                        # Fallback to regular lightweight if tensor extraction fails
+                        lightweight_result = {
+                            "action": full_result.action,
+                            "js_action": full_result.js_action,
+                            "solve_time": full_result.solve_time,
+                                                         "success": True,  # Simplified for lightweight mode
+                            "lightweight": True
+                        }
+                        return {"result": lightweight_result}
                 else:
                     result = attr(*args, **kwargs)
             else:
@@ -369,10 +373,11 @@ class MpcSolverServer:
 
     def _serialize_fast(self, obj: Any) -> bytes:
         """Fast serialization using msgpack if available, otherwise pickle."""
-        if self.use_msgpack:
+        if self.use_msgpack and HAS_MSGPACK:
             try:
                 # msgpack is typically 2-3x faster than pickle
-                return msgpack.packb(obj, use_bin_type=True)
+                result = msgpack.packb(obj, use_bin_type=True)
+                return result if result is not None else pickle.dumps(obj, protocol=self.pickle_protocol)
             except (TypeError, ValueError):
                 # Fall back to pickle for complex objects
                 return pickle.dumps(obj, protocol=self.pickle_protocol)
