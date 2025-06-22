@@ -14,7 +14,8 @@ from projects_root.utils.plot_spheres import SphereVisualizer
 from projects_root.utils.quaternion import integrate_quat
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.utils import shift_tensor_left, mask_decreasing_values
 from concurrent.futures import ProcessPoolExecutor, wait
-from projects_root.utils.transforms import transform_poses_batched
+from projects_root.utils.transforms import transform_poses_batched, transform_robot_positions_to_world, create_optimized_collision_checker_buffers, transform_positions_with_precomputed_matrix
+from curobo.geom.transform import batch_transform_points
 
 import time
 
@@ -162,6 +163,10 @@ class DynamicObsCollPredictor:
         #     # Pre-allocate broadcast buffer for world frame transformation
         #     self.p_R_broadcast = self.p_R.view(1, 1, 1, 3).expand(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 3)
         
+        self.rotation_matrix = None
+        self.world_translation = None
+        self.transform_matrix_dirty = True
+        
     def _project_sparse_to_full_horizon(self, sparse_matrix: torch.Tensor, full_matrix: torch.Tensor):
         """
         Project a sparse matrix from (n_rollouts, n_sampling_steps) to (n_rollouts, H).
@@ -217,41 +222,38 @@ class DynamicObsCollPredictor:
         # Update broadcast-ready buffer
         self.p_obs_buf_broadcast[0, :, 0, :, :] = self.p_obs_buf
 
-    def cost_fn(self, prad_own_R:torch.Tensor, safety_margin=0.1):
-        """
-        prad_own_R: tensor of shape [n_rollouts, H, n_valid_own, 3]. The poses of the own spheres, expressed in the robot base frame.
-        Optimized collision cost computation with reduced memory operations and fused computations.
-        """
+    def update_world_pose(self, world_pose):
+        """Update world pose and pre-compute transformation matrix."""
+        self.X = world_pose
+        if not hasattr(self, 'X_tensor') or self.X_tensor is None:
+            self.X_tensor = torch.tensor(self.X, device=self.tensor_args.device, dtype=torch.float32)
+        
+        # Pre-compute rotation matrix for ultra-fast transforms
+        self.rotation_matrix, self.world_translation = create_optimized_collision_checker_buffers(
+            self.n_rollouts, self.H, self.n_own_spheres, self.X_tensor, self.tensor_args.device
+        )
+        self.transform_matrix_dirty = False
 
-        # Efficient indexing and extraction in one step
-        # Filter out the timesteps and spheres that are not needed
-        # pos, radius of own spheres, expressed in the robot base frame R
-        # pradFiltered_own_R = torch.index_select(prad_own_R, 1, self.sampling_timesteps_tensor)  # Select timesteps
-        # pradFiltered_own_R = torch.index_select(pradFiltered_own_R, 2, self.valid_own_spheres_tensor)   # Select spheres
-
-        # filter out the spheres that are not needed
-        # pradFiltered_own_R = torch.index_select(prad_own_R, 2, self.valid_own_spheres_tensor)   # Select spheres
-        # self.XFiltered_own_R[:,:,:,:3] = pradFiltered_own_R[:,:,:,:3] # set own spheres expressed in the robot base frame (positions only, quaternion is already set to identity)
-        # self.X_own_R[:,:,:,:3] = pradFiltered_own_R[:,:,:,:3]
-        self.X_own_R[:,:,:,:3] = prad_own_R[:,:,:,:3]
-        # Express own spheres (except the one we already filtered) in the world frame, 
-        # so that it will be at the same frame as the obstacles (we need that to compute the distances between the own and obs spheres)
-        # and save only the positions 
-        # self.p_own_buf = transform_poses_batched(self.X_own_R, self.X)[:,:,:,:3]
-        self.p_own_buf_unfiltered = transform_poses_batched(self.X_own_R, self.X)[:,:,:,:3]
-        get_topics().topics[self.env_id][self.robot_id]["p_spheres_rollouts"] = self.p_own_buf_unfiltered # publish the own spheres poses in the world frame
-
-        # publish the own spheres poses in the world frame
-        # runtime_topics.topics[self.env_id][self.robot_id]["p_SpheresRolloutsFiltered"] = self.p_own_buf # publish the own spheres poses in the world frame
+    def cost_fn(self, prad_own_R: torch.Tensor, safety_margin=0.1):
+        """Ultra-optimized collision cost computation."""
+        
+        # Update transformation matrix if needed
+        if self.transform_matrix_dirty or self.rotation_matrix is None:
+            self.update_world_pose(self.X)
+        
+        # Extract positions from robot frame poses
+        robot_positions = prad_own_R[:, :, :, :3]  # (n_rollouts, H, n_spheres, 3)
+        
+        # ULTRA-FAST transformation using pre-computed matrix
+        self.p_own_buf_unfiltered = transform_positions_with_precomputed_matrix(
+            robot_positions, self.rotation_matrix, self.world_translation
+        )
         
         # filter out the timesteps that are not needed
         p_spheres_tmp_time_filtered = torch.index_select(self.p_own_buf_unfiltered, 1, self.sampling_timesteps_tensor) # Select timesteps
         # filter out the spheres that are not needed
         self.p_own_buf = torch.index_select(p_spheres_tmp_time_filtered, 2, self.valid_own_spheres_tensor)
         
-        # runtime_topics.topics[self.env_id][self.robot_id]["rad_SpheresRolloutsFiltered"] = self.rad_own_buf
-        # NOW WE HAVE BOTH OWN AND OBS SPHERES IN THE SAME FRAME (WORLD FRAME)
-
         # Update broadcast-ready buffer
         self.p_own_buf_broadcast[:, :, :, 0, :] = self.p_own_buf
         

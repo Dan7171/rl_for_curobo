@@ -1,0 +1,11 @@
+conda activate env_isaacsim # init env
+
+austin -o ./f.austin -i 5000  python3 path/to/my/script.py # run script to profile
+
+ctrl + c # stop script
+
+ctrl+shift+path and search for load austin samples.
+select rl_for_curobo/f.austin
+
+go to Flame Graph bar near terminal
+

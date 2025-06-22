@@ -299,7 +299,7 @@ class AutonomousFranka:
             zero_vel (bool): should multiply the velocities by 0.0 to set them to zero (differs for robot types - MPC and Cumotion).
 
         Returns:
-            JointState: the robot’s joint configuration in curobo's representation.
+            JointState: the robot's joint configuration in curobo's representation.
         """
         if sim_js is None:
             sim_js = self.get_sim_joint_state()
@@ -736,8 +736,9 @@ class FrankaMpc(AutonomousFranka):
                         qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
                         qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
                     
-                    # transform all poses from robot base frame to to the world frame
-                    X_world = transform_poses_batched(torch.cat([pKey, qKey], dim=-1), self_transform)
+                    # OPTIMIZED VERSION: Use ultra-fast specialized function
+                    from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres
+                    X_world = transform_poses_batched_optimized_for_spheres(torch.cat([pKey, qKey], dim=-1), self_transform)
                     pKey = X_world[...,:3]
                     qKey = X_world[...,3:]
                     plan['task_space'][key]['p'] = pKey
@@ -969,7 +970,7 @@ class FrankaCumotion(AutonomousFranka):
             enable_graph=self.enable_graph_planner, # Use graph planner to generate collision-free seed for trajectory optimization.
             enable_graph_attempt=2, # Number of failed attempts at which to fallback to a graph planner for obtaining trajectory seeds.
             max_attempts=self.max_attempts, # Maximum number of attempts allowed to solve the motion generation problem.
-            enable_finetune_trajopt=self.enable_finetune_trajopt, # Run finetuning trajectory optimization after running 100 iterations of trajectory optimization. This will provide shorter and smoother trajectories. When MotionGenConfig.optimize_dt is True, this flag will also scale the trajectory optimization by a new dt. Leave this to True for most cases. If you are not interested in finding time-optimal solutions and only want to use motion generation as a feasibility check, set this to False. Note that when set to False, the resulting trajectory is only guaranteed to be collision-free and within joint limits. When False, it’s not guaranteed to be smooth and might not execute on a real robot.
+            enable_finetune_trajopt=self.enable_finetune_trajopt, # Run finetuning trajectory optimization after running 100 iterations of trajectory optimization. This will provide shorter and smoother trajectories. When MotionGenConfig.optimize_dt is True, this flag will also scale the trajectory optimization by a new dt. Leave this to True for most cases. If you are not interested in finding time-optimal solutions and only want to use motion generation as a feasibility check, set this to False. Note that when set to False, the resulting trajectory is only guaranteed to be collision-free and within joint limits. When False, it's not guaranteed to be smooth and might not execute on a real robot.
             time_dilation_factor=self.dilation_factor, # Slow down optimized trajectory by re-timing with a dilation factor. This is useful to execute trajectories at a slower speed for debugging. Use this to generate slower trajectories instead of reducing MotionGenConfig.velocity_scale or MotionGenConfig.acceleration_scale as those parameters will require re-tuning of the cost terms while MotionGenPlanConfig.time_dilation_factor will only post-process the trajectory.
         )
     
@@ -1009,7 +1010,7 @@ class FrankaCumotion(AutonomousFranka):
             if self.constrain_grasp_approach:
                 # cuRobo also can enable constrained motions for part of a trajectory.
                 # This is useful in pick and place tasks where traditionally the robot goes to an offset pose (pre-grasp pose) and then moves 
-                # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it’s orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
+                # to the grasp pose in a linear motion along 1 axis (e.g., z axis) while also constraining it's orientation. We can formulate this two step process as a single trajectory optimization problem, with orientation and linear motion costs activated for the second portion of the timesteps. 
                 # https://curobo.org/advanced_examples/3_constrained_planning.html#:~:text=Grasp%20Approach%20Vector,behavior%20as%20below.
                 # Enables moving to a pregrasp and then locked orientation movement to final grasp.
                 # Since this is added as a cost, the trajectory will not reach the exact offset, instead it will try to take a blended path to the final grasp without stopping at the offset.

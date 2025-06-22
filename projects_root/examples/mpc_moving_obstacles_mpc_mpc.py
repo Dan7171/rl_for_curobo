@@ -64,7 +64,7 @@ from projects_root.utils.transforms import transform_poses_batched
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = False # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-OBS_PREDICTION  = False # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
+OBS_PREDICTION = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
 VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
@@ -471,8 +471,7 @@ def main():
             # Store plans for each robot in the environment topics
             for robot_idx in range(len(env_topics)):
                 env_topics[robot_idx]["plans"] = plans[robot_idx]
-        else:
-            sphere_states_all_robots = [robots[i].get_current_spheres_state()[0] for i in range(len(robots))]
+        
         robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
         # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
@@ -486,7 +485,6 @@ def main():
                     if j != i: 
                         planSpheres_robotj = plans[j]['task_space']['spheres'] # robots[j].get_plan(n_steps=robots[i].H)['task_space']['spheres']
                         p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
-                        # print(f"debug: j = {j},  p_spheresRobotj.sum() = ", p_spheresRobotjH.sum())                
                         rad_spheresRobotjH = planSpheres_robotj['r'][0].to(tensor_args.device)
                         if p_spheresOthersH is None:
                             p_spheresOthersH = p_spheresRobotjH
@@ -506,17 +504,7 @@ def main():
                             col_pred.update(p_spheresOthersH)
                 robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
-                # if HIGHLIGHT_OBS and t_idx % HIGHLIGHT_OBS_H == 0: # 
-                #     if not obs_viz_init:
-                #         material = None # glass_material
-                #         for h in range(HIGHLIGHT_OBS_H):
-                #             for j in range(p_spheresOthersH.shape[1]):
-                #                 robots[i].add_obs_viz(p_spheresOthersH[h][j].cpu(),rad_spheresOthersH[j].cpu(),f"o{j}t{h}",h=h,h_max=robots[i].H,material=material)
-                #         if i == len(robots) - 1:
-                #             obs_viz_init = True
-                #     else:
-                #         robots[i].update_obs_viz(p_spheresOthersH[:HIGHLIGHT_OBS_H].reshape(-1, 3).cpu()) # collapse first two dimensions
-                
+     
                 if VISUALIZE_PREDICTED_OBS_PATHS:
                     visualizations_timer_start = time.time()
                     point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
@@ -537,7 +525,6 @@ def main():
             targets_update_timer += time.time() - targets_update_timer_start
 
             # MPC STEP
-            
             mpc_solver_timer_start = time.time()
             mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) # print_rate_decorator(lambda: robot1.solver.step(robot1.current_state, max_attempts=2), args.print_ctrl_rate, "mpc.step")()
             mpc_solver_timer += time.time() - mpc_solver_timer_start
