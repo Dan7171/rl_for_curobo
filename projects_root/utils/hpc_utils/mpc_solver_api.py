@@ -71,10 +71,8 @@ class MpcSolverApi:
         self.socket = self.context.socket(zmq.REQ)  # Request socket
         self.socket.connect(f"tcp://{server_ip}:{server_port}")
         
-        # Set socket options for performance
-        self.socket.setsockopt(zmq.LINGER, 0)  # Don't wait on close
-        self.socket.setsockopt(zmq.RCVTIMEO, 30000)  # 30 second timeout
-        self.socket.setsockopt(zmq.SNDTIMEO, 30000)  # 30 second timeout
+        # Minimal settings for low latency
+        self.socket.setsockopt(zmq.LINGER, 0)
         
         print(f"Connected to MPC server at {server_ip}:{server_port}")
         

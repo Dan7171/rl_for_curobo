@@ -35,6 +35,10 @@ class MpcSolverServer:
         # Initialize ZeroMQ
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)  # Reply socket
+        
+        # Minimal settings for low latency
+        self.socket.setsockopt(zmq.LINGER, 0)
+        
         self.socket.bind(f"tcp://*:{port}")
         
         print(f"MPC Solver Server listening on port {port}")
