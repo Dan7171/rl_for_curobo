@@ -482,8 +482,10 @@ class PoseCost(CostBase, PoseCostConfig):
         # if link_name is None and cost.shape[0]==8:
         #    print(ee_pos_batch[...,-1].squeeze())
         # print(cost.shape)
-
-        get_topics().topics[self.env_id][self.robot_id]["cost"]["pose"] = cost
+        
+        # to adress get_topics().topics[self.env_id][self.robot_id]["cost"]["pose"] = cost AttributeError: 'NoneType' object has no attribute 'topics'
+        if get_topics() is not None:
+            get_topics().topics[self.env_id][self.robot_id]["cost"]["pose"] = cost
         return cost
 
     def forward_pose(

@@ -1165,14 +1165,14 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             self._fig.savefig(os.path.join(self._cost_plots_dir, f'base_costs_iter_{total_iterations}.png'), dpi=150, bbox_inches='tight')
             print(f"Saved ArmBase plot snapshot at iteration {total_iterations}")
 
-    def enable_live_plotting(self, enable: bool = True, save_plots: bool = False):
+    def enable_live_plotting(self, enable: bool = True):
         """Enable or disable live plotting of cost values
         
         Args:
             enable (bool): Whether to enable live plotting. Defaults to True.
         """
         self._enable_live_plotting = enable # live plotting of cost values if True
-        self._save_plots = save_plots # save plots to file if True
+        self._save_plots = False # save plots to file if True. TODO: maybe implement this later
         if not enable and hasattr(self, '_fig'):
             # Close the figure if disabling
             plt.close(self._fig)

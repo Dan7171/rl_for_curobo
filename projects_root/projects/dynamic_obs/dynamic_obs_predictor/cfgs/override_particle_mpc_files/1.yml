@@ -90,37 +90,37 @@ cost:
     n_own_spheres: 65
 
     # Custom costs that run in arm_base (general robot costs)
-    arm_base:
+    # arm_base:
       
-      dynamic_obs_cost:
-        module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
-        class_name: "DynamicObsCost"
-        config_class_name: "DynamicObsCostConfig"
-        weight: 100  # Adjust weight as needed
-        terminal: False
-        env_id: 0
-        robot_id: 1
-        X: [1.2, 0, 0, 0, 0, 0, 1]
-        n_coll_spheres: 65
-        sparse_steps:
-          use: True
-          ratio: 0.2
+    #   dynamic_obs_cost:
+    #     module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
+    #     class_name: "DynamicObsCost"
+    #     config_class_name: "DynamicObsCostConfig"
+    #     weight: 100  # Adjust weight as needed
+    #     terminal: False
+    #     env_id: 0
+    #     robot_id: 1
+    #     X: [1.2, 0, 0, 0, 0, 0, 1]
+    #     n_coll_spheres: 65
+    #     sparse_steps:
+    #       use: True
+    #       ratio: 0.2
 
-        sparse_spheres:
-          exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60] # 0,1,4,5: base link, graspped object: 61,62,63,64, 36 or greater: end effector (sparse sampline)
-          exclude_others: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
-        env_id: 0
-        robot_id: 1
+    #     sparse_spheres:
+    #       exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60] # 0,1,4,5: base link, graspped object: 61,62,63,64, 36 or greater: end effector (sparse sampline)
+    #       exclude_others: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
+    #     env_id: 0
+    #     robot_id: 1
         
-    arm_reacher:
-      egocentricm_cost:
-        module_path: "curobo.rollout.cost.custom.arm_reacher.egocentrism_cost"
-        class_name: "EgocentricmCost"
-        config_class_name: "EgocentricmCostConfig"
-        weight: 1.0
-        sparse_spheres_exclude_self: [61,62,63,64] # graspped object: 61,62,63,64
-        env_id: 0
-        robot_id: 1
+    # arm_reacher:
+    #   egocentricm_cost:
+    #     module_path: "curobo.rollout.cost.custom.arm_reacher.egocentrism_cost"
+    #     class_name: "EgocentricmCost"
+    #     config_class_name: "EgocentricmCostConfig"
+    #     weight: 1.0
+    #     sparse_spheres_exclude_self: [61,62,63,64] # graspped object: 61,62,63,64
+    #     env_id: 0
+    #     robot_id: 1
 
 mppi:
   init_cov          : 0.05 # 0.05 #.5 #.5

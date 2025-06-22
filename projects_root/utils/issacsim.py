@@ -1,6 +1,9 @@
 import time
 
-def init_app(app_settings:dict={"headless": False}):
+def init_app(app_settings:dict={"headless": False,
+                                "width": "800",   # Reduced from 1920
+                                "height": "600",
+                                }):
     """
     Steps that must be done before importing other isaac sim modules.
     https://medium.com/@kabilankb2003/isaac-sim-core-api-for-robot-control-a-hands-on-guide-f9b27f5729ab

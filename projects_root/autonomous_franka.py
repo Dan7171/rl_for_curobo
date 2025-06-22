@@ -454,7 +454,7 @@ class FrankaMpc(AutonomousFranka):
                 q_T_R=np.array([0, 1, 0, 0]), 
                 target_color=np.array([0, 0.5, 0]), 
                 target_size=0.05, 
-                cost_live_plotting_cfg:dict={'live_plotting':False, 'save_plots':False},
+                plot_costs:bool=False,
                 override_particle_file:str=None,
                 ):
         """
@@ -469,7 +469,6 @@ class FrankaMpc(AutonomousFranka):
             q_T_R (_type_): _description_
             target_color (_type_): _description_
             target_size (_type_): _description_
-            cost_live_plotting_cfgs (_type_): _description_
         """
         super().__init__(robot_cfg, world,env_id, robot_id, p_R, q_R, p_T_R, q_T_R, target_color, target_size)
         # self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
@@ -480,7 +479,7 @@ class FrankaMpc(AutonomousFranka):
         self.cfg = load_yaml(self.override_particle_file)
         self.H = self.cfg["model"]["horizon"]
         self.num_particles = self.cfg["mppi"]["num_particles"]
-        self.cost_live_plotting_cfg = cost_live_plotting_cfg
+        self.plot_costs = plot_costs
         
   
 
@@ -505,7 +504,6 @@ class FrankaMpc(AutonomousFranka):
             world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
             use_cuda_graph=not debug, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
             use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
-            use_cuda_graph_full_step=False, #  Capture full step in MPC as a single CUDA graph. This is experimental and might not work reliably.
             self_collision_check=True, # Enable self-collision check during MPC optimization.
             collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
             collision_cache=collision_cache,
@@ -516,7 +514,7 @@ class FrankaMpc(AutonomousFranka):
             step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
             dynamic_obs_checker=None, # New
             override_particle_file=self.override_particle_file, # New
-            cost_live_plotting_cfg=self.cost_live_plotting_cfg # New
+            plot_costs=self.plot_costs # New
         )
 
         

@@ -123,7 +123,7 @@ class MpcSolverConfig:
         override_particle_file: str = None,
         project_pose_to_goal_frame: bool = True,
         dynamic_obs_checker=None,
-        cost_live_plotting_cfg: dict = {},
+        plot_costs:bool=False,
     ):
         """Create an MPC solver configuration from robot and world configuration.
 
@@ -283,8 +283,9 @@ class MpcSolverConfig:
         arm_rollout_mppi = ArmReacher(cfg)
         arm_rollout_safety = ArmReacher(safety_cfg)
         arm_rollout_aux = ArmReacher(aux_cfg)
-        if cost_live_plotting_cfg["live_plotting"]:
-            arm_rollout_mppi.enable_live_plotting(cost_live_plotting_cfg["save_plots"])
+
+        if plot_costs:
+            arm_rollout_mppi.enable_live_plotting()
         config_data["mppi"]["store_rollouts"] = store_rollouts
         if use_cuda_graph is not None:
             config_data["mppi"]["use_cuda_graph"] = use_cuda_graph
