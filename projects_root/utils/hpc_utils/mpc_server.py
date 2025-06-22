@@ -255,7 +255,25 @@ class MpcSolverServer:
             # Regular methods and attributes
             attr = getattr(obj, method_name)
             if callable(attr):
-                result = attr(*args, **kwargs)
+                # Check if this is mpc.step and if lightweight response is requested
+                if method_path == "mpc.step" and len(args) >= 5 and args[4] is True:
+                    # Call the method with the original args (without the lightweight flag)
+                    full_result = attr(*args[:4], **kwargs)
+                    
+                    # Return only essential data but maintain compatibility
+                    lightweight_result = {
+                        "action": full_result.action,
+                        "js_action": full_result.js_action,  # Client code needs this
+                        "solve_time": full_result.solve_time,
+                        "success": getattr(full_result.metrics, 'feasible', None) if full_result.metrics else None,
+                        "metrics": {
+                            "feasible": getattr(full_result.metrics, 'feasible', None) if full_result.metrics else None,
+                            "pose_error": getattr(full_result.metrics, 'pose_error', None) if full_result.metrics else None,
+                        } if full_result.metrics else None,
+                    }
+                    result = lightweight_result
+                else:
+                    result = attr(*args, **kwargs)
             else:
                 # If it's an attribute, return it (for properties)
                 result = attr
