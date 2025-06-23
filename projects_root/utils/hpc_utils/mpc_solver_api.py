@@ -168,7 +168,7 @@ class MpcSolverApi:
         
         # Initialize remote solver
         self._initialize_solver(config_params)
-
+    
     def __del__(self):
         """Clean up ZeroMQ resources."""
         if hasattr(self, 'socket'):
@@ -206,7 +206,16 @@ class MpcSolverApi:
             WrapResult or dict: Result of the optimization. If lightweight_response=True,
             returns dict with only essential data, otherwise returns full WrapResult.
         """
+        current_state.joint_names = None
+        current_state.tensor_args = None
         return self._call_on_server("mpc.step", current_state, shift_steps, seed_traj, max_attempts, self.lightweight_response)
+
+    def step_light(self, current_state: JointState, shift_steps: int = 1, seed_traj: Optional[JointState] = None, max_attempts: int = 1):
+        """
+        Solve for the next action given the current state.
+        """
+        
+        return self._call_on_server("mpc.step_light", current_state, shift_steps, seed_traj, max_attempts, self.lightweight_response)
 
     def setup_solve_single(self, goal, num_seeds: int = 1):
         """Setup single solve goal."""

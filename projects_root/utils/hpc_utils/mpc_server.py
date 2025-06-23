@@ -307,6 +307,9 @@ class MpcSolverServer:
                 # Check if this is mpc.step and if lightweight response is requested
                 if method_path == "mpc.step" and len(args) >= 5 and args[4] is True:
                     # Call the method with the original args (without the lightweight flag)
+                    current_state = args[0]
+                    current_state.tensor_args = self.mpc_solver.tensor_args
+                    current_state.joint_names = self.mpc_solver.rollout_fn.joint_names
                     full_result = attr(*args[:4], **kwargs)
                     
                     # ULTRA-LIGHTWEIGHT: Return only raw numpy arrays
@@ -375,6 +378,7 @@ class MpcSolverServer:
             obj = getattr(obj, part)
         
         return {"result": obj}
+
     
     def _get_debug_copy(self) -> Dict[str, Any]:
         """Get a copy of the MPC solver for debugging."""

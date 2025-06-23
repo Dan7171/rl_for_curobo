@@ -358,6 +358,7 @@ def main(server_ip: str=''):
         
         st_time = time.time() # new debug
         mpc_result = mpc.step(current_state, max_attempts=1)
+        #mpc_result = mpc.step_light(current_state, max_attempts=1)
         # torch.cuda.synchronize()
         if step_index > 50: #
             mpc_time.append(time.time() - st_time)
