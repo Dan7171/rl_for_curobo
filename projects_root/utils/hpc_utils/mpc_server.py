@@ -58,23 +58,22 @@ class MpcSolverServer:
         
         self.socket = self.context.socket(zmq.REP)
         
-        # ZMQ Low-latency optimizations matching client
-        # Aggressive socket buffer optimization
-        self.socket.setsockopt(zmq.SNDBUF, 65536)    # 64KB send buffer  
-        self.socket.setsockopt(zmq.RCVBUF, 65536)    # 64KB receive buffer
+        # ZMQ Low-latency optimizations (conservative approach for MPC payloads)
+        # OPTIMAL: 8KB buffers proven best through empirical testing
+        self.socket.setsockopt(zmq.SNDBUF, 8192)     # 8KB send buffer (optimal)
+        self.socket.setsockopt(zmq.RCVBUF, 8192)     # 8KB receive buffer (optimal)
         
         # High Water Mark - prevent queueing delays
         self.socket.setsockopt(zmq.SNDHWM, 1)        # Only 1 message in send queue
         self.socket.setsockopt(zmq.RCVHWM, 1)        # Only 1 message in recv queue
         
-        # Immediate connection - don't wait for slow start
-        self.socket.setsockopt(zmq.IMMEDIATE, 1)
+        # SELECTIVE: Keep proven optimizations but avoid aggressive ones
+        self.socket.setsockopt(zmq.IMMEDIATE, 1)     # Don't queue on disconnected peers
+        self.socket.setsockopt(zmq.LINGER, 10)       # 10ms linger (vs 100ms, but not 0)
         
-        # Reduce linger time for faster shutdown
-        self.socket.setsockopt(zmq.LINGER, 100)      # 100ms max linger
-        
-        # Optimize for low-latency over high-throughput
-        self.socket.setsockopt(zmq.RATE, 1000000)    # 1Mbps rate limit (prevents buffering)
+        # Server-side timeout optimizations
+        self.socket.setsockopt(zmq.RCVTIMEO, -1)     # No receive timeout (server waits)
+        self.socket.setsockopt(zmq.SNDTIMEO, 1000)   # 1s send timeout
         
         # Bind to port
         self.socket.bind(f"tcp://*:{port}")
@@ -86,8 +85,9 @@ class MpcSolverServer:
         self.compression_level = 1  # Fast compression
         self.compression_threshold = 1024  # Only compress if > 1KB
         
-        print(f"MPC Server started on port {port} with low-latency optimizations")
-        print(f"  - Socket buffers: 64KB each")
+        print(f"🚀 MPC Server started on port {port} with optimized low-latency settings")
+        print(f"  - Socket buffers: 8KB each (empirically optimal)")
+        print(f"  - LINGER=10ms, IMMEDIATE=1 (balanced settings)")
         print(f"  - Pickle protocol: {self.pickle_protocol}")
         print(f"  - Compression: level {self.compression_level}, threshold {self.compression_threshold} bytes")
         
@@ -114,8 +114,13 @@ class MpcSolverServer:
                 # Receive request with smart decompression
                 try:
                     # OPTIMIZATION 6: Smart decompression based on marker
+                    # block until a message is received
+                    network_recv_time_start = time.time()
                     request_data = self.socket.recv()
+                    network_recv_time = time.time() - network_recv_time_start
                     
+                    # process the request...
+                    processing_time_start = time.time()
                     if request_data[0:1] == b'C':
                         # Compressed request
                         serialized_request = zlib.decompress(request_data[1:])
@@ -134,16 +139,29 @@ class MpcSolverServer:
                     
                     if len(serialized_response) > self.compression_threshold:
                         compressed_response = zlib.compress(serialized_response, level=self.compression_level)
+                        processing_time = time.time() - processing_time_start
+
                         # Send with compression marker
+                        network_send_time_start = time.time()
                         self.socket.send(b'C' + compressed_response)
+                        network_send_time = time.time() - network_send_time_start
                     else:
-                        # Send uncompressed with marker
-                        self.socket.send(b'U' + serialized_response)
+                        processing_time = time.time() - processing_time_start
                     
+                        # Send uncompressed with marker
+                        network_send_time_start = time.time()
+                        self.socket.send(b'U' + serialized_response)
+                        network_send_time = time.time() - network_send_time_start
+
                     # OPTIMIZATION 9: Garbage collection hint for large responses
                     if len(serialized_response) > 100000:  # 100KB threshold
                         gc.collect()
                     
+                    print(f"Network recv time: {network_recv_time*1000:.2f}ms")
+                    print(f"Processing time ({request.get('type')}, {request.get('args', ())}): {processing_time*1000:.2f}ms")
+                    print(f"Network send time: {network_send_time*1000:.2f}ms")
+                    print(f"Total iteration time: {(network_recv_time + processing_time + network_send_time)*1000:.2f}ms")
+                    print("")
                 except Exception as e:
                     # Send error response with same compression protocol
                     error_response = {

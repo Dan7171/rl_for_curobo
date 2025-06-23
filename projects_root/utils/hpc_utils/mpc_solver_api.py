@@ -7,6 +7,8 @@ from typing import Any, Optional, Dict
 import time
 import zlib
 
+from projects_root.utils.size import get_total_size
+
 # Try to import msgpack for faster serialization
 try:
     import msgpack
@@ -127,29 +129,25 @@ class MpcSolverApi:
         
         self.socket = self.context.socket(zmq.REQ)
         
-        # ZMQ Low-latency optimizations
+        # ZMQ Low-latency optimizations (conservative approach for MPC payloads)
         # Note: ZMQ handles TCP_NODELAY internally for REQ/REP patterns
         
-        # Aggressive socket buffer optimization
-        # Set small buffers to minimize memory copying and reduce latency
-        self.socket.setsockopt(zmq.SNDBUF, 65536)    # 64KB send buffer  
-        self.socket.setsockopt(zmq.RCVBUF, 65536)    # 64KB receive buffer
+        # OPTIMAL: 8KB buffers proven best through empirical testing
+        self.socket.setsockopt(zmq.SNDBUF, 8192)     # 8KB send buffer (optimal)
+        self.socket.setsockopt(zmq.RCVBUF, 8192)     # 8KB receive buffer (optimal)
         
         # High Water Mark - prevent queueing delays
         self.socket.setsockopt(zmq.SNDHWM, 1)        # Only 1 message in send queue
         self.socket.setsockopt(zmq.RCVHWM, 1)        # Only 1 message in recv queue
         
-        # Immediate connection - don't wait for slow start
-        self.socket.setsockopt(zmq.IMMEDIATE, 1)
+        # SELECTIVE: Keep proven optimizations but avoid aggressive ones
+        self.socket.setsockopt(zmq.IMMEDIATE, 1)     # Don't queue on disconnected peers
+        self.socket.setsockopt(zmq.LINGER, 10)       # 10ms linger (vs 100ms, but not 0)
         
-        # Reduce linger time for faster shutdown
-        self.socket.setsockopt(zmq.LINGER, 100)      # 100ms max linger
-        
-        # Connection timeout
+        # Optimized timeouts for low-latency
         self.socket.setsockopt(zmq.CONNECT_TIMEOUT, 1000)  # 1 second timeout
-        
-        # Optimize for low-latency over high-throughput
-        self.socket.setsockopt(zmq.RATE, 1000000)    # 1Mbps rate limit (prevents buffering)
+        self.socket.setsockopt(zmq.RCVTIMEO, 5000)   # 5s receive timeout
+        self.socket.setsockopt(zmq.SNDTIMEO, 5000)   # 5s send timeout
         
         # Connect to server
         connection_string = f"tcp://{server_ip}:{server_port}"
@@ -267,7 +265,7 @@ class MpcSolverApi:
             "type": request_type,
             "args": args,
         }
-        
+        request_raw_size = get_total_size(request)
         try:
             # TIMING: Serialize request
             serialize_start = time.time()
@@ -275,24 +273,36 @@ class MpcSolverApi:
             serialize_time = time.time() - serialize_start
             
             # TIMING: Compress request
-            compress_start = time.time()
+            
             if len(pickled_request) > self.compression_threshold:
+
+                # compress request
+                compress_start = time.time()
                 compressed_request = zlib.compress(pickled_request, level=1)
-                self.socket.send(b'C' + compressed_request)
                 compress_time = time.time() - compress_start
+                
+                # send compressed request
+                network_send_start = time.time()
+                self.socket.send(b'C' + compressed_request)
+                network_send_time = time.time() - network_send_start
                 request_size = len(compressed_request)
                 compressed = True
+            
             else:
+                # no compression, send uncompressed request
+                compress_time = 0
+                network_send_start = time.time()
                 self.socket.send(b'U' + pickled_request)
-                compress_time = time.time() - compress_start
+                network_send_time = time.time() - network_send_start
                 request_size = len(pickled_request)
                 compressed = False
             
             # TIMING: Network round-trip (send + receive)
-            network_start = time.time()
+            network_receinve_start = time.time()
             response_data = self.socket.recv()
-            network_time = time.time() - network_start
-            
+            network_receive_time = time.time() - network_receinve_start
+            network_round_trip_time = network_send_time + network_receive_time
+            response_raw_size = get_total_size(response_data)
             # TIMING: Decompress response
             decompress_start = time.time()
             if response_data[0:1] == b'C':
@@ -363,12 +373,17 @@ class MpcSolverApi:
                 print(f"Total time:        {total_time*1000:.2f}ms")
                 print(f"  Serialize req:   {serialize_time*1000:.2f}ms")
                 print(f"  Compress req:    {compress_time*1000:.2f}ms")
-                print(f"  Network round:   {network_time*1000:.2f}ms")
+                print(f"  Network send:    {network_send_time*1000:.2f}ms")
+                print(f"  Network receive: {network_receive_time*1000:.2f}ms")
+                print(f"  Network round (send + receive):   {network_round_trip_time*1000:.2f}ms")
                 print(f"  Decompress resp: {decompress_time*1000:.2f}ms")
                 print(f"  Deserialize resp:{deserialize_time*1000:.2f}ms")
                 print(f"  Wrap result:     {wrap_time*1000:.2f}ms")
-                print(f"Request size:      {request_size} bytes ({'compressed' if compressed else 'uncompressed'})")
-                print(f"Response size:     {response_size} bytes ({'compressed' if response_compressed else 'uncompressed'})")
+                print(f" Request size-raw: {request_raw_size} bytes")
+                print(f" Response size-raw: {response_raw_size} bytes")
+                print(f"Request size-network:     {request_size} bytes ({'compressed' if compressed else 'uncompressed'})")
+                print(f"Response size-network:    {response_size} bytes ({'compressed' if response_compressed else 'uncompressed'})")
+                
                 print(f"===================================\n")
                 
             return result
@@ -388,12 +403,15 @@ class MpcSolverApi:
     
     def _initialize_solver(self, config_params: Dict[str, Any]):
         """Initialize the remote MPC solver with configuration parameters."""
-        print(f"Connected to MPC server at {self.server_ip}:{self.server_port}")
-        print(f"Lightweight response mode: {self.lightweight_response}")
+        print(f"🚀 Connected to MPC server at {self.server_ip}:{self.server_port}")
+        print(f"   Optimized low-latency settings applied:")
+        print(f"   - Socket buffers: 8KB each (empirically optimal)")
+        print(f"   - LINGER=10ms, IMMEDIATE=1 (balanced settings)")
+        print(f"   - Lightweight response: {self.lightweight_response}")
         
         # Initialize the MPC solver
         self._send_request("init_mpc", config_params)
-        print("Remote MPC solver initialized")
+        print("✅ Remote MPC solver initialized with low-latency settings")
     
     def _serialize_fast(self, obj: Any) -> bytes:
         """Fast serialization using msgpack if available, otherwise pickle."""

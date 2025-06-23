@@ -37,7 +37,7 @@ A python example is available at :ref:`python_mpc_example`.
 # Standard Library
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 # Third Party
 import torch
@@ -940,3 +940,28 @@ class MpcSolver(MpcSolverConfig):
                 self._cu_state_in, shift_steps=shift_steps, seed_traj=self._cu_seed
             )
         self._cu_step_init = True
+
+    def step_light(
+        self,
+        current_state: JointState,
+        shift_steps: int = 1,
+        seed_traj: Optional[JointState] = None,
+        max_attempts: int = 1,
+        
+    ):
+        sim_js_names = self._mpc_step_sim_js_names
+        dof_index_map = self._mpc_step_dof_index_map
+
+        mpc_result = self.step(current_state, max_attempts=2)
+        cmd_state_full = mpc_result.js_action
+        common_js_names = []
+        # idx_list = []
+        # for x in sim_js_names:
+        #     if x in cmd_state_full.joint_names: # linter error is ok here
+        #         # idx_list.append(robot.get_dof_index(x))
+        #         idx_list.append(dof_index_map[x])
+        #         common_js_names.append(x)
+
+        cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names) # linter error is ok here
+        cmd_state_full = cmd_state
+        ans = cmd_state.position.view(-1).cpu().numpy(), cmd_state_full

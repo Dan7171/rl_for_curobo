@@ -144,7 +144,11 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
-def main():
+def main(server_ip: str=''):
+    
+    if server_ip:
+        args.server_ip = server_ip
+    
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
     stage = my_world.stage
@@ -266,7 +270,7 @@ def main():
             for _ in range(10):
                 my_world.step(render=True)
             init_world = True
-        draw_points(mpc.get_visual_rollouts())
+        # draw_points(mpc.get_visual_rollouts())
 
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -379,12 +383,11 @@ def main():
         )
         # positions_goal = articulation_action.joint_positions
         if step_index % 1000 == 0:
-            print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
-
+            # print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
+            pass
         if succ:
             # set desired joint angles obtained from IK:
-            for _ in range(1):
-                articulation_controller.apply_action(art_action)
+            articulation_controller.apply_action(art_action)
 
         else:
             carb.log_warn("No action is being taken.")
@@ -395,5 +398,6 @@ def main():
 ############################################################
 
 if __name__ == "__main__":
-    main()
+    main(server_ip="132.72.65.119")
+    
     simulation_app.close() 
