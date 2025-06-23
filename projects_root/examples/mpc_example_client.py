@@ -234,7 +234,7 @@ def main(server_ip: str=''):
 
     # USE MpcSolverApi instead of MpcSolver - this connects to remote server
     print(f"Connecting to MPC server at {args.server_ip}:{args.server_port}")
-    mpc = MpcSolverApi(args.server_ip, args.server_port, config_params)
+    mpc = MpcSolverApi(args.server_ip, args.server_port, config_params, ultra_low_latency=True)
     
     # 1 x 7
     retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
@@ -266,6 +266,7 @@ def main(server_ip: str=''):
     add_extensions(simulation_app, args.headless_mode)
     mpc_time = []
     while simulation_app.is_running():
+        ctrl_loop_time_start = time.time()
         if not init_world:
             for _ in range(10):
                 my_world.step(render=True)
@@ -396,9 +397,11 @@ def main(server_ip: str=''):
         if step_index % 100 == 0:
             print(f"mean MPC step time in last 20 steps: {np.mean(mpc_time[-20:])}")
 
+        ctrl_loop_time = time.time() - ctrl_loop_time_start
+        print(f"Control loop iteration time: {ctrl_loop_time*1000:.2f}ms")
 ############################################################
 
 if __name__ == "__main__":
-    main(server_ip="132.72.65.119")
-    
+    # main(server_ip="132.72.65.119")
+    main()
     simulation_app.close() 

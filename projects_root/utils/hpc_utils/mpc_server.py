@@ -59,17 +59,17 @@ class MpcSolverServer:
         self.socket = self.context.socket(zmq.REP)
         
         # ZMQ Low-latency optimizations (conservative approach for MPC payloads)
-        # OPTIMAL: 8KB buffers proven best through empirical testing
-        self.socket.setsockopt(zmq.SNDBUF, 8192)     # 8KB send buffer (optimal)
-        self.socket.setsockopt(zmq.RCVBUF, 8192)     # 8KB receive buffer (optimal)
+        # ULTRA-LOW LATENCY: Minimal buffers for tiny payloads (~1KB)
+        self.socket.setsockopt(zmq.SNDBUF, 2048)     # 2KB send buffer (minimal for ~1KB payloads)
+        self.socket.setsockopt(zmq.RCVBUF, 2048)     # 2KB receive buffer (minimal for ~1KB payloads)
         
         # High Water Mark - prevent queueing delays
         self.socket.setsockopt(zmq.SNDHWM, 1)        # Only 1 message in send queue
         self.socket.setsockopt(zmq.RCVHWM, 1)        # Only 1 message in recv queue
         
-        # SELECTIVE: Keep proven optimizations but avoid aggressive ones
+        # AGGRESSIVE: Maximum low-latency settings for university cluster
         self.socket.setsockopt(zmq.IMMEDIATE, 1)     # Don't queue on disconnected peers
-        self.socket.setsockopt(zmq.LINGER, 10)       # 10ms linger (vs 100ms, but not 0)
+        self.socket.setsockopt(zmq.LINGER, 0)        # 0ms linger (immediate close)
         
         # Server-side timeout optimizations
         self.socket.setsockopt(zmq.RCVTIMEO, -1)     # No receive timeout (server waits)
@@ -158,7 +158,8 @@ class MpcSolverServer:
                         gc.collect()
                     
                     print(f"Network recv time: {network_recv_time*1000:.2f}ms")
-                    print(f"Processing time ({request.get('type')}, {request.get('args', ())}): {processing_time*1000:.2f}ms")
+                    # print(f"Processing time ({request.get('type')}, {request.get('args', ())}): {processing_time*1000:.2f}ms")
+                    print(f"Processing time: {processing_time*1000:.2f}ms")
                     print(f"Network send time: {network_send_time*1000:.2f}ms")
                     print(f"Total iteration time: {(network_recv_time + processing_time + network_send_time)*1000:.2f}ms")
                     print("")

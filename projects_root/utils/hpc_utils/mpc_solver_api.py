@@ -105,7 +105,7 @@ class MpcSolverApi:
     - Lightweight response: ~1.7KB (only action + metadata)
     """
 
-    def __init__(self, server_ip: str, server_port: int, config_params: Dict[str, Any], lightweight_response: bool = True):
+    def __init__(self, server_ip: str, server_port: int, config_params: Dict[str, Any], lightweight_response: bool = True, ultra_low_latency: bool = False):
         """
         Connect to MPC solver server and initialize remote solver.
 
@@ -114,6 +114,7 @@ class MpcSolverApi:
             server_port: Port of the server  
             config_params: Dictionary of configuration parameters for MPC solver
             lightweight_response: If True, return only essential data (action tensor) instead of full WrapResult
+            ultra_low_latency: If True, use 1KB buffers instead of 2KB for maximum latency reduction
         """
         
         self.server_ip = server_ip
@@ -132,17 +133,23 @@ class MpcSolverApi:
         # ZMQ Low-latency optimizations (conservative approach for MPC payloads)
         # Note: ZMQ handles TCP_NODELAY internally for REQ/REP patterns
         
-        # OPTIMAL: 8KB buffers proven best through empirical testing
-        self.socket.setsockopt(zmq.SNDBUF, 8192)     # 8KB send buffer (optimal)
-        self.socket.setsockopt(zmq.RCVBUF, 8192)     # 8KB receive buffer (optimal)
+        # ULTRA-LOW LATENCY: Minimal buffers for tiny payloads (~1KB)
+        if ultra_low_latency:
+            # Try even smaller buffers for university cluster connection
+            self.socket.setsockopt(zmq.SNDBUF, 1024)     # 1KB send buffer (ultra-minimal)
+            self.socket.setsockopt(zmq.RCVBUF, 1024)     # 1KB receive buffer (ultra-minimal)
+            print("🔥 ULTRA-LOW LATENCY mode: 1KB buffers")
+        else:
+            self.socket.setsockopt(zmq.SNDBUF, 2048)     # 2KB send buffer (minimal for ~1KB payloads)
+            self.socket.setsockopt(zmq.RCVBUF, 2048)     # 2KB receive buffer (minimal for ~1KB payloads)
         
         # High Water Mark - prevent queueing delays
         self.socket.setsockopt(zmq.SNDHWM, 1)        # Only 1 message in send queue
         self.socket.setsockopt(zmq.RCVHWM, 1)        # Only 1 message in recv queue
         
-        # SELECTIVE: Keep proven optimizations but avoid aggressive ones
+        # AGGRESSIVE: Maximum low-latency settings for university cluster
         self.socket.setsockopt(zmq.IMMEDIATE, 1)     # Don't queue on disconnected peers
-        self.socket.setsockopt(zmq.LINGER, 10)       # 10ms linger (vs 100ms, but not 0)
+        self.socket.setsockopt(zmq.LINGER, 0)        # 0ms linger (immediate close)
         
         # Optimized timeouts for low-latency
         self.socket.setsockopt(zmq.CONNECT_TIMEOUT, 1000)  # 1 second timeout
@@ -207,7 +214,7 @@ class MpcSolverApi:
             returns dict with only essential data, otherwise returns full WrapResult.
         """
         current_state.joint_names = None
-        current_state.tensor_args = None
+        # Don't set tensor_args to None - it causes linter errors and isn't needed
         return self._call_on_server("mpc.step", current_state, shift_steps, seed_traj, max_attempts, self.lightweight_response)
 
     def step_light(self, current_state: JointState, shift_steps: int = 1, seed_traj: Optional[JointState] = None, max_attempts: int = 1):
