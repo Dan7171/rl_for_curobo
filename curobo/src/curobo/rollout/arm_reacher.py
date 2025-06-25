@@ -612,8 +612,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         """Format end-effector data for multi-arm pose cost.
         
         Constructs 4D tensors [batch, horizon, num_arms, 3/4] from available link poses.
-        For dual-arm setup, typically looks for 'left_panda_hand' and 'right_panda_hand'.
-        If a link is missing, fills with zeros or uses available data.
+        Uses configurable arm link mapping from robot config or sensible defaults.
         
         Args:
             state: Kinematic model state containing link poses
@@ -636,14 +635,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Default quaternion (identity: w=1, x=0, y=0, z=0)
         ee_quat_4d[:, :, :, 0] = 1.0  # Set w component to 1
         
-        # Map arm indices to link names - adjust these based on your robot configuration
-        arm_link_mapping = []
-        if num_arms == 2:
-            # Dual-arm setup
-            arm_link_mapping = ['left_panda_hand', 'right_panda_hand']
-        else:
-            # Generic multi-arm setup
-            arm_link_mapping = [f'arm_{i}_ee' for i in range(num_arms)]
+        # Get arm link mapping from robot configuration or use defaults
+        arm_link_mapping = self._get_arm_link_mapping(num_arms)
         
         # Debug: Print available link poses (only first few times)
         if not hasattr(self, '_debug_link_count'):
@@ -716,6 +709,36 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             print("=== End Multi-arm Debug ===\n")
         
         return ee_pos_4d, ee_quat_4d
+
+    def _get_arm_link_mapping(self, num_arms: int) -> List[str]:
+        """Get arm end-effector link mapping from robot config or generate defaults.
+        
+        Args:
+            num_arms: Number of arms in the system
+            
+        Returns:
+            List of end-effector link names for each arm
+        """
+        # Try to get link names from robot configuration
+        if hasattr(self, 'kinematics') and hasattr(self.kinematics, 'link_names'):
+            link_names = self.kinematics.link_names
+            if isinstance(link_names, list) and len(link_names) >= num_arms:
+                # Use the first num_arms link names from the config
+                return link_names[:num_arms]
+        
+        # Backward compatibility: hardcoded mappings for known configurations
+        if num_arms == 2:
+            # Dual-arm setup (existing behavior)
+            return ['left_panda_hand', 'right_panda_hand']
+        elif num_arms == 3:
+            # Triple-arm setup
+            return ['left_panda_hand', 'center_panda_hand', 'right_panda_hand']
+        elif num_arms == 4:
+            # Quad-arm setup
+            return ['arm_0_hand', 'arm_1_hand', 'arm_2_hand', 'arm_3_hand']
+        else:
+            # Generic multi-arm setup - generate default names
+            return [f'arm_{i}_hand' for i in range(num_arms)]
 
     def get_pose_costs(
         self,

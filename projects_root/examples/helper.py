@@ -72,6 +72,57 @@ def add_extensions(simulation_app, headless_mode: Optional[str] = None):
     return True
 
 
+def find_articulation_root(stage, robot_path: str) -> str:
+    """Find the actual articulation root prim within the imported robot hierarchy.
+    
+    After URDF import, the Robot class needs to point to the actual articulation prim,
+    which may be deeper in the hierarchy than the base_link.
+    
+    Args:
+        stage: The USD stage
+        robot_path: The path where the robot was imported
+        
+    Returns:
+        The path to the articulation root prim
+    """
+    import omni.usd
+    from pxr import UsdPhysics
+    
+    # Get the robot prim
+    robot_prim = stage.GetPrimAtPath(robot_path)
+    if not robot_prim:
+        raise ValueError(f"Robot prim not found at {robot_path}")
+    
+    # Search for articulation root in the hierarchy
+    def find_articulation_recursive(prim):
+        # Check if this prim has an ArticulationRootAPI
+        if prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            return prim.GetPath()
+        
+        # Search children
+        for child in prim.GetChildren():
+            result = find_articulation_recursive(child)
+            if result:
+                return result
+        return None
+    
+    articulation_path = find_articulation_recursive(robot_prim)
+    
+    if articulation_path:
+        return str(articulation_path)
+    else:
+        # Fallback: try common articulation root names
+        common_roots = ["base_link", "world", "root_link", robot_prim.GetName()]
+        for root_name in common_roots:
+            candidate_path = f"{robot_path}/{root_name}"
+            candidate_prim = stage.GetPrimAtPath(candidate_path)
+            if candidate_prim and candidate_prim.IsValid():
+                return candidate_path
+        
+        # Final fallback: use the robot_path itself
+        return robot_path
+
+
 ############################################################
 def add_robot_to_scene(
     robot_config: Dict,
@@ -157,10 +208,14 @@ def add_robot_to_scene(
             dest_path,
         )
 
-    base_link_name = robot_config["kinematics"]["base_link"]
+    # Find the actual articulation root instead of assuming base_link
+    articulation_root_path = find_articulation_root(my_world.stage, robot_path)
+    
+    print(f"Robot imported at: {robot_path}")
+    print(f"Articulation root found at: {articulation_root_path}")
 
     robot_p = Robot(
-        prim_path=robot_path + "/" + base_link_name,
+        prim_path=articulation_root_path,
         name=robot_name,
     )
 
