@@ -604,8 +604,8 @@ def main():
             carb.log_warn("No action is being taken.")
 
 
-############################################################
+###########################################################
 
 if __name__ == "__main__":
     main()
-    simulation_app.close() 
+    simulation_app.close()
