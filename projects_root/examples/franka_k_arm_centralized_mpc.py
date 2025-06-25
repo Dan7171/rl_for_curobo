@@ -65,13 +65,7 @@ parser.add_argument(
     "--robot", 
     type=str, 
     default="franka_dual_arm.yml", 
-    help="robot configuration to load (supports franka_dual_arm.yml, franka_triple_arm.yml, or custom generated configs)"
-)
-parser.add_argument(
-    "--num_arms", 
-    type=int, 
-    default=2, 
-    help="number of Franka arms in the system (2, 3, or more)"
+    help="robot configuration to load (number of arms auto-detected from config)"
 )
 parser.add_argument(
     "--override_particle_file", 
@@ -118,7 +112,7 @@ from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from curobo.types.robot import JointState
 from curobo.types.state import JointState
-from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
+from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml, write_yaml
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 
 ############################################################
@@ -204,59 +198,71 @@ def create_arm_targets(num_arms: int, my_world: World, arm_spacing: float = 0.8)
     return targets
 
 
-def detect_config_type(robot_config_path: str) -> Tuple[str, int]:
+def auto_detect_num_arms(robot_config_path: str) -> int:
     """
-    Detect the type of robot configuration and number of arms.
+    Auto-detect the number of arms from the robot configuration.
+    
+    First tries to extract from filename, then reads the actual config file.
     
     Returns:
-        Tuple of (config_type, num_arms)
-        config_type: 'dual_arm', 'triple_arm', 'generated', 'unknown'
+        Number of arms detected
     """
+    # Method 1: Extract from filename pattern (e.g., franka_4_arm.yml -> 4)
     config_name = os.path.basename(robot_config_path).lower()
     
+    # Check for explicit number in filename
+    import re
+    match = re.search(r'(\d+)_arm', config_name)
+    if match:
+        num_arms = int(match.group(1))
+        print(f"Auto-detected {num_arms} arms from filename: {config_name}")
+        return num_arms
+    
+    # Special cases for known configs
     if 'dual' in config_name or config_name == 'franka_dual_arm.yml':
-        return 'dual_arm', 2
+        print(f"Auto-detected 2 arms from known config: {config_name}")
+        return 2
     elif 'triple' in config_name or config_name == 'franka_triple_arm.yml':
-        return 'triple_arm', 3
-    elif 'franka_3_arm' in config_name:
-        return 'generated', 3
-    elif 'franka_2_arm' in config_name:
-        return 'generated', 2
-    else:
-        # Try to infer from config content
-        try:
-            config = load_yaml(robot_config_path)
-            joint_names = config["robot_cfg"]["kinematics"]["cspace"]["joint_names"]
-            # Count arm joints (each Franka arm has 7 main joints + 2 finger joints = 9 total)
-            arm_count = len(joint_names) // 9
-            return 'generated', arm_count
-        except:
-            return 'unknown', 2  # Default to dual arm
+        print(f"Auto-detected 3 arms from known config: {config_name}")
+        return 3
+    
+    # Method 2: Read the config file and count link_names
+    try:
+        # Determine full path
+        if os.path.isabs(robot_config_path):
+            full_path = robot_config_path
+        elif robot_config_path.startswith('./') or robot_config_path.startswith('../') or os.path.exists(robot_config_path):
+            full_path = robot_config_path
+        else:
+            full_path = join_path(get_robot_configs_path(), robot_config_path)
+        
+        robot_cfg = load_yaml(full_path)["robot_cfg"]
+        link_names = robot_cfg.get("kinematics", {}).get("link_names", [])
+        
+        if link_names:
+            num_arms = len(link_names)
+            print(f"Auto-detected {num_arms} arms from config link_names: {link_names}")
+            return num_arms
+            
+    except Exception as e:
+        print(f"Warning: Could not read config file {robot_config_path}: {e}")
+    
+    # Default fallback
+    print(f"Warning: Could not auto-detect arms from {config_name}, defaulting to 2 arms")
+    return 2
 
 
 def get_particle_config_path(num_arms: int, override_file: Optional[str] = None) -> str:
-    """Get the appropriate particle MPC configuration file path."""
+    """Get the appropriate particle MPC configuration file path.
+    
+    Since num_arms is now auto-detected from robot config, we can use a single generic config.
+    """
     if override_file is not None:
         return override_file
         
-    # Standard particle configs based on number of arms
-    if num_arms == 2:
-        return 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_dual_arm.yml'
-    elif num_arms == 3:
-        return 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_triple_arm.yml'
-    elif num_arms == 4:
-        return 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_quad_arm.yml'
-    else:
-        # For arbitrary K, generate config on the fly
-        try:
-            from projects_root.utils.multi_arm_config_generator import MultiArmConfigGenerator
-            generator = MultiArmConfigGenerator("tmp_configs")
-            config_path = generator.generate_particle_mpc_config(num_arms, f"franka_{num_arms}_arm")
-            print(f"Generated particle MPC config for {num_arms} arms: {config_path}")
-            return config_path
-        except ImportError:
-            print(f"Warning: Cannot generate particle config for {num_arms} arms, using dual-arm default")
-            return 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc_dual_arm.yml'
+    # Use universal particle config - num_arms is auto-detected from robot config
+    print(f"Using universal particle config for {num_arms}-arm system (num_arms auto-detected from robot)")
+    return 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml'
 
 
 def main():
@@ -278,13 +284,15 @@ def main():
     else:
         robot_config_path = join_path(get_robot_configs_path(), args.robot)
     
-    print(f"Loading Franka {args.num_arms}-arm configuration: {robot_config_path}")
+    # Auto-detect number of arms from robot configuration
+    num_arms = auto_detect_num_arms(robot_config_path)
+    print(f"Loading Franka {num_arms}-arm configuration: {robot_config_path}")
 
     # Create K arm targets
-    arm_targets = create_arm_targets(args.num_arms, my_world, args.arm_spacing)
+    arm_targets = create_arm_targets(num_arms, my_world, args.arm_spacing)
 
     setup_curobo_logger("warn")
-    past_poses = [None] * args.num_arms  # Track past poses for each arm
+    past_poses = [None] * num_arms  # Track past poses for each arm
     n_obstacle_cuboids = 30
     n_obstacle_mesh = 10
 
@@ -330,7 +338,7 @@ def main():
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     # Get particle MPC configuration
-    particle_config_path = get_particle_config_path(args.num_arms, args.override_particle_file)
+    particle_config_path = get_particle_config_path(num_arms, args.override_particle_file)
 
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
@@ -346,7 +354,8 @@ def main():
         use_es=False,
         store_rollouts=True,
         step_dt=0.02,
-        override_particle_file=particle_config_path
+        override_particle_file=particle_config_path,
+        num_arms=num_arms  # Pass the auto-detected number of arms
     )
 
     mpc = MpcSolver(mpc_config)
@@ -376,7 +385,7 @@ def main():
     target_y = 0.3  # Fixed y position
     target_z = 0.5  # Fixed z position
     
-    for i in range(args.num_arms):
+    for i in range(num_arms):
         x_pos = base_x + i * 0.3  # Space arms 0.3m apart in x
         initial_positions.append([x_pos, target_y, target_z])
         initial_quaternions.append([1.0, 0.0, 0.0, 0.0])  # Identity quaternion
@@ -417,7 +426,7 @@ def main():
     spheres = None  # For collision sphere visualization
     add_extensions(simulation_app, args.headless_mode)
     
-    print(f"Initialized Franka {args.num_arms}-arm centralized MPC system")
+    print(f"Initialized Franka {num_arms}-arm centralized MPC system")
     print(f"Using robot config: {robot_config_path}")
     print(f"Using particle file: {particle_config_path}")
     
@@ -426,7 +435,7 @@ def main():
             for _ in range(10):
                 my_world.step(render=True)
             init_world = True
-        draw_points(mpc.get_visual_rollouts())
+        # draw_points(mpc.get_visual_rollouts())
 
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -457,7 +466,7 @@ def main():
                     robot_prim_path,
                     "/World/defaultGroundPlane",
                     "/curobo",
-                ] + [f"/World/arm_{i}_target" for i in range(args.num_arms)],  # Ignore all arm targets
+                ] + [f"/World/arm_{i}_target" for i in range(num_arms)],  # Ignore all arm targets
                 reference_prim_path=robot_prim_path,
             )
             obstacles.add_obstacle(world_cfg_table.cuboid[0])
@@ -516,7 +525,7 @@ def main():
                 print("Resetting MPC internal state to avoid local minima")
                 mpc.reset()
             
-            print(f"Updated {args.num_arms}-arm goals:")
+            print(f"Updated {num_arms}-arm goals:")
             for i, pos in enumerate(arm_positions):
                 print(f"  Arm {i} target: {past_poses[i]}")
             print(f"  Goal position shape: {goal_buffer.goal_pose.position.shape}")
@@ -591,7 +600,7 @@ def main():
                 print(f"Action position sample (first 6 joints): {mpc_result.js_action.position[0, :6].cpu().numpy()}")
                 
                 # Debug joint names and EE link names for multi-arm
-                if args.num_arms >= 3:
+                if num_arms >= 3:
                     print(f"Robot joint names ({len(mpc.rollout_fn.joint_names)}): {mpc.rollout_fn.joint_names[:12]}...")  # First 12 joints
                     if hasattr(mpc.rollout_fn, 'kinematics'):
                         print(f"EE link name: {mpc.rollout_fn.kinematics.ee_link}")
@@ -613,7 +622,7 @@ def main():
                     if hasattr(state, 'link_pose') and state.link_pose is not None:
                         print(f"Available link poses: {list(state.link_pose.keys())}")
                         # Check if we have poses for expected arm links
-                        expected_links = [f'arm_{i}_panda_hand' for i in range(args.num_arms)]
+                        expected_links = [f'arm_{i}_panda_hand' for i in range(num_arms)]
                         for i, link in enumerate(expected_links):
                             if link in state.link_pose:
                                 pos_tensor = state.link_pose[link].position

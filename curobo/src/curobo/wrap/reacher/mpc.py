@@ -124,6 +124,7 @@ class MpcSolverConfig:
         project_pose_to_goal_frame: bool = True,
         dynamic_obs_checker=None,
         plot_costs:bool=False,
+        num_arms: int = 1,
     ):
         """Create an MPC solver configuration from robot and world configuration.
 
@@ -175,6 +176,7 @@ class MpcSolverConfig:
                 between reached and goal pose. Use this to constrain motion to specific axes
                 either in the global frame or the goal frame.
             dynamic_obs_checker: Instance of DynamicObsCollPredictor to use for MPC.
+            num_arms: Number of robot arms in the system. When > 1, enables multi-arm pose cost.
 
         Returns:
             MpcSolverConfig: Configuration for the MPC solver.
@@ -211,6 +213,11 @@ class MpcSolverConfig:
         base_cfg["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
         base_cfg["convergence"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
         config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        
+        # Inject num_arms for multi-arm systems (2+ arms use multi-arm pose cost)
+        if num_arms > 1:
+            config_data["cost"]["pose_cfg"]["num_arms"] = num_arms
+            print(f"Configured MPC for {num_arms}-arm system")
         if collision_activation_distance is not None:
             config_data["cost"]["primitive_collision_cfg"][
                 "activation_distance"

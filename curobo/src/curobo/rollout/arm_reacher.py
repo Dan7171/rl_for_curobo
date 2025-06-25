@@ -128,11 +128,14 @@ class ArmReacherCostConfig(ArmCostConfig):
         
         # Handle multi-arm pose configuration conditionally
         if "pose_cfg" in data_dict and isinstance(data_dict["pose_cfg"], dict):
-            pose_cfg = data_dict["pose_cfg"]
-            if "num_arms" in pose_cfg and pose_cfg["num_arms"] > 1:
+            # Check if num_arms is already set in pose_cfg (from external detection)
+            num_arms_from_cfg = data_dict["pose_cfg"].get("num_arms", 1)
+            
+            if num_arms_from_cfg > 1:
                 # Use PoseCostMultiArmConfig for multi-arm setup
                 k_list = k_list.copy()  # Make a copy to avoid modifying the original
                 k_list["pose_cfg"] = PoseCostMultiArmConfig
+                print(f"Using multi-arm pose cost for {num_arms_from_cfg}-arm system")
         
         data = ArmCostConfig._get_formatted_dict(
             data_dict,
@@ -210,13 +213,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         if self.cost_cfg.pose_cfg is not None:
             self.cost_cfg.pose_cfg.waypoint_horizon = self.horizon
             
-            # Check if this is a multi-arm setup
+            # Check if this is a multi-arm setup from pose config
             num_arms = getattr(self.cost_cfg.pose_cfg, 'num_arms', 1)
             if num_arms > 1:
-                # Convert PoseCostConfig to PoseCostMultiArmConfig
-                multi_arm_config = PoseCostMultiArmConfig(**vars(self.cost_cfg.pose_cfg))
-                multi_arm_config.num_arms = num_arms
-                self.goal_cost = PoseCostMultiArm(multi_arm_config)
+                # Use PoseCostMultiArm for multi-arm setup (config should already be PoseCostMultiArmConfig)
+                self.goal_cost = PoseCostMultiArm(self.cost_cfg.pose_cfg)
+                print(f"Using multi-arm pose cost for {num_arms}-arm system")
             else:
                 self.goal_cost = PoseCost(self.cost_cfg.pose_cfg)
                 
