@@ -36,7 +36,7 @@ cost:
     terminal: True
     run_weight: 1.0
     use_metric: True
-    num_arms: 3  # Enable multi-arm pose cost for dual arms
+    num_arms: 3  # Enable multi-arm pose cost for triple arms
 
   cspace_cfg:
     weight: 1000.0
@@ -80,7 +80,7 @@ mppi:
   step_size_cov     : 0.01
   beta              : 0.1
   alpha             : 1
-  num_particles     : 400
+  num_particles     : 600  # Increased for more complex 3-arm system
   update_cov        : True
   cov_type          : "DIAG_A"
   kappa             : 0.0001
