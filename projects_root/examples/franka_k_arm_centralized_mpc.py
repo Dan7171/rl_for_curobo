@@ -73,12 +73,7 @@ parser.add_argument(
     default=None, 
     help="override particle MPC config file"
 )
-parser.add_argument(
-    "--arm_spacing",
-    type=float,
-    default=0.8,
-    help="spacing between arm targets in meters (default: 0.8m)"
-)
+
 
 args = parser.parse_args()
 
@@ -151,8 +146,8 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
-def create_arm_targets(num_arms: int, my_world: World, arm_spacing: float = 0.8):
-    """Create target cubes for K Franka arms. Returns list of target objects."""
+def create_arm_targets(num_arms: int, my_world: World, robot_cfg: dict):
+    """Create target cubes for K Franka arms positioned based on URDF arm base poses."""
     targets = []
     
     # Generate distinct colors for each arm
@@ -169,26 +164,54 @@ def create_arm_targets(num_arms: int, my_world: World, arm_spacing: float = 0.8)
             r, g, b = 0.0, (360-hue)/120, 1.0
         colors.append([r, g, b])
     
-    # Create target cubes positioned for each arm
-    for i in range(num_arms):
-        if num_arms == 2:
-            # Dual arm: left and right positions (matching working dual-arm script)
-            x_pos = 0.2 + (i * 0.6)  # 0.2, 0.8
-            y_pos = 0.3             # Same Y for both
-        elif num_arms == 3:
-            # Triple arm: left, center, right
-            x_pos = 0.2 + (i * 0.3)  # 0.2, 0.5, 0.8
-            y_pos = 0.3
-        else:
-            # General case: distribute evenly
-            x_pos = 0.2 + (i * 0.6 / (num_arms - 1)) if num_arms > 1 else 0.5
-            y_pos = 0.3
+    # Extract arm base poses from robot configuration
+    # The robot config contains the base poses for each arm in the URDF
+    base_poses = []
+    
+    # Try to get base poses from robot configuration
+    if "base_poses" in robot_cfg.get("kinematics", {}):
+        # If explicitly defined in config
+        base_poses = robot_cfg["kinematics"]["base_poses"]
+    else:
+        # Default positioning based on common multi-arm setups
+        # This matches the typical spacing used in our generated URDFs
+        for i in range(num_arms):
+            if num_arms == 2:
+                # Dual arm: left and right positions
+                x_pos = 0.2 + (i * 0.6)  # 0.2, 0.8
+                y_pos = 0.3
+            elif num_arms == 3:
+                # Triple arm: left, center, right
+                x_pos = 0.2 + (i * 0.3)  # 0.2, 0.5, 0.8
+                y_pos = 0.3
+            elif num_arms == 4:
+                # Quad arm: evenly spaced
+                x_pos = 0.2 + (i * 0.2)  # 0.2, 0.4, 0.6, 0.8
+                y_pos = 0.3
+            else:
+                # General case: distribute evenly
+                x_pos = 0.2 + (i * 0.6 / (num_arms - 1)) if num_arms > 1 else 0.5
+                y_pos = 0.3
             
-        z_pos = 0.5  # Standard height for Franka workspace
+            base_poses.append([x_pos, y_pos, 0.0])  # Base at table level
+    
+    # Create target cubes positioned relative to each arm's base
+    for i in range(num_arms):
+        if i < len(base_poses):
+            base_x, base_y, base_z = base_poses[i]
+            # Position target in front of each arm's base position
+            target_x = base_x
+            target_y = base_y + 0.3  # 30cm in front of base
+            target_z = 0.5  # Standard height for Franka workspace
+        else:
+            # Fallback if not enough base poses defined
+            target_x = 0.2 + (i * 0.3)
+            target_y = 0.3
+            target_z = 0.5
         
         target = cuboid.VisualCuboid(
             f"/World/arm_{i}_target",
-            position=np.array([x_pos, y_pos, z_pos]),
+            position=np.array([target_x, target_y, target_z]),
             orientation=np.array([0, 1, 0, 0]),
             color=np.array(colors[i]),
             size=0.05,
@@ -288,8 +311,11 @@ def main():
     num_arms = auto_detect_num_arms(robot_config_path)
     print(f"Loading Franka {num_arms}-arm configuration: {robot_config_path}")
 
-    # Create K arm targets
-    arm_targets = create_arm_targets(num_arms, my_world, args.arm_spacing)
+    # Load robot configuration to get base poses
+    robot_cfg = load_yaml(robot_config_path)["robot_cfg"]
+    
+    # Create K arm targets based on robot configuration
+    arm_targets = create_arm_targets(num_arms, my_world, robot_cfg)
 
     setup_curobo_logger("warn")
     past_poses = [None] * num_arms  # Track past poses for each arm
@@ -301,8 +327,6 @@ def main():
     target_pose = None
 
     tensor_args = TensorDeviceType()
-
-    robot_cfg = load_yaml(robot_config_path)["robot_cfg"]
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
     robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02

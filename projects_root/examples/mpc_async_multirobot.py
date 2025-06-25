@@ -21,8 +21,9 @@ MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simula
 HEADLESS_ISAAC = False 
 
 collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
-robots_cfgs_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs"
-mpc_cfg_overide_files_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs"
+robots_cfgs_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/robot/franka"
+mpc_cfg_overide_files_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc"
+
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
     
@@ -66,47 +67,93 @@ def handle_sigint_gpu_mem_debug(signum, frame):
     print("Now raising KeyboardInterrupt to let the original KeyboardInterrupt handler (of nvidia) to close the app")
     raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
     
-def main():
+
+def basic_setup(n_robots:int):
+    """
+    returns:
+        X_np: list of robot poses in world frame
+        col_pred_with: list of lists of robot indices that each robot will use for dynamic obs prediction. In entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
+        X_target_R: list of robot target (initial) poses in robot frame
+        plot_costs: list of booleans that indicate whether to plot the cost function for each robot
+        target_colors: list of colors for each robot target (ordered by RGBY)
+    """
+
+    # robot targets, expressed in robot frames
+    X_targets = [0, 0, 0.5, 0, 1, 0, 0] # position and orientation of all targets in world frame (x,y,z,qw, qx,qy,qz)
     
+    match(n_robots):
+        case 1:
+            X_robot = [-0.5,0,0,1,0,0,0] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
+            col_pred_with = [[]]
+            plot_costs = [False]
+            target_colors = [npColors.red]
+            
+        case 2: # 2 robots in a line
+            X_robot = [[-0.5, 0, 0, 1, 0, 0, 0], [0.5, 0, 0, 1, 0, 0, 0]] 
+            col_pred_with = [[1], [0]]
+            plot_costs = [False, False]
+            target_colors = [npColors.red, npColors.green ]
+
+        case 3: # 3 robots in a triangle
+            X_robot = [[0.7071,-0.5 ,0, 1, 0, 0, 0], [-0.7071, -0.5, 0, 1, 0, 0, 0], [0, 0.5, 0, 1, 0, 0, 0]]
+            col_pred_with = [[1,2], [0,2], [0,1]]
+            plot_costs = [False, False, False]
+            target_colors = [npColors.red, npColors.green, npColors.blue]
+        case 4: # 4 robots in a square
+            X_robot = [[-0.5, -0.5, 0, 1, 0, 0, 0], [-0.5, 0.5, 0, 1, 0, 0, 0], [0.5, 0.5, 0, 1, 0, 0, 0], [0.5, -0.5, 0, 1, 0, 0, 0]]
+            col_pred_with = [[1,2,3], [0,2,3], [0,1,3], [0,1,2]]
+            plot_costs = [False, False, False, False]
+            target_colors = [npColors.red, npColors.green, npColors.blue, npColors.yellow]
+
+    # technical steps:
+    # 1. convert to numpy arrays
+    X_robot_np = [np.array(Xi, dtype=np.float32) for Xi in X_robot]
     
+    # 2. express targets in robot frames
+    X_target_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
+    return X_robot_np, col_pred_with, X_target_R, plot_costs, target_colors
+
+def main(n_robots):
+    
+    # isaac sim and open usd setup
     usd_help = UsdHelper()  # Helper for USD stage operations
     my_world = World(stage_units_in_meters=1.0) 
     my_world.scene.add_default_ground_plane()
     my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT) 
+    if ENABLE_GPU_DYNAMICS:
+        activate_gpu_dynamics(my_world)
     stage = my_world.stage
     usd_help.load_stage(stage)
     xform = stage.DefinePrim("/World", "Xform")  # Root transform for all objects
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
+    
+    # curobo setup (logger, tensor device, etc...)
     setup_curobo_logger("warn")
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
-    if ENABLE_GPU_DYNAMICS:
-        activate_gpu_dynamics(my_world)
     
+    # basic setup of the scenario (robot poses, target poses, target colors, etc...)
+    X_Robots, col_pred_with, X_target_R, plot_costs, target_colors = basic_setup(n_robots)
     
-    # robot base frames, expressed in world frame
-    X_Robots = [
-        np.array([0,0,0,1,0,0,0], dtype=np.float32), # 1,0,0,0 = 0,0,0 in euler angles
-        np.array([1.2,0,0,0,0,0,1], dtype=np.float32) # 0,0,0,1  = 0,0,180 in euler angles
-        ] # (x,y,z,qw, qx,qy,qz) expressed in world frame
-    
-    n_robots = len(X_Robots)
+    # runtime topics (for communication between robots, storing buffers for shared data like robots plans etc...)
     init_runtime_topics(n_envs=1, robots_per_env=n_robots) 
     runtime_topics = get_topics()
     env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
-    robots_cu_js: List[Optional[JointState]] =[None for _ in range(n_robots)]# for visualization of robot spheres
-    robots_collision_caches = [{"obb": 5, "mesh": 5} for _ in range(n_robots)]
-    robot_cfgs = [load_yaml(f"{robots_cfgs_dir}/franka{i}.yml")["robot_cfg"] for i in range(1,n_robots+1)]
-    robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
-    robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    ccheckers = [] # collision checker for each robot 
-    # robot targets, expressed in robot frames
-    X_Targets_R = [[0.6, 0, 0.3, 0, 1, 0, 0], [0.6, 0, 0.3, 0, 1, 0, 0]] 
-    target_colors = [npColors.green, npColors.red] # as num of robots
-    plot_costs = [False, False] # as num of robots
-    if OBS_PREDICTION:
-        col_pred_with = [[1], [0]] # at each entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
     
+    # curobo joints
+    robots_cu_js: List[Optional[JointState]] = [None for _ in range(n_robots)]# for visualization of robot spheres
+    # robot idx lists (joint indices, will be initialized later)
+    robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
+    # collision caches (curobo collision checker for each robot)
+    robots_collision_caches = [{"obb": 5, "mesh": 5} for _ in range(n_robots)]
+    # collision world model (curobo world model for each robot. Empty for now, will be initialized later)
+    robot_world_models = [WorldConfig() for _ in range(n_robots)]
+    # curobo robot configs for each robot
+    robot_cfgs = [load_yaml(f"{robots_cfgs_dir}/arm{i}.yml")["robot_cfg"] for i in range(n_robots)]
+    # collision checker (curobo collision checker for each robot, empty for now, will be initialized later)
+    ccheckers = [] 
+    
+    # FrankaMpc instances for each robot (# TODO: make general robot mpc class (and not only franka))
     robots:List[FrankaMpc] = []
     for i in range(n_robots):
         robots.append(FrankaMpc(
@@ -117,13 +164,14 @@ def main():
             robot_id=i,
             p_R=X_Robots[i][:3],
             q_R=X_Robots[i][3:], 
-            p_T_R=X_Targets_R[i][:3],
-            q_T_R=X_Targets_R[i][3:], 
+            p_T_R=X_target_R[i][:3],
+            q_T_R=X_target_R[i][3:], 
             target_color=target_colors[i],
             plot_costs=plot_costs[i],
-            override_particle_file=f'{mpc_cfg_overide_files_dir}/override_particle_mpc_files/{i}.yml'
+            override_particle_file=f'{mpc_cfg_overide_files_dir}/arm{i}.yml'
             )
         )
+    
     # ENVIRONMENT OBSTACLES - INITIALIZATION
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
     env_obstacles = [] # list of obstacles in the world
@@ -334,14 +382,17 @@ def main():
             # print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
  
        
+
+
+
 if __name__ == "__main__":
     if DEBUG_GPU_MEM:
         signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
-    main()
+    n_robots = int(input("Enter the number of robots (1-4, default 1): "))
+    main(n_robots)
     simulation_app.close()
     
      
         
 
-        
