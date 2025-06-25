@@ -367,35 +367,14 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     ee_pos_for_cost = multi_arm_ee_pos
                     ee_quat_for_cost = multi_arm_ee_quat
                     
-                    # Debug: Track both arms' poses over batch x horizon (first few times)
+                    # Minimal debug output (very reduced frequency)
                     if not hasattr(self, '_debug_ee_poses_count'):
                         self._debug_ee_poses_count = 0
                     self._debug_ee_poses_count += 1
                     
-                    if self._debug_ee_poses_count <= 3:  # Debug first 3 cost function calls
-                        print(f"\n=== EE Poses Debug #{self._debug_ee_poses_count} ===")
+                    if self._debug_ee_poses_count % 5000 == 0:  # Very reduced frequency
                         batch_size, horizon, num_arms_tensor, _ = multi_arm_ee_pos.shape
-                        print(f"Multi-arm EE data shape: pos={multi_arm_ee_pos.shape}, quat={multi_arm_ee_quat.shape}")
-                        
-                        for arm_idx in range(min(num_arms_tensor, 2)):  # Only debug first 2 arms
-                            print(f"\n--- Arm {arm_idx} EE Poses Over Horizon ---")
-                            for t in range(min(horizon, 5)):  # First 5 time steps
-                                arm_pos = multi_arm_ee_pos[0, t, arm_idx, :]  # [3]
-                                arm_quat = multi_arm_ee_quat[0, t, arm_idx, :]  # [4]
-                                print(f"  t={t}: pos={arm_pos.cpu().numpy()}, quat={arm_quat.cpu().numpy()}")
-                        
-                        # Also print goal targets for comparison
-                        if hasattr(self._goal_buffer, 'goal_pose') and self._goal_buffer.goal_pose.position is not None:
-                            goal_pos = self._goal_buffer.goal_pose.position
-                            goal_quat = self._goal_buffer.goal_pose.quaternion
-                            print(f"\n--- Goal Targets ---")
-                            if goal_pos.dim() == 2 and goal_pos.shape[0] >= 2:  # Multi-arm goals
-                                for arm_idx in range(min(goal_pos.shape[0], 2)):
-                                    print(f"  Arm {arm_idx} goal: pos={goal_pos[arm_idx, :].cpu().numpy()}, quat={goal_quat[arm_idx, :].cpu().numpy()}")
-                            else:
-                                print(f"  Single goal: pos={goal_pos.cpu().numpy()}, quat={goal_quat.cpu().numpy()}")
-                        
-                        print("=== End EE Poses Debug ===\n")
+                        print(f"Multi-arm EE debug: {num_arms_tensor} arms, shapes pos={multi_arm_ee_pos.shape}, quat={multi_arm_ee_quat.shape}")
                 else:
                     # For single-arm pose cost, use the regular ee_pos_batch and ee_quat_batch
                     ee_pos_for_cost = ee_pos_batch
@@ -638,18 +617,13 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Get arm link mapping from robot configuration or use defaults
         arm_link_mapping = self._get_arm_link_mapping(num_arms)
         
-        # Debug: Print available link poses (only first few times)
+        # Minimal debug for link mapping (very reduced frequency)
         if not hasattr(self, '_debug_link_count'):
             self._debug_link_count = 0
         self._debug_link_count += 1
         
-        if self._debug_link_count <= 3:  # Print first 3 times
-            link_poses = state.link_pose
-            if link_poses is not None:
-                print(f"\n=== Multi-arm Debug {self._debug_link_count} ===")
-                print(f"Available link poses: {list(link_poses.keys())}")
-                print(f"Expected arm links: {arm_link_mapping}")
-                print(f"Primary EE data shape: pos={state.ee_pos_seq.shape if state.ee_pos_seq is not None else None}, quat={state.ee_quat_seq.shape if state.ee_quat_seq is not None else None}")
+        if self._debug_link_count % 10000 == 0:  # Very reduced frequency
+            print(f"Multi-arm link mapping: {len(arm_link_mapping)} arms")
         
         # Fill in data for available links
         link_poses = state.link_pose
@@ -661,10 +635,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     ee_pos_4d[:, :, arm_idx, :] = link_pose.position
                     ee_quat_4d[:, :, arm_idx, :] = link_pose.quaternion
                     
-                    if self._debug_link_count <= 3:
-                        print(f"Arm {arm_idx} ({link_name}): Found link pose data")
-                        print(f"  Position shape: {link_pose.position.shape}")
-                        print(f"  Position sample: {link_pose.position[0, 0, :] if link_pose.position.numel() > 3 else link_pose.position}")
+
                 else:
                     # Link not found - try alternative approaches
                     if arm_idx == 0 and state.ee_pos_seq is not None and state.ee_quat_seq is not None:
@@ -672,8 +643,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         ee_pos_4d[:, :, arm_idx, :] = state.ee_pos_seq
                         ee_quat_4d[:, :, arm_idx, :] = state.ee_quat_seq
                         
-                        if self._debug_link_count <= 3:
-                            print(f"Arm {arm_idx} ({link_name}): Using primary EE data as fallback")
+
                     elif hasattr(self, 'kinematics') and hasattr(self.kinematics, 'get_state'):
                         # Try to compute the missing end-effector pose using kinematics
                         try:
@@ -687,26 +657,18 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                     ee_pos_4d[:, :, arm_idx, :] = computed_pose.position
                                     ee_quat_4d[:, :, arm_idx, :] = computed_pose.quaternion
                                     
-                                    if self._debug_link_count <= 3:
-                                        print(f"Arm {arm_idx} ({link_name}): Computed pose using kinematics")
-                                        print(f"  Computed position sample: {computed_pose.position[0, 0, :] if computed_pose.position.numel() > 3 else computed_pose.position}")
+                                    pass
                                 else:
-                                    if self._debug_link_count <= 3:
-                                        print(f"Arm {arm_idx} ({link_name}): Kinematics computation failed - using zeros/identity")
+                                    pass
                             else:
-                                if self._debug_link_count <= 3:
-                                    print(f"Arm {arm_idx} ({link_name}): No joint positions available - using zeros/identity")
+                                pass
                         except Exception as e:
-                            if self._debug_link_count <= 3:
-                                print(f"Arm {arm_idx} ({link_name}): Kinematics computation error: {e} - using zeros/identity")
+                            pass
                     else:
-                        if self._debug_link_count <= 3:
-                            print(f"Arm {arm_idx} ({link_name}): Missing - using zeros/identity")
+                        pass
                     # If all fallbacks fail, leave as zeros/identity quaternion (already initialized)
         
-        if self._debug_link_count <= 3:
-            print(f"Final 4D tensor shapes: pos={ee_pos_4d.shape}, quat={ee_quat_4d.shape}")
-            print("=== End Multi-arm Debug ===\n")
+
         
         return ee_pos_4d, ee_quat_4d
 
@@ -719,26 +681,34 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         Returns:
             List of end-effector link names for each arm
         """
-        # Try to get link names from robot configuration
+        # PRIORITY 1: Try to get link names from robot configuration
         if hasattr(self, 'kinematics') and hasattr(self.kinematics, 'link_names'):
             link_names = self.kinematics.link_names
             if isinstance(link_names, list) and len(link_names) >= num_arms:
                 # Use the first num_arms link names from the config
+                # Only print once to avoid spam
+                if not hasattr(self, '_link_mapping_printed'):
+                    print(f"Using robot config link_names: {link_names[:num_arms]}")
+                    self._link_mapping_printed = True
                 return link_names[:num_arms]
+            else:
+                if not hasattr(self, '_link_mapping_printed'):
+                    print(f"Robot config has {len(link_names) if link_names else 0} link_names, need {num_arms}")
+                    self._link_mapping_printed = True
         
-        # Backward compatibility: hardcoded mappings for known configurations
+        # PRIORITY 2: Backward compatibility fallbacks (only if config unavailable)
         if num_arms == 2:
             # Dual-arm setup (existing behavior)
             return ['left_panda_hand', 'right_panda_hand']
         elif num_arms == 3:
-            # Triple-arm setup
-            return ['left_panda_hand', 'center_panda_hand', 'right_panda_hand']
+            # Triple-arm setup - updated to match common auto-generated naming
+            return ['arm_0_panda_hand', 'arm_1_panda_hand', 'arm_2_panda_hand']
         elif num_arms == 4:
             # Quad-arm setup
-            return ['arm_0_hand', 'arm_1_hand', 'arm_2_hand', 'arm_3_hand']
+            return ['arm_0_panda_hand', 'arm_1_panda_hand', 'arm_2_panda_hand', 'arm_3_panda_hand']
         else:
             # Generic multi-arm setup - generate default names
-            return [f'arm_{i}_hand' for i in range(num_arms)]
+            return [f'arm_{i}_panda_hand' for i in range(num_arms)]
 
     def get_pose_costs(
         self,

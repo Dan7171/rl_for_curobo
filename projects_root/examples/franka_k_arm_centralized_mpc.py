@@ -358,13 +358,52 @@ def main():
         JointState.from_position(retract_cfg, joint_names=joint_names)
     )
     current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
+    
+    # Debug: Check what the retract pose looks like for multi-arm
+    print(f"=== Retract Pose Debug ===")
+    print(f"retract_cfg shape: {retract_cfg.shape}")
+    print(f"state.ee_pos_seq shape: {state.ee_pos_seq.shape}")
+    print(f"state.ee_quat_seq shape: {state.ee_quat_seq.shape}")
+    print(f"=== End Retract Pose Debug ===")
+    
     retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
     
+    # Initialize with default target positions for K arms
+    # Create initial multi-arm target positions (spread along x-axis)
+    initial_positions = []
+    initial_quaternions = []
+    base_x = 0.2  # Starting x position
+    target_y = 0.3  # Fixed y position
+    target_z = 0.5  # Fixed z position
+    
+    for i in range(args.num_arms):
+        x_pos = base_x + i * 0.3  # Space arms 0.3m apart in x
+        initial_positions.append([x_pos, target_y, target_z])
+        initial_quaternions.append([1.0, 0.0, 0.0, 0.0])  # Identity quaternion
+    
+    # Create initial multi-arm goal pose with explicit batch dimension
+    initial_goal_positions = torch.tensor(initial_positions, device=tensor_args.device, dtype=tensor_args.dtype)
+    initial_goal_quaternions = torch.tensor(initial_quaternions, device=tensor_args.device, dtype=tensor_args.dtype)
+    
+    # FIXED: Add batch dimension to ensure Goal.batch = 1 instead of num_arms
+    # Format: [1, num_arms, 3] and [1, num_arms, 4] for single problem with multiple arms
+    initial_goal_positions = initial_goal_positions.unsqueeze(0)  # [1, num_arms, 3]
+    initial_goal_quaternions = initial_goal_quaternions.unsqueeze(0)  # [1, num_arms, 4]
+    
+    initial_goal_pose = Pose(position=initial_goal_positions, quaternion=initial_goal_quaternions)
+    
+    # Debug: Check initial goal pose shapes
+    print(f"=== Initial Goal Pose Debug ===")
+    print(f"initial_goal_positions shape: {initial_goal_positions.shape}")
+    print(f"initial_goal_quaternions shape: {initial_goal_quaternions.shape}")
+    print(f"=== End Initial Goal Pose Debug ===")
+    
     # For K-arm, we use the multi-arm pose structure for goals
+    # FIXED: Don't use retract_pose since it only has single end-effector data
     goal = Goal(
         current_state=current_state,
         goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
-        goal_pose=retract_pose,
+        goal_pose=initial_goal_pose,  # Use proper multi-arm target with correct tensor shapes
     )
 
     goal_buffer = mpc.setup_solve_single(goal, 1)
@@ -444,19 +483,38 @@ def main():
             arm_orientations.append(tensor_args.to_device(current_quat))
         
         if targets_changed:
-            # Create multi-arm goals: [num_arms, 3] for positions, [num_arms, 4] for quaternions
+            # Create multi-arm goals: [1, num_arms, 3] for positions, [1, num_arms, 4] for quaternions
+            # FIXED: Add batch dimension to ensure Goal.batch = 1 instead of num_arms
             multi_arm_positions = torch.stack(arm_positions, dim=0)  # [num_arms, 3]
             multi_arm_quaternions = torch.stack(arm_orientations, dim=0)  # [num_arms, 4]
             
+            # Add batch dimension to match initial goal format
+            multi_arm_positions = multi_arm_positions.unsqueeze(0)  # [1, num_arms, 3]
+            multi_arm_quaternions = multi_arm_quaternions.unsqueeze(0)  # [1, num_arms, 4]
+            
             # Create multi-arm pose goal
             ik_goal = Pose(
-                position=multi_arm_positions,     # [num_arms, 3] tensor for all arms
-                quaternion=multi_arm_quaternions  # [num_arms, 4] tensor for all arms
+                position=multi_arm_positions,     # [1, num_arms, 3] tensor for all arms
+                quaternion=multi_arm_quaternions  # [1, num_arms, 4] tensor for all arms
             )
+            
+            # Debug goal tensor shapes (reduced output)
+            if step % 100 == 0:  # Only print occasionally
+                print(f"--- Goal Tensor Debug ---")
+                print(f"Goal position shape: {ik_goal.position.shape}")
+                print(f"Goal quaternion shape: {ik_goal.quaternion.shape}")
+                print(f"Goal position values: {ik_goal.position}")
+                print(f"Goal quaternion values: {ik_goal.quaternion}")
+                print("--- End Goal Debug ---")
             
             # IMPORTANT: Direct assignment instead of copy_() to preserve multi-arm structure
             goal_buffer.goal_pose = ik_goal
             mpc.update_goal(goal_buffer)
+            
+            # Debug: Force MPC to reset its internal state to avoid getting stuck
+            if hasattr(mpc, 'reset') and step % 50 == 0:  # Reset every 50 steps when targets change
+                print("Resetting MPC internal state to avoid local minima")
+                mpc.reset()
             
             print(f"Updated {args.num_arms}-arm goals:")
             for i, pos in enumerate(arm_positions):
@@ -514,7 +572,62 @@ def main():
         common_js_names = []
         current_state.copy_(cu_js)
 
-        mpc_result = mpc.step(current_state, max_attempts=2)
+        # Try with more attempts if we're getting stuck
+        max_attempts = 5 if step % 100 == 0 else 2
+        mpc_result = mpc.step(current_state, max_attempts=max_attempts)
+
+        # Debug MPC result occasionally
+        if step % 100 == 0:
+            print(f"\n=== MPC Debug (step {step}) ===")
+            print(f"MPC solve time: {mpc_result.solve_time:.4f}s")
+            if hasattr(mpc_result, 'metrics') and mpc_result.metrics is not None:
+                if hasattr(mpc_result.metrics, 'feasible'):
+                    print(f"MPC feasible: {mpc_result.metrics.feasible}")
+                if hasattr(mpc_result.metrics, 'cost'):
+                    print(f"MPC cost: {mpc_result.metrics.cost}")
+            if mpc_result.js_action is not None:
+                print(f"Action shape: {mpc_result.js_action.position.shape}")
+                print(f"Action velocity norm: {torch.norm(mpc_result.js_action.velocity).item():.6f}")
+                print(f"Action position sample (first 6 joints): {mpc_result.js_action.position[0, :6].cpu().numpy()}")
+                
+                # Debug joint names and EE link names for multi-arm
+                if args.num_arms >= 3:
+                    print(f"Robot joint names ({len(mpc.rollout_fn.joint_names)}): {mpc.rollout_fn.joint_names[:12]}...")  # First 12 joints
+                    if hasattr(mpc.rollout_fn, 'kinematics'):
+                        print(f"EE link name: {mpc.rollout_fn.kinematics.ee_link}")
+                        if hasattr(mpc.rollout_fn.kinematics, 'link_names'):
+                            print(f"All link names: {mpc.rollout_fn.kinematics.link_names}")
+                    
+                    # Check current robot state and EE positions
+                    state = mpc.rollout_fn.compute_kinematics(current_state)
+                    if state.ee_pos_seq is not None:
+                        print(f"EE position tensor shape: {state.ee_pos_seq.shape}")
+                        # Handle different tensor dimensions safely
+                        if len(state.ee_pos_seq.shape) == 3:
+                            print(f"Current EE position: {state.ee_pos_seq[0, 0, :].cpu().numpy()}")
+                        elif len(state.ee_pos_seq.shape) == 2:
+                            print(f"Current EE position: {state.ee_pos_seq[0, :].cpu().numpy()}")
+                        else:
+                            print(f"Unexpected EE tensor shape, first values: {state.ee_pos_seq.flatten()[:6].cpu().numpy()}")
+                    
+                    if hasattr(state, 'link_pose') and state.link_pose is not None:
+                        print(f"Available link poses: {list(state.link_pose.keys())}")
+                        # Check if we have poses for expected arm links
+                        expected_links = [f'arm_{i}_panda_hand' for i in range(args.num_arms)]
+                        for i, link in enumerate(expected_links):
+                            if link in state.link_pose:
+                                pos_tensor = state.link_pose[link].position
+                                print(f"  {link} position tensor shape: {pos_tensor.shape}")
+                                if len(pos_tensor.shape) >= 3:
+                                    pos = pos_tensor[0, 0, :].cpu().numpy()
+                                    print(f"  {link} position: {pos}")
+                                else:
+                                    print(f"  {link} position: {pos_tensor.flatten()[:3].cpu().numpy()}")
+                            else:
+                                print(f"  {link}: MISSING!")
+            else:
+                print("No action generated!")
+            print("=== End MPC Debug ===\n")
 
         succ = True
         cmd_state_full = mpc_result.js_action
@@ -533,14 +646,18 @@ def main():
             joint_indices=idx_list,
         )
         
-        if step_index % 1000 == 0:
-            print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
+        if step_index % 100 == 0:
+            print(f"MPC feasible: {mpc_result.metrics.feasible.item()}, pose_error: {mpc_result.metrics.pose_error.item():.6f}")
+            print(f"Applying action to {len(idx_list)} joints")
+            print(f"Joint action sample: {art_action.joint_positions[:6]}")
 
         if succ:
             # Set desired joint angles obtained from MPC:
             for _ in range(1):
                 articulation_controller.apply_action(art_action)
         else:
+            if step_index % 100 == 0:
+                print("WARNING: No action is being taken - MPC failed!")
             carb.log_warn("No action is being taken.")
 
 

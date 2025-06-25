@@ -177,6 +177,11 @@ class PoseCostMultiArm(CostBase, PoseCostMultiArmConfig):
         if goal.goal_pose is not None and goal.goal_pose.position is not None:
             goal_pos_shape = goal.goal_pose.position.shape
             
+            # Debug: print goal extraction occasionally (reduced output)
+            if not hasattr(self, '_goal_debug_counter'):
+                self._goal_debug_counter = 0
+            self._goal_debug_counter += 1
+            
             if len(goal_pos_shape) == 2 and goal_pos_shape[0] >= self.num_arms:
                 # Multi-arm format: [num_arms, 3]
                 arm_goal_pos = goal.goal_pose.position[arm_idx:arm_idx+1, :]  # [1, 3]
@@ -204,6 +209,8 @@ class PoseCostMultiArm(CostBase, PoseCostMultiArmConfig):
                 # Single goal for all arms or fallback
                 arm_goal_pos = goal.goal_pose.position
                 arm_goal_quat = goal.goal_pose.quaternion if goal.goal_pose.quaternion is not None else torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+            
+            # Debug: removed excessive output
             
             # Create pose for this arm in format expected by original PoseCost
             arm_goal.goal_pose = Pose(position=arm_goal_pos, quaternion=arm_goal_quat)
@@ -319,6 +326,7 @@ class PoseCostMultiArm(CostBase, PoseCostMultiArmConfig):
         total_cost = torch.zeros((batch_size, horizon), device=ee_pos_batch.device, dtype=ee_pos_batch.dtype)
         
         # Compute cost for each arm using original PoseCost
+        arm_costs = []
         for arm_idx in range(self.num_arms):
             # Extract pose data for this arm in format expected by original PoseCost
             arm_ee_pos, arm_ee_quat = self._extract_arm_ee_data(ee_pos_batch, ee_quat_batch, arm_idx)
@@ -328,12 +336,21 @@ class PoseCostMultiArm(CostBase, PoseCostMultiArmConfig):
             
             # Use original PoseCost.forward() for this arm
             arm_cost = self._arm_pose_costs[arm_idx].forward(arm_ee_pos, arm_ee_quat, arm_goal)
+            arm_costs.append(arm_cost)
             
             # Add to total cost
             total_cost += arm_cost
         
         # Average by number of arms
         averaged_cost = total_cost / self.num_arms
+        
+        # Debug cost values occasionally (reduced frequency)
+        if not hasattr(self, '_debug_counter'):
+            self._debug_counter = 0
+        self._debug_counter += 1
+        
+        if self._debug_counter % 1000 == 0:  # Reduced from every 100 to every 1000 calls
+            print(f"Multi-arm Cost Debug (call #{self._debug_counter}): Average cost = {averaged_cost.mean().item():.2f}")
         
         return averaged_cost
     
