@@ -9,7 +9,7 @@ REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). S
 ENABLE_GPU_DYNAMICS = False # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 OBS_PREDICTION = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
 DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
-VISUALIZE_PREDICTED_OBS_PATHS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
+VISUALIZE_PLANS_AS_DOTS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
 VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
 VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
@@ -245,7 +245,8 @@ def main(meta_config_paths: List[str]):
             plot_costs=plot_costs[i],
             override_particle_file=mpc_config_paths[i],  # Use individual MPC config per robot
             n_coll_spheres=robot_sphere_counts[i],  # Total spheres (base + extra)
-            n_coll_spheres_valid=robot_sphere_counts_valid[i]  # Valid spheres (base only)
+            n_coll_spheres_valid=robot_sphere_counts_valid[i],  # Valid spheres (base only)
+            use_col_pred=OBS_PREDICTION and len(col_pred_with[i]) > 0  # Enable collision prediction
             )
         )
     
@@ -307,209 +308,56 @@ def main(meta_config_paths: List[str]):
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
         if robot_idx_lists[i] is None:
             raise RuntimeError(f"Failed to get DOF indices for robot {i}")
-        
         # Type assertion for linter
         idx_list = robot_idx_lists[i]
         assert idx_list is not None
         robot.init_joints(idx_list)
         # Init robot mpc solver
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
-
         # Some technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
         robots[i].robot._articulation_view.initialize() 
-        
         # Get initialized collision checker of robot
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
-        # # Some technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
-        robots[i].robot._articulation_view.initialize()
-    
-    # VALIDATE: Verify our config-based sphere count calculation is correct
-    validation_passed = True
-    for i in range(n_robots):
-        isaac_sim_joints = robots[i].get_sim_joint_state()
-        curobo_format_joints = robots[i].get_curobo_joint_state(isaac_sim_joints)
-        robots[i].update_current_state(curobo_format_joints)
 
-        # Extract just the positions for sphere calculation
-        joint_positions = curobo_format_joints.position
-        sph_list = robots[i].solver.kinematics.get_robot_as_spheres(joint_positions)
-        n_actual_spheres = len(sph_list)
-        n_config_spheres = robot_sphere_counts[i]
-        
-        if n_config_spheres != n_actual_spheres:
-            validation_passed = False 
-
-        
     for i in range(len(env_obstacles)):
         env_obstacles[i].register_ccheckers(ccheckers)
-
-
-    # time step index in real world (not simulation) steps. This is the num of completed control steps (actions) in *played* simulation (after play button is pressed)
-    t_idx = 0 
-    
-    # debugging timers
-    ctrl_loop_timer = 0
-    world_step_timer = 0
-    mpc_solver_timer = 0
-    targets_update_timer = 0
-    joint_state_timer = 0
-    action_timer = 0
-    robots_as_obs_timer = 0
-    env_obstacles_timer = 0
-    visualizations_timer = 0
-
+     
     # main loop
+    t_idx = 0
     while simulation_app.is_running():
-        point_visualzer_inputs = [] # here we store inputs for draw_points()
-        ctrl_loop_timer_start = time.time()
-        
-        # WORLD STEP
-        world_step_timer_start = time.time()                 
+        # empty list for draw_points() inputs
+        point_visualzer_inputs = []
+        # update simulation
         my_world.step(render=True)       
-        world_step_timer += time.time() - world_step_timer_start
-
-        # ENVIRONMENT OBSTACLES - READ STATES AND UPDATE ROBOTS
         # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
-        env_obstacles_update_timer_start = time.time()
         for i in range(len(env_obstacles)): 
             env_obstacles[i].update_registered_ccheckers()
-        env_obstacles_timer += time.time() - env_obstacles_update_timer_start
-
-        # ROBOTS AS OBSTACLES - READ STATES/PLANS
-        # get other robots states (no prediction) or plans (with prediction) for collision checking
-        robots_as_obs_timer_start = time.time()
+        # aggregate plans for all robots (tbd: async)
         if OBS_PREDICTION:         
             plans = [robots[i].get_plan(valid_spheres_only=False) for i in range(len(robots))]
-                        # Store plans for each robot in the environment topics
-            for robot_idx in range(len(env_topics)):
-                env_topics[robot_idx]["plans"] = plans[robot_idx]
-        
-        robots_as_obs_timer += time.time() - robots_as_obs_timer_start
-
-        # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
-        # update robots with other robots as obstacles (robot spheres as obstacles)
+            if VISUALIZE_PLANS_AS_DOTS:
+                for i in range(len(robots)):
+                    point_visualzer_inputs.append({'points': plans[i]['task_space']['spheres']['p'][:robots[i].H].to(tensor_args.device), 'color': 'green'})
         for i in range(len(robots)):
-            # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
-            if OBS_PREDICTION and len(col_pred_with[i]): # using prediction of other robots plans
-                robots_as_obs_timer_start = time.time()
-                
-                col_pred = robots[i].get_col_pred()
-                if col_pred is not None:
-                    if t_idx == 0:
-                        # Initialize collision predictor on first iteration
-                        # Set radii for each robot that this robot collides with
-                        for j in col_pred_with[i]:
-                            rad_spheres_robotj = plans[j]['task_space']['spheres']['r'][0].to(tensor_args.device)
-                            col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
-                        
-                        # Set own robot radii 
-                        col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
-                    else:
-                        # Update positions for each robot that this robot collides with
-                        for j in col_pred_with[i]:
-                            planSpheres_robotj = plans[j]['task_space']['spheres'] 
-                            p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device)
-                            col_pred.update_robot_spheres(j, p_spheresRobotjH)
-                            
-                            # VISUALIZATION: Add visualization for predicted obstacle paths
-                            if VISUALIZE_PREDICTED_OBS_PATHS:
-                                visualizations_timer_start = time.time()
-                                point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
-                                visualizations_timer += time.time() - visualizations_timer_start
-
-                robots_as_obs_timer += time.time() - robots_as_obs_timer_start
-
-            # UPDATE STATE IN SOLVER
-            joint_state_timer_start = time.time()
-            isaac_sim_joints = robots[i].get_sim_joint_state()
-            curobo_format_joints = robots[i].get_curobo_joint_state(isaac_sim_joints)
-            robots[i].update_current_state(curobo_format_joints)    
-            joint_state_timer += time.time() - joint_state_timer_start
+            if robots[i].use_col_pred:
+                robots[i].update(plans, col_pred_with[i], t_idx, tensor_args, i)
+            else:
+                robots[i].update()
+            action = robots[i].plan(max_attempts=2)
+            robots[i].command(action, num_times=1)
             
-            # UPDATE TARGET IN SOLVER
-            targets_update_timer_start = time.time()
-            p_T, q_T = robots[i].target.get_world_pose() 
-            if robots[i].set_new_target_for_solver(p_T, q_T):
-                robots[i].update_solver_target()
-            targets_update_timer += time.time() - targets_update_timer_start
-
-            # MPC STEP
-            mpc_solver_timer_start = time.time()
-            mpc_result = robots[i].solver.step(robots[i].current_state, max_attempts=2) 
-            mpc_solver_timer += time.time() - mpc_solver_timer_start
-            
-            # APPLY ACTION
-            action_timer_start = time.time()
-            art_action = robots[i].get_next_articulation_action(mpc_result.js_action) # get articulated action from joint state action
-            robots[i].apply_articulation_action(art_action,num_times=1) # Note: I chhanged it to 1 instead of 3
-            action_timer += time.time() - action_timer_start
-            
-            # VISUALIZATION
+            # post-step visualization        
             if VISUALIZE_MPC_ROLLOUTS:
-                visualizations_timer_start = time.time()
-                p_visual_rollouts_robotframe = robots[i].solver.get_visual_rollouts()
-                q_visual_rollouts_robotframe = torch.empty(p_visual_rollouts_robotframe.shape[:-1] + torch.Size([4]), device=p_visual_rollouts_robotframe.device)
-                q_visual_rollouts_robotframe[...,:] = torch.tensor([1,0,0,0],device=p_visual_rollouts_robotframe.device, dtype=p_visual_rollouts_robotframe.dtype) 
-                visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)                
-                visual_rollouts = transform_poses_batched(visual_rollouts, X_robots[i].tolist())
-                rollouts_for_visualization = {'points':  visual_rollouts, 'color': 'green'}
-                point_visualzer_inputs.append(rollouts_for_visualization)
-                visualizations_timer += time.time() - visualizations_timer_start
-            
+                point_visualzer_inputs.append({'points': robots[i].get_rollouts_in_world_frame(), 'color': 'green'})
             if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-                visualizations_timer_start = time.time()
-                robots[i].visualize_robot_as_spheres(curobo_format_joints)
-                visualizations_timer += time.time() - visualizations_timer_start
+                robots[i].visualize_robot_as_spheres(robots[i].curobo_format_joints)
 
-        # VISUALIZATION
         if len(point_visualzer_inputs):
-            visualizations_timer_start = time.time()
             draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")()
-            visualizations_timer += time.time() - visualizations_timer_start
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
-        ctrl_loop_timer += time.time() - ctrl_loop_timer_start
         
-        # PRINT TIME STATISTICS (reduced frequency for cleaner output)
-        k_print = 500  # Reduced frequency from 100 to 500 steps
-        if t_idx % k_print == 0 and ctrl_loop_timer > 0:    
-            print(f"t = {t_idx}")
-            print(f"ctrl freq in last {k_print} steps:  {k_print / ctrl_loop_timer}")
-            print(f"robots as obs ops freq in last {k_print} steps: {k_print / robots_as_obs_timer}")
-            print(f"env obs ops freq in last {k_print} steps: {k_print / env_obstacles_timer}")
-            print(f"mpc solver freq in last {k_print} steps: {k_print / mpc_solver_timer}")
-            print(f"world step freq in last {k_print} steps: {k_print / world_step_timer}")
-            print(f"targets update freq in last {k_print} steps: {k_print / targets_update_timer}")
-            print(f"joint states updates freq in last {k_print} steps: {k_print / joint_state_timer}")
-            print(f"actions freq in last {k_print} steps: {k_print / action_timer}")
-            print(f"visualization ops freq in last {k_print} steps: {k_print / visualizations_timer}")
-            
-            total_time_measured = mpc_solver_timer + world_step_timer + targets_update_timer + \
-            joint_state_timer + action_timer + visualizations_timer + robots_as_obs_timer + env_obstacles_timer
-            total_time_actual = ctrl_loop_timer
-            delta = total_time_actual - total_time_measured
-            print(f"total time actual: {total_time_actual}")
-            print(f"total time measured: {total_time_measured}")
-            print(f"delta: {delta}")
-            print("In percentage %:")
-            print(f"mpc solver: {100 * mpc_solver_timer / total_time_actual}")
-            print(f"world step: {100 * world_step_timer / total_time_actual}")
-            print(f"robots as obs: {100 * robots_as_obs_timer / total_time_actual}")
-            print(f"env obs: {100 * env_obstacles_timer / total_time_actual}")
-            print(f"targets update: {100 * targets_update_timer / total_time_actual}")
-            print(f"joint state: {100 * joint_state_timer / total_time_actual}")
-            print(f"action: {100 * action_timer / total_time_actual}")
-            print(f"visualizations: {100 * visualizations_timer / total_time_actual}")
-            # reset timers
-            ctrl_loop_timer = 0
-            mpc_solver_timer = 0
-            world_step_timer = 0
-            targets_update_timer = 0
-            joint_state_timer = 0
-            action_timer = 0
-            visualizations_timer = 0
-            robots_as_obs_timer = 0
-            env_obstacles_timer = 0
+        
        
 
 def resolve_meta_config_path(robot_model:str) -> str:

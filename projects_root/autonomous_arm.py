@@ -129,7 +129,6 @@ class AutonomousArm:
         self.p_R = p_R  
         self.q_R = q_R 
         self.X_R = list(p_R) + list(q_R) # robot base frame in world frame
-        self.cu_js = None
         # target settings
         X_target_R = list(p_T_R) + list(q_T_R)
         X_target_W = transform_pose_between_frames(X_target_R, self.X_R) # target frame from robot frame to world frame
@@ -153,6 +152,12 @@ class AutonomousArm:
         self.obs_viz = [] # for visualization of robot spheres
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
+        
+        # Current joint state in CuRobo format (updated by update_joint_state)
+        self.curobo_format_joints = None
+        
+        # Collision prediction control
+        self.use_col_pred = False  # Set to True to enable collision prediction updates
         
         # AutonomousArm.instance_counter += 1
     
@@ -213,7 +218,9 @@ class AutonomousArm:
     
     def get_last_synced_target_pose(self):
         return Pose(position=self.tensor_args.to_device(self.p_solverTarget),quaternion=self.tensor_args.to_device(self.q_solverTarget),)
-            
+    
+    
+
     def _post_init_solver(self):
         return None
 
@@ -476,7 +483,8 @@ class ArmMpc(AutonomousArm):
                 plot_costs:bool=False,
                 override_particle_file:str=None,
                 n_coll_spheres:int=None,  # Total spheres (base + extra)
-                n_coll_spheres_valid:int=None  # Valid spheres (base only, no extra)
+                n_coll_spheres_valid:int=None,  # Valid spheres (base only, no extra)
+                use_col_pred:bool=False  # Enable collision prediction updates
                 ):
         """
         Spawns an arm robot in the scene and setting the target for the robot to follow.
@@ -508,6 +516,7 @@ class ArmMpc(AutonomousArm):
         self.H = self.cfg["model"]["horizon"]
         self.num_particles = self.cfg["mppi"]["num_particles"]
         self.plot_costs = plot_costs
+        self.use_col_pred = use_col_pred
         
   
 
@@ -562,7 +571,7 @@ class ArmMpc(AutonomousArm):
         goal_buffer = self.solver.setup_solve_single(goal_mpc, 1)
         self.goal_buffer = goal_buffer
         self.solver.update_goal(self.goal_buffer)
-        mpc_result = self.solver.step(self.current_state, max_attempts=2)
+        mpc_result = self.step(max_attempts=2)
 
 
 
@@ -591,7 +600,21 @@ class ArmMpc(AutonomousArm):
         cu_js = cu_js.get_ordered_joint_state(self.solver.rollout_fn.joint_names)
         return cu_js
     
-
+    def update_target(self):
+        """
+        Update the robot's target from the scene and sync it with the solver if needed.
+        This encapsulates the common pattern of getting target pose and updating the solver.
+        
+        Returns:
+            bool: True if the solver target was updated, False otherwise
+        """
+        p_T, q_T = self.target.get_world_pose()
+        if self.set_new_target_for_solver(p_T, q_T):
+            self.update_solver_target()
+            return True
+        return False
+    
+    
     def update_current_state(self, cu_js):
         if self._cmd_state_full is None:
             self.current_state.copy_(cu_js)
@@ -603,6 +626,15 @@ class ArmMpc(AutonomousArm):
             self.current_state.joint_names = current_state_partial.joint_names
         self.current_state.copy_(cu_js)
 
+    def update_joint_state(self):
+        """
+        Update the robot's joint state from simulation and store it in CuRobo format.
+        This encapsulates the common pattern of getting simulation joint state, 
+        converting to CuRobo format, and updating the solver's current state.
+        """
+        isaac_sim_joints = self.get_sim_joint_state()
+        self.curobo_format_joints = self.get_curobo_joint_state(isaac_sim_joints)
+        self.update_current_state(self.curobo_format_joints)
 
     def get_next_articulation_action(self, js_action):
         """Get articulated action from joint state action (supplied by MPC solver).
@@ -624,7 +656,10 @@ class ArmMpc(AutonomousArm):
         return art_action
     
 
-    def apply_articulation_action(self, art_action: ArticulationAction,num_times:int=3):
+    def command(self, art_action: ArticulationAction,num_times:int=3):
+        """
+        Command controller in the motors (or simulator controller) to move the robot.
+        """
         for _ in range(num_times):
             ans = self.articulation_controller.apply_action(art_action)
         return ans
@@ -795,6 +830,108 @@ class ArmMpc(AutonomousArm):
             if isinstance(instance, DynamicObsCost):
                 return instance.col_pred
         raise ValueError("No col_pred found in the rollout_fn")
+
+    def update_col_pred(self, plans, col_pred_with, t_idx, tensor_args, own_robot_id):
+        """
+        Update the collision predictor with other robots' plans.
+        
+        Args:
+            plans: List of robot plans from all robots
+            col_pred_with: List of robot IDs that this robot should consider for collision
+            t_idx: Current time step index
+            tensor_args: Tensor arguments for device placement
+            own_robot_id: This robot's ID in the plans list
+        """
+        col_pred = self.get_col_pred()
+        if col_pred is None:
+            return
+            
+        if t_idx == 0:
+            # Initialize collision predictor on first iteration
+            # Set radii for each robot that this robot collides with
+            for j in col_pred_with:
+                rad_spheres_robotj = plans[j]['task_space']['spheres']['r'][0].to(tensor_args.device)
+                col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
+            
+            # Set own robot radii 
+            col_pred.set_own_rads(plans[own_robot_id]['task_space']['spheres']['r'][0].to(tensor_args.device))
+        else:
+            # Update positions for each robot that this robot collides with
+            for j in col_pred_with:
+                plan_robot_j = plans[j]['task_space']['spheres'] 
+                plan_robot_j_horizon = plan_robot_j['p'][:self.H].to(tensor_args.device)
+                col_pred.update_robot_spheres(j, plan_robot_j_horizon)
+
+    def step(self, shift_steps=1, seed_traj=None, max_attempts=2):
+        """
+        Execute one MPC step using the current robot state.
+        
+        Args:
+            shift_steps: Number of steps to shift the trajectory
+            seed_traj: Initial trajectory to seed the optimization. If None, the solver
+                uses the solution from the previous step
+            max_attempts: Maximum number of attempts for the MPC solver
+            
+        Returns:
+            MPC result from the solver
+        """
+        return self.solver.step(self.current_state, shift_steps=shift_steps, seed_traj=seed_traj, max_attempts=max_attempts)
+
+    def update(self, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None):
+        """
+        Complete robot update cycle: collision prediction, joint state, target, and MPC step.
+        
+        Args:
+            plans: List of robot plans from all robots (required if use_col_pred=True)
+            col_pred_with: List of robot IDs for collision prediction (required if use_col_pred=True)
+            t_idx: Current time step index (required if use_col_pred=True)
+            tensor_args: Tensor arguments for device placement (required if use_col_pred=True)
+            own_robot_id: This robot's ID in the plans list (required if use_col_pred=True)
+            
+        Returns:
+            MPC result from the solver
+        """
+        # Update collision predictor if enabled
+        if self.use_col_pred:
+            if any(arg is None for arg in [plans, col_pred_with, t_idx, tensor_args, own_robot_id]):
+                raise ValueError("When use_col_pred=True, all collision prediction arguments must be provided")
+            self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
+        
+        # Update joint state from simulation
+        self.update_joint_state()
+        
+        # Update target from scene
+        self.update_target()
+        
+        
+
+    def get_rollouts_in_world_frame(self):
+        """
+        Get visual rollouts transformed to world frame for visualization.
+        
+        Returns:
+            torch.Tensor: Visual rollouts with poses in world frame
+        """
+        p_visual_rollouts_robotframe = self.solver.get_visual_rollouts()
+        q_visual_rollouts_robotframe = torch.empty(p_visual_rollouts_robotframe.shape[:-1] + torch.Size([4]), device=p_visual_rollouts_robotframe.device)
+        q_visual_rollouts_robotframe[...,:] = torch.tensor([1,0,0,0], device=p_visual_rollouts_robotframe.device, dtype=p_visual_rollouts_robotframe.dtype) 
+        visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)                
+        visual_rollouts = transform_poses_batched(visual_rollouts, self.X_R)
+        return visual_rollouts
+
+    def plan(self, max_attempts=2):
+        """
+        Execute MPC planning and generate the next articulation action.
+        
+        Args:
+            max_attempts: Maximum attempts for MPC solver
+            
+        Returns:
+            ArticulationAction: Next action to be applied to the robot
+        """
+        mpc_result = self.step(max_attempts=max_attempts)
+        art_action = self.get_next_articulation_action(mpc_result.js_action)
+        return art_action
 
 class ArmCumotion(AutonomousArm):
     def __init__(self, 
