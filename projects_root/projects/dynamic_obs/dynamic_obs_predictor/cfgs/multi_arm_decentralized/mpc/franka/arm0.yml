@@ -2,9 +2,7 @@
 ## Clean Multi-Arm MPC Configuration Template
 ## This eliminates code duplication by computing values dynamically
 ##
-general:
-  env_id: 0
-  robot_id: 0
+
 
 model:
   horizon: 30

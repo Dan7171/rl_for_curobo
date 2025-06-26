@@ -101,33 +101,12 @@ def calculate_robot_sphere_count(robot_cfg):
     
     # Add extra collision spheres
     extra_spheres = robot_cfg["kinematics"].get("extra_collision_spheres", {})
+    extra_sphere_count = 0
     for obj_name, count in extra_spheres.items():
-        sphere_count += count
+        extra_sphere_count += count
         
-    return sphere_count
+    return sphere_count, extra_sphere_count
 
-def calculate_robot_sphere_count_valid(robot_cfg) -> int:
-    """Calculate number of valid collision spheres (base spheres only, no extra)"""
-    collision_spheres = robot_cfg["kinematics"]["collision_spheres"]
-    
-    # Handle two cases:
-    # 1. collision_spheres is a string path to external file (e.g., Franka)
-    # 2. collision_spheres is inline dictionary (e.g., UR5e)
-    if isinstance(collision_spheres, str):
-        # External file case
-        collision_spheres_path = os.path.join(robots_collision_spheres_configs_parent_dir, collision_spheres)
-        collision_spheres_cfg = load_yaml(collision_spheres_path)
-        collision_spheres_dict = collision_spheres_cfg["collision_spheres"]
-    else:
-        # Inline dictionary case
-        collision_spheres_dict = collision_spheres
-    
-    sphere_count = 0
-    for link_name, spheres in collision_spheres_dict.items():
-        if isinstance(spheres, list):
-            sphere_count += len(spheres)
-    
-    return sphere_count  # Return only base spheres, no extra
 
 def parse_meta_configs(meta_config_paths: List[str]) -> Tuple[List[str], List[str]]:
     """
@@ -149,12 +128,12 @@ def parse_meta_configs(meta_config_paths: List[str]) -> Tuple[List[str], List[st
         
     return robot_config_paths, mpc_config_paths
 
-def basic_setup(n_robots:int):
+def define_run_setup(n_robots:int):
     """
     returns:
         X_np: list of robot poses in world frame
         col_pred_with: list of lists of robot indices that each robot will use for dynamic obs prediction. In entry i, list of indices of robots that the ith robot will use for dynamic obs prediction
-        X_target_R: list of robot target (initial) poses in robot frame
+        X_targets_R: list of robot target (initial) poses in robot frame
         plot_costs: list of booleans that indicate whether to plot the cost function for each robot
         target_colors: list of colors for each robot target (ordered by RGBY)
     """
@@ -167,8 +146,7 @@ def basic_setup(n_robots:int):
             X_robot = [[-0.5,0,0,1,0,0,0]] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
             col_pred_with = [[]]
             plot_costs = [False]
-            target_colors = [npColors.red]
-            
+            target_colors = [npColors.red]  
         case 2: # 2 robots in a line
             X_robot = [[-0.5, 0, 0, 1, 0, 0, 0], [0.5, 0, 0, 1, 0, 0, 0]] 
             col_pred_with = [[1], [0]]
@@ -190,8 +168,8 @@ def basic_setup(n_robots:int):
     X_robot_np = [np.array(Xi, dtype=np.float32) for Xi in X_robot]
     
     # 2. express targets in robot frames
-    X_target_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
-    return X_robot_np, col_pred_with, X_target_R, plot_costs, target_colors
+    X_targets_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
+    return X_robot_np, col_pred_with, X_targets_R, plot_costs, target_colors
 
 def main(meta_config_paths: List[str]):
     """
@@ -229,7 +207,7 @@ def main(meta_config_paths: List[str]):
     tensor_args = TensorDeviceType()  # Device configuration for tensor operations
     
     # basic setup of the scenario (robot poses, target poses, target colors, etc...)
-    X_Robots, col_pred_with, X_target_R, plot_costs, target_colors = basic_setup(n_robots)
+    X_robots, col_pred_with, X_targets_R, plot_costs, target_colors = define_run_setup(n_robots)
     
     # runtime topics (for communication between robots, storing buffers for shared data like robots plans etc...)
     init_runtime_topics(n_envs=1, robots_per_env=n_robots) 
@@ -251,8 +229,9 @@ def main(meta_config_paths: List[str]):
     ccheckers = []
     
     # Calculate sphere counts for all robots BEFORE creating instances
-    robot_sphere_counts = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
-    robot_sphere_counts_valid = [calculate_robot_sphere_count_valid(robot_cfg) for robot_cfg in robot_cfgs]
+    robot_sphere_counts_split = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
+    robot_sphere_counts = [split[0] + split[1] for split in robot_sphere_counts_split]
+    robot_sphere_counts_valid = [split[0] for split in robot_sphere_counts_split]
 
     
     # ArmMpc instances for each robot (supports heterogeneous robot models)
@@ -264,10 +243,10 @@ def main(meta_config_paths: List[str]):
             usd_help, 
             env_id=0,
             robot_id=i,
-            p_R=X_Robots[i][:3],
-            q_R=X_Robots[i][3:], 
-            p_T_R=np.array(X_target_R[i][:3]),
-            q_T_R=np.array(X_target_R[i][3:]), 
+            p_R=X_robots[i][:3],
+            q_R=X_robots[i][3:], 
+            p_T_R=np.array(X_targets_R[i][:3]),
+            q_T_R=np.array(X_targets_R[i][3:]), 
             target_color=target_colors[i],
             plot_costs=plot_costs[i],
             override_particle_file=mpc_config_paths[i],  # Use individual MPC config per robot
@@ -282,7 +261,7 @@ def main(meta_config_paths: List[str]):
     for obstacle in col_ob_cfg:
         obstacle = Obstacle(my_world, **obstacle)
         for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_Robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
+            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
             print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
         env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
     world_prim = stage.GetPrimAtPath("/World")
@@ -316,7 +295,7 @@ def main(meta_config_paths: List[str]):
             # Populate robot context directly in env_topics[i]
             env_topics[i]["env_id"] = 0
             env_topics[i]["robot_id"] = i
-            env_topics[i]["robot_pose"] = X_Robots[i].tolist()
+            env_topics[i]["robot_pose"] = X_robots[i].tolist()
             env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
             env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
             env_topics[i]["horizon"] = mpc_config["model"]["horizon"]
@@ -469,7 +448,7 @@ def main(meta_config_paths: List[str]):
                 q_visual_rollouts_robotframe = torch.empty(p_visual_rollouts_robotframe.shape[:-1] + torch.Size([4]), device=p_visual_rollouts_robotframe.device)
                 q_visual_rollouts_robotframe[...,:] = torch.tensor([1,0,0,0],device=p_visual_rollouts_robotframe.device, dtype=p_visual_rollouts_robotframe.dtype) 
                 visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)                
-                visual_rollouts = transform_poses_batched(visual_rollouts, X_Robots[i].tolist())
+                visual_rollouts = transform_poses_batched(visual_rollouts, X_robots[i].tolist())
                 rollouts_for_visualization = {'points':  visual_rollouts, 'color': 'green'}
                 point_visualzer_inputs.append(rollouts_for_visualization)
                 visualizations_timer += time.time() - visualizations_timer_start
@@ -529,19 +508,22 @@ def main(meta_config_paths: List[str]):
             env_obstacles_timer = 0
        
 
-
+def resolve_meta_config_path(robot_model:str) -> str:
+    """
+    Resolves the meta-configuration paths to the absolute paths.
+    """
+    root_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs"
+    return os.path.join(root_path, f"{robot_model}.yml")
 
 if __name__ == "__main__":
+    
     if DEBUG_GPU_MEM:
         signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
-    # Example: Heterogeneous multi-robot setup (Franka + UR10e)
-    meta_config_paths = [
-        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/franka.yml",
-        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/ur5e.yml",
-        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/franka.yml",
-    ]
-    main(meta_config_paths)
+    
+    
+    input_args = ['franka', 'ur5e']
+    main([resolve_meta_config_path(robot_model) for robot_model in input_args])
     simulation_app.close()
     
      
