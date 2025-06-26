@@ -30,7 +30,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
     """
     
     def __init__(self, config: DynamicObsCostConfig):
-        print("DynamicObsCost.__init__() called - initializing dynamic obstacle cost")
         DynamicObsCostConfig.__init__(self, **vars(config))
         CostBase.__init__(self)
         
@@ -38,7 +37,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         weight_value = self.weight
         if isinstance(weight_value, torch.Tensor):
             weight_value = weight_value.cpu().item()
-        print(f"DynamicObsCost weight: {weight_value}")
         
         runtime_topics = get_topics()
         if runtime_topics is None:
@@ -69,7 +67,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             robot_context = available_contexts[DynamicObsCost._assignment_index]
             self.robot_id = robot_context['robot_id']
             DynamicObsCost._assignment_index += 1
-            print(f"DynamicObsCost assigned to robot {self.robot_id}")
         else:
             print(f"ERROR: No robot context available - found {len(available_contexts)} contexts")
             self.col_pred = None
@@ -92,14 +89,10 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         n_rollouts = robot_context['n_rollouts']
         col_pred_with = robot_context['col_pred_with']
         
-        print(f"DynamicObsCost initialized for robot {self.robot_id}: {n_obstacle_spheres} obstacle spheres, {n_own_spheres} own spheres")
-        print(f"Robot {self.robot_id} predicts collisions with robots: {col_pred_with}")
-        
         if n_obstacle_spheres == 0:
             # If no obstacle spheres, disable this cost and set col_pred to None
             self.col_pred = None
             self.disable_cost()
-            print(f"DynamicObsCost disabled for robot {self.robot_id} - no obstacle spheres")
             return
         
         # Extract sparse sphere filtering configuration
@@ -128,7 +121,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 mpc_config = load_yaml(mpc_config_paths[self.robot_id])
                 if 'cost' in mpc_config and 'custom' in mpc_config['cost'] and 'published_info' in mpc_config['cost']['custom']:
                     spheres_to_exclude_self = mpc_config['cost']['custom']['published_info'].get('spheres_to_exclude_in_sparse_mode', [])
-                    print(f"Robot {self.robot_id} excluding own spheres: {spheres_to_exclude_self}")
             
             # Build col_with_idx_map for other robots
             current_idx = 0
@@ -138,9 +130,20 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 if len(mpc_config_paths) > other_robot_id:
                     other_mpc_config = load_yaml(mpc_config_paths[other_robot_id])
                     if 'cost' in other_mpc_config and 'custom' in other_mpc_config['cost'] and 'published_info' in other_mpc_config['cost']['custom']:
-                        spheres_to_exclude_other = other_mpc_config['cost']['custom']['published_info'].get('spheres_to_exclude_in_sparse_mode', [])
+                        raw_exclusion_list = other_mpc_config['cost']['custom']['published_info'].get('spheres_to_exclude_in_sparse_mode', [])
+                        
+                        # Get total sphere count for this other robot from pre-calculated values
+                        other_base_spheres, other_extra_spheres = robot_sphere_counts[other_robot_id]
+                        other_total_spheres = other_base_spheres + other_extra_spheres
+                        
+                        # CRITICAL FIX: Validate and filter exclusion indices
+                        spheres_to_exclude_other = [idx for idx in raw_exclusion_list if 0 <= idx < other_total_spheres]
+                        invalid_indices = [idx for idx in raw_exclusion_list if idx >= other_total_spheres]
+                        
+                        if invalid_indices:
+                            print(f"WARNING: Robot {other_robot_id} has invalid exclusion indices {invalid_indices} (total spheres: {other_total_spheres})")
                 
-                # Get total sphere count for this other robot from pre-calculated values
+                # Get total sphere count for this other robot from pre-calculated values (moved up for validation)
                 other_base_spheres, other_extra_spheres = robot_sphere_counts[other_robot_id]
                 other_total_spheres = other_base_spheres + other_extra_spheres
                 
@@ -156,8 +159,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                     'exclude_list': spheres_to_exclude_other
                 }
                 current_idx += n_valid_other
-                
-                print(f"Robot {self.robot_id}: Other robot {other_robot_id} mapped to indices {col_with_idx_map[other_robot_id]['start_idx']}-{col_with_idx_map[other_robot_id]['end_idx']} (excluding {spheres_to_exclude_other})")
         
         self.col_pred = DynamicObsCollPredictor(
             self.tensor_args,

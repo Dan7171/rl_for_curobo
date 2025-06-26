@@ -175,6 +175,29 @@ class DynamicObsCollPredictor:
         # Direct indexing and copy
         self.rad_obs_buf.copy_(rad_obs[self.valid_obs_spheres])
 
+    def set_obs_rads_for_robot(self, robot_id: int, rad_robot: torch.Tensor):
+        """
+        Set the radii for a specific robot in the concatenated obstacle buffer.
+        
+        Args:
+            robot_id: ID of the robot whose radii to set
+            rad_robot: tensor of shape [n_robot_spheres]. The radii for this robot.
+        """
+        if robot_id not in self.col_with_idx_map:
+            print(f"Warning: Robot {robot_id} not found in collision mapping")
+            return
+        
+        robot_map = self.col_with_idx_map[robot_id]
+        start_idx = robot_map['start_idx']
+        end_idx = robot_map['end_idx']
+        valid_indices = robot_map['valid_indices']
+        
+        # Filter robot radii based on its exclusion list
+        filtered_radii = rad_robot[valid_indices]  # [n_valid_robot_spheres]
+        
+        # Update the corresponding section in the concatenated obstacle radius buffer
+        self.rad_obs_buf[start_idx:end_idx] = filtered_radii
+
     def set_own_rads(self, rad_own:torch.Tensor):
         """
         Set the radii of the own spheres and pre-compute radius sum matrix.

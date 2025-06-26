@@ -61,12 +61,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     a = torch.zeros(4, device="cuda:0")
 
 
-def handle_sigint_gpu_mem_debug(signum, frame):
-    print("Caught SIGINT (Ctrl+C), first dump snapshot...")
-    torch.cuda.memory._dump_snapshot()
-    print("Snapshot dumped to dump_snapshot.pickle, you can upload it to the server: https://docs.pytorch.org/memory_viz")
-    print("Now raising KeyboardInterrupt to let the original KeyboardInterrupt handler (of nvidia) to close the app")
-    raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
+# GPU memory debugging function removed for production
     
 
 def calculate_robot_sphere_count(robot_cfg):
@@ -403,10 +398,10 @@ def main(meta_config_paths: List[str]):
                 if col_pred is not None:
                     if t_idx == 0:
                         # Initialize collision predictor on first iteration
-                        # Set radii for all robots that this robot collides with
+                        # Set radii for each robot that this robot collides with
                         for j in col_pred_with[i]:
                             rad_spheres_robotj = plans[j]['task_space']['spheres']['r'][0].to(tensor_args.device)
-                            col_pred.set_obs_rads(rad_spheres_robotj)
+                            col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
                         
                         # Set own robot radii 
                         col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
@@ -474,8 +469,8 @@ def main(meta_config_paths: List[str]):
         t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
         ctrl_loop_timer += time.time() - ctrl_loop_timer_start
         
-        # PRINT TIME STATISTICS
-        k_print = 100
+        # PRINT TIME STATISTICS (reduced frequency for cleaner output)
+        k_print = 500  # Reduced frequency from 100 to 500 steps
         if t_idx % k_print == 0 and ctrl_loop_timer > 0:    
             print(f"t = {t_idx}")
             print(f"ctrl freq in last {k_print} steps:  {k_print / ctrl_loop_timer}")
@@ -526,11 +521,11 @@ def resolve_meta_config_path(robot_model:str) -> str:
 if __name__ == "__main__":
     
     if DEBUG_GPU_MEM:
-        signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
+        # GPU memory debugging signal handler removed for production 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
     
     
-    input_args = ['franka', 'ur5e']
+    input_args = ['franka', 'ur5e', 'franka']
     main([resolve_meta_config_path(robot_model) for robot_model in input_args])
     simulation_app.close()
     
