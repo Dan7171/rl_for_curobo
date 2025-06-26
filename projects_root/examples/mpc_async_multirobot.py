@@ -222,7 +222,6 @@ def main(meta_config_paths: List[str]):
     robot_cfgs = [load_yaml(robot_path)["robot_cfg"] for robot_path in robot_config_paths]
     # collision checker (curobo collision checker for each robot, empty for now, will be initialized later)
     ccheckers = []
-    
     # Calculate sphere counts for all robots BEFORE creating instances
     robot_sphere_counts_split = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
     robot_sphere_counts = [split[0] + split[1] for split in robot_sphere_counts_split]
@@ -328,12 +327,13 @@ def main(meta_config_paths: List[str]):
     # VALIDATE: Verify our config-based sphere count calculation is correct
     validation_passed = True
     for i in range(n_robots):
-        cu_js = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())
-        if not isinstance(cu_js.position, torch.Tensor):
-            joint_pos = torch.tensor(cu_js.position, device=tensor_args.device, dtype=tensor_args.dtype)
-        else:
-            joint_pos = cu_js.position
-        sph_list = robots[i].solver.kinematics.get_robot_as_spheres(joint_pos)
+        isaac_sim_joints = robots[i].get_sim_joint_state()
+        curobo_format_joints = robots[i].get_curobo_joint_state(isaac_sim_joints)
+        robots[i].update_current_state(curobo_format_joints)
+
+        # Extract just the positions for sphere calculation
+        joint_positions = curobo_format_joints.position
+        sph_list = robots[i].solver.kinematics.get_robot_as_spheres(joint_positions)
         n_actual_spheres = len(sph_list)
         n_config_spheres = robot_sphere_counts[i]
         
@@ -422,8 +422,9 @@ def main(meta_config_paths: List[str]):
 
             # UPDATE STATE IN SOLVER
             joint_state_timer_start = time.time()
-            robots_cu_js[i] = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())
-            robots[i].update_current_state(robots_cu_js[i])    
+            isaac_sim_joints = robots[i].get_sim_joint_state()
+            curobo_format_joints = robots[i].get_curobo_joint_state(isaac_sim_joints)
+            robots[i].update_current_state(curobo_format_joints)    
             joint_state_timer += time.time() - joint_state_timer_start
             
             # UPDATE TARGET IN SOLVER
@@ -458,7 +459,7 @@ def main(meta_config_paths: List[str]):
             
             if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
                 visualizations_timer_start = time.time()
-                robots[i].visualize_robot_as_spheres(robots_cu_js[i])
+                robots[i].visualize_robot_as_spheres(curobo_format_joints)
                 visualizations_timer += time.time() - visualizations_timer_start
 
         # VISUALIZATION

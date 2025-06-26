@@ -360,15 +360,15 @@ class Obstacle:
         https://curobo.org/_api/curobo.types.math.html#curobo.types.math.Pose
         https://curobo.org/get_started/2c_world_collision.html
         
-        # Here we initialize the curobo representation of the obstacle in its collision checker.
-        # For every type of obstacle, we need to define the curobo representation of the obstacle in its collision checker.
-        # Valid options are:
-        # - Cuboid
-        # - Sphere
-        # - Mesh
-        # - Capsule
-        # - Cylinder
-        # - Cone
+        Here we initialize the curobo representation of the obstacle in its collision checker.
+        For every type of obstacle, we need to define the curobo representation of the obstacle in its collision checker.
+        Valid options are:
+        - Cuboid
+        - Sphere
+        - Mesh
+        - Capsule
+        - Cylinder
+        - Cone
 
         # More info: https://curobo.org/get_started/2c_world_collision.html 
         

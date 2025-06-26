@@ -307,10 +307,10 @@ class DynamicObsCollPredictor:
         end_idx = robot_map['end_idx']
         valid_indices = robot_map['valid_indices']
         
-        # Filter robot spheres based on its exclusion list
+        # Filter robot spheres based on its exclusion list (if sparse mode is used)
         filtered_spheres = p_robot_spheres[:, valid_indices, :]  # [H, n_valid_robot_spheres, 3]
         
-        # Update the corresponding section in the concatenated obstacle buffer
+        # Then filter by timesteps (if sparse mode is used)
         filtered_spheres = torch.index_select(filtered_spheres, 0, self.sampling_timesteps_tensor)  # [n_sampling_steps, n_valid_robot_spheres, 3]
         
         # Update the relevant slice of the obstacle buffer

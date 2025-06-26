@@ -129,7 +129,7 @@ class AutonomousArm:
         self.p_R = p_R  
         self.q_R = q_R 
         self.X_R = list(p_R) + list(q_R) # robot base frame in world frame
-        
+        self.cu_js = None
         # target settings
         X_target_R = list(p_T_R) + list(q_T_R)
         X_target_W = transform_pose_between_frames(X_target_R, self.X_R) # target frame from robot frame to world frame
@@ -153,6 +153,7 @@ class AutonomousArm:
         self.obs_viz = [] # for visualization of robot spheres
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
+        
         # AutonomousArm.instance_counter += 1
     
     def get_num_of_sphers(self, valid_only:bool=True):
@@ -326,6 +327,10 @@ class AutonomousArm:
         cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.get_dof_names()) # joint_names=self.robot.dof_names) 
         return cu_js
     
+    def update_cu_js(self, sim_js, zero_vel=True):
+        cu_js = self.get_curobo_joint_state(sim_js, zero_vel=zero_vel)
+        self.update_current_state(cu_js)
+        return cu_js
 
     def get_current_spheres_state(self,express_in_world_frame:bool=True, valid_only=True,zero_vel=False):
         cu_js = self.get_curobo_joint_state(self.get_sim_joint_state(),zero_vel=zero_vel) # zero vel doesent matter since we are getting sphere poses and radii
