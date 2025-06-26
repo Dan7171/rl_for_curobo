@@ -1,2 +1,0 @@
-robot: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/robot/franka/arm1.yml
-mpc: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc/franka/arm1.yml 

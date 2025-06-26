@@ -537,8 +537,9 @@ if __name__ == "__main__":
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
     # Example: Heterogeneous multi-robot setup (Franka + UR10e)
     meta_config_paths = [
-        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/ur10e_00.yml",
-        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/ur10e_01.yml"
+        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/franka.yml",
+        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/ur5e.yml",
+        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/franka.yml",
     ]
     main(meta_config_paths)
     simulation_app.close()

@@ -1,2 +1,3 @@
 robot: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/robot/ur5e/arm0.yml
-mpc: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc/ur5e/arm0.yml 
+mpc: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc/ur5e/arm0.yml
+
