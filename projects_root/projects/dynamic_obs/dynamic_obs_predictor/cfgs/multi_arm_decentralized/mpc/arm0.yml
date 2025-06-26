@@ -65,16 +65,13 @@ cost:
     weight: 100.0
     max_nlimit: 0.25
   
-  # CLEAN CUSTOM COST CONFIGURATION
-  # Values like X (robot pose), n_coll_spheres, env_id, robot_id are computed dynamically
-  custom:
-    
+  custom:  
     arm_base:
       dynamic_obs_cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 100.0  # Only specify the cost weight
+        weight: 100.0  
         terminal: False
         sparse_steps:
           use: True

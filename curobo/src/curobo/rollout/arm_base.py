@@ -15,7 +15,7 @@ import os
 from typing import Dict, List, Optional, Union
 import datetime
 import matplotlib.pyplot as plt
-
+from collections import deque
 # Third Party
 import torch
 import torch.autograd.profiler as profiler
@@ -620,22 +620,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                     with profiler.record_function(f"cost/custom_arm_base/{cost_name}"):
                         custom_cost = cost_instance.forward(state)
                         cost_list.append(custom_cost)
-                        # try:
-                        #     custom_cost = cost_instance.forward(state)
-                        #     cost_list.append(custom_cost)
-                        # except Exception as e:
-                        #     log_error(f"Error computing custom arm_base cost {cost_name}: {e}")
-        
-        # Dynamic obstacle predictive collision checking.
-        # dynamic_obs_col_checker = self.get_dynamic_obs_coll_predictor() # If not used, should be None.
-        # if dynamic_obs_col_checker is not None:
-        #     # dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-        #     # cost_list.append(dynamic_coll_cost) 
-        #     is_mpc_initiation_step = state.robot_spheres.shape[0] != dynamic_obs_col_checker.n_rollouts
-        #     if not is_mpc_initiation_step: # Meaning, if we are in the normal MPC step, not the initiation step
-        #         dynamic_coll_cost = dynamic_obs_col_checker.cost_fn(state.robot_spheres)
-        #         cost_list.append(dynamic_coll_cost) 
-
+     
 
         # Note: Live plotting is handled by child classes (e.g., ArmReacher) to avoid duplicate plots
        
@@ -1042,10 +1027,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
 
     def _update_live_plot(self, cost_list):
         """Update live plot of cost values in real-time"""
-        import matplotlib.pyplot as plt
-        import matplotlib.animation as animation
-        from collections import deque
-        import numpy as np
+        
         
         # Initialize plotting components if not already done
         if not hasattr(self, '_plot_initialized'):
@@ -1066,6 +1048,8 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             self._ax.grid(True)
             
             plt.tight_layout()
+            # Manually adjust subplot parameters to avoid stretched plot
+            plt.subplots_adjust(right=0.84)
             plt.show(block=False)
         
         # Increment counter and check if we should plot this iteration

@@ -770,6 +770,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self._ax.grid(True)
             
             plt.tight_layout()
+            # Manually adjust subplot parameters to avoid stretched plot
+            plt.subplots_adjust(right=0.84)
             plt.show(block=False)
         
         # Increment counter and check if we should plot this iteration

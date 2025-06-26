@@ -71,7 +71,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 100.0  # Only specify the cost weight
+        weight: 100.0  
         terminal: False
         sparse_steps:
           use: True
