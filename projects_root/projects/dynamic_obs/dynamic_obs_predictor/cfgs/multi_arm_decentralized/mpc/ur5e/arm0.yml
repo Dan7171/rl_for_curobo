@@ -1,10 +1,7 @@
 ##
-## Clean Multi-Arm MPC Configuration Template
-## This eliminates code duplication by computing values dynamically
+## UR5e Multi-Arm MPC Configuration
+## Adapted from Franka config with UR5e-specific sphere filtering
 ##
-general:
-  env_id: 0
-  robot_id: 0
 
 model:
   horizon: 30
@@ -66,6 +63,9 @@ cost:
     max_nlimit: 0.25
   
   custom:  
+    published_info:
+      spheres_to_exclude_in_sparse_mode: []  # User will fill this later
+
     arm_base:
       dynamic_obs_cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
@@ -76,9 +76,9 @@ cost:
         sparse_steps:
           use: True
           ratio: 0.2
+        
         sparse_spheres:
-          exclude_self: []
-          exclude_others: []
+          use: True
 
 mppi:
   init_cov: 0.05

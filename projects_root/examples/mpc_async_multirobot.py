@@ -301,12 +301,23 @@ def main(meta_config_paths: List[str]):
             env_topics[i]["horizon"] = mpc_config["model"]["horizon"]
             env_topics[i]["n_rollouts"] = mpc_config["mppi"]["num_particles"]
             env_topics[i]["col_pred_with"] = col_pred_with[i]
+            
+            # Add new fields for sparse sphere functionality
+            env_topics[i]["mpc_config_paths"] = mpc_config_paths
+            env_topics[i]["robot_config_paths"] = robot_config_paths
+            env_topics[i]["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
 
 
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
-        robot.init_joints(robot_idx_lists[i])
+        if robot_idx_lists[i] is None:
+            raise RuntimeError(f"Failed to get DOF indices for robot {i}")
+        
+        # Type assertion for linter
+        idx_list = robot_idx_lists[i]
+        assert idx_list is not None
+        robot.init_joints(idx_list)
         # Init robot mpc solver
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
 
@@ -387,36 +398,33 @@ def main(meta_config_paths: List[str]):
             # ROBOTS AS OBSTACLES - UPDATE STATES/PLANS
             if OBS_PREDICTION and len(col_pred_with[i]): # using prediction of other robots plans
                 robots_as_obs_timer_start = time.time()
-                p_spheresOthersH = None
-                for j in range(len(robots)):
-                    if j != i: 
-                        planSpheres_robotj = plans[j]['task_space']['spheres'] 
-                        p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device) # get plan (sphere positions) of robot j, up to the horizon length of robot i
-                        rad_spheresRobotjH = planSpheres_robotj['r'][0].to(tensor_args.device)
-                        if p_spheresOthersH is None:
-                            p_spheresOthersH = p_spheresRobotjH
-                            rad_spheresOthersH = rad_spheresRobotjH
-                        else:
-                            p_spheresOthersH = torch.cat((p_spheresOthersH, p_spheresRobotjH), dim=1) # stack the plans horizontally
-                            rad_spheresOthersH = torch.cat((rad_spheresOthersH, rad_spheresRobotjH))
+                
                 col_pred = robots[i].get_col_pred()
                 if col_pred is not None:
                     if t_idx == 0:
                         # Initialize collision predictor on first iteration
-                        col_pred.set_obs_rads(rad_spheresOthersH)
+                        # Set radii for all robots that this robot collides with
+                        for j in col_pred_with[i]:
+                            rad_spheres_robotj = plans[j]['task_space']['spheres']['r'][0].to(tensor_args.device)
+                            col_pred.set_obs_rads(rad_spheres_robotj)
+                        
+                        # Set own robot radii 
                         col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
                     else:
-                        if p_spheresOthersH is not None:
-                            col_pred.update(p_spheresOthersH)
+                        # Update positions for each robot that this robot collides with
+                        for j in col_pred_with[i]:
+                            planSpheres_robotj = plans[j]['task_space']['spheres'] 
+                            p_spheresRobotjH = planSpheres_robotj['p'][:robots[i].H].to(tensor_args.device)
+                            col_pred.update_robot_spheres(j, p_spheresRobotjH)
+                            
+                            # VISUALIZATION: Add visualization for predicted obstacle paths
+                            if VISUALIZE_PREDICTED_OBS_PATHS:
+                                visualizations_timer_start = time.time()
+                                point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
+                                visualizations_timer += time.time() - visualizations_timer_start
 
                 robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
-     
-                if VISUALIZE_PREDICTED_OBS_PATHS:
-                    visualizations_timer_start = time.time()
-                    point_visualzer_inputs.append({'points': p_spheresRobotjH, 'color': 'green'})
-                    visualizations_timer += time.time() - visualizations_timer_start
-            
             # UPDATE STATE IN SOLVER
             joint_state_timer_start = time.time()
             robots_cu_js[i] = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())

@@ -40,6 +40,7 @@ class DynamicObsCollPredictor:
                  X = [0,0,0,1,0,0,0],
                  sparse_steps:dict={'use': False, 'ratio': 0.5},
                  sparse_spheres:dict={'exclude_self': [], 'exclude_others': []}, # list of ints, each int is the index of the sphere to exclude from the collision check.
+                 col_with_idx_map=None, # mapping from robot IDs to their index ranges in concatenated tensor
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -52,6 +53,7 @@ class DynamicObsCollPredictor:
             n_checkers(int, optional): Defaults to H (marked by passing -1). The number of collision checkers to use. If n_checkers is not H, then the collision checkers will be used in a sliding window fashion.
             n_rollouts (int, optional): Defaults to 400. The number of rollouts. TODO: Should be taken from the mpc config.
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
+            col_with_idx_map: Dictionary mapping robot IDs to their index ranges in the concatenated obstacle tensor
             """
         
 
@@ -78,7 +80,8 @@ class DynamicObsCollPredictor:
         # control sparsity over spheres - filter out spheres which are not needed/less relevant (for efficiency)
         self.sparse_spheres = sparse_spheres # sparse spheres config
         
-        self.n_own_spheres = self.n_own_spheres # n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        # Store collision mapping for robot-specific updates
+        self.col_with_idx_map = col_with_idx_map or {}
         
         # Filter out invalid sphere indices that are outside the range of available spheres
         valid_exclude_self = [idx for idx in self.sparse_spheres['exclude_self'] if 0 <= idx < self.n_own_spheres]
@@ -109,8 +112,6 @@ class DynamicObsCollPredictor:
 
         # Buffers for own spheres: position and radius  
         self.p_own_buf = torch.empty(n_rollouts, self.n_sampling_steps, self.n_valid_own, 3, device=self.tensor_args.device)
-        # self.XFiltered_own_R = torch.zeros(n_rollouts, self.n_sampling_steps, self.n_valid_own, 7, device=self.tensor_args.device)
-        # self.XFiltered_own_R[:,:,:,3] = 1 # this is making the quat 1,0,0,0, which is the identity quaternion
 
         self.p_own_buf_unfiltered = torch.zeros(n_rollouts, self.H, self.n_own_spheres, 3, device=self.tensor_args.device)
         self.X_own_R = torch.zeros(n_rollouts, self.H, self.n_own_spheres, 7, device=self.tensor_args.device)
@@ -223,6 +224,10 @@ class DynamicObsCollPredictor:
         if self.transform_matrix_dirty or self.rotation_matrix is None:
             self.update_world_pose(self.X)
         
+        # Ensure transformation matrices are available
+        if self.rotation_matrix is None or self.world_translation is None:
+            raise RuntimeError("Transformation matrices not initialized")
+        
         # Extract positions from robot frame poses
         robot_positions = prad_own_R[:, :, :, :3]  # (n_rollouts, H, n_spheres, 3)
         
@@ -261,6 +266,35 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf.mul_(self.cost_weight)
         
         return self.cost_mat_buf
+
+    def update_robot_spheres(self, robot_id: int, p_robot_spheres: torch.Tensor):
+        """
+        Update the positions of spheres for a specific "other" robot in the concatenated obstacle tensor.
+        
+        Args:
+            robot_id: ID of the robot whose spheres to update
+            p_robot_spheres: tensor of shape [H, n_robot_spheres, 3]. The sphere positions for this robot.
+        """
+        if robot_id not in self.col_with_idx_map:
+            print(f"Warning: Robot {robot_id} not found in collision mapping")
+            return
+        
+        robot_map = self.col_with_idx_map[robot_id]
+        start_idx = robot_map['start_idx']
+        end_idx = robot_map['end_idx']
+        valid_indices = robot_map['valid_indices']
+        
+        # Filter robot spheres based on its exclusion list
+        filtered_spheres = p_robot_spheres[:, valid_indices, :]  # [H, n_valid_robot_spheres, 3]
+        
+        # Update the corresponding section in the concatenated obstacle buffer
+        filtered_spheres = torch.index_select(filtered_spheres, 0, self.sampling_timesteps_tensor)  # [n_sampling_steps, n_valid_robot_spheres, 3]
+        
+        # Update the relevant slice of the obstacle buffer
+        self.p_obs_buf[:, start_idx:end_idx, :] = filtered_spheres
+        
+        # Update broadcast-ready buffer
+        self.p_obs_buf_broadcast[0, :, 0, start_idx:end_idx, :] = filtered_spheres
 
 
 

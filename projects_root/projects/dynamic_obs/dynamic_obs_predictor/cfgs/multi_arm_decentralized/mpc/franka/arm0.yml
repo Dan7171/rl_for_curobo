@@ -64,6 +64,9 @@ cost:
     max_nlimit: 0.25
   
   custom:  
+    published_info: # new
+      spheres_to_exclude_in_sparse_mode: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
+
     arm_base:
       dynamic_obs_cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
@@ -74,10 +77,14 @@ cost:
         sparse_steps:
           use: True
           ratio: 0.2
-        sparse_spheres:
-          exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
-          exclude_others: []
-
+        
+        sparse_spheres: # new
+          use: True
+        
+        # sparse_spheres: # removed
+        #   exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
+        #   # exclude_others: [] 
+        
 mppi:
   init_cov: 0.05
   gamma: 0.98

@@ -4,25 +4,20 @@ This cost dynamically computes collision avoidance with other robots.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Dict, List
 import torch
 from curobo.rollout.cost.cost_base import CostBase, CostConfig
 from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
+from curobo.util_file import load_yaml
 
 @dataclass
 class DynamicObsCostConfig(CostConfig):
     """Configuration for dynamic obstacle collision cost."""
-    weight: float = 100.0
-    # Remove duplicated fields - these will be computed dynamically:
-    # X: robot pose (computed from robot instance)
-    # n_coll_spheres: total obstacle spheres (computed from col_pred_with)
-    # env_id, robot_id: passed from robot context
-    
-    # Optional sparsity configuration
+    weight: float = 100.0    
     sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
-    sparse_spheres: dict = field(default_factory=lambda: {'exclude_self': [], 'exclude_others': []})
+    sparse_spheres: dict = field(default_factory=lambda: {'use': False})
     
     def __post_init__(self):
         return super().__post_init__()
@@ -82,7 +77,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             return
         
         # Get required values from robot context - fail if any are missing
-        required_keys = ['robot_pose', 'n_obstacle_spheres', 'n_own_spheres', 'horizon', 'n_rollouts']
+        required_keys = ['robot_pose', 'n_obstacle_spheres', 'n_own_spheres', 'horizon', 'n_rollouts', 'col_pred_with']
         for key in required_keys:
             if key not in robot_context:
                 print(f"ERROR: Required key '{key}' missing from robot context for robot {self.robot_id}")
@@ -91,34 +86,96 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 return
         
         X = robot_context['robot_pose']
-        n_coll_spheres = robot_context['n_obstacle_spheres']
+        n_obstacle_spheres = robot_context['n_obstacle_spheres']
         n_own_spheres = robot_context['n_own_spheres']
         horizon = robot_context['horizon']
         n_rollouts = robot_context['n_rollouts']
+        col_pred_with = robot_context['col_pred_with']
         
-        # Log key initialization parameters
-        print(f"DynamicObsCost initialized for robot {self.robot_id}: {n_coll_spheres} obstacle spheres, {n_own_spheres} own spheres")
+        print(f"DynamicObsCost initialized for robot {self.robot_id}: {n_obstacle_spheres} obstacle spheres, {n_own_spheres} own spheres")
+        print(f"Robot {self.robot_id} predicts collisions with robots: {col_pred_with}")
         
-        if n_coll_spheres == 0:
+        if n_obstacle_spheres == 0:
             # If no obstacle spheres, disable this cost and set col_pred to None
             self.col_pred = None
             self.disable_cost()
+            print(f"DynamicObsCost disabled for robot {self.robot_id} - no obstacle spheres")
             return
+        
+        # Extract sparse sphere filtering configuration
+        use_sparse_spheres = self.sparse_spheres.get('use', False)
+        
+        # Get published sphere exclusion info for this robot and other robots
+        spheres_to_exclude_self = []
+        col_with_idx_map = {}
+        
+        if use_sparse_spheres:
+            # Get sphere exclusion info from robot context (passed from main script)
+            required_sparse_keys = ['mpc_config_paths', 'robot_config_paths', 'robot_sphere_counts']
+            for key in required_sparse_keys:
+                if key not in robot_context:
+                    print(f"ERROR: Required sparse key '{key}' missing from robot context for robot {self.robot_id}")
+                    self.col_pred = None
+                    self.disable_cost()
+                    return
+            
+            mpc_config_paths = robot_context['mpc_config_paths']
+            robot_config_paths = robot_context['robot_config_paths']
+            robot_sphere_counts = robot_context['robot_sphere_counts']  # [(base_count, extra_count), ...]
+            
+            # Get this robot's exclusion list from MPC config
+            if len(mpc_config_paths) > self.robot_id:
+                mpc_config = load_yaml(mpc_config_paths[self.robot_id])
+                if 'cost' in mpc_config and 'custom' in mpc_config['cost'] and 'published_info' in mpc_config['cost']['custom']:
+                    spheres_to_exclude_self = mpc_config['cost']['custom']['published_info'].get('spheres_to_exclude_in_sparse_mode', [])
+                    print(f"Robot {self.robot_id} excluding own spheres: {spheres_to_exclude_self}")
+            
+            # Build col_with_idx_map for other robots
+            current_idx = 0
+            for other_robot_id in col_pred_with:
+                # Load MPC config for other robot to get their exclusion list
+                spheres_to_exclude_other = []
+                if len(mpc_config_paths) > other_robot_id:
+                    other_mpc_config = load_yaml(mpc_config_paths[other_robot_id])
+                    if 'cost' in other_mpc_config and 'custom' in other_mpc_config['cost'] and 'published_info' in other_mpc_config['cost']['custom']:
+                        spheres_to_exclude_other = other_mpc_config['cost']['custom']['published_info'].get('spheres_to_exclude_in_sparse_mode', [])
+                
+                # Get total sphere count for this other robot from pre-calculated values
+                other_base_spheres, other_extra_spheres = robot_sphere_counts[other_robot_id]
+                other_total_spheres = other_base_spheres + other_extra_spheres
+                
+                # Calculate valid sphere indices after filtering
+                valid_indices_other = list(set(range(other_total_spheres)) - set(spheres_to_exclude_other))
+                n_valid_other = len(valid_indices_other)
+                
+                # Map this robot to its index range in the concatenated tensor
+                col_with_idx_map[other_robot_id] = {
+                    'start_idx': current_idx,
+                    'end_idx': current_idx + n_valid_other,
+                    'valid_indices': valid_indices_other,
+                    'exclude_list': spheres_to_exclude_other
+                }
+                current_idx += n_valid_other
+                
+                print(f"Robot {self.robot_id}: Other robot {other_robot_id} mapped to indices {col_with_idx_map[other_robot_id]['start_idx']}-{col_with_idx_map[other_robot_id]['end_idx']} (excluding {spheres_to_exclude_other})")
         
         self.col_pred = DynamicObsCollPredictor(
             self.tensor_args,
             horizon,
             n_rollouts,
             n_own_spheres,
-            n_coll_spheres,
+            n_obstacle_spheres,
             weight_value,
             X,
             self.sparse_steps,
-            self.sparse_spheres
+            {
+                'use': use_sparse_spheres,
+                'exclude_self': spheres_to_exclude_self,
+                'exclude_others': []  # Not used anymore - handled by col_with_idx_map
+            },
+            col_with_idx_map
         )
-        print(f"DynamicObsCost successfully initialized for robot {self.robot_id} with {n_coll_spheres} obstacle spheres")
-
-
+        print(f"DynamicObsCost successfully initialized for robot {self.robot_id} with {n_obstacle_spheres} obstacle spheres")
 
     def forward(self, state: KinematicModelState) -> torch.Tensor:
         """
