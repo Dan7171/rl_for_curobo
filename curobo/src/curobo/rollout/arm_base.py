@@ -437,6 +437,20 @@ class ArmBase(RolloutBase, ArmBaseConfig):
     def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
         return self._dynamic_obs_coll_predictor
     
+    def set_robot_context(self, env_id: int, robot_id: int, robot_pose: list, col_pred_with: list):
+        """Set robot context for dynamic cost computation."""
+        # Compute total obstacle spheres from col_pred_with
+        # This assumes each robot has the same number of spheres (can be improved)
+        n_obstacle_spheres = len(col_pred_with) * 65  # TODO: get actual sphere count per robot
+        
+        self._robot_context = {
+            'env_id': env_id,
+            'robot_id': robot_id,
+            'robot_pose': robot_pose,
+            'n_obstacle_spheres': n_obstacle_spheres,
+            'col_pred_with': col_pred_with
+        }
+    
     @profiler.record_function("arm_base/init_after_config_load")
     def _init_after_config_load(self):
         # self.current_state = None
@@ -536,6 +550,18 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             for cost_name, cost_info in self.cost_cfg.custom_cfg["arm_base"].items():
                 cost_class = cost_info["cost_class"]
                 cost_config = cost_info["cost_config"]
+                
+                # Inject robot context for dynamic costs (like DynamicObsCost)
+                if hasattr(cost_config, 'set_robot_context'):
+                    robot_context = getattr(self, '_robot_context', None)
+                    if robot_context is not None:
+                        cost_config.set_robot_context(
+                            robot_context['env_id'],
+                            robot_context['robot_id'], 
+                            robot_context['robot_pose'],
+                            robot_context['n_obstacle_spheres']
+                        )
+                
                 cost_instance = cost_class(cost_config)
                 self._custom_arm_base_costs[cost_name] = cost_instance
                 log_info(f"Initialized custom arm_base cost: {cost_name}")

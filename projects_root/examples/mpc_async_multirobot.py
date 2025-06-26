@@ -23,7 +23,7 @@ HEADLESS_ISAAC = False
 collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/collision_obstacles.yml"
 robots_cfgs_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/robot/franka"
 mpc_cfg_overide_files_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc"
-
+robots_collision_spheres_configs_parent_dir = "curobo/src/curobo/content/configs/robot"
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
     
@@ -32,6 +32,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import signal
     from typing import List, Optional
     import torch
+    import os
     import numpy as np
     # Initialize isaacsim app and load extensions
     from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
@@ -68,6 +69,37 @@ def handle_sigint_gpu_mem_debug(signum, frame):
     raise KeyboardInterrupt # to let the original KeyboardInterrupt handler (of nvidia) to close the app
     
 
+def calculate_robot_sphere_count(robot_cfg):
+    """
+    Calculate the number of collision spheres for a robot from its configuration.
+    
+    Args:
+        robot_cfg: Robot configuration dictionary
+        
+    Returns:
+        int: Total number of collision spheres (base + extra)
+    """
+    # Get the collision spheres file path
+    collision_spheres_file = robot_cfg["kinematics"]["collision_spheres"]
+    
+    # Load the collision spheres configuration
+    collision_spheres_cfg = load_yaml(os.path.join(robots_collision_spheres_configs_parent_dir, collision_spheres_file))
+    
+    # Count spheres by counting entries in each link's sphere list
+    sphere_count = 0
+    if "collision_spheres" in collision_spheres_cfg:
+        for link_name, spheres in collision_spheres_cfg["collision_spheres"].items():
+            sphere_count += len(spheres)
+    
+    # Add extra collision spheres
+    extra_spheres = robot_cfg["kinematics"].get("extra_collision_spheres", {})
+    for obj_name, count in extra_spheres.items():
+        sphere_count += count
+        
+    return sphere_count
+    
+    
+
 def basic_setup(n_robots:int):
     """
     returns:
@@ -91,13 +123,12 @@ def basic_setup(n_robots:int):
         case 2: # 2 robots in a line
             X_robot = [[-0.5, 0, 0, 1, 0, 0, 0], [0.5, 0, 0, 1, 0, 0, 0]] 
             col_pred_with = [[1], [0]]
-            plot_costs = [False, False]
+            plot_costs = [True, True]
             target_colors = [npColors.red, npColors.green ]
-
-        case 3: # 3 robots in a triangle
+        case 3: # 3 robots in a triangle 
             X_robot = [[0.7071,-0.5 ,0, 1, 0, 0, 0], [-0.7071, -0.5, 0, 1, 0, 0, 0], [0, 0.5, 0, 1, 0, 0, 0]]
             col_pred_with = [[1,2], [0,2], [0,1]]
-            plot_costs = [False, False, False]
+            plot_costs = [True, True, True]
             target_colors = [npColors.red, npColors.green, npColors.blue]
         case 4: # 4 robots in a square
             X_robot = [[-0.5, -0.5, 0, 1, 0, 0, 0], [-0.5, 0.5, 0, 1, 0, 0, 0], [0.5, 0.5, 0, 1, 0, 0, 0], [0.5, -0.5, 0, 1, 0, 0, 0]]
@@ -139,6 +170,9 @@ def main(n_robots):
     init_runtime_topics(n_envs=1, robots_per_env=n_robots) 
     runtime_topics = get_topics()
     env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
+    
+    # FIX: Pre-populate robot context for clean dynamic obstacle costs
+    # We'll get actual sphere counts after robots are created and initialized
     
     # curobo joints
     robots_cu_js: List[Optional[JointState]] = [None for _ in range(n_robots)]# for visualization of robot spheres
@@ -189,6 +223,30 @@ def main(n_robots):
     
     
     
+    # FIRST: Pre-populate robot context with estimated sphere counts BEFORE init_solver()
+    # Since n_own_spheres was removed from config, we'll use a reasonable default
+    # and update it after robots are initialized
+    robot_sphere_counts = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
+    print(f"Using sphere count estimate: {robot_sphere_counts[0]} spheres per robot")
+    
+    # Populate robot context BEFORE solver initialization
+    for i in range(n_robots):
+        n_obstacle_spheres = sum(robot_sphere_counts[j] for j in col_pred_with[i])
+        # Get MPC config values for this specific robot
+        mpc_override_file = f'{mpc_cfg_overide_files_dir}/arm{i}.yml'
+        mpc_config = load_yaml(mpc_override_file)
+        
+        # Populate robot context directly in env_topics[i]
+        env_topics[i]["env_id"] = 0
+        env_topics[i]["robot_id"] = i
+        env_topics[i]["robot_pose"] = X_Robots[i].tolist()
+        env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
+        env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
+        env_topics[i]["horizon"] = mpc_config["model"]["horizon"]
+        env_topics[i]["n_rollouts"] = mpc_config["mppi"]["num_particles"]
+        env_topics[i]["col_pred_with"] = col_pred_with[i]
+        print(f"Pre-populated robot context for robot {i}: n_obstacle_spheres={n_obstacle_spheres}, n_own_spheres={robot_sphere_counts[i]}, horizon={mpc_config['model']['horizon']}, n_rollouts={mpc_config['mppi']['num_particles']}")
+
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
         robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
@@ -203,7 +261,28 @@ def main(n_robots):
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
         # # Some technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
-        # robots[i].robot._articulation_view.initialize() 
+        robots[i].robot._articulation_view.initialize()
+    
+    # VALIDATE: Verify our config-based sphere count calculation is correct
+    validation_passed = True
+    for i in range(n_robots):
+        cu_js = robots[i].get_curobo_joint_state(robots[i].get_sim_joint_state())
+        if not isinstance(cu_js.position, torch.Tensor):
+            joint_pos = torch.tensor(cu_js.position, device=tensor_args.device, dtype=tensor_args.dtype)
+        else:
+            joint_pos = cu_js.position
+        sph_list = robots[i].solver.kinematics.get_robot_as_spheres(joint_pos)
+        n_actual_spheres = len(sph_list)
+        n_config_spheres = robot_sphere_counts[i]
+        
+        if n_config_spheres != n_actual_spheres:
+            print(f"WARNING: Sphere count mismatch for robot {i}! Config={n_config_spheres}, Runtime={n_actual_spheres}")
+            validation_passed = False
+    
+    if validation_passed:
+        print("✓ Sphere count validation passed - using config-based calculations")
+    else:
+        print("⚠ Sphere count validation failed - check robot configurations") 
 
         
     for i in range(len(env_obstacles)):
@@ -246,6 +325,12 @@ def main(n_robots):
         robots_as_obs_timer_start = time.time()
         if OBS_PREDICTION:         
             plans = [robots[i].get_plan(valid_spheres_only=False) for i in range(len(robots))]
+            # Check if any plans are None (only print warnings, not routine info)
+            for i, plan in enumerate(plans):
+                if plan is None:
+                    print(f"WARNING: Robot {i} returned None plan!")
+                elif 'task_space' not in plan or 'spheres' not in plan['task_space']:
+                    print(f"WARNING: Robot {i} plan missing task_space/spheres!")
             # Store plans for each robot in the environment topics
             for robot_idx in range(len(env_topics)):
                 env_topics[robot_idx]["plans"] = plans[robot_idx]
@@ -273,12 +358,15 @@ def main(n_robots):
                 col_pred = robots[i].get_col_pred()
                 if col_pred is not None:
                     if t_idx == 0:
-                      
+                        # Initialize collision predictor on first iteration
                         col_pred.set_obs_rads(rad_spheresOthersH)
                         col_pred.set_own_rads(plans[i]['task_space']['spheres']['r'][0].to(tensor_args.device))
                     else:
                         if p_spheresOthersH is not None:
                             col_pred.update(p_spheresOthersH)
+                else:
+                    if t_idx == 0:  # Only warn once at startup
+                        print(f"WARNING: Robot {i} has no collision predictor (col_pred is None)!")
                 robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
      
@@ -389,7 +477,9 @@ if __name__ == "__main__":
     if DEBUG_GPU_MEM:
         signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
-    n_robots = int(input("Enter the number of robots (1-4, default 1): "))
+    n_robots = 3
+    if not isinstance(n_robots, int) and 0 < n_robots < 5:
+        n_robots = int(input("Enter the number of robots (1-4, default 1): "))
     main(n_robots)
     simulation_app.close()
     

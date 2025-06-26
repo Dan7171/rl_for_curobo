@@ -37,12 +37,9 @@ class DynamicObsCollPredictor:
                  n_own_spheres=65, # total number of spheres of the robot (including ones that we don't want to check for collision)
                  n_obs=65, # total number of spheres of the obstacles in the world (including ones that we don't want to check for collision)
                  cost_weight=100.0, 
-                 # p_R=torch.zeros(3),
                  X = [0,0,0,1,0,0,0],
                  sparse_steps:dict={'use': False, 'ratio': 0.5},
                  sparse_spheres:dict={'exclude_self': [], 'exclude_others': []}, # list of ints, each int is the index of the sphere to exclude from the collision check.
-                 env_id: int = 0,
-                 robot_id: int = 0,
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -57,30 +54,13 @@ class DynamicObsCollPredictor:
             cost_weight: weight for the dynamic obstacle cost function (cost term weight). This is a hyper-parameter, unlike the weight_col_check which you should leave as 1. Default value is 100000, as by the original primitive collision cost weight of the mpc.
             """
         
-        # self.debug = False
-        # if self.debug:
-        #     self.sphere_visualizer = SphereVisualizer(
-        #         group_ids=[0, 1], # 0: own spheres, 1: obs spheres
-        #         figsize=(14, 10),
-        #         update_interval=1000,  # Update every 100ms
-        #         show_trajectory_trails=True
-        #     )
 
         self.X = X # the pose (x y z qw qx qy qz) of the robot in the world frame
-        self._init_counter = 0 # number of steps until cuda graph initiation. Here Just for debugging. Can be removed. with no effect on the code. 
         self.tensor_args = tensor_args 
-        self.env_id = env_id
-        self.robot_id = robot_id
         self.H = H
-        # self.H = H # number of states in the trajectory during trajectory optimization. https://curobo.org/_api/curobo.wrap.reacher.trajopt.html#curobo.wrap.reacher.trajopt.TrajOptSolver.action_horizon
         
-        # self.n_rollouts = n_rollouts 
         self.n_rollouts = n_rollouts
         self.n_own_spheres = n_own_spheres
-        # self.env_id = env_id
-        # self.robot_id = robot_id
-        # self.env_id = runtime_topics.topics[env_id][robot_id]['mpc_cfg']['general']['env_id']
-        # self.robot_id = runtime_topics.topics[env_id][robot_id]['mpc_cfg']['general']['robot_id']
 
         # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
@@ -158,11 +138,7 @@ class DynamicObsCollPredictor:
         
         # flags
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
-        # if self.manually_express_p_own_in_world_frame:
-        #     self.p_R = p_R.to(self.tensor_args.device) # xyz of own base in world frame
-        #     # Pre-allocate broadcast buffer for world frame transformation
-        #     self.p_R_broadcast = self.p_R.view(1, 1, 1, 3).expand(self.n_rollouts, self.n_sampling_steps, self.n_valid_own, 3)
-        
+    
         self.rotation_matrix = None
         self.world_translation = None
         self.transform_matrix_dirty = True
@@ -278,11 +254,6 @@ class DynamicObsCollPredictor:
         # Apply cost weight
         self.cost_mat_buf.mul_(self.cost_weight)
         
-
-        # if self.debug:
-        #     self.sphere_visualizer.update(self.p_own_buf[:3], 0, self.rad_own_buf)
-        #     self.sphere_visualizer.update(self.p_obs_buf.unsqueeze(0), 1, self.rad_obs_buf)
-
         return self.cost_mat_buf
 
 
