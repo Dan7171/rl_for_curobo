@@ -394,6 +394,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     goal_cost = self.goal_cost.forward(
                         ee_pos_for_cost, ee_quat_for_cost, self._goal_buffer
                     )
+
                 cost_list.append(goal_cost)
         with profiler.record_function("cost/link_poses"):
             if self._goal_buffer.links_goal_pose is not None and self.cost_cfg.pose_cfg is not None:
@@ -468,6 +469,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
         if getattr(self, '_enable_live_plotting', False):
             self._update_live_plot_reacher(cost_list)
+        
+
             
         with profiler.record_function("cat_sum"):
             if self.sum_horizon:
@@ -619,13 +622,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Get arm link mapping from robot configuration or use defaults
         arm_link_mapping = self._get_arm_link_mapping(num_arms)
         
-        # Minimal debug for link mapping (very reduced frequency)
-        if not hasattr(self, '_debug_link_count'):
-            self._debug_link_count = 0
-        self._debug_link_count += 1
-        
-        if self._debug_link_count % 10000 == 0:  # Very reduced frequency
-            print(f"Multi-arm link mapping: {len(arm_link_mapping)} arms")
+
         
         # Fill in data for available links
         link_poses = state.link_pose
@@ -636,16 +633,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     link_pose = link_poses[link_name]
                     ee_pos_4d[:, :, arm_idx, :] = link_pose.position
                     ee_quat_4d[:, :, arm_idx, :] = link_pose.quaternion
-                    
-
                 else:
                     # Link not found - try alternative approaches
                     if arm_idx == 0 and state.ee_pos_seq is not None and state.ee_quat_seq is not None:
                         # Use primary end-effector data for first arm
                         ee_pos_4d[:, :, arm_idx, :] = state.ee_pos_seq
                         ee_quat_4d[:, :, arm_idx, :] = state.ee_quat_seq
-                        
-
                     elif hasattr(self, 'kinematics') and hasattr(self.kinematics, 'get_state'):
                         # Try to compute the missing end-effector pose using kinematics
                         try:
@@ -658,12 +651,6 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                     computed_pose = kin_state.link_pose[link_name]
                                     ee_pos_4d[:, :, arm_idx, :] = computed_pose.position
                                     ee_quat_4d[:, :, arm_idx, :] = computed_pose.quaternion
-                                    
-                                    pass
-                                else:
-                                    pass
-                            else:
-                                pass
                         except Exception as e:
                             pass
                     else:

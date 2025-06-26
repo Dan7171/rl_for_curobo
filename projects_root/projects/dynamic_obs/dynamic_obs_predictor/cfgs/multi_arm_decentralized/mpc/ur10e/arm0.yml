@@ -77,8 +77,8 @@ cost:
           use: True
           ratio: 0.2
         sparse_spheres:
-          exclude_self: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
-          exclude_others: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
+          exclude_self: []
+          exclude_others: []
 
 mppi:
   init_cov: 0.05

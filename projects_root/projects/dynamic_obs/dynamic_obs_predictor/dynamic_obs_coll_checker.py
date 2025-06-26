@@ -79,10 +79,16 @@ class DynamicObsCollPredictor:
         self.sparse_spheres = sparse_spheres # sparse spheres config
         
         self.n_own_spheres = self.n_own_spheres # n_own_spheres # number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
-        self.valid_own_spheres = np.array(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])))# torch.tensor(list(set(list(range(self.n_own_spheres))) - set(self.sparse_spheres['exclude_self'])), device=self.tensor_args.device)
+        
+        # Filter out invalid sphere indices that are outside the range of available spheres
+        valid_exclude_self = [idx for idx in self.sparse_spheres['exclude_self'] if 0 <= idx < self.n_own_spheres]
+        self.valid_own_spheres = np.array(list(set(list(range(self.n_own_spheres))) - set(valid_exclude_self)))
         
         self.n_obs = n_obs # number of valid obstacles (ignoring 4 spheres which are not valid due to negative radius)
-        self.valid_obs_spheres = np.array(list(set(list(range(self.n_obs))) - set(self.sparse_spheres['exclude_others'])))# torch.tensor(list(set(list(range(self.n_obs))) - set(self.sparse_spheres['exclude_others'])), device=self.tensor_args.device)
+        
+        # Filter out invalid sphere indices that are outside the range of available obstacle spheres
+        valid_exclude_others = [idx for idx in self.sparse_spheres['exclude_others'] if 0 <= idx < self.n_obs]
+        self.valid_obs_spheres = np.array(list(set(list(range(self.n_obs))) - set(valid_exclude_others)))
         
         # Pre-compute index tensors for efficient indexing
         self.sampling_timesteps_tensor = torch.tensor(self.sampling_timesteps, device=self.tensor_args.device, dtype=torch.long)

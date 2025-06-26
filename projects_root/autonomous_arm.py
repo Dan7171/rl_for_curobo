@@ -67,7 +67,7 @@ def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orien
     
     return target
 
-class AutonomousFranka:
+class AutonomousArm:
     
     instance_counter = 0
     def __init__(self,
@@ -80,23 +80,33 @@ class AutonomousFranka:
                 p_T_R=np.array([0.5,0.0,0.5]), 
                 q_T_R=np.array([0, 1, 0, 0]), 
                 target_color=np.array([0.0,1.0,0.0]), 
-                target_size=0.05):
+                target_size=0.05,
+                n_coll_spheres:int=None,  # Total spheres (base + extra)
+                n_coll_spheres_valid:int=None  # Valid spheres (base only, no extra)
+                ):
         """
-        Spawns a franka robot in the scene andd setting the target for the robot to follow.
+        Spawns an arm robot in the scene and setting the target for the robot to follow.
         All notations will follow Drake. See: https://drake.mit.edu/doxygen_cxx/group__multibody__quantities.html#:~:text=Typeset-,Monogram,-Meaning%E1%B5%83
         https://drake.mit.edu/doxygen_cxx/group__multibody__notation__basics.html https://drake.mit.edu/doxygen_cxx/group__multibody__frames__and__bodies.html
         Args:
             world (_type_): simulator world instance.
+            robot_cfg: Robot configuration dictionary containing kinematics, collision, and other robot-specific settings
+            env_id: Environment ID for multi-environment setups
+            robot_id: Robot ID for multi-robot setups
             p_R: Position vector from Wo (W (World frame) origin (o)) to Ro (R's origin (robot's base frame)), expressed in the world frame W (implied).
             q_R: Frame R's (second R, representing robot's base frame) orientation (first R, representing rotation) in the world frame W  . Quaternion (w,x,y,z)
             p_T_R: Position vector from Wo (W (World frame) origin (o)) to To (target's origin), expressed in the robot frame R.
             q_T_R: Frame T's (representing target's base frame) orientation (R, representing rotation) in the robot frame . Quaternion (w,x,y,z)
+            target_color: RGB color for target visualization
+            target_size: Size of target visualization
+            n_coll_spheres: Total number of collision spheres (calculated from calculate_robot_sphere_count)
+            n_coll_spheres_valid: Number of valid collision spheres (base spheres only, excluding extra_collision_spheres)
 
         """
         
 
         # simulator paths etc.
-        # self.instance_id = AutonomousFranka.instance_counter
+        # self.instance_id = AutonomousArm.instance_counter
         self.env_id = env_id
         self.instance_id = robot_id
         self.world = world
@@ -104,9 +114,16 @@ class AutonomousFranka:
         self.robot_name = f'robot_{self.instance_id}'
         self.subroot_path = f'{self.world_root}/world_{self.robot_name}'
 
-        self.n_coll_spheres = 65 # num of self spheres which can be used for collision checking
-        self.valid_coll_spheres_idx = np.arange(self.n_coll_spheres - 4)
-        self.n_coll_spheres_valid = self.n_coll_spheres - 4 # Should be number of valid spheres of the robot (ignoring 4 spheres which are not valid due to negative radius)
+        # Robot configuration and collision sphere setup
+        self.robot_cfg = robot_cfg # the section under the key 'robot_cfg' in the robot config file (yml). https://curobo.org/tutorials/1_robot_configuration.html#tut-robot-configuration
+        
+        # Use provided sphere counts (calculated externally using calculate_robot_sphere_count)
+        if n_coll_spheres is None or n_coll_spheres_valid is None:
+            raise ValueError("n_coll_spheres and n_coll_spheres_valid must be provided. Use calculate_robot_sphere_count() to get these values.")
+        
+        self.n_coll_spheres = n_coll_spheres # Total num of collision spheres (base + extra)
+        self.n_coll_spheres_valid = n_coll_spheres_valid # Valid spheres (base spheres only, no extra)
+        self.valid_coll_spheres_idx = np.arange(self.n_coll_spheres_valid) # Indices of valid spheres
         
         # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
         self.p_R = p_R  
@@ -125,7 +142,6 @@ class AutonomousFranka:
         self.p_solverTarget = None # current target position of robot as set to the planner (solver). Not necessarily synced with (may be behind of) the target in the scene.
         self.q_solverTarget = None # current target orientation of robot as set to the planner (solver). Not necessarily synced with (may be behind of) the target in the scene.
 
-        self.robot_cfg = robot_cfg # the section under the key 'robot_cfg' in the robot config file (yml). https://curobo.org/tutorials/1_robot_configuration.html#tut-robot-configuration
         self.j_names = self.robot_cfg["kinematics"]["cspace"]["joint_names"] # joint names for the robot
         self.initial_joint_config = self.robot_cfg["kinematics"]["cspace"]["retract_config"] # initial ("/retract") joint configuration for the robot
         self.tensor_args = TensorDeviceType()
@@ -137,7 +153,7 @@ class AutonomousFranka:
         self.obs_viz = [] # for visualization of robot spheres
         self.obs_viz_obs_names = []
         self.obs_viz_prim_path = f'/obstacles/{self.robot_name}'
-        # AutonomousFranka.instance_counter += 1
+        # AutonomousArm.instance_counter += 1
     
     def get_num_of_sphers(self, valid_only:bool=True):
         return self.n_coll_spheres if not valid_only else self.n_coll_spheres_valid
@@ -437,11 +453,9 @@ class AutonomousFranka:
         js_state_new.jerk[:] = filter_coefficients.jerk * js_state_new.jerk + (1.0 - filter_coefficients.jerk) * js_state_prev.jerk
         return js_state_new
     
-    @abstractmethod
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
-        pass
+   
     
-class FrankaMpc(AutonomousFranka):
+class ArmMpc(AutonomousArm):
     def __init__(self, 
                 robot_cfg, 
                 world:World, 
@@ -456,21 +470,30 @@ class FrankaMpc(AutonomousFranka):
                 target_size=0.05, 
                 plot_costs:bool=False,
                 override_particle_file:str=None,
+                n_coll_spheres:int=None,  # Total spheres (base + extra)
+                n_coll_spheres_valid:int=None  # Valid spheres (base only, no extra)
                 ):
         """
-        Spawns a franka robot in the scene andd setting the target for the robot to follow.
+        Spawns an arm robot in the scene and setting the target for the robot to follow.
 
         Args:
-            world (_type_): _description_
-            robot_name (_type_): _description_
-            p_R (_type_): _description_
-            q_R (_type_): _description_
-            p_T (_type_): _description_
-            q_T_R (_type_): _description_
-            target_color (_type_): _description_
-            target_size (_type_): _description_
+            robot_cfg: Robot configuration dictionary containing kinematics, collision, and other robot-specific settings
+            world (_type_): Isaac Sim world instance
+            usd_help: USD helper for scene management
+            env_id: Environment ID for multi-environment setups
+            robot_id: Robot ID for multi-robot setups
+            p_R: Position of robot base in world frame
+            q_R: Quaternion orientation of robot base in world frame  
+            p_T_R: Target position relative to robot base frame
+            q_T_R: Target orientation relative to robot base frame
+            target_color: RGB color for target visualization
+            target_size: Size of target visualization
+            plot_costs: Whether to enable live cost plotting
+            override_particle_file: Path to MPC configuration file to override defaults
+            n_coll_spheres: Total number of collision spheres (calculated from calculate_robot_sphere_count)
+            n_coll_spheres_valid: Number of valid collision spheres (base spheres only, excluding extra_collision_spheres)
         """
-        super().__init__(robot_cfg, world,env_id, robot_id, p_R, q_R, p_T_R, q_T_R, target_color, target_size)
+        super().__init__(robot_cfg, world, env_id, robot_id, p_R, q_R, p_T_R, q_T_R, target_color, target_size, n_coll_spheres, n_coll_spheres_valid)
         # self.robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02  # Add safety margin (making collision spheres larger, you can see the difference if activeating the VISUALIZE_ROBOT_COL_SPHERES flag)
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
@@ -511,7 +534,7 @@ class FrankaMpc(AutonomousFranka):
             use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
             store_rollouts=True,  # Store trajectories for visualization
-            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.solver.html
+            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.html
             dynamic_obs_checker=None, # New
             override_particle_file=self.override_particle_file, # New
             plot_costs=self.plot_costs # New
@@ -650,7 +673,7 @@ class FrankaMpc(AutonomousFranka):
                     raise TypeError(f"Unsupported value type at key '{k}': {type(v)}")
             return out
        
-        pi_mpc_means = self.get_policy_means() # (H x num of joints (7 in franka)) accelerations (each action is an acceleration vector)
+        pi_mpc_means = self.get_policy_means() # (H x num of joints) accelerations (each action is an acceleration vector)
 
         plan = {'joint_space':
                 {     
@@ -707,24 +730,6 @@ class FrankaMpc(AutonomousFranka):
             # express in world frame:
             for key in plan['task_space'].keys():
                 
-                # if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys() and 'q' not in plan['task_space'][key].keys():
-                #     pKey = plan['task_space'][key]['p']
-                #     pKey = pKey.cpu() 
-                #     pKey[...,:3] = pKey[...,:3] + self.p_R # # offset by robot origin to express in world frame (only position, radius is not affected)
-                #     plan['task_space'][key]['p'] = pKey
-            
-                # express in world frame:
-                # elif isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys() and 'q' in plan['task_space'][key].keys():
-                #     self_transform = [*list(self.p_R), *list(self.q_R)]
-                #     pKey = plan['task_space'][key]['p']
-                #     qKey = plan['task_space'][key]['q']
-                #     for i, p in enumerate(pKey[...,:]):
-                #         X_key_i_Robot = pKey[...,:][i].flatten().cpu().tolist() +  qKey[...,:][i].flatten().cpu().tolist()
-                #         X_key_i_world = torch.tensor(transform_pose_between_frames(X_key_i_Robot, self_transform)) 
-                #         pKey[...,:][i] = X_key_i_world[:3]
-                #         qKey[...,:][i] = X_key_i_world[3:]
-                #     plan['task_space'][key]['p'] = pKey
-                #     plan['task_space'][key]['q'] = qKey
                 
                 if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys():
                     
@@ -744,27 +749,7 @@ class FrankaMpc(AutonomousFranka):
                     plan['task_space'][key]['p'] = pKey
                     plan['task_space'][key]['q'] = qKey
 
-                    # transform_poses_batched
-                    # import itertools
-                    # index_ranges = [range(s) for s in pKey.shape[:-1]]
-    
-                    # for nd_idx in itertools.product(*index_ranges):
-                        
-                    #     if 'q' in plan['task_space'][key].keys():
-                    #         qKey = plan['task_space'][key]['q']
-                    #         qKey_i = qKey[nd_idx].flatten().cpu().tolist()
-                    #     else:
-                    #         qKey_i = [1,0,0,0]
-
-                    #     X_key_i_Robot = pKey[nd_idx].flatten().cpu().tolist() +  qKey_i
-                    #     X_key_i_world = torch.tensor(transform_pose_between_frames(X_key_i_Robot, self_transform)) 
-                    #     pKey[nd_idx] = X_key_i_world[:3]
-                    #     if 'q' in plan['task_space'][key].keys():
-                    #         qKey[nd_idx] = X_key_i_world[3:]
-                    
-                    # plan['task_space'][key]['p'] = pKey
-                    # if 'q' in plan['task_space'][key].keys():
-                    #     plan['task_space'][key]['q'] = qKey
+         
                 
             
             # take only the first n_steps
@@ -776,20 +761,7 @@ class FrankaMpc(AutonomousFranka):
         return plan 
         
        
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=False) -> DynamicObsCollPredictor:
-        n_particles = self.num_particles 
-        H = self.H # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
-        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
-                                                            None,
-                                                            H,
-                                                            n_particles,
-                                                            self.n_coll_spheres_valid,
-                                                            sum(obs_groups_nspheres),
-                                                            cost_weight,
-                                                            obs_groups_nspheres,
-                                                            manually_express_p_own_in_world_frame,
-                                                            torch.from_numpy(self.p_R))
-        return self.dynamic_obs_col_pred
+    
     
 
     def get_solver(self) -> MpcSolver:
@@ -819,7 +791,7 @@ class FrankaMpc(AutonomousFranka):
                 return instance.col_pred
         raise ValueError("No col_pred found in the rollout_fn")
 
-class FrankaCumotion(AutonomousFranka):
+class ArmCumotion(AutonomousArm):
     def __init__(self, 
                 # robot basic parameters
                 robot_cfg, 
@@ -845,14 +817,18 @@ class FrankaCumotion(AutonomousFranka):
                 interpolation_dt=0.05,
                 # Post trajectory optimization parameters
                 dilation_factor=0.5,
-                evaluate_interpolated_trajectory=True
+                evaluate_interpolated_trajectory=True,
+                # Collision sphere parameters
+                n_coll_spheres:int=None,  # Total spheres (base + extra)
+                n_coll_spheres_valid:int=None  # Valid spheres (base only, no extra)
                 ):
         """
-        Spawns a franka robot in the scene andd setting the target for the robot to follow.
+        Spawns an arm robot in the scene and setting the target for the robot to follow.
         
         Args: (FOR MORE INFO SEE: https://curobo.org/_api/curobo.wrap.reacher.trajopt.html)
+            robot_cfg: Robot configuration dictionary containing kinematics, collision, and other robot-specific settings
             world (_type_): World of the simulation
-            robot_name (str): 
+            usd_help: USD helper for scene management
             p_R: initial position of the robot
             q_R: initial orientation of the robot
             p_T: initial position of the target
@@ -872,8 +848,10 @@ class FrankaCumotion(AutonomousFranka):
             enable_graph_planner (bool, optional): _description_. Defaults to False.
             dilation_factor(float, optional): Slowing down the final plan by this factor. Probably for debugging. Belongs to the "re-timing" process after trajectory optimization. See comment in init_plan_config(). See https://curobo.org/_api/curobo.wrap.reacher.motion_gen.html#curobo.wrap.reacher.motion_gen.MotionGenResult.retime_trajectory
             evaluate_interpolated_trajectory(bool, optional): I set it to False for the dynamic obstacles. Original docs: evaluate_interpolated_trajectory – Evaluate interpolated trajectory after optimization. Default of True is recommended to ensure the optimized trajectory is not passing through very thin obstacles.
+            n_coll_spheres: Total number of collision spheres (calculated from calculate_robot_sphere_count)
+            n_coll_spheres_valid: Number of valid collision spheres (base spheres only, excluding extra_collision_spheres)
         """
-        super().__init__(robot_cfg, world, p_R, q_R, p_T, q_T, target_color, target_size)
+        super().__init__(robot_cfg, world, env_id=0, robot_id=0, p_R=p_R, q_R=q_R, p_T_R=p_T, q_T_R=q_T, target_color=target_color, target_size=target_size, n_coll_spheres=n_coll_spheres, n_coll_spheres_valid=n_coll_spheres_valid)
 
         self.solver = None # motion generator
         self.past_cmd:JointState = None # last commanded joint state
@@ -1169,19 +1147,85 @@ class FrankaCumotion(AutonomousFranka):
             self.cmd_joint_state.jerk[:] = qdd_des * 0.0
         return self.cmd_joint_state.clone()
         
-    def init_col_predictor(self,obs_groups_nspheres:list[int]=[], cost_weight:float=100, manually_express_p_own_in_world_frame:bool=True) -> DynamicObsCollPredictor:
-        n_particles = self.num_trajopt_seeds 
-        H = self.trajopt_tsteps # self.trajopt_tsteps - 1 if self.dilation_factor == 1.0 else self.trajopt_tsteps
-        self.dynamic_obs_col_pred = DynamicObsCollPredictor(self.tensor_args,
-                                                            None,
-                                                            H,
-                                                            n_particles,
-                                                            self.n_coll_spheres_valid,
-                                                            sum(obs_groups_nspheres),
-                                                            cost_weight,
-                                                            obs_groups_nspheres,
-                                                            manually_express_p_own_in_world_frame,
-                                                            torch.from_numpy(self.p_R))
-        return self.dynamic_obs_col_pred
     
     
+    
+"""
+USAGE EXAMPLE - How to update existing code to use ArmMpc instead of FrankaMpc:
+
+OLD CODE (Franka-specific):
+    robots:List[FrankaMpc] = []
+    for i in range(n_robots):
+        robots.append(FrankaMpc(
+            robot_cfgs[i], 
+            my_world, 
+            usd_help, 
+            env_id=0,
+            robot_id=i,
+            p_R=X_Robots[i][:3],
+            q_R=X_Robots[i][3:], 
+            p_T_R=X_target_R[i][:3],
+            q_T_R=X_target_R[i][3:], 
+            target_color=target_colors[i],
+            plot_costs=plot_costs[i],
+            override_particle_file=f"{mpc_cfg_overide_files_dir}/arm{i}.yml"
+        ))
+
+NEW CODE (Generic arm support):
+    # Calculate sphere counts for all robots BEFORE creating instances
+    robot_sphere_counts = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
+    robot_sphere_counts_valid = [calculate_robot_sphere_count_valid(robot_cfg) for robot_cfg in robot_cfgs]
+    
+    robots:List[ArmMpc] = []
+    for i in range(n_robots):
+        robots.append(ArmMpc(
+            robot_cfgs[i], 
+            my_world, 
+            usd_help, 
+            env_id=0,
+            robot_id=i,
+            p_R=X_Robots[i][:3],
+            q_R=X_Robots[i][3:], 
+            p_T_R=X_target_R[i][:3],
+            q_T_R=X_target_R[i][3:], 
+            target_color=target_colors[i],
+            plot_costs=plot_costs[i],
+            override_particle_file=f"{mpc_cfg_overide_files_dir}/arm{i}.yml",
+            n_coll_spheres=robot_sphere_counts[i],  # Total spheres (base + extra)
+            n_coll_spheres_valid=robot_sphere_counts_valid[i]  # Valid spheres (base only)
+        ))
+
+HELPER FUNCTIONS NEEDED:
+    def calculate_robot_sphere_count_valid(robot_cfg) -> int:
+        \"\"\"Calculate number of valid collision spheres (base spheres only, no extra)\"\"\"
+        collision_spheres_file = robot_cfg["kinematics"]["collision_spheres"]
+        collision_spheres_path = join_path(get_robot_configs_path(), collision_spheres_file)
+        collision_spheres_cfg = load_yaml(collision_spheres_path)
+        
+        sphere_count = 0
+        if "collision_spheres" in collision_spheres_cfg:
+            for link_name, spheres in collision_spheres_cfg["collision_spheres"].items():
+                sphere_count += len(spheres)
+        
+        return sphere_count  # Return only base spheres, no extra
+
+BENEFITS:
+✅ Supports any arm robot model (Franka, UR, Kinova, etc.)
+✅ No hardcoded sphere counts or robot-specific values  
+✅ Dynamic calculation from config files
+✅ Single source of truth for robot parameters
+✅ Clean separation between configuration and runtime
+✅ Backward compatible with existing MPC configurations
+"""
+
+# Backward compatibility aliases - allows existing code to continue working
+FrankaMpc = ArmMpc
+FrankaCumotion = ArmCumotion
+AutonomousFranka = AutonomousArm
+
+# Also export the new class names for future use
+__all__ = [
+    'AutonomousArm', 'ArmMpc', 'ArmCumotion',  # New generalized classes
+    'FrankaMpc', 'FrankaCumotion', 'AutonomousFranka',  # Backward compatibility aliases
+    'spawn_target'
+]

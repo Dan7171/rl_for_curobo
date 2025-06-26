@@ -30,7 +30,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     # Third party modules
     import time
     import signal
-    from typing import List, Optional
+    from typing import List, Optional, Tuple
     import torch
     import os
     import numpy as np
@@ -44,7 +44,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     # Our modules
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
     from projects_root.utils.transforms import transform_poses_batched
-    from projects_root.autonomous_franka import FrankaMpc
+    from projects_root.autonomous_arm import ArmMpc
     from projects_root.utils.draw import draw_points
     from projects_root.utils.colors import npColors
     # CuRobo modules
@@ -56,7 +56,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from curobo.util_file import  load_yaml
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
-    from projects_root.autonomous_franka import AutonomousFranka
+    from projects_root.autonomous_arm import AutonomousArm
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
     a = torch.zeros(4, device="cuda:0")
 
@@ -79,16 +79,24 @@ def calculate_robot_sphere_count(robot_cfg):
     Returns:
         int: Total number of collision spheres (base + extra)
     """
-    # Get the collision spheres file path
-    collision_spheres_file = robot_cfg["kinematics"]["collision_spheres"]
+    # Get collision spheres configuration
+    collision_spheres = robot_cfg["kinematics"]["collision_spheres"]
     
-    # Load the collision spheres configuration
-    collision_spheres_cfg = load_yaml(os.path.join(robots_collision_spheres_configs_parent_dir, collision_spheres_file))
+    # Handle two cases:
+    # 1. collision_spheres is a string path to external file (e.g., Franka)
+    # 2. collision_spheres is inline dictionary (e.g., UR5e)
+    if isinstance(collision_spheres, str):
+        # External file case  
+        collision_spheres_cfg = load_yaml(os.path.join(robots_collision_spheres_configs_parent_dir, collision_spheres))
+        collision_spheres_dict = collision_spheres_cfg["collision_spheres"]
+    else:
+        # Inline dictionary case
+        collision_spheres_dict = collision_spheres
     
     # Count spheres by counting entries in each link's sphere list
     sphere_count = 0
-    if "collision_spheres" in collision_spheres_cfg:
-        for link_name, spheres in collision_spheres_cfg["collision_spheres"].items():
+    for link_name, spheres in collision_spheres_dict.items():
+        if isinstance(spheres, list):
             sphere_count += len(spheres)
     
     # Add extra collision spheres
@@ -97,8 +105,49 @@ def calculate_robot_sphere_count(robot_cfg):
         sphere_count += count
         
     return sphere_count
+
+def calculate_robot_sphere_count_valid(robot_cfg) -> int:
+    """Calculate number of valid collision spheres (base spheres only, no extra)"""
+    collision_spheres = robot_cfg["kinematics"]["collision_spheres"]
     
+    # Handle two cases:
+    # 1. collision_spheres is a string path to external file (e.g., Franka)
+    # 2. collision_spheres is inline dictionary (e.g., UR5e)
+    if isinstance(collision_spheres, str):
+        # External file case
+        collision_spheres_path = os.path.join(robots_collision_spheres_configs_parent_dir, collision_spheres)
+        collision_spheres_cfg = load_yaml(collision_spheres_path)
+        collision_spheres_dict = collision_spheres_cfg["collision_spheres"]
+    else:
+        # Inline dictionary case
+        collision_spheres_dict = collision_spheres
     
+    sphere_count = 0
+    for link_name, spheres in collision_spheres_dict.items():
+        if isinstance(spheres, list):
+            sphere_count += len(spheres)
+    
+    return sphere_count  # Return only base spheres, no extra
+
+def parse_meta_configs(meta_config_paths: List[str]) -> Tuple[List[str], List[str]]:
+    """
+    Parse meta-configuration files to extract robot and MPC config paths.
+    
+    Args:
+        meta_config_paths: List of paths to meta-config YAML files
+        
+    Returns:
+        Tuple of (robot_config_paths, mpc_config_paths)
+    """
+    robot_config_paths = []
+    mpc_config_paths = []
+    
+    for meta_path in meta_config_paths:
+        meta_config = load_yaml(meta_path)
+        robot_config_paths.append(meta_config["robot"])
+        mpc_config_paths.append(meta_config["mpc"])
+        
+    return robot_config_paths, mpc_config_paths
 
 def basic_setup(n_robots:int):
     """
@@ -115,7 +164,7 @@ def basic_setup(n_robots:int):
     
     match(n_robots):
         case 1:
-            X_robot = [-0.5,0,0,1,0,0,0] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
+            X_robot = [[-0.5,0,0,1,0,0,0]] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
             col_pred_with = [[]]
             plot_costs = [False]
             target_colors = [npColors.red]
@@ -144,7 +193,23 @@ def basic_setup(n_robots:int):
     X_target_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
     return X_robot_np, col_pred_with, X_target_R, plot_costs, target_colors
 
-def main(n_robots):
+def main(meta_config_paths: List[str]):
+    """
+    Main function for multi-robot MPC simulation with heterogeneous robot models.
+    
+    Args:
+        meta_config_paths: List of paths to meta-configuration files, each specifying
+                          robot and MPC config paths for one robot
+    """
+    n_robots = len(meta_config_paths)
+    print(f"Starting multi-robot simulation with {n_robots} robots")
+    
+    # Parse meta-configurations to get robot and MPC config paths
+    robot_config_paths, mpc_config_paths = parse_meta_configs(meta_config_paths)
+    
+    # Print robot configuration summary
+    for i, (robot_path, mpc_path) in enumerate(zip(robot_config_paths, mpc_config_paths)):
+        print(f"Robot {i}: robot_config='{robot_path}', mpc_config='{mpc_path}'")
     
     # isaac sim and open usd setup
     usd_help = UsdHelper()  # Helper for USD stage operations
@@ -171,8 +236,6 @@ def main(n_robots):
     runtime_topics = get_topics()
     env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
     
-    # FIX: Pre-populate robot context for clean dynamic obstacle costs
-    # We'll get actual sphere counts after robots are created and initialized
     
     # curobo joints
     robots_cu_js: List[Optional[JointState]] = [None for _ in range(n_robots)]# for visualization of robot spheres
@@ -183,14 +246,19 @@ def main(n_robots):
     # collision world model (curobo world model for each robot. Empty for now, will be initialized later)
     robot_world_models = [WorldConfig() for _ in range(n_robots)]
     # curobo robot configs for each robot
-    robot_cfgs = [load_yaml(f"{robots_cfgs_dir}/arm{i}.yml")["robot_cfg"] for i in range(n_robots)]
+    robot_cfgs = [load_yaml(robot_path)["robot_cfg"] for robot_path in robot_config_paths]
     # collision checker (curobo collision checker for each robot, empty for now, will be initialized later)
-    ccheckers = [] 
+    ccheckers = []
     
-    # FrankaMpc instances for each robot (# TODO: make general robot mpc class (and not only franka))
-    robots:List[FrankaMpc] = []
+    # Calculate sphere counts for all robots BEFORE creating instances
+    robot_sphere_counts = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
+    robot_sphere_counts_valid = [calculate_robot_sphere_count_valid(robot_cfg) for robot_cfg in robot_cfgs]
+
+    
+    # ArmMpc instances for each robot (supports heterogeneous robot models)
+    robots:List[ArmMpc] = []
     for i in range(n_robots):
-        robots.append(FrankaMpc(
+        robots.append(ArmMpc(
             robot_cfgs[i], 
             my_world, 
             usd_help, 
@@ -198,11 +266,13 @@ def main(n_robots):
             robot_id=i,
             p_R=X_Robots[i][:3],
             q_R=X_Robots[i][3:], 
-            p_T_R=X_target_R[i][:3],
-            q_T_R=X_target_R[i][3:], 
+            p_T_R=np.array(X_target_R[i][:3]),
+            q_T_R=np.array(X_target_R[i][3:]), 
             target_color=target_colors[i],
             plot_costs=plot_costs[i],
-            override_particle_file=f'{mpc_cfg_overide_files_dir}/arm{i}.yml'
+            override_particle_file=mpc_config_paths[i],  # Use individual MPC config per robot
+            n_coll_spheres=robot_sphere_counts[i],  # Total spheres (base + extra)
+            n_coll_spheres_valid=robot_sphere_counts_valid[i]  # Valid spheres (base only)
             )
         )
     
@@ -223,29 +293,36 @@ def main(n_robots):
     
     
     
-    # FIRST: Pre-populate robot context with estimated sphere counts BEFORE init_solver()
-    # Since n_own_spheres was removed from config, we'll use a reasonable default
-    # and update it after robots are initialized
-    robot_sphere_counts = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
-    print(f"Using sphere count estimate: {robot_sphere_counts[0]} spheres per robot")
+    # FIRST: Pre-populate robot context with sphere counts BEFORE init_solver()
+    # robot_sphere_counts already calculated above when creating robots
+    
     
     # Populate robot context BEFORE solver initialization
     for i in range(n_robots):
-        n_obstacle_spheres = sum(robot_sphere_counts[j] for j in col_pred_with[i])
         # Get MPC config values for this specific robot
-        mpc_override_file = f'{mpc_cfg_overide_files_dir}/arm{i}.yml'
-        mpc_config = load_yaml(mpc_override_file)
+        mpc_config = load_yaml(mpc_config_paths[i])
         
-        # Populate robot context directly in env_topics[i]
-        env_topics[i]["env_id"] = 0
-        env_topics[i]["robot_id"] = i
-        env_topics[i]["robot_pose"] = X_Robots[i].tolist()
-        env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
-        env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
-        env_topics[i]["horizon"] = mpc_config["model"]["horizon"]
-        env_topics[i]["n_rollouts"] = mpc_config["mppi"]["num_particles"]
-        env_topics[i]["col_pred_with"] = col_pred_with[i]
-        print(f"Pre-populated robot context for robot {i}: n_obstacle_spheres={n_obstacle_spheres}, n_own_spheres={robot_sphere_counts[i]}, horizon={mpc_config['model']['horizon']}, n_rollouts={mpc_config['mppi']['num_particles']}")
+        # Check if this robot has DynamicObsCost enabled
+        has_dynamic_obs_cost = (
+            "cost" in mpc_config and 
+            "custom" in mpc_config["cost"] and 
+            "arm_base" in mpc_config["cost"]["custom"] and 
+            "dynamic_obs_cost" in mpc_config["cost"]["custom"]["arm_base"]
+        )
+        
+        if has_dynamic_obs_cost:
+            n_obstacle_spheres = sum(robot_sphere_counts[j] for j in col_pred_with[i])
+            
+            # Populate robot context directly in env_topics[i]
+            env_topics[i]["env_id"] = 0
+            env_topics[i]["robot_id"] = i
+            env_topics[i]["robot_pose"] = X_Robots[i].tolist()
+            env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
+            env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
+            env_topics[i]["horizon"] = mpc_config["model"]["horizon"]
+            env_topics[i]["n_rollouts"] = mpc_config["mppi"]["num_particles"]
+            env_topics[i]["col_pred_with"] = col_pred_with[i]
+
 
     for i, robot in enumerate(robots):
         # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
@@ -276,13 +353,7 @@ def main(n_robots):
         n_config_spheres = robot_sphere_counts[i]
         
         if n_config_spheres != n_actual_spheres:
-            print(f"WARNING: Sphere count mismatch for robot {i}! Config={n_config_spheres}, Runtime={n_actual_spheres}")
-            validation_passed = False
-    
-    if validation_passed:
-        print("✓ Sphere count validation passed - using config-based calculations")
-    else:
-        print("⚠ Sphere count validation failed - check robot configurations") 
+            validation_passed = False 
 
         
     for i in range(len(env_obstacles)):
@@ -325,13 +396,7 @@ def main(n_robots):
         robots_as_obs_timer_start = time.time()
         if OBS_PREDICTION:         
             plans = [robots[i].get_plan(valid_spheres_only=False) for i in range(len(robots))]
-            # Check if any plans are None (only print warnings, not routine info)
-            for i, plan in enumerate(plans):
-                if plan is None:
-                    print(f"WARNING: Robot {i} returned None plan!")
-                elif 'task_space' not in plan or 'spheres' not in plan['task_space']:
-                    print(f"WARNING: Robot {i} plan missing task_space/spheres!")
-            # Store plans for each robot in the environment topics
+                        # Store plans for each robot in the environment topics
             for robot_idx in range(len(env_topics)):
                 env_topics[robot_idx]["plans"] = plans[robot_idx]
         
@@ -364,9 +429,7 @@ def main(n_robots):
                     else:
                         if p_spheresOthersH is not None:
                             col_pred.update(p_spheresOthersH)
-                else:
-                    if t_idx == 0:  # Only warn once at startup
-                        print(f"WARNING: Robot {i} has no collision predictor (col_pred is None)!")
+
                 robots_as_obs_timer += time.time() - robots_as_obs_timer_start
 
      
@@ -385,7 +448,6 @@ def main(n_robots):
             targets_update_timer_start = time.time()
             p_T, q_T = robots[i].target.get_world_pose() 
             if robots[i].set_new_target_for_solver(p_T, q_T):
-                print(f"robot {i} target changed!")
                 robots[i].update_solver_target()
             targets_update_timer += time.time() - targets_update_timer_start
 
@@ -465,10 +527,6 @@ def main(n_robots):
             visualizations_timer = 0
             robots_as_obs_timer = 0
             env_obstacles_timer = 0
-            # print("t = ", t_idx)
-            # ctrl_loop_freq = t_idx / (time.time() - ctrl_loop_start_time) 
-            # print(f"Control loop frequency [HZ] = {ctrl_loop_freq}")
- 
        
 
 
@@ -477,10 +535,12 @@ if __name__ == "__main__":
     if DEBUG_GPU_MEM:
         signal.signal(signal.SIGINT, handle_sigint_gpu_mem_debug) # register the signal handler for SIGINT (Ctrl+C) 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
-    n_robots = 3
-    if not isinstance(n_robots, int) and 0 < n_robots < 5:
-        n_robots = int(input("Enter the number of robots (1-4, default 1): "))
-    main(n_robots)
+    # Example: Heterogeneous multi-robot setup (Franka + UR10e)
+    meta_config_paths = [
+        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/ur10e_00.yml",
+        "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/meta_cfgs/ur10e_01.yml"
+    ]
+    main(meta_config_paths)
     simulation_app.close()
     
      
