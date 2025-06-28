@@ -622,7 +622,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Get arm link mapping from robot configuration or use defaults
         arm_link_mapping = self._get_arm_link_mapping(num_arms)
         
-
+        
         
         # Fill in data for available links
         link_poses = state.link_pose
