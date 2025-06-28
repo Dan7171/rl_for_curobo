@@ -62,10 +62,10 @@ cost:
   stop_cfg:
     weight: 100.0
     max_nlimit: 0.25
-  
-    custom:  
-      published_info: # new
-        spheres_to_exclude_in_sparse_mode: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
+
+  custom:  
+    published_info: # new
+      spheres_to_exclude_in_sparse_mode: [0,1,4,5,61,62,63,64,36,37,40,41,43,46,48,52,55,58,60]
 
     arm_base:
       dynamic_obs_cost:

@@ -27,16 +27,22 @@ robots_collision_spheres_configs_parent_dir = "curobo/src/curobo/content/configs
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
     
-    # Third party modules
+    # CRITICAL: Isaac Sim must be imported FIRST before any other modules
+    try:
+        import isaacsim
+    except ImportError:
+        pass
+    
+    from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
+    simulation_app = init_app() # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
+    
+    # Third party modules (moved after Isaac Sim initialization)
     import time
     import signal
     from typing import List, Optional, Tuple
     import torch
     import os
     import numpy as np
-    # Initialize isaacsim app and load extensions
-    from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
-    simulation_app = init_app() # must happen before importing other isaac sim modules, or any other module which imports isaac sim modules.
     from projects_root.utils.helper import add_extensions # available only after app initiation
     add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     # Omniverse and IsaacSim modules
