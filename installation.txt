@@ -83,7 +83,9 @@ PART 4 - SETUP CUROBO ENVIRONMENT:
 # specifically "library installation" part: https://curobo.org/get_started/1_install_instructions.html#:~:text=git%2Dlfs).-,Library%20Installation,-%C2%B6
 go to the project directory:
     cd /home/%your username%/%project repo dir%/curobo (see above)
-activate conda env (if not already activated):
+# If you followed isaac sim part above, use the conda env we made earlier. 
+# Else, just make a new conda env (conda create -n %your env name%) 
+activate your conda env (if not already activated):
     conda activate %your env name%
 install curobo packes to your condna env:
     pip install pybind11 ninja
@@ -107,6 +109,58 @@ then test curobo with isaacsim:
 
     # then run an example including isaac sim (you should see gui and reaching target):
     python curobo/examples/isaac_sim/mpc_example.py
+
+PART 5 - ROS2
+# sources: 
+# isaacsim ros installation:
+https://docs.isaacsim.omniverse.nvidia.com/5.0.0/installation/install_ros.html
+# ros jazzy (I used ubuntu 24.04 so its recommended to use jazzy, but other distros should work too):
+https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html
+
+a. Install ros2 as specified(depending on your isaacsim & ubuntu versions versions):at 
+    https://docs.isaacsim.omniverse.nvidia.com/5.0.0/installation/install_ros.html 
+    # I have ubuntu 24.04 so I installed jazzy. Note: Verify python version of conda env supports the ros disto...
+
+b. build isaac ros workspace: 
+
+sources:
+    https://github.com/isaac-sim/IsaacSim-ros_workspaces?tab=readme-ov-file
+    https://docs.isaacsim.omniverse.nvidia.com/5.0.0/installation/install_ros.html#setting-up-workspaces
+
+first try installing based on docs (# change jazzy to humle if you are using humble)
+    # enter your env:
+        conda activate %your env name%
+    # clone this:
+        git clone https://github.com/isaac-sim/IsaacSim-ros_workspaces
+    run as in instructions:
+        # For rosdep install command
+        sudo apt install python3-rosdep build-essential
+        # For colcon build command
+        sudo apt install python3-colcon-common-extensions
+        # source /opt/ros/jazzy/setup.bash should already be sourced if used activate.d in conda env (see tips)
+        cd jazzy_ws
+        git submodule update --init --recursive # If using docker, perform this step outside the container and relaunch the container
+        rosdep install -i --from-path src --rosdistro jazzy -y
+
+# troubleshoot for docs installation (worked for me) :
+conda activate %your env name%
+if having ssl errors run:
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+then run:
+    rm -rf build/ install/ log/
+    source /opt/ros/jazzy/setup.bash
+    rosdep install --from-paths src --ignore-src --rosdistro=jazzy -y  
+    colcon build
+    rosdep update
+    pip install catkin_pkg empy lark
+    source install/local_setup.bash # will probably need to add to conda env activate.d 
+to verify everything is set properly, run:
+    
+
+
+
+
+
 
 
 # GENERAL TIPS:
