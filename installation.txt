@@ -107,7 +107,7 @@ then test curobo with isaacsim:
 
     # then run an example including isaac sim (you should see gui and reaching target):
     python curobo/examples/isaac_sim/mpc_example.py
-
+ 
 
     
 
