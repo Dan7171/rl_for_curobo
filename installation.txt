@@ -107,7 +107,25 @@ then test curobo with isaacsim:
 
     # then run an example including isaac sim (you should see gui and reaching target):
     python curobo/examples/isaac_sim/mpc_example.py
- 
+
+
+# GENERAL TIPS:
+pro tip 1:
+    replace the manual call (every time you start the conda env) to:
+        source %isaac sim installation dir%/isaacsim/_build/linux-x86_64/release/setup_conda_env.sh
+    
+    by adding an activate.d to your conda file that does that for you automatically.
+    steps:
+        find your codna env path:
+            normally it's: /home/%your user name%/anaconda3/envs/%your env name%
+        cd to it 
+            cd /home/%your user name%/anaconda3/envs/%your env name% 
+        run next command to make the activate.d dir and file in it:        
+            touch -p /etc/conda/activate.d/isaac_sim_setup.sh
+        copy next 2 lines to isaac_sim_setup.sh:
+            #!/bin/bash
+            source %isaac sim installation dir%/isaacsim/_build/linux-x86_64/release/setup_conda_env.sh
+        
 
     
 
