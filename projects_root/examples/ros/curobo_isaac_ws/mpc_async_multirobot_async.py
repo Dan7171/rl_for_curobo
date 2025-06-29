@@ -65,6 +65,13 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.autonomous_arm import AutonomousArm
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
     a = torch.zeros(4, device="cuda:0")
+    import json, threading, subprocess, sys
+    import omni.graph.core as og
+    from projects_root.examples.ros.curobo_isaac_ws.curobo_multirobot_graph import (
+        build_plan_publish_graph,
+        push_plan,
+        fetch_plan,
+    )
 
 
 # GPU memory debugging function removed for production
@@ -256,6 +263,45 @@ def main(meta_config_paths: List[str]):
             )
         )
     
+    # ------------------------------------------------------------
+    # Thread per robot for asynchronous planning
+    # ------------------------------------------------------------
+    class RobotController(threading.Thread):
+        def __init__(self, rid, arm, col_pred_with, tensor_args, period):
+            super().__init__(daemon=True)
+            self.rid = rid
+            self.arm = arm
+            self.col_pred_with = col_pred_with
+            self.tensor_args = tensor_args
+            self.period = period
+            self._stop = False
+        def stop(self):
+            self._stop = True
+        def run(self):
+            next_t = time.time()
+            while not self._stop and simulation_app.is_running():
+                # 1. get other plans
+                plans = []
+                for j in self.col_pred_with:
+                    raw = fetch_plan(src_id=j, dst_id=self.rid)
+                    if raw:
+                        try:
+                            plans.append(json.loads(raw))
+                        except Exception:
+                            pass
+                # 2. update + plan
+                if self.arm.use_col_pred and plans:
+                    self.arm.update(plans, self.col_pred_with, 0, self.tensor_args, self.rid)
+                else:
+                    self.arm.update()
+                action = self.arm.plan(max_attempts=1)
+                self.arm.command(action, num_times=1)
+                # 3. publish plan
+                push_plan(self.rid, json.dumps(self.arm.get_plan(valid_spheres_only=False)))
+                # sleep
+                next_t += self.period
+                time.sleep(max(0.0, next_t - time.time()))
+
     # ENVIRONMENT OBSTACLES - INITIALIZATION
     col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
     env_obstacles = [] # list of obstacles in the world
@@ -325,57 +371,34 @@ def main(meta_config_paths: List[str]):
         # Get initialized collision checker of robot
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
-        for j in range(len(env_obstacles)):
-            env_obstacles[j].register_ccheckers([checker])
-    # for i in range(len(env_obstacles)):
-    #     env_obstacles[i].register_ccheckers(ccheckers)
+        
 
+    for i in range(len(env_obstacles)):
+        env_obstacles[i].register_ccheckers(ccheckers)
      
-    # main loop
-    t_idx = 0
-    plans = [None for _ in range(len(robots))]
-    while simulation_app.is_running():
-        # empty list for draw_points() inputs
-        point_visualzer_inputs = []
-        # update simulation
-        my_world.step(render=True)       
-        
-        # TODO: required ros modification: we should open a topic for 
-        # each obstacle's pose/all obstacles' poses and update it only if the obstalce has changed its pose
-        # the collision chekerts should subscribe to the topic and update their own pose accordingly
-        # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
-        # for i in range(len(env_obstacles)): 
-        #     env_obstacles[i].update_registered_ccheckers()
-            
-        # aggregate plans for all robots (tbd: async)
-        
-        for i in range(len(robots)):
+    # ------------------------------------------------------------
+    #  Build / reuse ROS plan graph and launch planner threads
+    # ------------------------------------------------------------
+    graph_path = "/ROS_MultiRobot"
+    if og.get_graph_by_path(graph_path) is None:
+        build_plan_publish_graph(list(range(n_robots)), col_pred_with, graph_path)
 
-            if OBS_PREDICTION:         
-                plans[i] = robots[i].get_plan(valid_spheres_only=False)
-                if VISUALIZE_PLANS_AS_DOTS:
-                    point_visualzer_inputs.append({'points': plans[i]['task_space']['spheres']['p'][:robots[i].H].to(tensor_args.device), 'color': 'green'})
-                
-            if robots[i].use_col_pred:
-                
-                robots[i].update(plans, col_pred_with[i], t_idx, tensor_args, i)
-            else:
-                robots[i].update()
-            action = robots[i].plan(max_attempts=2)
-            robots[i].command(action, num_times=1)
-            
-            # post-step visualization        
-            if VISUALIZE_MPC_ROLLOUTS:
-                point_visualzer_inputs.append({'points': robots[i].get_rollouts_in_world_frame(), 'color': 'green'})
-            if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-                robots[i].visualize_robot_as_spheres(robots[i].curobo_format_joints)
+    controllers = [RobotController(i, robots[i], col_pred_with[i], tensor_args, MPC_DT)
+                   for i in range(n_robots)]
+    for c in controllers:
+        c.start()
 
-        if len(point_visualzer_inputs):
-            draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")()
-        t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
-        
-        
-       
+    # ----------- Physics / render loop (no per-robot planning) ------------
+    try:
+        while simulation_app.is_running():
+            my_world.step(render=True)
+            for obs in env_obstacles:
+                obs.update_registered_ccheckers()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for c in controllers:
+            c.stop(); c.join()
 
 def resolve_meta_config_path(robot_model:str) -> str:
     """
@@ -389,7 +412,6 @@ if __name__ == "__main__":
     if DEBUG_GPU_MEM:
         # GPU memory debugging signal handler removed for production 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
-    
     
     input_args = ['franka', 'ur5e', 'franka']
     main([resolve_meta_config_path(robot_model) for robot_model in input_args])

@@ -6,7 +6,7 @@ This document outlines the structure and organization of the Isaac Sim Franka Pa
 
 ```
 arm_isaac_ws/
-├── isaac_robot_working_movable.py          # Main Isaac Sim robot node
+├── isaac_robot_graph.py          # Main Isaac Sim robot node
 ├── robot_command_sender.py                 # ROS2 to Isaac Sim bridge
 ├── launch_complete_system.sh               # System launcher script
 ├── README.md                               # Main documentation
@@ -31,7 +31,7 @@ arm_isaac_ws/
 
 ### Core Components
 
-1. **Isaac Sim Node** (`isaac_robot_working_movable.py`)
+1. **Isaac Sim Node** (`isaac_robot_graph.py`)
    - Loads Franka Panda robot in Isaac Sim
    - Creates ROS2 action graph for joint state publishing
    - Processes joint position commands from file

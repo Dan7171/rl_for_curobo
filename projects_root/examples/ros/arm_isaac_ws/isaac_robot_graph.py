@@ -133,16 +133,26 @@ class RobotControlNode:
                     ("rosContext", "isaacsim.ros2.bridge.ROS2Context"),
                     ("publishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
                     ("subscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+                    # New: publish /clock so external ROS 2 nodes can use sim-time
+                    ("publishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
                 ],
                 keys.CONNECT: [
                     ("OnTick.outputs:tick", "articulationController.inputs:execIn"),
                     ("OnTick.outputs:tick", "publishJointState.inputs:execIn"),
                     ("OnTick.outputs:tick", "subscribeJointState.inputs:execIn"),
+                    # Exec connection for clock publisher
+                    ("OnTick.outputs:tick", "publishClock.inputs:execIn"),
                     ("rosContext.outputs:context", "publishJointState.inputs:context"),
                     ("rosContext.outputs:context", "subscribeJointState.inputs:context"),
+                    ("rosContext.outputs:context", "publishClock.inputs:context"),
                     ("subscribeJointState.outputs:positionCommand", "articulationController.inputs:positionCommand"),
                     ("subscribeJointState.outputs:velocityCommand", "articulationController.inputs:velocityCommand"),
                     ("subscribeJointState.outputs:effortCommand", "articulationController.inputs:effortCommand"),
+                    # Allow partial joint commands by passing explicit indices list
+                    ("subscribeJointState.outputs:jointNames", "articulationController.inputs:jointNames"),
+                    # Provide simulation time directly from OnTick
+                    ("OnTick.outputs:time", "publishClock.inputs:timeStamp"),
+                    ("OnTick.outputs:time", "publishJointState.inputs:timeStamp"),
                 ],
                 keys.SET_VALUES: [
                     ("articulationController.inputs:robotPath", ROBOT_PRIM_PATH),
@@ -151,6 +161,8 @@ class RobotControlNode:
                     ("publishJointState.inputs:nodeNamespace", "robot"),
                     ("subscribeJointState.inputs:topicName", "joint_command"),
                     ("subscribeJointState.inputs:nodeNamespace", "robot"),
+                    # Configure clock publisher
+                    ("publishClock.inputs:topicName", "clock"),
                 ],
             },
         )

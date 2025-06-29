@@ -63,7 +63,7 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 start_isaac_sim() {
     echo "🤖 Starting Isaac Sim robot node..."
     cd "$SCRIPT_DIR"
-    $ISAAC_SIM_PATH/python.sh isaac_robot_working_movable.py &
+    $ISAAC_SIM_PATH/python.sh isaac_robot_graph.py &
     ISAAC_PID=$!
     echo "Isaac Sim PID: $ISAAC_PID"
 }

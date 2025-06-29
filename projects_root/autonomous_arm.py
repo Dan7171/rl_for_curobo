@@ -850,6 +850,8 @@ class ArmMpc(AutonomousArm):
             # Initialize collision predictor on first iteration
             # Set radii for each robot that this robot collides with
             for j in col_pred_with:
+                if plans[j] is None:
+                    continue
                 rad_spheres_robotj = plans[j]['task_space']['spheres']['r'][0].to(tensor_args.device)
                 col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
             
@@ -858,6 +860,8 @@ class ArmMpc(AutonomousArm):
         else:
             # Update positions for each robot that this robot collides with
             for j in col_pred_with:
+                if plans[j] is None:
+                    continue
                 plan_robot_j = plans[j]['task_space']['spheres'] 
                 plan_robot_j_horizon = plan_robot_j['p'][:self.H].to(tensor_args.device)
                 col_pred.update_robot_spheres(j, plan_robot_j_horizon)

@@ -23,7 +23,13 @@ A complete Isaac Sim + ROS2 integration for real-time Franka Panda robot joint c
 ISAAC_PY=/home/dan/isaacsim500/isaacsim/_build/linux-x86_64/release/python.sh # set it to isaac sim dir python.sh file
 cd projects_root/examples/ros/arm_isaac_ws
 source /opt/ros/jazzy/setup.bash
-$ISAAC_PY isaac_robot_working_movable.py 
+$ISAAC_PY isaac_robot_graph.py 
+# or:
+source /opt/ros/jazzy/setup.bash
+conda activate isaac-sim 
+python ~/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/isaac_robot_working_movable.py 
+
+
 ```
 ***HEALTH CHECK***
 ```bash
@@ -111,6 +117,18 @@ ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{name:["p
 # publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['panda_joint1'], position=[], velocity=[0.5], effort=[])
 
 ```
+***TOOL KIT!***
+```bash
+# to get the format of a message:
+1. 
+ros 2 interface show %message-type%
+# example - for the joint stage messaging:
+ros2 interface show sensor_msgs/msg/JointState # see https://docs.ros.org/en/noetic/api/sensor_msgs/html/msg/JointState.html
+2. should be useful: 
+https://www.roboticsunveiled.com/ros2-joint-state-publisher-and-robot-state-publisher/
+
+
+```
 
 
 2. **OPTIONAL: Start ROS2 Robot Command Bridge** (separate terminal):
@@ -143,7 +161,7 @@ ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{velocity
 There are **two** equivalent ways to drive the Panda arm.  Choose the one that best fits your Python / ROS 2 environment.
 
 ### 1. Direct ROS 2 control (preferred – no extra helper script)
-`isaac_robot_working_movable.py` already contains an OmniGraph `ROS2SubscribeJointState` node wired to the topic `/robot/joint_command`.  When you publish a `sensor_msgs/JointState` message on that topic the robot moves instantly inside Isaac Sim.
+`isaac_robot_graph.py` already contains an OmniGraph `ROS2SubscribeJointState` node wired to the topic `/robot/joint_command`.  When you publish a `sensor_msgs/JointState` message on that topic the robot moves instantly inside Isaac Sim.
 
 Example (one‐liner/home pose):
 ```bash
@@ -185,8 +203,24 @@ Behind the scenes the script:
 | Direction  | Topic                            | When it is used |
 |------------|----------------------------------|-----------------|
 | Publish ⇢ | `/joint_states`                   | Always (live feedback from Isaac Sim) |
+| Publish ⇢ | `/clock`                          | If you enabled sim-time (default now) |
 | Subscribe ⇠ | `/robot/joint_command`           | Direct control path |
 | Subscribe ⇠ | `/robot/joint_positions`         | File-bridge path via `robot_command_sender.py` |
+
+## 🕒 Using simulation time in your ROS 2 nodes
+
+Isaac Sim now publishes `/clock` every physics tick.  To make any ROS 2 node use that simulated time:
+
+```bash
+ros2 param set /<your_node_name> use_sim_time true
+```
+
+When you run nodes with `rclpy` this can be done programmatically:
+```python
+self.use_sim_time = True   # before spin()
+```
+
+After that `rclcpp::Clock(RCL_ROS_TIME)` (C++) or `self.get_clock()` (Python) will return Isaac-Sim time instead of wall-clock time.
 
 ## 🤖 Franka Panda Joints
 

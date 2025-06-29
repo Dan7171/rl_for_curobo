@@ -1,0 +1,76 @@
+# Dynamic Scene Obstacles Configuration
+# For use with the Dynamic Scene Manager
+
+# Central bin configuration - robots will work around/inside this bin
+- name: bin_floor
+  curobo_type: cuboid
+  pose: [0.0, 0.0, 0.2, 1, 0, 0, 0]  # x y z qw qx qy qz
+  dims: [0.4, 0.4, 0.02]  # width, depth, thickness
+  color: [0.6, 0.4, 0.2, 0.3]  # Brown color with transparency (RGBA)
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: True
+  visual_material: null
+
+- name: bin_wall_front
+  curobo_type: cuboid
+  pose: [0.2, 0.0, 0.35, 1, 0, 0, 0]  # x + width/2, y, z + height/2
+  dims: [0.02, 0.4, 0.3]  # thickness, depth, height
+  color: [0.6, 0.4, 0.2, 0.3]  # Brown color with transparency (RGBA)
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: True
+  visual_material: null
+
+- name: bin_wall_back
+  curobo_type: cuboid
+  pose: [-0.2, 0.0, 0.35, 1, 0, 0, 0]  # x - width/2, y, z + height/2
+  dims: [0.02, 0.4, 0.3]  # thickness, depth, height
+  color: [0.6, 0.4, 0.2, 0.3]  # Brown color with transparency (RGBA)
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: True
+  visual_material: null
+
+- name: bin_wall_left
+  curobo_type: cuboid
+  pose: [0.0, -0.2, 0.35, 1, 0, 0, 0]  # x, y - depth/2, z + height/2
+  dims: [0.4, 0.02, 0.3]  # width, thickness, height
+  color: [0.6, 0.4, 0.2, 0.3]  # Brown color with transparency (RGBA)
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: True
+  visual_material: null
+
+- name: bin_wall_right
+  curobo_type: cuboid
+  pose: [0.0, 0.2, 0.35, 1, 0, 0, 0]  # x, y + depth/2, z + height/2
+  dims: [0.4, 0.02, 0.3]  # width, thickness, height
+  color: [0.6, 0.4, 0.2, 0.3]  # Brown color with transparency (RGBA)
+  mass: 5000
+  linear_velocity: [0, 0, 0]
+  angular_velocity: [0, 0, 0]
+  gravity_enabled: False
+  sim_collision_enabled: True
+  visual_material: null
+
+# Optional: Ground table for additional surface (uncomment if needed)
+# - name: ground_table
+#   curobo_type: cuboid
+#   pose: [0.0, 0.6, -0.01, 1, 0, 0, 0]
+#   dims: [2.0, 2.0, 0.02]
+#   color: [0.7, 0.7, 0.7]
+#   mass: 5000
+#   linear_velocity: [0, 0, 0]
+#   angular_velocity: [0, 0, 0]
+#   gravity_enabled: False
+#   sim_collision_enabled: False
+#   visual_material: null 
