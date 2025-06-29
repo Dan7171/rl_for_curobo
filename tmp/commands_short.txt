@@ -1,0 +1,11 @@
+# running:
+# isaac curobo
+conda activate isaac-sim
+source ~/isaacsim500/isaacsim/_build/linux-x86_64/release/setup_conda_env.sh 
+cd ~/rl_for_curobo
+1. python projects_root/examples/mpc_async_multirobot.py 
+2. ~/isaacsim500/isaacsim/_build/linux-x86_64/release/isaac-sim.selector.sh
+3. ~/isaacsim500/isaacsim/_build/linux-x86_64/release/isaac-sim.sh
+
+
+# source /opt/ros/jazzy/setup.sh

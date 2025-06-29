@@ -31,7 +31,7 @@ echo ""
 
 ####### configure ros 2 #######
 
-echo linking current terminal to ros 2: $ROS_DISTRO...
+# echo linking current terminal to ros 2: $ROS_DISTRO...
 source /opt/ros/$ROS_DISTRO/setup.bash # this is a must in ros2, it has nothing to do with isaac sim
 # echo "(optional test: run ros2 run demo_nodes_cpp talker to verify... (for more info see: https://# docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html))"
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp 
@@ -43,8 +43,6 @@ echo ""
 
 ###### configure isaac sim ros workspaces #########
 cwd_tmp=$(pwd)  # Capture current directory
-# CRITICAL: Tell colcon to use conda Python instead of system Python
-export COLCON_PYTHON_EXECUTABLE=$(which python)
 cd $isaac_ros_ws_root/${ROS_DISTRO}_ws
 source install/local_setup.bash
 cd $cwd_tmp
