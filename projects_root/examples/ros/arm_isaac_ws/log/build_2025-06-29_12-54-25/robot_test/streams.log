@@ -1,0 +1,41 @@
+[0.671s] Invoking command in '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/src/robot_test': CONDA_PROMPT_MODIFIER=(isaac-sim) DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_test build --build-base /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build install --record /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/install.log --single-version-externally-managed install_data
+[0.900s] running egg_info
+[0.900s] creating ../../build/robot_test/robot_test.egg-info
+[0.914s] writing ../../build/robot_test/robot_test.egg-info/PKG-INFO
+[0.914s] writing dependency_links to ../../build/robot_test/robot_test.egg-info/dependency_links.txt
+[0.914s] writing entry points to ../../build/robot_test/robot_test.egg-info/entry_points.txt
+[0.914s] writing requirements to ../../build/robot_test/robot_test.egg-info/requires.txt
+[0.914s] writing top-level names to ../../build/robot_test/robot_test.egg-info/top_level.txt
+[0.914s] writing manifest file '../../build/robot_test/robot_test.egg-info/SOURCES.txt'
+[2.095s] reading manifest file '../../build/robot_test/robot_test.egg-info/SOURCES.txt'
+[2.095s] writing manifest file '../../build/robot_test/robot_test.egg-info/SOURCES.txt'
+[2.095s] running build
+[2.096s] running build_py
+[2.096s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build
+[2.096s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib
+[2.096s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test
+[2.096s] copying robot_test/robot_controller.py -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test
+[2.096s] copying robot_test/robot_subscriber.py -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test
+[2.096s] copying robot_test/__init__.py -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test
+[2.096s] running install
+[2.101s] running install_lib
+[2.119s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test
+[2.119s] copying /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test/robot_controller.py -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test
+[2.119s] copying /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test/robot_subscriber.py -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test
+[2.119s] copying /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build/lib/robot_test/__init__.py -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test
+[2.120s] byte-compiling /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test/robot_controller.py to robot_controller.cpython-312.pyc
+[2.121s] byte-compiling /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test/robot_subscriber.py to robot_subscriber.cpython-312.pyc
+[2.123s] byte-compiling /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test/__init__.py to __init__.cpython-312.pyc
+[2.123s] running install_data
+[2.123s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/share/ament_index
+[2.123s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/share/ament_index/resource_index
+[2.123s] creating /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/share/ament_index/resource_index/packages
+[2.123s] copying resource/robot_test -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/share/ament_index/resource_index/packages
+[2.123s] copying package.xml -> /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/share/robot_test
+[2.123s] running install_egg_info
+[2.139s] Copying ../../build/robot_test/robot_test.egg-info to /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test-0.0.0-py3.12.egg-info
+[2.140s] running install_scripts
+[2.232s] Installing robot_controller script to /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/robot_test
+[2.232s] Installing robot_subscriber script to /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/robot_test
+[2.232s] writing list of installed files to '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/install.log'
+[2.257s] Invoked command in '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/src/robot_test' returned '0': CONDA_PROMPT_MODIFIER=(isaac-sim) DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_test build --build-base /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build install --record /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/install.log --single-version-externally-managed install_data
