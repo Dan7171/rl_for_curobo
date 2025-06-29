@@ -2,7 +2,9 @@
 async version of projects_root/examples/mpc_moving_obstacles_mpc_mpc.py
 """
 
-
+# Force non-interactive matplotlib backend to avoid GUI operations from worker threads
+import os
+os.environ.setdefault("MPLBACKEND", "Agg")
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
@@ -39,7 +41,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     # Third party modules (moved after Isaac Sim initialization)
     import time
     import signal
-    from typing import List, Optional, Tuple
+    from typing import List, Optional, Tuple, Any
     import torch
     import os
     import numpy as np
@@ -151,12 +153,12 @@ def define_run_setup(n_robots:int):
         case 2: # 2 robots in a line
             X_robot = [[-0.5, 0, 0, 1, 0, 0, 0], [0.5, 0, 0, 1, 0, 0, 0]] 
             col_pred_with = [[1], [0]]
-            plot_costs = [True, True]
+            plot_costs = [False, False]
             target_colors = [npColors.red, npColors.green ]
         case 3: # 3 robots in a triangle 
             X_robot = [[0.7071,-0.5 ,0, 1, 0, 0, 0], [-0.7071, -0.5, 0, 1, 0, 0, 0], [0, 0.5, 0, 1, 0, 0, 0]]
             col_pred_with = [[1,2], [0,2], [0,1]]
-            plot_costs = [True, True, True]
+            plot_costs = [False, False, False]
             target_colors = [npColors.red, npColors.green, npColors.blue]
         case 4: # 4 robots in a square
             X_robot = [[-0.5, -0.5, 0, 1, 0, 0, 0], [-0.5, 0.5, 0, 1, 0, 0, 0], [0.5, 0.5, 0, 1, 0, 0, 0], [0.5, -0.5, 0, 1, 0, 0, 0]]
@@ -331,15 +333,76 @@ def main(meta_config_paths: List[str]):
     #     env_obstacles[i].register_ccheckers(ccheckers)
 
      
-    # main loop
-    t_idx = 0
-    plans = [None for _ in range(len(robots))]
+    # -------------- Threaded robot loops --------------
+    from threading import Thread, Event, Lock
+    stop_event = Event()
+    t_lock = Lock()          # Protects access to shared t_idx
+    plans_lock = Lock()      # Protects access to shared plans list
+    physx_lock = Lock()
+
+    plans: List[Optional[Any]] = [None for _ in range(len(robots))]
+    pending_actions: List[Optional[Any]] = [None for _ in range(len(robots))]
+    actions_lock = Lock()
+
+    t_idx = 0  # global simulation step index
+
+    # Helper per-robot loop
+    def _robot_loop(robot_idx: int):
+        last_local_step = -1
+        while not stop_event.is_set():
+            # Wait for a new world step
+            with t_lock:
+                current_step = t_idx
+            if current_step == last_local_step:
+                time.sleep(0.0005)
+                continue
+            last_local_step = current_step
+
+            with physx_lock:
+                if OBS_PREDICTION:
+                    new_plan = robots[robot_idx].get_plan(valid_spheres_only=False)
+                    with plans_lock:
+                        plans[robot_idx] = new_plan
+
+                # 2) Update robot state (with or without collision prediction)
+                if robots[robot_idx].use_col_pred:
+                    with plans_lock:
+                        robots[robot_idx].update(plans, col_pred_with[robot_idx], current_step, tensor_args, robot_idx)
+                else:
+                    robots[robot_idx].update()
+
+            # 3) Plan next action
+            action = robots[robot_idx].plan(max_attempts=2)
+
+            # 4) Store action for main thread to execute
+            with actions_lock:
+                pending_actions[robot_idx] = action
+
+    # Spawn one thread per robot
+    robot_threads = [Thread(target=_robot_loop, args=(idx,), daemon=True) for idx in range(len(robots))]
+    for th in robot_threads:
+        th.start()
+
     while simulation_app.is_running():
         # empty list for draw_points() inputs
         point_visualzer_inputs = []
         # update simulation
-        my_world.step(render=True)       
+        with physx_lock:
+            my_world.step(render=True)       
         
+        # safely increment global step counter
+        with t_lock:
+            t_idx += 1
+
+        # Execute any pending actions from robot threads (sequentially in main thread)
+        with actions_lock:
+            for ridx, act in enumerate(pending_actions):
+                if act is not None:
+                    world_time = t_idx * PHYSICS_STEP_DT
+                    with physx_lock:
+                        robots[ridx].command(act, num_times=1, world_time=world_time, t_idx=t_idx)
+                    pending_actions[ridx] = None
+
         # TODO: required ros modification: we should open a topic for 
         # each obstacle's pose/all obstacles' poses and update it only if the obstalce has changed its pose
         # the collision chekerts should subscribe to the topic and update their own pose accordingly
@@ -349,33 +412,13 @@ def main(meta_config_paths: List[str]):
             
         # aggregate plans for all robots (tbd: async)
         
-        for i in range(len(robots)):
+        # ---------------- Run all robots concurrently ----------------
+        # Robot loops run continuously; nothing to do here other than stepping the world.
 
-            if OBS_PREDICTION:         
-                plans[i] = robots[i].get_plan(valid_spheres_only=False)
-                if VISUALIZE_PLANS_AS_DOTS:
-                    point_visualzer_inputs.append({'points': plans[i]['task_space']['spheres']['p'][:robots[i].H].to(tensor_args.device), 'color': 'green'})
-                
-            if robots[i].use_col_pred:
-                
-                robots[i].update(plans, col_pred_with[i], t_idx, tensor_args, i)
-            else:
-                robots[i].update()
-            action = robots[i].plan(max_attempts=2)
-            robots[i].command(action, num_times=1)
-            
-            # post-step visualization        
-            if VISUALIZE_MPC_ROLLOUTS:
-                point_visualzer_inputs.append({'points': robots[i].get_rollouts_in_world_frame(), 'color': 'green'})
-            if VISUALIZE_ROBOT_COL_SPHERES and t_idx % 2 == 0:
-                robots[i].visualize_robot_as_spheres(robots[i].curobo_format_joints)
-
-        if len(point_visualzer_inputs):
-            draw_points(point_visualzer_inputs) # print_rate_decorator(lambda: draw_points(point_visualzer_inputs), args.print_ctrl_rate, "draw_points")()
-        t_idx += 1 # num of completed control steps (actions) in *played* simulation (aft
-        
-        
-       
+    # Clean up thread pool
+    stop_event.set()
+    for th in robot_threads:
+        th.join()
 
 def resolve_meta_config_path(robot_model:str) -> str:
     """

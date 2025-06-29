@@ -159,6 +159,14 @@ class AutonomousArm:
         # Collision prediction control
         self.use_col_pred = False  # Set to True to enable collision prediction updates
         
+        # ---------------- Action-tracking ----------------
+        # Total number of high-level actions (solver commands) sent so far
+        self.actions_taken: int = 0
+        # Simulation world time (seconds) recorded after the last action
+        self.last_world_time: float = 0.0
+        # Global simulation step index recorded after the last action
+        self.last_t_idx: int = -1
+
         # AutonomousArm.instance_counter += 1
     
     def get_num_of_sphers(self, valid_only:bool=True):
@@ -656,12 +664,19 @@ class ArmMpc(AutonomousArm):
         return art_action
     
 
-    def command(self, art_action: ArticulationAction,num_times:int=3):
+    def command(self, art_action: ArticulationAction,num_times:int=3, *, world_time:float=None, t_idx:int=None):
         """
         Command controller in the motors (or simulator controller) to move the robot.
+        Also records bookkeeping information (#actions, world time, t_idx).
         """
         for _ in range(num_times):
             ans = self.articulation_controller.apply_action(art_action)
+        # ---------------- bookkeeping ----------------
+        self.actions_taken += 1
+        if world_time is not None:
+            self.last_world_time = float(world_time)
+        if t_idx is not None:
+            self.last_t_idx = int(t_idx)
         return ans
     
     def get_trajopt_horizon(self):
@@ -691,7 +706,7 @@ class ArmMpc(AutonomousArm):
         """
         return self.solver.solver.optimizers[0].mean_action.squeeze(0)
     
-    def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True):
+    def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True) -> Optional[dict]:
         """
         Get the H steps plan from the solver. All positions are in the world frame.
         Args:
