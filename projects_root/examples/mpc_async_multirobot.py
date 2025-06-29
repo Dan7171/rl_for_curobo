@@ -325,9 +325,11 @@ def main(meta_config_paths: List[str]):
         # Get initialized collision checker of robot
         checker = robots[i].get_cchecker() # available only after init_solver
         ccheckers.append(checker)
+        for j in range(len(env_obstacles)):
+            env_obstacles[j].register_ccheckers([checker])
+    # for i in range(len(env_obstacles)):
+    #     env_obstacles[i].register_ccheckers(ccheckers)
 
-    for i in range(len(env_obstacles)):
-        env_obstacles[i].register_ccheckers(ccheckers)
      
     # main loop
     t_idx = 0
