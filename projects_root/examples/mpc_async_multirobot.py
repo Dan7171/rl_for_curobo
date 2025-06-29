@@ -40,7 +40,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     
     # Third party modules (moved after Isaac Sim initialization)
     import time
-    import signal
+    from threading import Thread, Event, Lock
     from typing import List, Optional, Tuple, Any
     import torch
     import os
@@ -173,6 +173,49 @@ def define_run_setup(n_robots:int):
     # 2. express targets in robot frames
     X_targets_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
     return X_robot_np, col_pred_with, X_targets_R, plot_costs, target_colors
+
+def robot_loop(robot_idx: int,
+               stop_event: Event,
+               get_t_idx,
+               t_lock: Lock,
+               physx_lock: Lock,
+               plans_lock: Lock,
+               actions_lock: Lock,
+               robots,
+               col_pred_with,
+               plans: List[Optional[Any]],
+               pending_actions: List[Optional[Any]],
+               tensor_args):
+    """Background loop that runs one MPC cycle whenever t_idx increments."""
+    last_step = -1
+    r = robots[robot_idx]
+    while not stop_event.is_set():
+        with t_lock:
+            cur_step = get_t_idx()
+        if cur_step == last_step:
+            time.sleep(5e-4)
+            continue
+        last_step = cur_step
+
+        # PhysX reads
+        with physx_lock:
+            if OBS_PREDICTION:
+                new_plan = r.get_plan(valid_spheres_only=False)
+                with plans_lock:
+                    plans[robot_idx] = new_plan
+
+            if r.use_col_pred:
+                with plans_lock:
+                    r.update(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx)
+            else:
+                r.update()
+
+        # Torch-heavy optimisation (no PhysX)... (improved curobo mpc planning)
+        action = r.plan(max_attempts=2)
+
+        # Hand action back to main thread
+        with actions_lock:
+            pending_actions[robot_idx] = action
 
 def main(meta_config_paths: List[str]):
     """
@@ -329,12 +372,12 @@ def main(meta_config_paths: List[str]):
         ccheckers.append(checker)
         for j in range(len(env_obstacles)):
             env_obstacles[j].register_ccheckers([checker])
+    
     # for i in range(len(env_obstacles)):
     #     env_obstacles[i].register_ccheckers(ccheckers)
 
      
     # -------------- Threaded robot loops --------------
-    from threading import Thread, Event, Lock
     stop_event = Event()
     t_lock = Lock()          # Protects access to shared t_idx
     plans_lock = Lock()      # Protects access to shared plans list
@@ -346,40 +389,8 @@ def main(meta_config_paths: List[str]):
 
     t_idx = 0  # global simulation step index
 
-    # Helper per-robot loop
-    def _robot_loop(robot_idx: int):
-        last_local_step = -1
-        while not stop_event.is_set():
-            # Wait for a new world step
-            with t_lock:
-                current_step = t_idx
-            if current_step == last_local_step:
-                time.sleep(0.0005)
-                continue
-            last_local_step = current_step
-
-            with physx_lock:
-                if OBS_PREDICTION:
-                    new_plan = robots[robot_idx].get_plan(valid_spheres_only=False)
-                    with plans_lock:
-                        plans[robot_idx] = new_plan
-
-                # 2) Update robot state (with or without collision prediction)
-                if robots[robot_idx].use_col_pred:
-                    with plans_lock:
-                        robots[robot_idx].update(plans, col_pred_with[robot_idx], current_step, tensor_args, robot_idx)
-                else:
-                    robots[robot_idx].update()
-
-            # 3) Plan next action
-            action = robots[robot_idx].plan(max_attempts=2)
-
-            # 4) Store action for main thread to execute
-            with actions_lock:
-                pending_actions[robot_idx] = action
-
     # Spawn one thread per robot
-    robot_threads = [Thread(target=_robot_loop, args=(idx,), daemon=True) for idx in range(len(robots))]
+    robot_threads = [Thread(target=robot_loop, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, actions_lock, robots, col_pred_with, plans, pending_actions, tensor_args), daemon=True) for idx in range(len(robots))]
     for th in robot_threads:
         th.start()
 
@@ -403,17 +414,6 @@ def main(meta_config_paths: List[str]):
                         robots[ridx].command(act, num_times=1, world_time=world_time, t_idx=t_idx)
                     pending_actions[ridx] = None
 
-        # TODO: required ros modification: we should open a topic for 
-        # each obstacle's pose/all obstacles' poses and update it only if the obstalce has changed its pose
-        # the collision chekerts should subscribe to the topic and update their own pose accordingly
-        # update obstacles poses in registed ccheckers (for environment (shared) obstacles)
-        # for i in range(len(env_obstacles)): 
-        #     env_obstacles[i].update_registered_ccheckers()
-            
-        # aggregate plans for all robots (tbd: async)
-        
-        # ---------------- Run all robots concurrently ----------------
-        # Robot loops run continuously; nothing to do here other than stepping the world.
 
     # Clean up thread pool
     stop_event.set()
