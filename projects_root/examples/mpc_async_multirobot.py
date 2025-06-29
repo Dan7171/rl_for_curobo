@@ -174,7 +174,7 @@ def define_run_setup(n_robots:int):
     X_targets_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
     return X_robot_np, col_pred_with, X_targets_R, plot_costs, target_colors
 
-def robot_loop(robot_idx: int,
+def ctrl_loop(robot_idx: int,
                stop_event: Event,
                get_t_idx,
                t_lock: Lock,
@@ -190,6 +190,8 @@ def robot_loop(robot_idx: int,
     last_step = -1
     r = robots[robot_idx]
     while not stop_event.is_set():
+        
+        # wait for new time step
         with t_lock:
             cur_step = get_t_idx()
         if cur_step == last_step:
@@ -197,7 +199,7 @@ def robot_loop(robot_idx: int,
             continue
         last_step = cur_step
 
-        # PhysX reads
+        # publish plan
         with physx_lock:
             if OBS_PREDICTION:
                 new_plan = r.get_plan(valid_spheres_only=False)
@@ -210,10 +212,10 @@ def robot_loop(robot_idx: int,
             else:
                 r.update()
 
-        # Torch-heavy optimisation (no PhysX)... (improved curobo mpc planning)
+        # plan: (improved curobo mpc planning, (torch-heavy, no PhysX))
         action = r.plan(max_attempts=2)
 
-        # Hand action back to main thread
+        #action: Hand action back to main thread
         with actions_lock:
             pending_actions[robot_idx] = action
 
@@ -390,20 +392,22 @@ def main(meta_config_paths: List[str]):
     t_idx = 0  # global simulation step index
 
     # Spawn one thread per robot
-    robot_threads = [Thread(target=robot_loop, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, actions_lock, robots, col_pred_with, plans, pending_actions, tensor_args), daemon=True) for idx in range(len(robots))]
+    robot_threads = [Thread(target=ctrl_loop, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, actions_lock, robots, col_pred_with, plans, pending_actions, tensor_args), daemon=True) for idx in range(len(robots))]
     for th in robot_threads:
         th.start()
 
     while simulation_app.is_running():
-        # empty list for draw_points() inputs
-        point_visualzer_inputs = []
-        # update simulation
+        
+        # point_visualzer_inputs = [] # empty list for draw_points() inputs
+        start_time = time.time()
+        # update simulation (PhysX)
         with physx_lock:
             my_world.step(render=True)       
         
         # safely increment global step counter
         with t_lock:
             t_idx += 1
+            print(f"t_idx: {t_idx}")
 
         # Execute any pending actions from robot threads (sequentially in main thread)
         with actions_lock:
@@ -413,8 +417,9 @@ def main(meta_config_paths: List[str]):
                     with physx_lock:
                         robots[ridx].command(act, num_times=1, world_time=world_time, t_idx=t_idx)
                     pending_actions[ridx] = None
-
-
+        end_time = time.time()
+        print(f"step time: {(end_time - start_time)*1000:.5f} ms")
+    
     # Clean up thread pool
     stop_event.set()
     for th in robot_threads:
