@@ -1,0 +1,22 @@
+[0.571s] Invoking command in '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/src/robot_test': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_test build --build-base /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build install --record /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/install.log --single-version-externally-managed install_data
+[0.753s] running egg_info
+[0.765s] writing ../../build/robot_test/robot_test.egg-info/PKG-INFO
+[0.765s] writing dependency_links to ../../build/robot_test/robot_test.egg-info/dependency_links.txt
+[0.766s] writing entry points to ../../build/robot_test/robot_test.egg-info/entry_points.txt
+[0.766s] writing requirements to ../../build/robot_test/robot_test.egg-info/requires.txt
+[0.766s] writing top-level names to ../../build/robot_test/robot_test.egg-info/top_level.txt
+[0.791s] reading manifest file '../../build/robot_test/robot_test.egg-info/SOURCES.txt'
+[0.791s] writing manifest file '../../build/robot_test/robot_test.egg-info/SOURCES.txt'
+[0.791s] running build
+[0.792s] running build_py
+[0.792s] running install
+[0.796s] running install_lib
+[0.809s] running install_data
+[0.809s] running install_egg_info
+[0.825s] removing '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test-0.0.0-py3.12.egg-info' (and everything under it)
+[0.825s] Copying ../../build/robot_test/robot_test.egg-info to /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages/robot_test-0.0.0-py3.12.egg-info
+[0.826s] running install_scripts
+[0.917s] Installing robot_controller script to /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/robot_test
+[0.917s] Installing robot_subscriber script to /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/robot_test
+[0.917s] writing list of installed files to '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/install.log'
+[0.937s] Invoked command in '/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/src/robot_test' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/install/robot_test/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_test build --build-base /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/build install --record /home/dan/rl_for_curobo/projects_root/examples/ros/arm_isaac_ws/build/robot_test/install.log --single-version-externally-managed install_data

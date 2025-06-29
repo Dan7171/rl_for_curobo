@@ -34,6 +34,10 @@ from isaacsim.core.utils import extensions
 
 print("Enabling isaacsim.ros2.bridge extension…")
 extensions.enable_extension("isaacsim.ros2.bridge")
+# enable omni graph editor
+extensions.enable_extension("omni.graph.window.core") # editor extension
+extensions.enable_extension("omni.graph.window.action") # editor extension
+extensions.enable_extension("omni.graph.window.generic") # editor extension
 
 # Force one OmniGraph tick – this registers all node
 # descriptors provided by the extensions we just
@@ -145,7 +149,7 @@ class RobotControlNode:
                     ("publishJointState.inputs:targetPrim", [usdrt.Sdf.Path(ROBOT_PRIM_PATH)]),
                     ("publishJointState.inputs:topicName", "joint_states"),
                     ("publishJointState.inputs:nodeNamespace", "robot"),
-                    ("subscribeJointState.inputs:topicName", "robot/joint_command"),
+                    ("subscribeJointState.inputs:topicName", "joint_command"),
                     ("subscribeJointState.inputs:nodeNamespace", "robot"),
                 ],
             },

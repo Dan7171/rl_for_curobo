@@ -20,54 +20,173 @@ A complete Isaac Sim + ROS2 integration for real-time Franka Panda robot joint c
 
 1. **Start Isaac Sim Robot Node**:
 ```bash
-conda activate isaac-sim 
-echo "make sure IS_EXE (see conda .activate.d) is set to the path of the dir contains isaac sim executbale: IS_EXE=$IS_EXE" 
-echo  
-ISAAC_SIM_PATH=$IS_EXE # set it 
+ISAAC_PY=/home/dan/isaacsim500/isaacsim/_build/linux-x86_64/release/python.sh # set it to isaac sim dir python.sh file
 cd projects_root/examples/ros/arm_isaac_ws
 source /opt/ros/jazzy/setup.bash
-$ISAAC_SIM_PATH/python.sh isaac_robot_working_movable.py 
-# or (in conda env) currently unavailable (beacuse of ros bridge and python version issues. bridge needs py 3.12 and codna has 3.11):
-# python isaac_robot_working_movable.py
+$ISAAC_PY isaac_robot_working_movable.py 
+```
+***HEALTH CHECK***
+```bash
+
+# check the /robot/* ros topics are active:
+rostopic list
+# should see:
+# /parameter_events
+# /robot/joint_command
+# /robot/joint_states
+# /rosout
+
+# check if /robot/joint_states topic works
+ros2 topic echo /robot/joint_states 
+# should see (many messages like:):
+# header:
+#   stamp:
+#     sec: 0
+#     nanosec: 0
+#   frame_id: ''
+# name:
+# - panda_joint1
+# - panda_joint2
+# - panda_joint3
+# - panda_joint4
+# - panda_joint5
+# - panda_joint6
+# - panda_joint7
+# - panda_finger_joint1
+# - panda_finger_joint2
+# position:
+# - 0.1064
+# - 0.1084
+# - 0.1079
+# - -0.0698
+# - 0.1081
+# - 0.1078
+# - 0.1083
+# - 0.04
+# - 0.04
+# velocity:
+# - 0.0167
+# - 0.0114
+# - 0.023
+# - 0.0
+# - 0.0199
+# - 0.0206
+# - 0.0191
+# - 0.0029
+# - 0.0001
+# effort:
+# - 0.0002
+# - -9.8898
+# - 0.0621
+# - 0.1363
+# - 0.0282
+# - 0.8111
+# - 0.0
+# - -0.0091
+# - 0.0091
+
+# check if nodes (probably hidden) exist) 
+ros2 node list --all
+# should see:
+# /_ros2cli_daemon_0_1b9d690a8d814305bbdf44fefa3e3494
+# /robot/_ROS_Robot_publishJointState
+# /robot/_ROS_Robot_subscribeJointState
+# dan@de:~$ ros2 node list # will return an emty list (non hidden) 
+# dan@de:~$ 
+
+# check controller reacts to joint commands
+# send position command:
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{name:["panda_joint1"], position:[0.5]}' # (can also try with other joints)
+# should see ARM MOVING! + next messages in terminal:
+# publisher: beginning loop
+# publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['panda_joint1'], position=[0.5], velocity=[], effort=[])
+# For more help see:
+# ros2 topic pub --once /robot/joint_command --help
+
+# send velocity command:
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{name:["panda_joint1"], velocity:[0.5]}'
+
+# should see ARM MOVING! + next messages in terminal:
+# publisher: beginning loop
+# publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['panda_joint1'], position=[], velocity=[0.5], effort=[])
+
 ```
 
-2. **Start ROS2 Robot Command Bridge** (separate terminal):
+
+2. **OPTIONAL: Start ROS2 Robot Command Bridge** (separate terminal):
 ```bash
 cd projects_root/examples/ros/arm_isaac_ws
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select robot_test
 source install/setup.bash
-python3 robot_command_sender.py
+python3 robot_command_sender.py # needs to use python 3.12 of ros python beacuse running rlcpy
 ```
 
 ## 🎮 Robot Control Commands
 
-### Joint Position Control
-```bash
-# Move single joint
-ros2 topic pub --once /robot/joint_positions sensor_msgs/msg/JointState '{name: ["panda_joint1"], position: [1.57]}'
+### Joint Position Control (single interface)
+All joint commands use a single topic: **`/robot/joint_command`**.
 
-# Move all joints (home pose)
-ros2 topic pub --once /robot/joint_positions sensor_msgs/msg/JointState '{position: [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]}'
+```bash
+# Move a single joint
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{name:["panda_joint1"], position:[0.5]}'
+
+# Home pose – set all 7 joints
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{position:[0.0,-0.785,0.0,-2.356,0.0,1.571,0.785]}'
+
+# Velocity control example (leave position empty)
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{velocity:[0.5,0,0,0,0,0,0]}'
 ```
 
-### Joint Velocity Control
+## 🤝 Controlling the Robot
+
+There are **two** equivalent ways to drive the Panda arm.  Choose the one that best fits your Python / ROS 2 environment.
+
+### 1. Direct ROS 2 control (preferred – no extra helper script)
+`isaac_robot_working_movable.py` already contains an OmniGraph `ROS2SubscribeJointState` node wired to the topic `/robot/joint_command`.  When you publish a `sensor_msgs/JointState` message on that topic the robot moves instantly inside Isaac Sim.
+
+Example (one‐liner/home pose):
 ```bash
-# Apply velocities to joints
-ros2 topic pub --once /robot/joint_velocities sensor_msgs/msg/JointState '{velocity: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}'
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState "{position:[0.0,-0.785,0.0,-2.356,0.0,1.571,0.785]}"
 ```
 
-## 📊 ROS2 Topics
+You **do not** need the helper script for this method – just make sure the Isaac Sim node is running and the ROS 2 environment (`source /opt/ros/jazzy/setup.bash`) is active in the terminal you use for `ros2 topic pub`.
 
-### Published Topics
-- `/joint_states` - Robot joint states (from Isaac Sim)
-- `/robot/current_joints` - Current joint positions
-- `/robot/state` - Robot status information
+### 2. Helper script `robot_command_sender.py` (file bridge)
+If your workstation has Python version conflicts (e.g. Isaac Sim 3.11 vs. system ROS 2 3.12) you can keep Isaac Sim isolated and bridge the commands through a small JSON file.  The workflow is:
 
-### Subscribed Topics
-- `/robot/joint_positions` - Joint position commands
-- `/robot/joint_velocities` - Joint velocity commands
-- `/robot/position_array` - Position array commands
+1. Run Isaac Sim robot node (same as before).
+2. In **another** terminal run the command sender:
+   ```bash
+   cd projects_root/examples/ros/arm_isaac_ws
+   source /opt/ros/jazzy/setup.bash
+   python3 robot_command_sender.py
+   ```
+   You should see log lines similar to:
+   ```
+   [INFO] [robot_command_sender]: 🚀 Robot Command Sender started
+   [INFO] [robot_command_sender]: 📂 Sending commands to: /tmp/isaac_robot_commands.json
+   ```
+3. Publish your joint targets on **`/robot/joint_positions`** (not `/robot/joint_command`).  For example:
+   ```bash
+   ros2 topic pub --once /robot/joint_positions sensor_msgs/msg/JointState '{name:["panda_joint1","panda_joint2"], position:[1.0, -0.5]}'
+   ```
+   The helper listens to that topic, appends the data to `/tmp/isaac_robot_commands.json`, and Isaac Sim will pick it up on the next simulation tick.
+
+Behind the scenes the script:
+* Subscribes to `sensor_msgs/JointState` on `/robot/joint_positions`.
+* Each new message is wrapped in a JSON object and **appended** to `/tmp/isaac_robot_commands.json`.
+* The simulation process periodically reads the file and feeds the values into an `IsaacArticulationController`.
+
+ℹ️ **Tip:** If you ever need to inspect what is being sent, simply `cat /tmp/isaac_robot_commands.json` while the sim is running.
+
+## 📊 ROS2 Topics (summary)
+
+| Direction  | Topic                            | When it is used |
+|------------|----------------------------------|-----------------|
+| Publish ⇢ | `/joint_states`                   | Always (live feedback from Isaac Sim) |
+| Subscribe ⇠ | `/robot/joint_command`           | Direct control path |
+| Subscribe ⇠ | `/robot/joint_positions`         | File-bridge path via `robot_command_sender.py` |
 
 ## 🤖 Franka Panda Joints
 
@@ -98,12 +217,12 @@ ros2 topic echo /robot/state
 
 ### Home Position
 ```bash
-ros2 topic pub --once /robot/joint_positions sensor_msgs/msg/JointState '{position: [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]}'
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{position:[0.0,-0.785,0.0,-2.356,0.0,1.571,0.785]}'
 ```
 
 ### Extended Position
 ```bash
-ros2 topic pub --once /robot/joint_positions sensor_msgs/msg/JointState '{position: [1.57, -0.5, 0.0, -1.5, 0.0, 1.0, 0.785]}'
+ros2 topic pub --once /robot/joint_command sensor_msgs/msg/JointState '{position:[1.57,-0.5,0.0,-1.5,0.0,1.0,0.785]}'
 ```
 
 ## 🛠️ Troubleshooting
