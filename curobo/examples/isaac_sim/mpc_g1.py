@@ -178,7 +178,12 @@ def main():
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
     robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02
 
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, position=np.array([0, 0, 0.7]))
+    robot, robot_prim_path = add_robot_to_scene(
+        robot_cfg,
+        my_world,
+        load_from_usd=True,
+        position=np.array([0, 0, 0.70])
+    )
 
     articulation_controller = robot.get_articulation_controller()
 

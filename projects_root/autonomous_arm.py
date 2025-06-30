@@ -165,12 +165,7 @@ class AutonomousArm:
         # ---------------- Action-tracking ----------------
         # Total number of high-level actions (solver commands) sent so far
         self.actions_taken: int = 0
-        # Simulation world time (seconds) recorded after the last action
-        self.last_world_time: float = 0.0
-        # Global simulation step index recorded after the last action
-        self.last_t_idx: int = -1
-
-        # AutonomousArm.instance_counter += 1
+     
     
     def get_num_of_sphers(self, valid_only:bool=True):
         return self.n_coll_spheres if not valid_only else self.n_coll_spheres_valid
@@ -672,7 +667,6 @@ class ArmMpc(AutonomousArm):
         art_action: ArticulationAction,
         num_times: int = 3,
         *,
-        world_time: float | None = None,
         t_idx: int | None = None,
         lock: Optional["Lock"] = None,
     ):
@@ -712,10 +706,7 @@ class ArmMpc(AutonomousArm):
 
         # ---------------- bookkeeping ----------------
         self.actions_taken += 1
-        if world_time is not None:
-            self.last_world_time = float(world_time)
-        if t_idx is not None:
-            self.last_t_idx = int(t_idx)
+     
         return ans
     
     def get_trajopt_horizon(self):
@@ -935,7 +926,7 @@ class ArmMpc(AutonomousArm):
         """
         return self.solver.step(self.current_state, shift_steps=shift_steps, seed_traj=seed_traj, max_attempts=max_attempts)
 
-    def update(self, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None):
+    def update(self, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None,physx_lock:Optional["Lock"]=None):
         """
         Complete robot update cycle: collision prediction, joint state, target, and MPC step.
         
@@ -950,14 +941,15 @@ class ArmMpc(AutonomousArm):
             MPC result from the solver
         """
         # Update collision predictor if enabled
-        if self.use_col_pred:
-            if any(arg is None for arg in [plans, col_pred_with, t_idx, tensor_args, own_robot_id]):
-                raise ValueError("When use_col_pred=True, all collision prediction arguments must be provided")
-            self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
+        if self.use_col_pred: # plans_lock should be provided
+            if plans_lock is not None: # for the async setup
+                with plans_lock: 
+                    self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
+            else: # for the sync setup
+                self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
         
         # Update joint state from simulation
-        self.update_joint_state()
-        
+        self.update_joint_state()        
         # Update target from scene
         self.update_target()
         

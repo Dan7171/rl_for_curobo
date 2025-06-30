@@ -28,7 +28,6 @@ mpc_cfg_overide_files_dir = "projects_root/projects/dynamic_obs/dynamic_obs_pred
 robots_collision_spheres_configs_parent_dir = "curobo/src/curobo/content/configs/robot"
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
-    
     # CRITICAL: Isaac Sim must be imported FIRST before any other modules
     try:
         import isaacsim
@@ -186,7 +185,7 @@ def ctrl_loop_robot(robot_idx: int,
                tensor_args):
     """Background loop that runs one MPC cycle whenever t_idx increments."""
     last_step = -1
-    r = robots[robot_idx]
+    r: ArmMpc = robots[robot_idx]
     while not stop_event.is_set():
         
         # wait for new time step
@@ -203,10 +202,10 @@ def ctrl_loop_robot(robot_idx: int,
                 new_plan = r.get_plan(valid_spheres_only=False)
                 with plans_lock:
                     plans[robot_idx] = new_plan
-
             if r.use_col_pred:
-                with plans_lock:
-                    r.update(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx)
+                # with plans_lock:
+                #     r.update(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+                r.update(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
             else:
                 r.update()
 
@@ -214,8 +213,9 @@ def ctrl_loop_robot(robot_idx: int,
         action = r.plan(max_attempts=2)
 
         # Apply the planned action immediately (thread-safe)
-        world_time = (cur_step + 1) * PHYSICS_STEP_DT  # approximate next step time
-        r.command(action, num_times=1, world_time=world_time, t_idx=cur_step + 1, lock=physx_lock)
+        # world_time = (cur_step + 1) * PHYSICS_STEP_DT  # approximate next step time
+        # r.command(action, num_times=1, world_time=world_time, t_idx=cur_step + 1, lock=physx_lock)
+        r.command(action, num_times=1, t_idx=cur_step + 1, lock=physx_lock)
 
 def main(meta_config_paths: List[str]):
     """
@@ -390,26 +390,24 @@ def main(meta_config_paths: List[str]):
     robot_threads = [Thread(target=ctrl_loop_robot, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args), daemon=True) for idx in range(len(robots))]
     for th in robot_threads:
         th.start()
-
+    
+    # point_visualzer_inputs = [] # empty list for draw_points() inputs
+    step_batch_start_time = time.time()
+    step_batch_size = 100
     while simulation_app.is_running():
-        
-        # point_visualzer_inputs = [] # empty list for draw_points() inputs
-        start_time = time.time()
         # update simulation (PhysX)
         with physx_lock:
-            my_world.step(render=True)       
-        
-        # safely increment global step counter
+            my_world.step(render=True)           
         with t_lock:
             t_idx += 1
-            # print(f"ts: {t_idx}")
-
-        if t_idx % 100 == 0:
+        if t_idx % step_batch_size == 0: # step batch size = 100
+            step_batch_time = time.time() - step_batch_start_time
             print(f"ts: {t_idx}")
             print("actions taken by each robot:")
             print([robots[i].actions_taken for i in range(len(robots))])
-            print(f"overall avg step time: {(total_steps_time/t_idx)*1000:.1f} ms")
-        total_steps_time += time.time() - start_time
+            print(f"overall avg step time: {(step_batch_time/step_batch_size)*1000:.1f} ms")
+            step_batch_start_time = time.time()
+        
         # print(f"step time: {(end_time - start_time)*1000:.5f} ms")
 
     

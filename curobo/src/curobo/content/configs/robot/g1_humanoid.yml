@@ -2,13 +2,7 @@ robot_cfg:
   kinematics:
     base_link: "g1"
     ee_link: "left_palm_link"
-    extra_links:
-      pelvis:
-        parent_link_name: "g1"
-        link_name: "pelvis"
-        joint_name: "pelvis_joint"
-        joint_type: "FIXED"
-        fixed_transform: [0, 0, 0, 1, 0, 0, 0]
+    use_usd_kinematics: False
 
     # File paths
     urdf_path: "robot/g1_humanoid/f.urdf"
@@ -103,7 +97,34 @@ robot_cfg:
       - left_hip_roll_link
       - torso_link
 
+    # Freeze lower-body and torso joints so that only the arms/hands are actuated
+    lock_joints:
+      left_hip_pitch_joint: -0.4
+      right_hip_pitch_joint: -0.4
+      torso_joint: 0.0
+      left_hip_roll_joint: 0.05
+      right_hip_roll_joint: -0.05
+      left_hip_yaw_joint: 0.0
+      right_hip_yaw_joint: 0.0
+      left_knee_joint: 0.8
+      right_knee_joint: 0.8
+      left_ankle_pitch_joint: -0.3
+      right_ankle_pitch_joint: -0.3
+      left_ankle_roll_joint: 0.0
+      right_ankle_roll_joint: 0.0
+
     collision_sphere_buffer: 0.005
+
+    self_collision_buffer:
+      torso_link: 0.04
+      left_shoulder_pitch_link: 0.03
+      right_shoulder_pitch_link: 0.03
+      left_shoulder_roll_link: 0.03
+      right_shoulder_roll_link: 0.03
+      left_elbow_pitch_link: 0.02
+      right_elbow_pitch_link: 0.02
+
+    self_collision_ignore: {}
 
     collision_spheres:
       g1:
@@ -308,9 +329,6 @@ robot_cfg:
         - center: [0.004, 0.047,  0.258]
           radius: 0.061
 
-    self_collision_buffer: {}
-    self_collision_ignore: {}
-
     cspace:
       joint_names:
         - left_hip_pitch_joint
@@ -350,7 +368,7 @@ robot_cfg:
         - right_one_joint
         - left_two_joint
         - right_two_joint
-      retract_config: [0.0, -0.0008, -0.0005, 0.0001, 0.0001, -0.0003, -0.0003, 0.0006, -0.0004, -0.0001, -0.0001, -0.0013, 0.0006, -0.0, 0.0001, -0.0166, -0.0189, -0.0, 0.0003, 0.0002, 0.0048, 0.0002, 0.0002, -0.0001, -0.0, 0.0, -0.0, -0.0, -0.0001, -0.0, -0.0, 0.0, 0.0, -0.0, -0.0, -0.0, -0.0]
+      retract_config: [-0.4, -0.4, 0.0, 0.05, -0.05, 0.3, 0.3, 0.0, 0.0, 0.1, -0.1, 0.8, 0.8, 0.0, 0.0, -0.3, -0.3, 0.7, 0.7, 0.0, 0.0, 0.0, 0.0, -0.8, -0.8, -0.3, -0.8, -0.8, -0.3, -0.8, -0.3, 0.0, -0.8, -0.3, 0.0, -0.3, 0.0]
       null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       max_acceleration: 10.0

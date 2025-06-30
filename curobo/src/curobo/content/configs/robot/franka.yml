@@ -11,7 +11,7 @@
 
 robot_cfg:
   kinematics:
-    use_usd_kinematics: False
+    use_usd_kinematics: true
     isaac_usd_path: "/Isaac/Robots/Franka/franka.usd"
     usd_path: "robot/non_shipping/franka/franka_panda_meters.usda"
     usd_robot_root: "/panda"
