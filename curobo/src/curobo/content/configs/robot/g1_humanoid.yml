@@ -1,7 +1,7 @@
 robot_cfg:
   kinematics:
-    base_link: "g1"
-    ee_link: "left_palm_link"
+    base_link: "pelvis"
+    ee_link: left_palm_link # "left_hand_ee"
     use_usd_kinematics: False
 
     # File paths
@@ -12,7 +12,7 @@ robot_cfg:
 
     # Collision configuration
     collision_link_names:
-      - g1
+      - pelvis
       - left_hip_pitch_link
       - left_ankle_pitch_link
       - left_ankle_roll_link
@@ -37,6 +37,7 @@ robot_cfg:
       - right_elbow_roll_link
       - right_palm_link
       - left_palm_link
+      # - left_hand_ee
       - left_five_link
       - right_five_link
       - left_six_link
@@ -55,7 +56,7 @@ robot_cfg:
       - torso_link
 
     mesh_link_names:
-      - g1
+      - pelvis
       - left_hip_pitch_link
       - left_ankle_pitch_link
       - left_ankle_roll_link
@@ -80,6 +81,7 @@ robot_cfg:
       - right_elbow_roll_link
       - right_palm_link
       - left_palm_link
+      - left_hand_ee
       - left_five_link
       - right_five_link
       - left_six_link
@@ -112,6 +114,25 @@ robot_cfg:
       right_ankle_pitch_joint: -0.3
       left_ankle_roll_joint: 0.0
       right_ankle_roll_joint: 0.0
+      right_shoulder_pitch_joint: -1.4
+      right_shoulder_roll_joint: 0.2
+      right_shoulder_yaw_joint: 0.0
+      right_elbow_pitch_joint: 1.2
+      right_elbow_roll_joint: 0.0
+      left_five_joint: -0.8
+      left_three_joint: -0.8
+      left_zero_joint: -0.3
+      right_five_joint: -0.8
+      right_three_joint: -0.8
+      right_zero_joint: -0.3
+      left_six_joint: -0.8
+      left_four_joint: -0.3
+      left_one_joint: 0.0
+      right_six_joint: -0.8
+      right_four_joint: -0.3
+      right_one_joint: 0.0
+      left_two_joint: 0.0
+      right_two_joint: 0.0
 
     collision_sphere_buffer: 0.005
 
@@ -127,7 +148,7 @@ robot_cfg:
     self_collision_ignore: {}
 
     collision_spheres:
-      g1:
+      pelvis:
         - center: [0.024, -0.017, -0.018]
           radius: 0.06493
       left_hip_pitch_link:
@@ -240,6 +261,9 @@ robot_cfg:
           radius: 0.02399
         - center: [0.075, 0.005, 0.024]
           radius: 0.02399
+      # left_hand_ee:
+      #   - center: [0.0, 0.0, 0.0]
+      #     radius: 0.03
       left_five_link:
         - center: [0.033, -0.002, 0.001]
           radius: 0.0127
@@ -329,47 +353,31 @@ robot_cfg:
         - center: [0.004, 0.047,  0.258]
           radius: 0.061
 
-    cspace:
+    cspace: # joints which are actuated
       joint_names:
-        - left_hip_pitch_joint
-        - right_hip_pitch_joint
-        - torso_joint
-        - left_hip_roll_joint
-        - right_hip_roll_joint
         - left_shoulder_pitch_joint
-        - right_shoulder_pitch_joint
-        - left_hip_yaw_joint
-        - right_hip_yaw_joint
         - left_shoulder_roll_joint
-        - right_shoulder_roll_joint
-        - left_knee_joint
-        - right_knee_joint
         - left_shoulder_yaw_joint
-        - right_shoulder_yaw_joint
-        - left_ankle_pitch_joint
-        - right_ankle_pitch_joint
         - left_elbow_pitch_joint
-        - right_elbow_pitch_joint
-        - left_ankle_roll_joint
-        - right_ankle_roll_joint
         - left_elbow_roll_joint
-        - right_elbow_roll_joint
-        - left_five_joint
-        - left_three_joint
-        - left_zero_joint
-        - right_five_joint
-        - right_three_joint
-        - right_zero_joint
-        - left_six_joint
-        - left_four_joint
-        - left_one_joint
-        - right_six_joint
-        - right_four_joint
-        - right_one_joint
-        - left_two_joint
-        - right_two_joint
-      retract_config: [-0.4, -0.4, 0.0, 0.05, -0.05, -1.4, -1.4, 0.0, 0.0, -0.2, 0.2, 0.8, 0.8, 0.0, 0.0, -0.3, -0.3, 1.2, 1.2, 0.0, 0.0, 0.0, 0.0, -0.8, -0.8, -0.3, -0.8, -0.8, -0.3, -0.8, -0.3, 0.0, -0.8, -0.3, 0.0, -0.3, 0.0]
-      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-      cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+      retract_config: [-1.4, -0.2, 0.0, 1.2, 0.0]
+      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0]
+      cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0]
       max_acceleration: 10.0
-      max_jerk: 10000.0 
+      max_jerk: 10000.0
+
+    # A virtual fingertip frame 18 cm in front of the palm
+    # extra_links:
+    #   left_hand_ee:
+    #     parent_link_name: "left_palm_link"
+    #     link_name: "left_hand_ee"
+    #     fixed_transform: [0.12, 0.0, 0.0, 1, 0, 0, 0]  # palm length ~12 cm
+    #     joint_type: "FIXED"
+    #     joint_name: "left_hand_ee_fixed"
+      # # Virtual base link coinciding with the original URDF root for cleaner prim hierarchy
+      # pelvis:
+      #   parent_link_name: "g1"
+      #   link_name: "pelvis"
+      #   fixed_transform: [0, 0, 0, 1, 0, 0, 0]
+      #   joint_type: "FIXED"
+      #   joint_name: "pelvis_fixed" 

@@ -54,7 +54,7 @@
   </joint>
   <joint name="left_hip_pitch_joint" type="revolute">
     <origin xyz="0. 0.06445 -0.1027 " rpy="-0.34907 0. 1.5707964"/>
-    <parent link="g1"/>
+    <parent link="pelvis"/>
     <child link="left_hip_pitch_link"/>
     <axis xyz="1. 0. 0."/>
     <limit lower="-2.3499997" upper="3.0499999" effort="88." velocity="32.0000004"/>
@@ -148,7 +148,7 @@
   </joint>
   <joint name="pelvis_contour_joint" type="fixed">
     <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
-    <parent link="g1"/>
+    <parent link="pelvis"/>
     <child link="pelvis_contour_link"/>
   </joint>
   <joint name="right_ankle_pitch_joint" type="revolute">
@@ -195,7 +195,7 @@
   </joint>
   <joint name="right_hip_pitch_joint" type="revolute">
     <origin xyz="0. -0.06445 -0.1027 " rpy="-0.34907 0. 1.5707964"/>
-    <parent link="g1"/>
+    <parent link="pelvis"/>
     <child link="right_hip_pitch_link"/>
     <axis xyz="1. 0. 0."/>
     <limit lower="-2.3499997" upper="3.0499999" effort="88." velocity="32.0000004"/>
@@ -284,12 +284,12 @@
   </joint>
   <joint name="torso_joint" type="revolute">
     <origin xyz="0. 0. 0." rpy="0. -1.5707964 0. "/>
-    <parent link="g1"/>
+    <parent link="pelvis"/>
     <child link="torso_link"/>
     <axis xyz="1. 0. 0."/>
     <limit lower="-2.618" upper="2.618" effort="88." velocity="32.0000004"/>
   </joint>
-  <link name="g1">
+  <link name="pelvis">
     <visual>
       <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
       <geometry>

@@ -67,7 +67,7 @@ import os
 # Third Party
 import carb
 import numpy as np
-from helper import add_robot_to_scene
+from projects_root.examples.helper import add_robot_to_scene
 from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid
 from omni.isaac.core.utils.types import ArticulationAction
@@ -75,6 +75,135 @@ from omni.isaac.core.utils.types import ArticulationAction
 # CuRobo
 from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
+# Create pose and update goal
+from curobo.types.math import Pose
+
+############################################################
+# Global coordinate frame configuration
+############################################################
+
+# World frame: fixed reference frame (identity transform)
+WORLD_FRAME = {
+    'position': np.array([0.0, 0.0, 0.0]),
+    'orientation': np.array([1.0, 0.0, 0.0, 0.0])  # [w, x, y, z] quaternion
+}
+
+# Base link frame: will be set from robot configuration
+BASE_LINK_FRAME = {
+    'name': None,  # Will be set from robot config
+    'robot_instance': None  # Will store robot instance for pose queries
+}
+
+def set_base_link_frame(robot_config: dict, robot_instance):
+    """Set the base link frame from robot configuration and instance.
+    
+    Args:
+        robot_config: Robot configuration dictionary
+        robot_instance: Isaac Sim robot instance for pose queries
+    """
+    global BASE_LINK_FRAME
+    BASE_LINK_FRAME['name'] = robot_config["kinematics"]["base_link"]
+    BASE_LINK_FRAME['robot_instance'] = robot_instance
+    print(f"Base link frame set to: {BASE_LINK_FRAME['name']}")
+
+def transform_pose_from_to(position, orientation, from_frame='world_frame', to_frame='base_link_frame'):
+    """Transform pose between coordinate frames.
+    
+    Args:
+        position: Position as numpy array [x, y, z]
+        orientation: Orientation as quaternion [w, x, y, z] (Isaac Sim format)
+        from_frame: Source coordinate frame ('world_frame' or 'base_link_frame')
+        to_frame: Target coordinate frame ('world_frame' or 'base_link_frame')
+        
+    Returns:
+        tuple: (transformed_position, transformed_orientation)
+    """
+    
+    if from_frame == to_frame:
+        return position, orientation
+    
+    # Get robot instance
+    if BASE_LINK_FRAME['robot_instance'] is None:
+        raise ValueError("Base link frame not initialized. Call set_base_link_frame() first.")
+    
+    robot = BASE_LINK_FRAME['robot_instance']
+    
+    # Import scipy rotation for coordinate transformations
+    from scipy.spatial.transform import Rotation as R
+
+    # Get robot's current world pose (this is the base_link world pose)
+    robot_world_position, robot_world_orientation = robot.get_world_pose()
+    
+    def isaac_to_scipy_quat(quat):
+        return np.array([quat[1], quat[2], quat[3], quat[0]])
+    
+    def scipy_to_isaac_quat(quat):
+        return np.array([quat[3], quat[0], quat[1], quat[2]])
+    
+    if from_frame == 'world_frame' and to_frame == 'base_link_frame':
+        # Transform from world to robot base frame
+        
+        # Position transformation
+        robot_rotation = R.from_quat(isaac_to_scipy_quat(robot_world_orientation))
+        world_to_robot_translation = position - robot_world_position
+        transformed_position = robot_rotation.inv().apply(world_to_robot_translation)
+        
+        # Orientation transformation
+        target_rotation = R.from_quat(isaac_to_scipy_quat(orientation))
+        relative_rotation = robot_rotation.inv() * target_rotation
+        transformed_orientation = scipy_to_isaac_quat(relative_rotation.as_quat())
+        
+        return transformed_position, transformed_orientation
+        
+    elif from_frame == 'base_link_frame' and to_frame == 'world_frame':
+        # Transform from robot base frame to world
+        
+        # Position transformation
+        robot_rotation = R.from_quat(isaac_to_scipy_quat(robot_world_orientation))
+        robot_to_world_translation = robot_rotation.apply(position)
+        transformed_position = robot_to_world_translation + robot_world_position
+        
+        # Orientation transformation
+        relative_rotation = R.from_quat(isaac_to_scipy_quat(orientation))
+        world_rotation = R.from_quat(isaac_to_scipy_quat(robot_world_orientation))
+        target_rotation = world_rotation * relative_rotation
+        transformed_orientation = scipy_to_isaac_quat(target_rotation.as_quat())
+        
+        return transformed_position, transformed_orientation
+        
+    else:
+        raise ValueError(f"Unsupported frame transformation: {from_frame} -> {to_frame}")
+
+def update_target_goal(cube_position, cube_orientation, goal_buffer, mpc, tensor_args):
+    """Update MPC goal with coordinate frame transformation.
+    
+    Args:
+        cube_position: Target position in world frame
+        cube_orientation: Target orientation in world frame  
+        goal_buffer: MPC goal buffer to update
+        mpc: MPC solver instance
+        tensor_args: Tensor device arguments
+    """
+    # Transform target from world frame to robot base frame
+    ee_translation_goal, ee_orientation_goal = transform_pose_from_to(
+        cube_position, cube_orientation, 
+        from_frame='world_frame', 
+        to_frame='base_link_frame'
+    )
+    
+
+    ik_goal = Pose(
+        position=tensor_args.to_device(ee_translation_goal),
+        quaternion=tensor_args.to_device(ee_orientation_goal),
+    )
+    goal_buffer.goal_pose.copy_(ik_goal)
+    mpc.update_goal(goal_buffer)
+    
+    # Debug output
+    print(f"Target world pos: {cube_position}")
+    print(f"Target robot-relative pos: {ee_translation_goal}")
+    
+    return ik_goal
 
 ############################################################
 
@@ -92,7 +221,7 @@ DATA_DIR = os.path.join(EXT_DIR, "data")
 from typing import Optional
 
 # Third Party
-from helper import add_extensions, add_robot_to_scene
+from projects_root.examples.helper import add_extensions, add_robot_to_scene
 
 # CuRobo
 # from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
@@ -128,12 +257,29 @@ def draw_points(rollouts: torch.Tensor):
     b, h, _ = cpu_rollouts.shape
     point_list = []
     colors = []
+    
+    # Transform rollout points from robot base frame to world frame for visualization
     for i in range(b):
-        # get list of points:
-        point_list += [
-            (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
-        ]
+        for j in range(h):
+            # Get point in robot base frame
+            base_frame_position = cpu_rollouts[i, j, :3]  # [x, y, z]
+            base_frame_orientation = np.array([1.0, 0.0, 0.0, 0.0])  # Identity quaternion [w, x, y, z]
+            
+            try:
+                # Transform to world frame for visualization
+                world_position, _ = transform_pose_from_to(
+                    base_frame_position, base_frame_orientation,
+                    from_frame='base_link_frame', 
+                    to_frame='world_frame'
+                )
+                point_list.append((world_position[0], world_position[1], world_position[2]))
+            except (ValueError, Exception):
+                # Fallback: use original points if transformation fails
+                point_list.append((cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]))
+        
+        # Add colors for this batch
         colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
+    
     sizes = [10.0 for _ in range(b * h)]
     draw.draw_points(point_list, colors, sizes)
 
@@ -183,8 +329,11 @@ def main():
         robot_cfg,
         my_world,
         load_from_usd=False,
-        position=np.array([0, 0, 0.70])
+        position=np.array([0.0, 0.0, 0.7])
     )
+
+    # Initialize coordinate frame system
+    set_base_link_frame(robot_cfg, robot)
 
     articulation_controller = robot.get_articulation_controller()
 
@@ -310,15 +459,8 @@ def main():
             past_pose = cube_position + 1.0
 
         if np.linalg.norm(cube_position - past_pose) > 1e-3:
-            # Set EE teleop goals, use cube for simple non-vr init:
-            ee_translation_goal = cube_position
-            ee_orientation_teleop_goal = cube_orientation
-            ik_goal = Pose(
-                position=tensor_args.to_device(ee_translation_goal),
-                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
-            )
-            goal_buffer.goal_pose.copy_(ik_goal)
-            mpc.update_goal(goal_buffer)
+            # Use the clean coordinate transformation function
+            update_target_goal(cube_position, cube_orientation, goal_buffer, mpc, tensor_args)
             past_pose = cube_position
 
         # if not changed don't call curobo:
