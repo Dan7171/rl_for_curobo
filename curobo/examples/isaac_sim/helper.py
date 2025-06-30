@@ -107,6 +107,14 @@ def add_robot_to_scene(
 
         robot_path = root_prim_path
 
+        # Ensure the referenced USD is composed before we wrap it with Robot()
+        try:
+            my_world.step(render=False)
+        except Exception:
+            # Fallback: if my_world is not yet initialized for stepping
+            import omni.kit.app
+            omni.kit.app.get_app().update()
+
     # ----------------------------------------------------------------------------------
     # 2) OPTION B: IMPORT FROM URDF (DEFAULT BEHAVIOUR)
     # ----------------------------------------------------------------------------------
