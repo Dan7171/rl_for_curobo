@@ -1,0 +1,360 @@
+format: "xrdf"
+
+format_version: 1.0
+
+default_joint_positions: 
+  left_hip_pitch_joint: 0.0
+  right_hip_pitch_joint: -0.0008
+  torso_joint: -0.0005
+  left_hip_roll_joint: 1e-04
+  right_hip_roll_joint: 1e-04
+  left_shoulder_pitch_joint: -0.0003
+  right_shoulder_pitch_joint: -0.0003
+  left_hip_yaw_joint: 0.0006
+  right_hip_yaw_joint: -0.0004
+  left_shoulder_roll_joint: -1e-04
+  right_shoulder_roll_joint: -1e-04
+  left_knee_joint: -0.0013
+  right_knee_joint: 0.0006
+  left_shoulder_yaw_joint: -0.0
+  right_shoulder_yaw_joint: 1e-04
+  left_ankle_pitch_joint: -0.0166
+  right_ankle_pitch_joint: -0.0189
+  left_elbow_pitch_joint: -0.0
+  right_elbow_pitch_joint: 0.0003
+  left_ankle_roll_joint: 0.0002
+  right_ankle_roll_joint: 0.0048
+  left_elbow_roll_joint: 0.0002
+  right_elbow_roll_joint: 0.0002
+  left_five_joint: -1e-04
+  left_three_joint: -0.0
+  left_zero_joint: 0.0
+  right_five_joint: -0.0
+  right_three_joint: -0.0
+  right_zero_joint: -1e-04
+  left_six_joint: -0.0
+  left_four_joint: -0.0
+  left_one_joint: 0.0
+  right_six_joint: 0.0
+  right_four_joint: -0.0
+  right_one_joint: -0.0
+  left_two_joint: -0.0
+  right_two_joint: -0.0
+
+cspace: 
+  joint_names: []
+  acceleration_limits: []
+  jerk_limits: []
+
+collision: 
+  geometry: "auto_generated_collision_sphere_group"
+
+self_collision: 
+  geometry: "auto_generated_collision_sphere_group"
+  ignore: 
+    pelvis: 
+      - "left_hip_pitch_link"
+      - "pelvis_contour_link"
+      - "right_hip_pitch_link"
+      - "torso_link"
+    left_hip_pitch_link: 
+      - "left_hip_roll_link"
+      - "pelvis_contour_link"
+      - "right_hip_pitch_link"
+      - "torso_link"
+    left_hip_roll_link: 
+      - "left_hip_yaw_link"
+    left_hip_yaw_link: 
+      - "left_knee_link"
+    left_knee_link: 
+      - "left_ankle_pitch_link"
+    left_ankle_pitch_link: 
+      - "left_ankle_roll_link"
+    right_hip_pitch_link: 
+      - "right_hip_roll_link"
+      - "torso_link"
+    right_hip_roll_link: 
+      - "right_hip_yaw_link"
+    right_hip_yaw_link: 
+      - "right_knee_link"
+    right_knee_link: 
+      - "right_ankle_pitch_link"
+    right_ankle_pitch_link: 
+      - "right_ankle_roll_link"
+    torso_link: 
+      - "head_link"
+      - "imu_link"
+      - "left_shoulder_pitch_link"
+      - "logo_link"
+      - "right_shoulder_pitch_link"
+    left_shoulder_pitch_link: 
+      - "left_shoulder_roll_link"
+      - "logo_link"
+      - "right_shoulder_pitch_link"
+    left_shoulder_roll_link: 
+      - "left_shoulder_yaw_link"
+    left_shoulder_yaw_link: 
+      - "left_elbow_pitch_link"
+    left_elbow_pitch_link: 
+      - "left_elbow_roll_link"
+    left_elbow_roll_link: 
+      - "left_palm_link"
+    left_palm_link: 
+      - "left_five_link"
+      - "left_three_link"
+      - "left_zero_link"
+    left_five_link: 
+      - "left_six_link"
+      - "left_three_link"
+      - "left_zero_link"
+    left_three_link: 
+      - "left_four_link"
+      - "left_zero_link"
+    left_zero_link: 
+      - "left_one_link"
+    left_one_link: 
+      - "left_two_link"
+    right_shoulder_pitch_link: 
+      - "right_shoulder_roll_link"
+    right_shoulder_roll_link: 
+      - "right_shoulder_yaw_link"
+    right_shoulder_yaw_link: 
+      - "right_elbow_pitch_link"
+    right_elbow_pitch_link: 
+      - "right_elbow_roll_link"
+    right_elbow_roll_link: 
+      - "right_palm_link"
+    right_palm_link: 
+      - "right_five_link"
+      - "right_three_link"
+      - "right_zero_link"
+    right_five_link: 
+      - "right_six_link"
+      - "right_three_link"
+      - "right_zero_link"
+    right_three_link: 
+      - "right_four_link"
+      - "right_zero_link"
+    right_zero_link: 
+      - "right_one_link"
+    right_one_link: 
+      - "right_two_link"
+    pelvis_contour_link: 
+      - "right_hip_pitch_link"
+      - "torso_link"
+    head_link: 
+      - "imu_link"
+      - "left_shoulder_pitch_link"
+      - "logo_link"
+      - "right_shoulder_pitch_link"
+    imu_link: 
+      - "left_shoulder_pitch_link"
+      - "logo_link"
+      - "right_shoulder_pitch_link"
+    logo_link: 
+      - "right_shoulder_pitch_link"
+
+geometry: 
+  auto_generated_collision_sphere_group: 
+    spheres: 
+      pelvis: 
+        - center: [0.024, -0.017, -0.018]
+          radius: 0.0649
+      left_hip_pitch_link: 
+        - center: [-0.008, 0.051, 0.003]
+          radius: 0.0654
+      left_ankle_pitch_link: 
+        - center: [-0.01, 0.001, -0.018]
+          radius: 0.0408
+        - center: [-0.01, 0.001, -0.018]
+          radius: 0.0408
+      left_ankle_roll_link: 
+        - center: [-0.023, -0.006, 0.008]
+          radius: 0.0386
+      pelvis_contour_link: 
+        - center: [0.017, -0.004, -0.065]
+          radius: 0.0592
+      right_hip_pitch_link: 
+        - center: [-0.008, -0.045, 0.012]
+          radius: 0.0604
+        - center: [-0.008, -0.053, -0.013]
+          radius: 0.0604
+      right_hip_roll_link: 
+        - center: [0.013, -0.002, -0.093]
+          radius: 0.0612
+        - center: [0.026, 0.006, -0.093]
+          radius: 0.0612
+        - center: [0.051, 0.015, -0.035]
+          radius: 0.05
+      right_hip_yaw_link: 
+        - center: [-0.005, 0.001, -0.045]
+          radius: 0.0578
+        - center: [-0.013, 0.001, -0.104]
+          radius: 0.0538
+      right_knee_link: 
+        - center: [-0.012, 0.003, -0.15]
+          radius: 0.0621
+        - center: [-0.013, -0.011, -0.089]
+          radius: 0.0599
+        - center: [0.005, -0.002, -0.223]
+          radius: 0.057
+      left_knee_link: 
+        - center: [-0.012, 0.011, -0.15]
+          radius: 0.0621
+        - center: [-0.013, -0.003, -0.089]
+          radius: 0.0599
+        - center: [0.005, 0.004, -0.203]
+          radius: 0.0585
+      right_ankle_pitch_link: 
+        - center: [-0.013, 0.001, -0.016]
+          radius: 0.0458
+      right_ankle_roll_link: 
+        - center: [-0.023, -0.0, -0.01]
+          radius: 0.0436
+      head_link: 
+        - center: [-0.003, 0.004, 0.481]
+          radius: 0.0535
+        - center: [-0.011, -0.003, 0.357]
+          radius: 0.0517
+        - center: [0.022, -0.014, 0.477]
+          radius: 0.0511
+      left_shoulder_pitch_link: 
+        - center: [-0.004, 0.05, -0.001]
+          radius: 0.0511
+      right_shoulder_pitch_link: 
+        - center: [-0.004, -0.051, -0.002]
+          radius: 0.0511
+      left_shoulder_roll_link: 
+        - center: [0.012, 0.002, -0.069]
+          radius: 0.0331
+      right_shoulder_roll_link: 
+        - center: [0.005, -0.006, -0.068]
+          radius: 0.0331
+      right_shoulder_yaw_link: 
+        - center: [0.0, 0.0, -0.016]
+          radius: 0.0442
+      left_shoulder_yaw_link: 
+        - center: [-0.001, 0.001, -0.018]
+          radius: 0.0435
+      left_elbow_pitch_link: 
+        - center: [0.05, 0.006, 0.016]
+          radius: 0.0296
+      right_elbow_pitch_link: 
+        - center: [0.051, -0.011, 0.012]
+          radius: 0.0302
+      left_elbow_roll_link: 
+        - center: [0.037, 0.008, 0.001]
+          radius: 0.036
+        - center: [0.073, 0.009, 0.001]
+          radius: 0.0325
+        - center: [0.107, 0.009, 0.002]
+          radius: 0.0291
+      right_elbow_roll_link: 
+        - center: [0.036, -0.008, -0.001]
+          radius: 0.036
+        - center: [0.071, -0.009, 0.0]
+          radius: 0.0331
+        - center: [0.106, -0.009, 0.0]
+          radius: 0.0297
+      right_palm_link: 
+        - center: [0.064, -0.001, -0.001]
+          radius: 0.025
+        - center: [0.075, -0.007, -0.024]
+          radius: 0.024
+        - center: [0.073, -0.007, 0.024]
+          radius: 0.024
+      left_palm_link: 
+        - center: [0.061, 0.001, -0.003]
+          radius: 0.025
+        - center: [0.082, 0.003, -0.024]
+          radius: 0.024
+        - center: [0.075, 0.005, 0.024]
+          radius: 0.024
+      left_five_link: 
+        - center: [0.033, -0.002, 0.001]
+          radius: 0.0127
+        - center: [0.047, -0.003, 0.0]
+          radius: 0.0111
+      right_five_link: 
+        - center: [0.033, 0.002, -0.001]
+          radius: 0.0127
+        - center: [0.047, 0.003, -0.0]
+          radius: 0.0111
+      left_six_link: 
+        - center: [0.019, 0.0, 0.001]
+          radius: 0.0164
+        - center: [0.03, 0.001, -0.004]
+          radius: 0.0155
+      right_six_link: 
+        - center: [0.02, -0.0, 0.002]
+          radius: 0.0164
+        - center: [0.03, -0.001, -0.002]
+          radius: 0.0155
+      left_three_link: 
+        - center: [0.033, -0.002, 0.001]
+          radius: 0.0207
+        - center: [0.047, -0.003, 0.0]
+          radius: 0.0191
+        - center: [0.047, 0.0, -0.001]
+          radius: 0.0185
+      right_three_link: 
+        - center: [0.033, 0.002, -0.001]
+          radius: 0.0207
+        - center: [0.047, 0.003, -0.0]
+          radius: 0.0191
+        - center: [0.047, -0.0, 0.001]
+          radius: 0.0185
+      right_four_link: 
+        - center: [0.02, -0.0, 0.002]
+          radius: 0.0164
+        - center: [0.03, -0.001, -0.002]
+          radius: 0.0155
+      left_four_link: 
+        - center: [0.019, 0.0, 0.001]
+          radius: 0.0164
+        - center: [0.03, 0.001, -0.004]
+          radius: 0.0155
+      left_zero_link: 
+        - center: [-0.022, -0.003, 0.001]
+          radius: 0.0188
+      right_zero_link: 
+        - center: [-0.024, 0.005, 0.001]
+          radius: 0.0188
+      right_one_link: 
+        - center: [-0.002, 0.028, -0.001]
+          radius: 0.0202
+        - center: [-0.003, 0.041, 0.0]
+          radius: 0.0192
+      left_one_link: 
+        - center: [-0.003, -0.027, -0.0]
+          radius: 0.0197
+        - center: [-0.003, -0.043, 0.0]
+          radius: 0.0192
+      left_two_link: 
+        - center: [-0.0, -0.019, 0.003]
+          radius: 0.0164
+        - center: [-0.001, -0.03, -0.003]
+          radius: 0.0155
+      right_two_link: 
+        - center: [-0.0, 0.019, -0.003]
+          radius: 0.0164
+        - center: [-0.001, 0.032, 0.003]
+          radius: 0.0155
+      left_hip_roll_link: 
+        - center: [0.013, -0.004, -0.093]
+          radius: 0.0612
+        - center: [0.026, 0.004, -0.093]
+          radius: 0.0612
+        - center: [0.052, 0.007, -0.036]
+          radius: 0.05
+      torso_link: 
+        - center: [-0.005, 0.056, 0.151]
+          radius: 0.061
+        - center: [0.021, 0.001, 0.062]
+          radius: 0.061
+        - center: [-0.002, -0.069, 0.259]
+          radius: 0.061
+        - center: [-0.011, -0.056, 0.145]
+          radius: 0.0619
+        - center: [0.004, 0.047, 0.258]
+          radius: 0.061

@@ -412,6 +412,7 @@ if __name__ == "__main__":
     if DEBUG_GPU_MEM:
         # GPU memory debugging signal handler removed for production 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
+
     
     input_args = ['franka', 'ur5e', 'franka']
     main([resolve_meta_config_path(robot_model) for robot_model in input_args])

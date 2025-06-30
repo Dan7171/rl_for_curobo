@@ -51,6 +51,9 @@ from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGen
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 
+# Thread-safety helpers
+from threading import Lock
+
 def spawn_target(path="/World/target", position=np.array([0.5, 0.0, 0.5]), orientation=np.array([0, 1, 0, 0]), color=np.array([0, 1, 0]), size=0.05):
     """ 
     Create a target pose "hologram" in the simulation. By "hologram", 
@@ -664,13 +667,49 @@ class ArmMpc(AutonomousArm):
         return art_action
     
 
-    def command(self, art_action: ArticulationAction,num_times:int=3, *, world_time:float=None, t_idx:int=None):
+    def command(
+        self,
+        art_action: ArticulationAction,
+        num_times: int = 3,
+        *,
+        world_time: float | None = None,
+        t_idx: int | None = None,
+        lock: Optional["Lock"] = None,
+    ):
         """
-        Command controller in the motors (or simulator controller) to move the robot.
-        Also records bookkeeping information (#actions, world time, t_idx).
+        Send *art_action* to Isaac-Sim through ``ArticulationController.apply_action``.
+
+        If *lock* is provided, the method acquires it **only around the call that
+        touches PhysX** so that the critical section is as small as possible.
+        This lets callers keep the rest of their logic lock-free while still
+        guaranteeing PhysX thread-safety.
+
+        Parameters
+        ----------
+        art_action
+            The low-level joint target produced by the MPC.
+        num_times
+            How many consecutive times to apply the same target (usually 1).
+        world_time, t_idx
+            Book-keeping info for the caller – stored verbatim so that the main
+            program can later inspect when a particular command was issued.
+        lock
+            Optional :class:`threading.Lock` shared by all threads that may
+            enter PhysX.  Passing *None* means "do **not** lock" (single-thread
+            context).
         """
-        for _ in range(num_times):
-            ans = self.articulation_controller.apply_action(art_action)
+
+        def _apply():
+            for _ in range(num_times):
+                ans_local = self.articulation_controller.apply_action(art_action)
+            return ans_local
+
+        if lock is None:
+            ans = _apply()
+        else:
+            with lock:
+                ans = _apply()
+
         # ---------------- bookkeeping ----------------
         self.actions_taken += 1
         if world_time is not None:

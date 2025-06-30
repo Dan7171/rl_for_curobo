@@ -174,17 +174,15 @@ def define_run_setup(n_robots:int):
     X_targets_R = [list(np.array(X_targets[:3]) - X_robot_np[i][:3]) + list(X_targets[3:]) for i in range(n_robots)] 
     return X_robot_np, col_pred_with, X_targets_R, plot_costs, target_colors
 
-def ctrl_loop(robot_idx: int,
+def ctrl_loop_robot(robot_idx: int,
                stop_event: Event,
                get_t_idx,
                t_lock: Lock,
                physx_lock: Lock,
                plans_lock: Lock,
-               actions_lock: Lock,
                robots,
                col_pred_with,
                plans: List[Optional[Any]],
-               pending_actions: List[Optional[Any]],
                tensor_args):
     """Background loop that runs one MPC cycle whenever t_idx increments."""
     last_step = -1
@@ -195,7 +193,7 @@ def ctrl_loop(robot_idx: int,
         with t_lock:
             cur_step = get_t_idx()
         if cur_step == last_step:
-            time.sleep(5e-4)
+            time.sleep(1e-7)
             continue
         last_step = cur_step
 
@@ -215,9 +213,9 @@ def ctrl_loop(robot_idx: int,
         # plan: (improved curobo mpc planning, (torch-heavy, no PhysX))
         action = r.plan(max_attempts=2)
 
-        #action: Hand action back to main thread
-        with actions_lock:
-            pending_actions[robot_idx] = action
+        # Apply the planned action immediately (thread-safe)
+        world_time = (cur_step + 1) * PHYSICS_STEP_DT  # approximate next step time
+        r.command(action, num_times=1, world_time=world_time, t_idx=cur_step + 1, lock=physx_lock)
 
 def main(meta_config_paths: List[str]):
     """
@@ -384,15 +382,12 @@ def main(meta_config_paths: List[str]):
     t_lock = Lock()          # Protects access to shared t_idx
     plans_lock = Lock()      # Protects access to shared plans list
     physx_lock = Lock()
-
     plans: List[Optional[Any]] = [None for _ in range(len(robots))]
-    pending_actions: List[Optional[Any]] = [None for _ in range(len(robots))]
-    actions_lock = Lock()
 
     t_idx = 0  # global simulation step index
-
+    total_steps_time = 0.0
     # Spawn one thread per robot
-    robot_threads = [Thread(target=ctrl_loop, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, actions_lock, robots, col_pred_with, plans, pending_actions, tensor_args), daemon=True) for idx in range(len(robots))]
+    robot_threads = [Thread(target=ctrl_loop_robot, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args), daemon=True) for idx in range(len(robots))]
     for th in robot_threads:
         th.start()
 
@@ -407,18 +402,16 @@ def main(meta_config_paths: List[str]):
         # safely increment global step counter
         with t_lock:
             t_idx += 1
-            print(f"t_idx: {t_idx}")
+            # print(f"ts: {t_idx}")
 
-        # Execute any pending actions from robot threads (sequentially in main thread)
-        with actions_lock:
-            for ridx, act in enumerate(pending_actions):
-                if act is not None:
-                    world_time = t_idx * PHYSICS_STEP_DT
-                    with physx_lock:
-                        robots[ridx].command(act, num_times=1, world_time=world_time, t_idx=t_idx)
-                    pending_actions[ridx] = None
-        end_time = time.time()
-        print(f"step time: {(end_time - start_time)*1000:.5f} ms")
+        if t_idx % 100 == 0:
+            print(f"ts: {t_idx}")
+            print("actions taken by each robot:")
+            print([robots[i].actions_taken for i in range(len(robots))])
+            print(f"overall avg step time: {(total_steps_time/t_idx)*1000:.1f} ms")
+        total_steps_time += time.time() - start_time
+        # print(f"step time: {(end_time - start_time)*1000:.5f} ms")
+
     
     # Clean up thread pool
     stop_event.set()
