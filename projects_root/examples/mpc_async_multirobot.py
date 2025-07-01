@@ -48,6 +48,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     # Omniverse and IsaacSim modules
     from omni.isaac.core import World 
+    from omni.isaac.core.utils.types import ArticulationAction
     # Our modules
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
     from projects_root.utils.transforms import transform_poses_batched
@@ -182,10 +183,12 @@ def ctrl_loop_robot(robot_idx: int,
                robots,
                col_pred_with,
                plans: List[Optional[Any]],
-               tensor_args):
+               tensor_args,
+               ):
     """Background loop that runs one MPC cycle whenever t_idx increments."""
     last_step = -1
     r: ArmMpc = robots[robot_idx]
+    
     while not stop_event.is_set():
         
         # wait for new time step
@@ -196,38 +199,39 @@ def ctrl_loop_robot(robot_idx: int,
             continue
         last_step = cur_step
 
-        # publish plan
         with physx_lock:
+            # publish 
             if OBS_PREDICTION:
-                new_plan = r.get_plan(valid_spheres_only=False)
-                with plans_lock:
-                    plans[robot_idx] = new_plan
+                r.publish(plans, plans_lock)
+            # sense
             if r.use_col_pred:
-                # with plans_lock:
-                #     r.update(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
-                r.update(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+                r.sense(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
             else:
-                r.update()
-
-        # plan: (improved curobo mpc planning, (torch-heavy, no PhysX))
+                r.sense()
+        # plan (improved curobo mpc planning, (torch-heavy, no PhysX))
         action = r.plan(max_attempts=2)
-
-        # Apply the planned action immediately (thread-safe)
-        # world_time = (cur_step + 1) * PHYSICS_STEP_DT  # approximate next step time
-        # r.command(action, num_times=1, world_time=world_time, t_idx=cur_step + 1, lock=physx_lock)
-        r.command(action, num_times=1, t_idx=cur_step + 1, lock=physx_lock)
-
-def main(meta_config_paths: List[str]):
+        # command* 
+        # r.command(action, num_times=1, physx_lock=physx_lock)
+        # * We actually only register action here and command it later in main thread. 
+        # The reason is that we want to command for each robot every time step, and not only the robots that have a new command to provide, and since we always use the most updated command we have the registry,even if its from a few steps ago, we can still command it.
+        
+def main(meta_config_paths: List[str], use_action_registry: bool = True):
     """
     Main function for multi-robot MPC simulation with heterogeneous robot models.
     
     Args:
-        meta_config_paths: List of paths to meta-configuration files, each specifying
-                          robot and MPC config paths for one robot
+        meta_config_paths: List of paths to meta-configuration files, each specifying  robot and MPC
+            config paths for one robot
+        use_action_registry: If True, then the action will be registered in the registry instead of applied.
+            Aimed to force commanding for each robot every time step, even if robot hasnt completed its planning on time (in that case we'll use the action from the previous time step until the robot has a new action to provide).
+            If False, then action will be sent to the articulation controller only if robot has a new action to provide (depending if it completed its planning on time or not).
+
     """
+
+
     n_robots = len(meta_config_paths)
     print(f"Starting multi-robot simulation with {n_robots} robots")
-    
+
     # Parse meta-configurations to get robot and MPC config paths
     robot_config_paths, mpc_config_paths = parse_meta_configs(meta_config_paths)
     
@@ -385,7 +389,13 @@ def main(meta_config_paths: List[str]):
     plans: List[Optional[Any]] = [None for _ in range(len(robots))]
 
     t_idx = 0  # global simulation step index
-    total_steps_time = 0.0
+    # total_steps_time = 0.0
+    
+    if use_action_registry:
+        action_reg_and_lock: Optional[Tuple[List[Optional[ArticulationAction]],Lock]] = ([None for _ in range(len(robots))], Lock()) 
+    else:
+        action_reg_and_lock = None
+        
     # Spawn one thread per robot
     robot_threads = [Thread(target=ctrl_loop_robot, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args), daemon=True) for idx in range(len(robots))]
     for th in robot_threads:
@@ -395,21 +405,23 @@ def main(meta_config_paths: List[str]):
     step_batch_start_time = time.time()
     step_batch_size = 100
     while simulation_app.is_running():
-        # update simulation (PhysX)
         with physx_lock:
+            # for each robot, apply the last planned action (if any)
+            for i in range(len(robots)):
+                robots[i].command(None, num_times=1, physx_lock=None)
+            # update simulation (PhysX)    
             my_world.step(render=True)           
         with t_lock:
             t_idx += 1
         if t_idx % step_batch_size == 0: # step batch size = 100
             step_batch_time = time.time() - step_batch_start_time
             print(f"ts: {t_idx}")
-            print("actions taken by each robot:")
-            print([robots[i].actions_taken for i in range(len(robots))])
+            print("num of actions planned by each robot:")
+            print([robots[i].n_actions_planned for i in range(len(robots))])
             print(f"overall avg step time: {(step_batch_time/step_batch_size)*1000:.1f} ms")
             step_batch_start_time = time.time()
-        
-        # print(f"step time: {(end_time - start_time)*1000:.5f} ms")
-
+    simulation_app.close() 
+    
     
     # Clean up thread pool
     stop_event.set()
@@ -426,13 +438,10 @@ def resolve_meta_config_path(robot_model:str) -> str:
 if __name__ == "__main__":
     
     if DEBUG_GPU_MEM:
-        # GPU memory debugging signal handler removed for production 
         torch.cuda.memory._record_memory_history() # https://docs.pytorch.org/docs/stable/torch_cuda_memory.html
-    
-    
-    input_args = ['franka', 'ur5e', 'franka']
+    input_args = ['ur5e', 'franka', 'franka']
     main([resolve_meta_config_path(robot_model) for robot_model in input_args])
-    simulation_app.close()
+    
     
      
         

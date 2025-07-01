@@ -3,7 +3,7 @@ try:
 except ImportError:
         pass
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
 from curobo.opt.particle.parallel_mppi import ParallelMPPI
 from curobo.rollout.arm_reacher import ArmReacher
@@ -163,10 +163,10 @@ class AutonomousArm:
         self.use_col_pred = False  # Set to True to enable collision prediction updates
         
         # ---------------- Action-tracking ----------------
-        # Total number of high-level actions (solver commands) sent so far
-        self.actions_taken: int = 0
-     
-    
+        self.n_actions_applied: int = 0 # num of actions actually sent to controller (not necessarily the planned number) 
+        self.n_actions_planned: int = 0 # num of actions planned by the solver (not necessarily the applied number)    
+        self.last_planned_action: Optional[ArticulationAction] = None # most recent action planned by the solver
+
     def get_num_of_sphers(self, valid_only:bool=True):
         return self.n_coll_spheres if not valid_only else self.n_coll_spheres_valid
     
@@ -664,11 +664,10 @@ class ArmMpc(AutonomousArm):
 
     def command(
         self,
-        art_action: ArticulationAction,
+        art_action: Optional[ArticulationAction],
         num_times: int = 3,
         *,
-        t_idx: int | None = None,
-        lock: Optional["Lock"] = None,
+        physx_lock: Optional["Lock"] = None,  
     ):
         """
         Send *art_action* to Isaac-Sim through ``ArticulationController.apply_action``.
@@ -682,33 +681,43 @@ class ArmMpc(AutonomousArm):
         ----------
         art_action
             The low-level joint target produced by the MPC.
+            If None, the last planned action will be applied.
         num_times
             How many consecutive times to apply the same target (usually 1).
         world_time, t_idx
             Book-keeping info for the caller – stored verbatim so that the main
             program can later inspect when a particular command was issued.
-        lock
+        physx_lock
             Optional :class:`threading.Lock` shared by all threads that may
             enter PhysX.  Passing *None* means "do **not** lock" (single-thread
             context).
+        
         """
 
-        def _apply():
+        def _apply(art_action):
+            """
+            Sending the command to articulation controller
+            """
+            if art_action is None: # if None, take last action planned by the solver
+                art_action = self.last_planned_action
+                if art_action is None: # If still no action to apply (no planned action yet), return
+                    return 
+                
             for _ in range(num_times):
                 ans_local = self.articulation_controller.apply_action(art_action)
+            
+            # bookkeeping
+            self.n_actions_applied += 1
             return ans_local
-
-        if lock is None:
-            ans = _apply()
-        else:
-            with lock:
-                ans = _apply()
-
-        # ---------------- bookkeeping ----------------
-        self.actions_taken += 1
-     
+        
+        
+        if physx_lock is None: # sync setup
+            ans = _apply(art_action)
+        else: # async setup
+            with physx_lock:
+                ans = _apply(art_action)
         return ans
-    
+
     def get_trajopt_horizon(self):
         return self.H
 
@@ -926,9 +935,9 @@ class ArmMpc(AutonomousArm):
         """
         return self.solver.step(self.current_state, shift_steps=shift_steps, seed_traj=seed_traj, max_attempts=max_attempts)
 
-    def update(self, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None,physx_lock:Optional["Lock"]=None):
+    def sense(self, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None,physx_lock:Optional["Lock"]=None):
         """
-        Complete robot update cycle: collision prediction, joint state, target, and MPC step.
+        Complete robot sensing and state update update cycle: collision prediction, joint state, target, and MPC step.
         
         Args:
             plans: List of robot plans from all robots (required if use_col_pred=True)
@@ -981,7 +990,13 @@ class ArmMpc(AutonomousArm):
         """
         mpc_result = self.step(max_attempts=max_attempts)
         art_action = self.get_next_articulation_action(mpc_result.js_action)
+        self.n_actions_planned += 1
+        self.last_planned_action = art_action
         return art_action
+    
+    def publish(self, plans, plans_lock:"Lock"):
+        with plans_lock:
+            plans[self.instance_id] = self.get_plan(valid_spheres_only=False)
 
 class ArmCumotion(AutonomousArm):
     def __init__(self, 
