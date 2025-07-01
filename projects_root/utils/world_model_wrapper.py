@@ -87,6 +87,8 @@ class WorldModelWrapper:
         self.collision_checker = None
         self.obstacle_names = set()
         self._initialized = False
+        # internal step counter for periodic summaries
+        self._step_counter = 0
         
         if self.verbosity:
             log_info("WorldModelWrapper initialized with base frame: {}".format(self.base_frame))
@@ -402,9 +404,13 @@ class WorldModelWrapper:
         if newly_added and self.verbosity >= 1:
             self._vprint("Added new obstacle(s): " + ", ".join(newly_added))
 
-        # With highest verbosity provide count summary every update
+        # periodic summary depending on verbosity level
         if self.verbosity >= 2:
-            self._print_world_summary(header=False, list_names=False)
+            self._step_counter += 1
+            interval = 10 if self.verbosity < 4 else 1
+            if self._step_counter % interval == 0:
+                list_names = self.verbosity >= 3
+                self._print_world_summary(header=False, list_names=list_names)
 
     # --------------------------------------------------------------
     # Helper for verbose summaries

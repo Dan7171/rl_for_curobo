@@ -212,7 +212,8 @@ def main(robot_base_frame):
     # Initialize WorldModelWrapper for efficient obstacle updates
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
-        base_frame=robot_base_frame
+        base_frame=robot_base_frame,
+        verbosity=3
     )
 
     init_curobo = False
@@ -330,7 +331,7 @@ def main(robot_base_frame):
             print("WorldModelWrapper initialized successfully!")
         
         # Efficient world update every 10 steps (instead of expensive recreation every 1000 steps)
-        # if world_initialized and step_index % 10 == 0:
+        if world_initialized and step_index % 10 == 0:
             # Update robot base frame in case robot has moved
             # for movable robot base frame:
             # if hasattr(robot, 'get_world_pose'):
@@ -342,6 +343,7 @@ def main(robot_base_frame):
             world_wrapper.update(
                 usd_helper=usd_help,
                 only_paths=["/World"],
+                # reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target",
