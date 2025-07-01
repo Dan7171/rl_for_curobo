@@ -37,7 +37,6 @@ robot_cfg:
       - right_elbow_roll_link
       - right_palm_link
       - left_palm_link
-      # - left_hand_ee
       - left_five_link
       - right_five_link
       - left_six_link
@@ -204,9 +203,9 @@ robot_cfg:
           radius: 0.04357
       head_link:
         - center: [-0.003, 0.004, 0.481]
-          radius: 0.05347
+          radius: 0.04
         - center: [-0.011, -0.003, 0.357]
-          radius: 0.05168
+          radius: 0.04
         - center: [0.022, -0.014, 0.477]
           radius: 0.05108
       left_shoulder_pitch_link:
@@ -261,9 +260,7 @@ robot_cfg:
           radius: 0.02399
         - center: [0.075, 0.005, 0.024]
           radius: 0.02399
-      # left_hand_ee:
-      #   - center: [0.0, 0.0, 0.0]
-      #     radius: 0.03
+
       left_five_link:
         - center: [0.033, -0.002, 0.001]
           radius: 0.0127
@@ -365,19 +362,3 @@ robot_cfg:
       cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0]
       max_acceleration: 10.0
       max_jerk: 10000.0
-
-    # A virtual fingertip frame 18 cm in front of the palm
-    # extra_links:
-    #   left_hand_ee:
-    #     parent_link_name: "left_palm_link"
-    #     link_name: "left_hand_ee"
-    #     fixed_transform: [0.12, 0.0, 0.0, 1, 0, 0, 0]  # palm length ~12 cm
-    #     joint_type: "FIXED"
-    #     joint_name: "left_hand_ee_fixed"
-      # # Virtual base link coinciding with the original URDF root for cleaner prim hierarchy
-      # pelvis:
-      #   parent_link_name: "g1"
-      #   link_name: "pelvis"
-      #   fixed_transform: [0, 0, 0, 1, 0, 0, 0]
-      #   joint_type: "FIXED"
-      #   joint_name: "pelvis_fixed" 

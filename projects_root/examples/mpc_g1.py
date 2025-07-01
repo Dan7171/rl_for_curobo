@@ -69,7 +69,7 @@ import carb
 import numpy as np
 from projects_root.examples.helper import add_robot_to_scene
 from omni.isaac.core import World
-from omni.isaac.core.objects import cuboid
+from omni.isaac.core.objects import cuboid, VisualSphere
 from omni.isaac.core.utils.types import ArticulationAction
 
 # CuRobo
@@ -322,7 +322,7 @@ def main():
 
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-    robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02
+    # robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02
 
     # Use URDF import path (load_from_usd=False) to avoid prim-composition timing issues
     robot, robot_prim_path = add_robot_to_scene(
@@ -409,6 +409,7 @@ def main():
     cmd_state_full = None
     step = 0
     add_extensions(simulation_app, args.headless_mode)
+    spheres = None  # For collision sphere visualization
     while simulation_app.is_running():
         if not init_world:
             for _ in range(10):
@@ -492,6 +493,34 @@ def main():
             # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
         common_js_names = []
         current_state.copy_(cu_js)
+
+        # --- Collision sphere visualization ---
+        if args.visualize_spheres and step_index % 2 == 0:
+            sph_list = mpc.kinematics.get_robot_as_spheres(cu_js.position)
+            # Get base link world pose (position, orientation as quaternion)
+            base_pos, base_quat = robot.get_world_pose()  # base_link is "pelvis"
+            from scipy.spatial.transform import Rotation as R
+            def isaac_to_scipy_quat(quat):
+                return np.array([quat[1], quat[2], quat[3], quat[0]])
+            base_rot = R.from_quat(isaac_to_scipy_quat(base_quat))
+            if spheres is None:
+                spheres = []
+                for si, s in enumerate(sph_list[0]):
+                    # Transform sphere position from base_link to world
+                    sphere_pos_world = base_rot.apply(s.position) + base_pos
+                    sp = VisualSphere(
+                        prim_path="/curobo/robot_sphere_" + str(si),
+                        position=np.ravel(sphere_pos_world),
+                        radius=float(s.radius),
+                        color=np.array([0, 0.8, 0.2]),
+                    )
+                    spheres.append(sp)
+            else:
+                for si, s in enumerate(sph_list[0]):
+                    if not np.isnan(s.position[0]):
+                        sphere_pos_world = base_rot.apply(s.position) + base_pos
+                        spheres[si].set_world_pose(position=np.ravel(sphere_pos_world))
+                        spheres[si].set_radius(float(s.radius))
 
         mpc_result = mpc.step(current_state, max_attempts=2)
         # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
