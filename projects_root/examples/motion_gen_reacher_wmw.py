@@ -335,6 +335,19 @@ def main():
             print("WorldModelWrapper initialized successfully!")
             carb.log_info("Synced CuRobo world from stage using WorldModelWrapper.")
 
+            # Detect and add any new obstacles that were added to the stage on-the-fly
+            world_wrapper.add_new_obstacles_from_stage(
+                 usd_helper=usd_help,
+                 only_paths=["/World"],
+                 reference_prim_path=robot_prim_path,
+                 ignore_substring=[
+                     robot_prim_path,
+                     "/World/target",
+                     "/World/defaultGroundPlane",
+                     "/curobo",
+                 ]
+            )
+
         # Efficient world update every 10 steps (instead of expensive recreation every 1000 steps)
         if world_initialized and step_index % 10 == 0:
             # Update robot base frame in case robot has moved
@@ -354,6 +367,19 @@ def main():
                     "/World/defaultGroundPlane",
                     "/curobo",
                 ]
+            )
+
+            # After updating poses, also check for brand new obstacles
+            world_wrapper.add_new_obstacles_from_stage(
+                 usd_helper=usd_help,
+                 only_paths=["/World"],
+                 reference_prim_path=robot_prim_path,
+                 ignore_substring=[
+                     robot_prim_path,
+                     "/World/target",
+                     "/World/defaultGroundPlane",
+                     "/curobo",
+                 ]
             )
 
         # position and orientation of target virtual cube:

@@ -19,21 +19,36 @@ and provides efficient updates to individual obstacle poses.
 """
 
 # Standard Library
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any
 
 # Third Party
 import numpy as np
 import torch
-
 # CuRobo
 from curobo.geom.types import WorldConfig
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
-from curobo.util.usd_helper import UsdHelper
-from curobo.util.logger import log_info, log_warn, log_error
+
+# -- UsdHelper is part of the Omniverse/USD stack and may be unavailable in
+# testing environments without those heavy dependencies.  We therefore attempt
+# the import and fall back to a very small stub so the module can still be
+# imported when running lightweight unit-tests.
+try:
+    from curobo.util.usd_helper import UsdHelper  # type: ignore
+except Exception:  # pragma: no cover
+    class UsdHelper:  # type: ignore
+        """Stub replacement used when usd-core/pxr is not installed."""
+
+        def __getattr__(self, _name: str) -> Any:  # noqa: D401,E501
+            raise ImportError(
+                "UsdHelper unavailable – install usd-core or run inside Isaac Sim."
+            )
 
 # Project utilities
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
+
+# Logger (kept separate so it still works even if UsdHelper stubbed)
+from curobo.util.logger import log_info, log_warn, log_error
 
 
 class WorldModelWrapper:
@@ -49,7 +64,8 @@ class WorldModelWrapper:
         self, 
         world_config: WorldConfig,
         base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
-        world_base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+        world_base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        verbosity: int = 2
     ):
         """
         Initialize the world model wrapper.
@@ -57,12 +73,14 @@ class WorldModelWrapper:
         Args:
             world_config: Initial world configuration with static obstacles
             base_frame: Base frame pose [x, y, z, qw, qx, qy, qz] - typically robot base frame
-            world_base_frame: World base frame pose [x, y, z, qw, qx, qy, qz] - typically identity
+            robot_base_frame: World base frame pose [x, y, z, qw, qx, qy, qz] - typically identity
+            verbosity: Verbosity level for logging
         """
         self.world_config = world_config
         self.base_frame = np.array(base_frame)
         self.world_base_frame = np.array(world_base_frame)
         self.tensor_args = TensorDeviceType()
+        self.verbosity = int(verbosity)
         
         # Will be set after first initialization
         self.collision_world = None
@@ -70,7 +88,8 @@ class WorldModelWrapper:
         self.obstacle_names = set()
         self._initialized = False
         
-        log_info("WorldModelWrapper initialized with base frame: {}".format(self.base_frame))
+        if self.verbosity:
+            log_info("WorldModelWrapper initialized with base frame: {}".format(self.base_frame))
     
     def initialize_from_stage(
         self,
@@ -128,8 +147,10 @@ class WorldModelWrapper:
         self.collision_world = collision_world
         self._extract_obstacle_names()
         self._initialized = True
-        
-        log_info(f"WorldModelWrapper initialized with {len(self.obstacle_names)} obstacles")
+
+        if self.verbosity >= 1:
+            self._print_world_summary(header=True, list_names=(self.verbosity >= 2))
+
         return collision_world
     
     def set_collision_checker(self, collision_checker):
@@ -185,6 +206,7 @@ class WorldModelWrapper:
         if current_obstacles.objects:
             for obstacle in current_obstacles.objects:
                 obstacle_name = obstacle.name
+                obs_type = obstacle.__class__.__name__ if hasattr(obstacle, "__class__") else "Unknown"
                 
                 if obstacle_name in self.obstacle_names:
                     # Transform obstacle pose from world frame to base frame
@@ -204,10 +226,30 @@ class WorldModelWrapper:
                             w_obj_pose=curobo_pose,
                             env_idx=0
                         )
+
+                        if self.verbosity >= 1:
+                            self._vprint(
+                                f"{obstacle_name} MOVED (type: {obs_type})\n"
+                                f"  X_W (pose w.r to world frame): {self._pose_str(world_pose)}\n"
+                                f"  X_R (pose w.r to collision world frame): {self._pose_str(base_frame_pose)}"
+                            )
                     except Exception as e:
                         log_warn(f"Failed to update obstacle {obstacle_name}: {e}")
                 else:
-                    log_warn(f"Obstacle {obstacle_name} not found in initialized world model")
+                    # Not yet part of collision world – will be added by add_new_obstacles_from_stage()
+                    if self.verbosity >= 1:
+                        self._vprint(
+                            f"New obstacle detected (will be added): {obstacle_name} (type: {obs_type})"
+                        )
+
+        # Optionally try to detect and add new obstacles that might have been introduced
+        self.add_new_obstacles_from_stage(
+            usd_helper,
+            only_paths=only_paths,
+            reference_prim_path=reference_prim_path,
+            ignore_substring=ignore_substring,
+            silent=True,
+        )
     
     def update_base_frame(self, new_base_frame: np.ndarray):
         """
@@ -288,3 +330,125 @@ class WorldModelWrapper:
         )
         
         return np.concatenate([base_position, base_orientation]) 
+
+    # ------------------------------------------------------------------
+    # New functionality
+    # ------------------------------------------------------------------
+    def add_new_obstacles_from_stage(
+        self,
+        usd_helper: UsdHelper,
+        only_paths: List[str] = ["/World"],
+        reference_prim_path: str = "/World",
+        ignore_substring: Optional[List[str]] = None,
+        silent: bool = False,
+    ) -> None:
+        """Detect and add *new* obstacles that have appeared in the stage after the
+        initialisation. This avoids rebuilding the whole collision world – the
+        new obstacles are appended to the existing world model and then the
+        collision checker is re-loaded so it can account for them.
+
+        Args:
+            usd_helper: UsdHelper instance to query stage.
+            only_paths: Stage paths to search.
+            reference_prim_path: Frame of reference for poses.
+            ignore_substring: List of substrings to ignore.
+            silent: If True, suppresses log output when no new obstacles found.
+        """
+        if not self._initialized:
+            log_error("WorldModelWrapper not initialised. Cannot add new obstacles.")
+            return
+
+        if ignore_substring is None:
+            ignore_substring = []
+
+        # Query current obstacles from stage
+        stage_obstacles = usd_helper.get_obstacles_from_stage(
+            only_paths=only_paths,
+            reference_prim_path=reference_prim_path,
+            ignore_substring=ignore_substring,
+        )
+
+        newly_added: List[str] = []
+        if stage_obstacles.objects:
+            for obs in stage_obstacles.objects:
+                if obs.name not in self.obstacle_names:
+                    try:
+                        # 1)  append to internal collision_world
+                        if self.collision_world is not None and hasattr(self.collision_world, "add_obstacle"):
+                            self.collision_world.add_obstacle(obs)
+                        # 2) keep track locally
+                        self.obstacle_names.add(obs.name)
+                        newly_added.append(f"{obs.name} (type: {obs.__class__.__name__})")
+
+                        # Print pose info for each newly added obstacle
+                        if self.verbosity >= 1:
+                            w_pose = np.array(obs.pose)
+                            b_pose = self._transform_pose_world_to_base(w_pose)
+                            self._vprint(
+                                f"ADDED {obs.name} (type: {obs.__class__.__name__})\n"
+                                f"  X_W (pose w.r to world frame): : {self._pose_str(w_pose)}\n"
+                                f"  X_R (pose w.r to collision world frame): {self._pose_str(b_pose)}"
+                            )
+                    except Exception as e:
+                        log_warn(f"Failed adding new obstacle {obs.name}: {e}")
+
+        # Reload collision checker if anything new was added so it can pick the changes.
+        if newly_added and self.collision_checker is not None:
+            try:
+                self.collision_checker.load_collision_model(self.collision_world)
+            except Exception as e:
+                log_warn(f"Could not reload collision checker after adding new obstacles: {e}")
+
+        if newly_added and self.verbosity >= 1:
+            self._vprint("Added new obstacle(s): " + ", ".join(newly_added))
+
+        # With highest verbosity provide count summary every update
+        if self.verbosity >= 2:
+            self._print_world_summary(header=False, list_names=False)
+
+    # --------------------------------------------------------------
+    # Helper for verbose summaries
+    # --------------------------------------------------------------
+    def _print_world_summary(self, header: bool = True, list_names: bool = False):
+        """Prints number of obstacles grouped by type (and optionally names)."""
+        if self.verbosity == 0:
+            return
+
+        type_counts = {}
+        name_by_type = {}
+        for name in self.obstacle_names:
+            # Derive type via name lookup inside collision_world
+            obj_type = "Unknown"
+            if self.collision_world:
+                for attr in ["cuboid", "mesh", "sphere", "capsule", "cylinder"]:
+                    objs = getattr(self.collision_world, attr, [])
+                    for o in objs or []:
+                        if getattr(o, "name", None) == name:
+                            obj_type = o.__class__.__name__
+                            break
+                    if obj_type != "Unknown":
+                        break
+            type_counts[obj_type] = type_counts.get(obj_type, 0) + 1
+            name_by_type.setdefault(obj_type, []).append(name)
+
+        if header:
+            log_info("===== Collision-world Summary =====")
+        summary = ", ".join([f"{t}: {c}" for t, c in type_counts.items()])
+        log_info("Obstacle counts → " + summary)
+        if list_names:
+            for t, names in name_by_type.items():
+                log_info(f"  {t}: {', '.join(sorted(names))}")
+        if header:
+            log_info("====================================")
+
+    # --------------------------------------------------------------
+    # Internal helper for printing respecting verbosity
+    # --------------------------------------------------------------
+    def _vprint(self, msg: str):
+        if self.verbosity > 0:
+            print(msg)
+
+    # helper to format pose arrays nicely
+    @staticmethod
+    def _pose_str(arr: np.ndarray) -> str:
+        return np.round(arr.astype(float), 2).tolist().__str__()

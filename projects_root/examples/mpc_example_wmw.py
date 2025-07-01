@@ -100,7 +100,7 @@ DATA_DIR = os.path.join(EXT_DIR, "data")
 from typing import Optional
 
 # Third Party
-from helper import add_extensions, add_robot_to_scene
+from projects_root.utils.helper import add_extensions, add_robot_to_scene
 
 # CuRobo
 # from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
@@ -149,9 +149,9 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
-def main():
+def main(robot_base_frame):
     # Get robot base frame from command line arguments
-    robot_base_frame = np.array(args.robot_base_frame)
+    # robot_base_frame = np.array(args.robot_base_frame)
     print(f"Robot base frame set to: {robot_base_frame}")
     
     # assuming obstacles are in objects_path:
@@ -170,7 +170,7 @@ def main():
     # Make a target to follow
     target = cuboid.VisualCuboid(
         "/World/target",
-        position=np.array([0.5, 0, 0.5]),
+        position=np.array([1.5, 1, 0.5]),
         orientation=np.array([0, 1, 0, 0]),
         color=np.array([1.0, 0, 0]),
         size=0.05,
@@ -193,7 +193,7 @@ def main():
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
     robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02
 
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
+    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, position=robot_base_frame[:3], orientation=robot_base_frame[3:])
 
     articulation_controller = robot.get_articulation_controller()
 
@@ -212,8 +212,7 @@ def main():
     # Initialize WorldModelWrapper for efficient obstacle updates
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
-        base_frame=robot_base_frame,
-        world_base_frame=np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+        base_frame=robot_base_frame
     )
 
     init_curobo = False
@@ -331,22 +330,35 @@ def main():
             print("WorldModelWrapper initialized successfully!")
         
         # Efficient world update every 10 steps (instead of expensive recreation every 1000 steps)
-        if world_initialized and step_index % 10 == 0:
+        # if world_initialized and step_index % 10 == 0:
             # Update robot base frame in case robot has moved
-            if hasattr(robot, 'get_world_pose'):
-                robot_position, robot_orientation = robot.get_world_pose()
-                robot_base_frame = np.concatenate([robot_position, robot_orientation])
-                world_wrapper.update_base_frame(robot_base_frame)
+            # for movable robot base frame:
+            # if hasattr(robot, 'get_world_pose'):
+            #     robot_position, robot_orientation = robot.get_world_pose()
+            #     robot_base_frame = np.concatenate([robot_position, robot_orientation])
+            #     world_wrapper.update_base_frame(robot_base_frame)
             
             # Efficiently update obstacle poses without recreating the world
             world_wrapper.update(
+                usd_helper=usd_help,
+                only_paths=["/World"],
+                ignore_substring=[
+                    robot_prim_path,
+                    "/World/target",
+                    "/World/defaultGroundPlane", 
+                    "/curobo",
+                ]
+            )
+
+            # Detect and add any new obstacles that may have been introduced during runtime
+            world_wrapper.add_new_obstacles_from_stage(
                 usd_helper=usd_help,
                 only_paths=["/World"],
                 reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target",
-                    "/World/defaultGroundPlane", 
+                    "/World/defaultGroundPlane",
                     "/curobo",
                 ]
             )
@@ -359,11 +371,13 @@ def main():
 
         if np.linalg.norm(cube_position - past_pose) > 1e-3:
             # Set EE teleop goals, use cube for simple non-vr init:
-            ee_translation_goal = cube_position
-            ee_orientation_teleop_goal = cube_orientation
+            X_target_W = np.concatenate([cube_position, cube_orientation])
+            X_target_R = world_wrapper._transform_pose_world_to_base(X_target_W)
+            p_goal_R, q_goal_R = X_target_R[:3], X_target_R[3:]
+
             ik_goal = Pose(
-                position=tensor_args.to_device(ee_translation_goal),
-                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+                position=tensor_args.to_device(p_goal_R),
+                quaternion=tensor_args.to_device(q_goal_R),
             )
             goal_buffer.goal_pose.copy_(ik_goal)
             mpc.update_goal(goal_buffer)
@@ -435,5 +449,6 @@ def main():
 ############################################################
 
 if __name__ == "__main__":
-    main()
+    robot_base_frame = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+    main(robot_base_frame)
     simulation_app.close() 
