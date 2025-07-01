@@ -211,21 +211,16 @@ def ctrl_loop_robot(robot_idx: int,
         # plan (improved curobo mpc planning, (torch-heavy, no PhysX))
         action = r.plan(max_attempts=2)
         # command* 
-        # r.command(action, num_times=1, physx_lock=physx_lock)
-        # * We actually only register action here and command it later in main thread. 
-        # The reason is that we want to command for each robot every time step, and not only the robots that have a new command to provide, and since we always use the most updated command we have the registry,even if its from a few steps ago, we can still command it.
-        
-def main(meta_config_paths: List[str], use_action_registry: bool = True):
+        r.command(action, num_times=1, physx_lock=physx_lock)
+    
+def main(meta_config_paths: List[str]):
     """
     Main function for multi-robot MPC simulation with heterogeneous robot models.
     
     Args:
         meta_config_paths: List of paths to meta-configuration files, each specifying  robot and MPC
             config paths for one robot
-        use_action_registry: If True, then the action will be registered in the registry instead of applied.
-            Aimed to force commanding for each robot every time step, even if robot hasnt completed its planning on time (in that case we'll use the action from the previous time step until the robot has a new action to provide).
-            If False, then action will be sent to the articulation controller only if robot has a new action to provide (depending if it completed its planning on time or not).
-
+        
     """
 
 
@@ -266,7 +261,7 @@ def main(meta_config_paths: List[str], use_action_registry: bool = True):
     
     
     # curobo joints
-    robots_cu_js: List[Optional[JointState]] = [None for _ in range(n_robots)]# for visualization of robot spheres
+    # robots_cu_js: List[Optional[JointState]] = [None for _ in range(n_robots)]# for visualization of robot spheres
     # robot idx lists (joint indices, will be initialized later)
     robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
     # collision caches (curobo collision checker for each robot)
@@ -391,10 +386,6 @@ def main(meta_config_paths: List[str], use_action_registry: bool = True):
     t_idx = 0  # global simulation step index
     # total_steps_time = 0.0
     
-    if use_action_registry:
-        action_reg_and_lock: Optional[Tuple[List[Optional[ArticulationAction]],Lock]] = ([None for _ in range(len(robots))], Lock()) 
-    else:
-        action_reg_and_lock = None
         
     # Spawn one thread per robot
     robot_threads = [Thread(target=ctrl_loop_robot, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args), daemon=True) for idx in range(len(robots))]
@@ -406,10 +397,6 @@ def main(meta_config_paths: List[str], use_action_registry: bool = True):
     step_batch_size = 100
     while simulation_app.is_running():
         with physx_lock:
-            # for each robot, apply the last planned action (if any)
-            for i in range(len(robots)):
-                robots[i].command(None, num_times=1, physx_lock=None)
-            # update simulation (PhysX)    
             my_world.step(render=True)           
         with t_lock:
             t_idx += 1
