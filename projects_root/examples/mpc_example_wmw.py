@@ -214,6 +214,7 @@ def main(robot_base_frame):
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_associated_robot_W=robot_base_frame,
+        robot_prim_path_stage=robot_prim_path,
         verbosity=4
     )
 
@@ -317,11 +318,10 @@ def main(robot_base_frame):
             collision_world = world_wrapper.initialize_from_stage(
                 usd_helper=usd_help,
                 only_paths=["/World"],
-                reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target", 
-                    # "/World/defaultGroundPlane",
+                    # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
                     "/curobo",
                 ]
             )
@@ -357,8 +357,8 @@ def main(robot_base_frame):
             # Detect and add any new obstacles that may have been introduced during runtime
             world_wrapper.add_new_obstacles_from_stage(
                 usd_helper=usd_help,
-                only_paths=["/World"],
                 reference_prim_path=robot_prim_path,
+                only_paths=["/World"],
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target",

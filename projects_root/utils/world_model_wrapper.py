@@ -64,7 +64,10 @@ class WorldModelWrapper:
         self, 
         world_config: WorldConfig,
         X_associated_robot_W: np.ndarray,
+        robot_prim_path_stage: str,
+
         X_world: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        world_prim_path_stage: str = "/World", 
         verbosity: int = 2,
         pose_change_threshold: float = 1e-6,
     ):
@@ -74,13 +77,17 @@ class WorldModelWrapper:
         Args:
             world_config: The associated Robot's Initial (collision) world configuration with potentially already existed obstacles (world collision model configuration). 
             X_associated_robot_W: Base frame pose [x, y, z, qw, qx, qy, qz] of the robot which is associated with this collision model, expressed in world
+            robot_prim_path_stage: str: the prim path of the prim that is associated with the robot. You should normally not change it (unless you know what you are doing).
             X_world: World base frame pose [x, y, z, qw, qx, qy, qz]. Should be normally position = 0,0,0 (xyz) and orientation (quat)= 1,0,0,0 (wxyz). Change it only in the rare case when the world frame is not at the origin.
+            world_prim_path_stage: str = "/World" - the prim path of the prim that is associated with the world frame. You should normally not change it (unless you know what you are doing).
             verbosity: Verbosity level for logging
             pose_change_threshold: Threshold (in meters) for considering pose changes, before the obstacle is considered moved and the collision model is updated.
         """
         self.world_config = world_config
         self.base_frame = np.array(X_associated_robot_W) 
         self.world_base_frame = np.array(X_world) 
+        self.robot_prim_path_stage = robot_prim_path_stage
+        self.world_prim_path_stage = world_prim_path_stage
         self.tensor_args = TensorDeviceType()
         self.verbosity = int(verbosity)
         self.pose_change_threshold = float(pose_change_threshold)
@@ -102,7 +109,6 @@ class WorldModelWrapper:
         self,
         usd_helper: UsdHelper,
         only_paths: List[str] = ["/World"],
-        reference_prim_path: str = "/World",
         ignore_substring: Optional[List[str]] = None
     ) -> WorldConfig:
         """
@@ -114,7 +120,6 @@ class WorldModelWrapper:
         Args:
             usd_helper: USD helper instance for reading stage obstacles
             only_paths: List of paths to search for obstacles
-            reference_prim_path: Reference prim path for coordinate transforms
             ignore_substring: List of substrings to ignore in obstacle names
             
         Returns:
@@ -126,7 +131,7 @@ class WorldModelWrapper:
         # Get obstacles from stage and create collision world
         stage_obstacles = usd_helper.get_obstacles_from_stage(
             only_paths=only_paths,
-            reference_prim_path=reference_prim_path,
+            reference_prim_path=self.robot_prim_path_stage,
             ignore_substring=ignore_substring
         )
         # debug:
@@ -186,7 +191,6 @@ class WorldModelWrapper:
         self,
         usd_helper: UsdHelper,
         only_paths: List[str] = ["/World"],
-        reference_prim_path: str = "/World", 
         ignore_substring: Optional[List[str]] = None
     ):
         """
@@ -198,7 +202,6 @@ class WorldModelWrapper:
         Args:
             usd_helper: USD helper instance for reading current obstacle poses
             only_paths: List of paths to search for obstacles
-            reference_prim_path: Reference prim path for coordinate transforms
             ignore_substring: List of substrings to ignore in obstacle names
         """
         if not self._initialized:
@@ -215,7 +218,7 @@ class WorldModelWrapper:
         # Get current obstacles from stage
         current_obstacles = usd_helper.get_obstacles_from_stage(
             only_paths=only_paths,
-            reference_prim_path=reference_prim_path,
+            reference_prim_path=self.world_prim_path_stage,
             ignore_substring=ignore_substring
         )
         
@@ -275,7 +278,7 @@ class WorldModelWrapper:
         self.add_new_obstacles_from_stage(
             usd_helper,
             only_paths=only_paths,
-            reference_prim_path=reference_prim_path,
+            reference_prim_path=self.world_prim_path_stage,
             ignore_substring=ignore_substring,
             silent=True,
         )
@@ -366,8 +369,8 @@ class WorldModelWrapper:
     def add_new_obstacles_from_stage(
         self,
         usd_helper: UsdHelper,
+        reference_prim_path: str,
         only_paths: List[str] = ["/World"],
-        reference_prim_path: str = "/World",
         ignore_substring: Optional[List[str]] = None,
         silent: bool = False,
     ) -> None:
@@ -379,10 +382,10 @@ class WorldModelWrapper:
         Args:
             usd_helper: UsdHelper instance to query stage.
             only_paths: Stage paths to search.
-            reference_prim_path: Frame of reference for poses.
             ignore_substring: List of substrings to ignore.
             silent: If True, suppresses log output when no new obstacles found.
         """
+
         if not self._initialized:
             log_error("WorldModelWrapper not initialised. Cannot add new obstacles.")
             return
