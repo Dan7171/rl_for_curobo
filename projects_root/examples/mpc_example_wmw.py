@@ -347,42 +347,44 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
         # if world_initialized and step_index % 10 == 0:
         if world_initialized:
             
-            cu_world_W: WorldConfig = usd_help.get_obstacles_from_stage(
-                only_paths=[obs_root_prim_path],
-                reference_prim_path="/World",
-                ignore_substring=[
-                    robot_prim_path,
-                    target_prim_path,
-                    "/World/defaultGroundPlane",
-                    "/curobo",
-                ]
-            )
             # Efficiently update obstacle poses without recreating the world
             cu_world_wrapper.update(
-                cu_world_W=cu_world_W,
-                # usd_helper=usd_help,
-                # only_paths=[obs_root_prim_path], 
-                # ignore_substring=[
-                #     robot_prim_path,
-                #     target_prim_path,
-                #     "/World/defaultGroundPlane", 
-                #     "/curobo",
-                # ]
+                cu_world_W=usd_help.get_obstacles_from_stage(
+                    only_paths=[obs_root_prim_path],
+                    reference_prim_path="/World",
+                    ignore_substring=[
+                        robot_prim_path,
+                        target_prim_path,
+                        "/World/defaultGroundPlane",
+                        "/curobo",
+                    ]
+                ), 
             )
 
             # Detect and add any new obstacles that may have been introduced during runtime
             cu_world_wrapper.add_new_obstacles_from_stage(
-                usd_helper=usd_help,
-                reference_prim_path=robot_prim_path,
-                only_paths=[obs_root_prim_path],
-                ignore_substring=[
-                    robot_prim_path,
-                    target_prim_path,
-                    "/World/defaultGroundPlane",
-                    "/curobo",
-                ]
+                cu_world_R=usd_help.get_obstacles_from_stage(
+                    only_paths=[obs_root_prim_path],
+                    reference_prim_path=robot_prim_path,
+                    ignore_substring=[
+                        robot_prim_path,
+                        target_prim_path,
+                        "/World/defaultGroundPlane",
+                        "/curobo",
+                    ]
+                ),
             )
-
+                # usd_helper=usd_help,
+                # reference_prim_path=robot_prim_path,
+                # only_paths=[obs_root_prim_path],
+                # cu_world_R=cu_world_R,
+                # ignore_substring=[
+                #    robot_prim_path,
+                #     target_prim_path,
+                #     "/World/defaultGroundPlane",
+                #     "/curobo",
+                #]
+            
         # position and orientation of target virtual cube:
         cube_position, cube_orientation = target.get_world_pose() # p_goal_W, q_goal_W
         if past_pose is None:

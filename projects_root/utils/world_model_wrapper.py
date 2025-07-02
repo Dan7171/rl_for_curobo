@@ -388,10 +388,11 @@ class WorldModelWrapper:
     # ------------------------------------------------------------------
     def add_new_obstacles_from_stage(
         self,
-        usd_helper: UsdHelper,
-        reference_prim_path: str,
-        only_paths: List[str] = ["/World"],
-        ignore_substring: Optional[List[str]] = None,
+        cu_world_R: WorldConfig,
+        # usd_helper: UsdHelper,
+        # reference_prim_path: str,
+        # only_paths: List[str] = ["/World"],
+        # ignore_substring: Optional[List[str]] = None,
         silent: bool = False,
     ) -> None:
         """Detect and add *new* obstacles that have appeared in the stage after the
@@ -400,9 +401,10 @@ class WorldModelWrapper:
         collision checker is re-loaded so it can account for them.
 
         Args:
-            usd_helper: UsdHelper instance to query stage.
-            only_paths: Stage paths to search.
-            ignore_substring: List of substrings to ignore.
+            cu_world_R: WorldConfig object that contains the current obstacle poses in the stage, expressed in robot frame.
+            # usd_helper: UsdHelper instance to query stage.
+            # only_paths: Stage paths to search.
+            # ignore_substring: List of substrings to ignore.
             silent: If True, suppresses log output when no new obstacles found.
         """
 
@@ -410,19 +412,19 @@ class WorldModelWrapper:
             log_error("WorldModelWrapper not initialised. Cannot add new obstacles.")
             return
 
-        if ignore_substring is None:
-            ignore_substring = []
+        # if ignore_substring is None:
+        #     ignore_substring = []
 
-        # Query current obstacles from stage
-        stage_obstacles = usd_helper.get_obstacles_from_stage(
-            only_paths=only_paths,
-            reference_prim_path=reference_prim_path,
-            ignore_substring=ignore_substring,
-        )
+        # # Query current obstacles from stage
+        # cu_world_R = usd_helper.get_obstacles_from_stage(
+        #     only_paths=only_paths,
+        #     reference_prim_path=reference_prim_path,
+        #     ignore_substring=ignore_substring,
+        # )
 
         newly_added: List[str] = []
-        if stage_obstacles.objects:
-            for obs in stage_obstacles.objects:
+        if cu_world_R.objects:
+            for obs in cu_world_R.objects:
                 if obs.name not in self.obstacle_names:
                     try:
                         # 1)  append to internal collision_world
