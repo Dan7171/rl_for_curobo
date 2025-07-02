@@ -329,20 +329,23 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         # Initialize world model wrapper once (replaces the expensive recreation every 1000 steps)
         if not world_initialized and step_index > 20:
             print("Initializing WorldModelWrapper (one-time setup)...")
-            # take env's (real world/simulator) curobo-world -> pass to wrapper -> get curobo-collision-world.
+            # 1) pull raw USD obstacles
+            _raw_world = usd_help.get_obstacles_from_stage(
+                only_paths=[world_prim_path],
+                reference_prim_path=robot_prim_path,
+                ignore_substring=[
+                    robot_prim_path,
+                    target_prim_path,
+                    "/curobo",
+                ],
+            )
+
+            # 2) Convert unsupported / analytic shapes to cheap cuboids
+            _init_cu_world = WorldConfig.create_obb_world(_raw_world)
+
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
-                # Convert raw USD obstacles to a collision-supported world (meshes + cuboids)
-                cu_world_R=usd_help.get_obstacles_from_stage(
-                    only_paths=[world_prim_path], # prim paths to search for obstacles under
-                    reference_prim_path= robot_prim_path, # to get obs poses w.r.t. robot base frame (not world frame),
-                    ignore_substring=[ # ignore these substrings when searching for obstacles in stage (hide them from the search)
-                        robot_prim_path,
-                        target_prim_path, 
-                        # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
-                        "/curobo",
-                    ]
-                ).get_collision_check_world(),
-            ) # initialized to collision world
+                cu_world_R=_init_cu_world,
+            )
             
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)
@@ -397,11 +400,13 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             if new_paths:
                 print(f"debug new_paths!!! {new_paths}")
 
-                new_world_cfg = usd_help.get_obstacles_from_stage(
+                _new_raw = usd_help.get_obstacles_from_stage(
                     only_paths=list(new_paths),
                     reference_prim_path=robot_prim_path,
                     ignore_substring=ignore_list,
-                ).get_collision_check_world()
+                )
+
+                new_world_cfg = WorldConfig.create_obb_world(_new_raw)
 
                 if new_world_cfg.objects:  # add only if we got actual obstacles
                     cu_world_wrapper.add_new_obstacles_from_cu_world(
