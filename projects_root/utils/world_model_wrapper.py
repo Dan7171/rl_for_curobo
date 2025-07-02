@@ -28,6 +28,7 @@ import torch
 from curobo.geom.types import WorldConfig
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
+from curobo.geom.sphere_fit import SphereFitType
 
 
 # Project utilities
@@ -483,5 +484,81 @@ class WorldModelWrapper:
                 )
                 if self.verbosity >= 3:
                     self._vprint(f"{name} MOVED (fast-dict)")
+                    self._vprint(
+                                f"  X_W (pose w.r to world frame): : {self._pose_str(pose_arr)}\n"
+                                f"  X_R (pose w.r to collision world frame): {self._pose_str(base_pose)}"
+                            )
             except Exception as e:
                 log_warn(f"update_from_pose_dict failed for {name}: {e}")
+
+    # ------------------------------------------------------------------
+    # Static helper – generate bounding-sphere approximations for visualization
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def make_geom_approx_to_spheres(
+        collision_world: WorldConfig,
+        base_pose_W: Union[List[float], np.ndarray, Pose],
+        n_spheres: int = 30,
+        fit_type: SphereFitType = SphereFitType.SAMPLE_SURFACE,
+        radius_scale: float = 0.01,
+    ) -> List[Tuple[np.ndarray, float]]:
+        """Return a list of `(pos_W, radius)` tuples approximating collision objects.
+
+        Args:
+            collision_world: The current CuRobo collision world instance.
+            base_pose_W: Pose (world ⇐ robot-base) – accepts Pose or 7-element array/list.
+            n_spheres: Number of spheres to sample **per obstacle**.
+            fit_type: SphereFitType used by `get_bounding_spheres` (default SAMPLE_SURFACE).
+            radius_scale: Sphere radius as a fraction of the smallest OBB extent.
+
+        Returns:
+            List of tuples `(np.ndarray(3,), float)` – world-frame sphere centres and radii.
+        """
+
+        if collision_world is None:
+            return []
+
+        obs_list = list(collision_world.objects or [])
+        if not obs_list:
+            for attr in ["cuboid", "mesh", "sphere", "capsule", "cylinder"]:
+                obs_attr = getattr(collision_world, attr, None)
+                if obs_attr:
+                    obs_list.extend(obs_attr)
+
+        if not obs_list:
+            return []
+
+        # Normalise base_pose_W to Pose
+        if not isinstance(base_pose_W, Pose):
+            if isinstance(base_pose_W, (list, tuple, np.ndarray)) and len(base_pose_W) == 7:
+                base_pose_W = Pose.from_list(list(base_pose_W))
+            else:
+                raise ValueError("base_pose_W must be Pose or 7-element list/array")
+
+        sphere_list: List[Tuple[np.ndarray, float]] = []
+
+        for obs in obs_list:
+            try:
+                # Determine automatic radius
+                obb = obs.get_cuboid()
+                if obb is not None and isinstance(getattr(obb, "dims", None), (list, tuple)):
+                    auto_radius = radius_scale * float(min(obb.dims))
+                else:
+                    auto_radius = radius_scale  # metres
+
+                sph = obs.get_bounding_spheres(
+                    n_spheres=n_spheres,
+                    surface_sphere_radius=auto_radius,
+                    fit_type=fit_type,
+                    pre_transform_pose=base_pose_W,
+                )
+
+                for s in sph:
+                    pos_w = np.array(s.pose[:3], dtype=float) if getattr(s, "pose", None) else np.zeros(3)
+                    sphere_list.append((pos_w, float(s.radius)))
+            except Exception:
+                # Skip obstacle on failure
+                continue
+
+        return sphere_list

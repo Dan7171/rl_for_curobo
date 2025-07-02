@@ -65,8 +65,15 @@ parser.add_argument(
 parser.add_argument(
     "--max_mesh_faces",
     type=int,
-    default=50, # 0 means no decimation, 50 considered small
-    help="If >0, simplify mesh obstacles to at most this many faces using trimesh QEM decimation.",
+    default=300, # 0 means no decimation, 50 considered small
+    help="If > 0, simplify mesh obstacles to at most this many faces using trimesh QEM decimation.",
+)
+
+parser.add_argument(
+    "--show_bnd_spheres",
+    action="store_true",
+    help="Render bounding sphere approximations of each obstacle in real-time.",
+    default=False,
 )
 
 args = parser.parse_args()
@@ -94,13 +101,14 @@ import carb
 import numpy as np
 from helper import add_robot_to_scene
 from omni.isaac.core import World
-from omni.isaac.core.objects import cuboid
+from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 
 # CuRobo
 from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
 from curobo.geom.types import Mesh  # type: ignore
+from curobo.geom.sphere_fit import SphereFitType
 
 ############################################################
 
@@ -116,9 +124,11 @@ DATA_DIR = os.path.join(EXT_DIR, "data")
 
 # Standard Library
 from typing import Optional
+from typing import Any
 
 # Third Party
 from projects_root.utils.helper import add_extensions, add_robot_to_scene
+from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
 
 # CuRobo
 # from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
@@ -136,9 +146,11 @@ from projects_root.utils.handy_utils import get_rollouts_in_world_frame
 # Project utilities
 from projects_root.utils.world_model_wrapper import WorldModelWrapper
 from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
-
+from projects_root.utils.handy_utils import save_curobo_world
 ############################################################
 
+# forward declaration for static checkers
+cu_world_wrapper: Any  # will be assigned in main()
 
 def draw_points(rollouts: torch.Tensor):
     if rollouts is None:
@@ -169,6 +181,92 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
+# ------------------------------------------------------------------
+# Helper: Render geometry approximations (bounding spheres) for obstacles
+# ------------------------------------------------------------------
+
+
+obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
+
+
+def render_geom_approx_to_spheres(collision_world):
+    """Visualize an approximate geometry (collection of spheres) for each obstacle.
+
+    Notes:
+        • Uses SAMPLE_SURFACE sphere fitting with a per–obstacle radius equal to
+          1 % of its smallest OBB extent.
+        • Relies on global variables `robot_base_frame` and `cu_world_wrapper` that
+          are established in the main routine.
+        • Maintains a persistent `obs_spheres` list so VisualSphere prims are
+          created only once and then updated every frame.
+
+    Args:
+        collision_world (WorldConfig): Current CuRobo collision world instance.
+    """
+
+    global obs_spheres, robot_base_frame, cu_world_wrapper
+
+    if collision_world is None or len(collision_world.objects) == 0:
+        return
+
+    # Use the utility in WorldModelWrapper to get sphere list (world-frame)
+    all_sph = WorldModelWrapper.make_geom_approx_to_spheres(
+        collision_world,
+        robot_base_frame.tolist(),
+        n_spheres=50,
+        fit_type=SphereFitType.SAMPLE_SURFACE,
+        radius_scale=0.05,  # 5 % of smallest OBB side for visibility
+    )
+
+    if not all_sph:
+        return
+
+    # Create extra VisualSphere prims if needed (handle import gracefully during static analysis)
+    try:
+        from omni.isaac.core.objects import sphere  # type: ignore
+    except ImportError:  # Fallback if omniverse modules are unavailable in the analysis env
+        return
+
+    # Get shared material from first sphere (if any)
+    shared_mat_path = None
+    if obs_spheres:
+        try:
+            first_rel = obs_spheres[0].prim.GetRelationship("material:binding")
+            targets = first_rel.GetTargets()
+            if targets:
+                shared_mat_path = targets[0]
+        except Exception:
+            pass
+
+    while len(obs_spheres) < len(all_sph):
+        p, r = all_sph[len(obs_spheres)]
+        sp = sphere.VisualSphere(
+            prim_path=f"/curobo/obs_sphere_{len(obs_spheres)}",
+            position=np.ravel(p),
+            radius=r,
+            color=np.array([1.0, 0.6, 0.1]),
+        )
+
+        # Bind shared material if available
+        if shared_mat_path is not None:
+            try:
+                rel = sp.prim.GetRelationship("material:binding")
+                rel.SetTargets([shared_mat_path])
+            except Exception:
+                pass
+
+        obs_spheres.append(sp)
+
+    # Update current prims
+    for idx, (p, r) in enumerate(all_sph):
+        obs_spheres[idx].set_world_pose(position=np.ravel(p))
+        obs_spheres[idx].set_radius(r)
+
+    # Hide surplus prims, if any
+    for idx in range(len(all_sph), len(obs_spheres)):
+        obs_spheres[idx].set_world_pose(position=np.array([0, 0, -10]))
+
+
 def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_path):
     """
     Args:
@@ -179,7 +277,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             prim path of the root prim in which the obstacles are. All obstacles should be put under %obs_root_prim_path%/obstacle name Drag obstacles under this prim path.
         world_prim_path: prim path of the world prim. ()
     """
-
+    
     target_prim_path = world_prim_path + target_prim_subpath
     # Get robot base frame from command line arguments
     # robot_base_frame = np.array(args.robot_base_frame)
@@ -187,6 +285,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
+    activate_gpu_dynamics(my_world)
     stage = my_world.stage
 
     xform = stage.DefinePrim(world_prim_path, "Xform")
@@ -245,7 +344,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     cu_world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
-        verbosity=4
+        verbosity=2
     )
 
     init_curobo = False
@@ -315,7 +414,17 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     cmd_state_full = None
     step = 0
     add_extensions(simulation_app, args.headless_mode)
+    spheres = None  # For robot collision sphere visualization
     while simulation_app.is_running():
+        try:
+            os.removedirs("tmp/debug_world_models")
+        except:
+            pass
+        os.makedirs("tmp/debug_world_models", exist_ok=True)
+        if step % 500 == 0 and step > 0:
+            print(f"Saving world model at step {step}")
+            save_curobo_world(f"tmp/debug_world_models/world_model_{step}.obj",cu_world_wrapper.get_collision_world())
+                
         if not init_world:
             for _ in range(10):
                 my_world.step(render=True)
@@ -528,6 +637,12 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
 
         else:
             carb.log_warn("No action is being taken.")
+
+        # ------------------------------------------------------------------
+        # OPTIONAL: visualize obstacle bounding spheres (simplified)
+        # ------------------------------------------------------------------
+        if args.show_bnd_spheres and world_initialized and step_index % 5 == 0:
+            render_geom_approx_to_spheres(cu_world_wrapper.get_collision_world())
 
 
 ############################################################
