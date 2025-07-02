@@ -32,9 +32,11 @@ def list_relevant_prims(
         # later decide if the prim can be converted to an obstacle.
         if p_str == "/World":
             continue
+        # Only consider prims that are direct geometry.  Exclude pure Xform
+        # containers (they never generate obstacles and would otherwise be
+        # reported as *new* every frame).
         if UsdGeom is not None and not (
-            prim.IsA(UsdGeom.Xform)
-            or prim.IsA(UsdGeom.Mesh)
+            prim.IsA(UsdGeom.Mesh)
             or prim.IsA(UsdGeom.Cube)
             or prim.IsA(UsdGeom.Sphere)
             or prim.IsA(UsdGeom.Cylinder)

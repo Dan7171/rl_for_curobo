@@ -52,6 +52,23 @@ parser.add_argument(
     type=float,
     default=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
 )
+
+# Optional flag: use cuboid (OBB) approximation for non-cuboid obstacles.
+parser.add_argument(
+    "--use_obb_approx",
+    action="store_true",
+    help="Approximate analytic shapes (capsules/cylinders/spheres) with oriented bounding boxes for faster collision checks.",
+    default=False,
+)
+
+# Optional: decimate complex meshes before loading to GPU.
+parser.add_argument(
+    "--max_mesh_faces",
+    type=int,
+    default=50, # 0 means no decimation, 50 considered small
+    help="If >0, simplify mesh obstacles to at most this many faces using trimesh QEM decimation.",
+)
+
 args = parser.parse_args()
 
 ###########################################################
@@ -83,6 +100,7 @@ from omni.isaac.core.utils.types import ArticulationAction
 # CuRobo
 from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
+from curobo.geom.types import Mesh  # type: ignore
 
 ############################################################
 
@@ -227,7 +245,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     cu_world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
-        verbosity=2
+        verbosity=4
     )
 
     init_curobo = False
@@ -340,8 +358,14 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 ],
             )
 
-            # 2) Convert unsupported / analytic shapes to cheap cuboids
-            _init_cu_world = WorldConfig.create_obb_world(_raw_world)
+            # 2) Optional mesh decimation
+            simplify_mesh_obstacles(_raw_world, args.max_mesh_faces)
+
+            # 3) Optionally simplify to cuboids for speed
+            if args.use_obb_approx:
+                _init_cu_world = WorldConfig.create_obb_world(_raw_world)
+            else:
+                _init_cu_world = _raw_world.get_collision_check_world()
 
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
                 cu_world_R=_init_cu_world,
@@ -387,18 +411,17 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 reference_prim_path=world_prim_path,
                 ignore_substring=ignore_list,
             )
-            print(f"debug pose_dict: {pose_dict}")
             cu_world_wrapper.update_from_pose_dict(pose_dict)
 
             
             current_paths = set(
                 list_relevant_prims(usd_help, [obs_root_prim_path], ignore_list)
             )
-            print(f"debug current_paths: {current_paths}")
-            print(f"debug known_prim_paths: {known_prim_paths}")
+
             new_paths = current_paths - known_prim_paths
             if new_paths:
-                print(f"debug new_paths!!! {new_paths}")
+                print(f"[NEW OBSTACLES] {new_paths}")
+                
 
                 _new_raw = usd_help.get_obstacles_from_stage(
                     only_paths=list(new_paths),
@@ -406,7 +429,13 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                     ignore_substring=ignore_list,
                 )
 
-                new_world_cfg = WorldConfig.create_obb_world(_new_raw)
+                # Optional decimation for newly added meshes
+                simplify_mesh_obstacles(_new_raw, args.max_mesh_faces)
+
+                if args.use_obb_approx:
+                    new_world_cfg = WorldConfig.create_obb_world(_new_raw)
+                else:
+                    new_world_cfg = _new_raw.get_collision_check_world()
 
                 if new_world_cfg.objects:  # add only if we got actual obstacles
                     cu_world_wrapper.add_new_obstacles_from_cu_world(
@@ -502,6 +531,52 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
 
 
 ############################################################
+
+# --------------------------------------------------------------
+# OPTIONAL MESH SIMPLIFICATION
+# --------------------------------------------------------------
+
+
+def simplify_mesh_obstacles(world: WorldConfig, face_limit: int):
+    """Simplify mesh obstacles in-place to reduce GPU load.
+
+    Args:
+        world: WorldConfig potentially containing Mesh obstacles.
+        face_limit: Upper bound on triangle count; meshes below this are left unmodified.
+    """
+
+    if face_limit <= 0:
+        return
+
+    mesh_list = world.mesh if world.mesh is not None else []
+    for m in list(mesh_list):  # copy of list to allow mutation
+        if isinstance(m, Mesh):
+            verts, faces = m.get_mesh_data()
+            face_cnt = len(faces) if faces is not None else 0
+            if faces is not None and face_cnt > face_limit:
+                try:
+                    import trimesh  # local import
+                    tri = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+                    decimate = getattr(tri, "simplify_quadratic_decimation", None)
+                    if callable(decimate):
+                        tri = decimate(face_limit)
+                        m.vertices = tri.vertices
+                        m.faces = tri.faces
+                        print(f"[MeshDecimate] {m.name}: {face_cnt} → {len(tri.faces)} faces")
+                    else:
+                        print(f"[MeshDecimate] trimesh lacks decimator – converting {m.name} to OBB")
+                        # Replace heavy mesh with its oriented bounding box cuboid
+                        obb = m.get_cuboid()
+                        if world.cuboid is None:
+                            world.cuboid = []
+                        world.cuboid.append(obb)
+                        world.mesh.remove(m)
+                        continue
+                except ImportError:
+                    print("[MeshDecimate] trimesh not installed – skipping mesh simplification")
+                except Exception as e:
+                    print(f"[MeshDecimate] Failed to decimate {m.name}: {e}")
+
 
 if __name__ == "__main__":
     robot_base_frame = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0])
