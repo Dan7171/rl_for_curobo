@@ -212,7 +212,7 @@ def main(robot_base_frame):
     # Initialize WorldModelWrapper for efficient obstacle updates
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
-        base_frame=robot_base_frame,
+        X_associated_robot_W=robot_base_frame,
         verbosity=4
     )
 

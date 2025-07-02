@@ -63,8 +63,8 @@ class WorldModelWrapper:
     def __init__(
         self, 
         world_config: WorldConfig,
-        base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
-        world_base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        X_associated_robot_W: np.ndarray,
+        X_world: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
         verbosity: int = 2,
         pose_change_threshold: float = 1e-6,
     ):
@@ -72,15 +72,15 @@ class WorldModelWrapper:
         Initialize the world model wrapper.
         
         Args:
-            world_config: Initial world configuration with static obstacles
-            base_frame: Base frame pose [x, y, z, qw, qx, qy, qz] - typically robot base frame
-            robot_base_frame: World base frame pose [x, y, z, qw, qx, qy, qz] - typically identity
+            world_config: The associated Robot's Initial (collision) world configuration with potentially already existed obstacles (world collision model configuration). 
+            X_associated_robot_W: Base frame pose [x, y, z, qw, qx, qy, qz] of the robot which is associated with this collision model, expressed in world
+            X_world: World base frame pose [x, y, z, qw, qx, qy, qz]. Should be normally position = 0,0,0 (xyz) and orientation (quat)= 1,0,0,0 (wxyz). Change it only in the rare case when the world frame is not at the origin.
             verbosity: Verbosity level for logging
-            pose_change_threshold: Threshold for considering pose changes
+            pose_change_threshold: Threshold (in meters) for considering pose changes, before the obstacle is considered moved and the collision model is updated.
         """
         self.world_config = world_config
-        self.base_frame = np.array(base_frame)
-        self.world_base_frame = np.array(world_base_frame)
+        self.base_frame = np.array(X_associated_robot_W) 
+        self.world_base_frame = np.array(X_world) 
         self.tensor_args = TensorDeviceType()
         self.verbosity = int(verbosity)
         self.pose_change_threshold = float(pose_change_threshold)
@@ -222,20 +222,20 @@ class WorldModelWrapper:
                 
                 if obstacle_name in self.obstacle_names:
                     # Current obstacle world pose
-                    world_pose = np.array(obstacle.pose)  # [x, y, z, qw, qx, qy, qz]
+                    X_obs_W = np.array(obstacle.pose)  # [x, y, z, qw, qx, qy, qz]
 
                     # Check if pose actually changed since last update
                     last_pose = self._last_world_poses.get(obstacle_name)
                     if last_pose is not None and np.allclose(
-                        last_pose, world_pose, atol=self.pose_change_threshold
+                        last_pose, X_obs_W, atol=self.pose_change_threshold
                     ):
                         # Skip unchanged obstacle to avoid spurious "MOVED" logs
                         continue
                     # Update cache
-                    self._last_world_poses[obstacle_name] = world_pose.copy()
+                    self._last_world_poses[obstacle_name] = X_obs_W.copy()
                     
                     # Transform obstacle pose from world frame to base frame
-                    base_frame_pose = self._transform_pose_world_to_base(world_pose)
+                    base_frame_pose = self._transform_pose_world_to_base(X_obs_W)
                     
                     # Create CuRobo Pose object
                     curobo_pose = Pose(
@@ -254,7 +254,7 @@ class WorldModelWrapper:
                         if self.verbosity >= 1:
                             self._vprint(
                                 f"{obstacle_name} MOVED (type: {obs_type})\n"
-                                f"  X_W (pose w.r to world frame): {self._pose_str(world_pose)}\n"
+                                f"  X_W (pose w.r to world frame): {self._pose_str(X_obs_W)}\n"
                                 f"  X_R (pose w.r to collision world frame): {self._pose_str(base_frame_pose)}"
                             )
                     except Exception as e:
