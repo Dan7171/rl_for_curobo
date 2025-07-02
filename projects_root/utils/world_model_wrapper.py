@@ -106,9 +106,10 @@ class WorldModelWrapper:
     
     def initialize_from_stage(
         self,
-        usd_helper: UsdHelper,
-        only_paths: List[str] = ["/World"],
-        ignore_substring: Optional[List[str]] = None
+        cu_world_stage_obstacles: WorldConfig,
+        # usd_helper: UsdHelper,
+        # only_paths: List[str] = ["/World"],
+        # ignore_substring: Optional[List[str]] = None
     ) -> WorldConfig:
         """
         Initialize the collision world from current USD stage obstacles.
@@ -124,27 +125,27 @@ class WorldModelWrapper:
         Returns:
             WorldConfig: The initialized collision world configuration
         """
-        if ignore_substring is None:
-            ignore_substring = []
             
         # Get obstacles from stage and create collision world
-        stage_obstacles = usd_helper.get_obstacles_from_stage(
-            only_paths=only_paths,
-            reference_prim_path=self.robot_prim_path_stage,
-            ignore_substring=ignore_substring
-        )
-        # debug:
-        # print("stage_obstacles.objects:")
-        # for obstacle in stage_obstacles.objects:
-        #     print(obstacle.name)
-        # print("--------------------------------")
-            
+        # if ignore_substring is None:
+        #     ignore_substring = []
+        # stage_obstacles = usd_helper.get_obstacles_from_stage(
+        #     only_paths=only_paths,
+        #     reference_prim_path=self.robot_prim_path_stage,
+        #     ignore_substring=ignore_substring
+        # )
+      
         # make a curobo world config object (curobo's object, has nothing to do with the simualtor (isaac sim))
         # from the stage obstacles (isaac sim's stage full of obstacles)
-        collision_world = stage_obstacles.get_collision_check_world() 
+        collision_world = cu_world_stage_obstacles.get_collision_check_world() 
         
         # Reading the obstacles from the world config (curobo's object, has nothing to do with the simualtor (isaac sim))
         # and adding them to the collision world (curobo's object, has nothing to do with the simualtor (isaac sim))
+        
+        # TODO:
+        # CHECK THIS:
+        # what it probably does: getting the old obstacles from the initial world config
+        # and adding them to the (newer?) collision world
         if self.world_config.cuboid:
             for cuboid in self.world_config.cuboid:
                 collision_world.add_obstacle(cuboid)
@@ -167,8 +168,8 @@ class WorldModelWrapper:
         self._initialized = True
 
         # Initialize last pose cache
-        if stage_obstacles.objects:
-            for _obs in stage_obstacles.objects:
+        if cu_world_stage_obstacles.objects:
+            for _obs in cu_world_stage_obstacles.objects:
                 self._last_world_poses[_obs.name] = np.array(_obs.pose)
 
         if self.verbosity >= 1:
@@ -190,9 +191,10 @@ class WorldModelWrapper:
     
     def update(
         self,
-        usd_helper: UsdHelper,
-        only_paths: List[str] = ["/World"],
-        ignore_substring: Optional[List[str]] = None,
+        cu_world_W: WorldConfig,
+        # usd_helper: UsdHelper,
+        # only_paths: List[str] = ["/World"],
+        # ignore_substring: Optional[List[str]] = None,
         new_base_frame: Optional[np.ndarray] = None,
         
     ):
@@ -203,12 +205,17 @@ class WorldModelWrapper:
         the poses in the existing collision checker, AVOIDING EXPENSIVE RECREATION (that's the key change comapred to the original curobo's examples, like in mpc_example.py or motion_gen_reacher.py where they recreate the collision world every time the robot moves).
         
         Args:
-            usd_helper: USD helper instance for reading current obstacle poses
-            only_paths: List of paths to search for obstacles
-            ignore_substring: List of substrings to ignore in obstacle names. 
-            Should contain all the prim paths that you dont want to update their poses. 
-            That's ideal for the case when you have a static objects, which you dont want to update their poses.
-            For example, if you have a ground/plane/table, add their prim paths to this list.
+            cu_world_W: WorldConfig object that contains the current obstacle poses in the stage, expressed in world frame.
+
+            # usd_helper: USD helper instance for reading current obstacle poses
+            
+            # only_paths: List of paths to search for obstacles
+            
+            # ignore_substring: List of substrings to ignore in obstacle names. 
+            # Should contain all the prim paths that you dont want to update their poses. 
+            # That's ideal for the case when you have a static objects, which you dont want to update their poses.
+            # For example, if you have a ground/plane/table, add their prim paths to this list.
+            
             new_base_frame: Set to a np.array (x,y,z,qw,qx,qy,qz) only when using movable base robot, and only when you want to upadate the world model base frame (to bas as the new base frame of the robot, instead of the old base frame).
             In this case, the base frame of the robot (the robot which is associated with this collision model),
             is not fixed and can change. In this case, the base frame of the robot is updated to the new pose and the collision model is updated accordingly. 
@@ -225,19 +232,19 @@ class WorldModelWrapper:
         if new_base_frame is not None:
             self._update_base_frame(new_base_frame)
 
-        if ignore_substring is None:
-            ignore_substring = []
+        # if ignore_substring is None:
+        #     ignore_substring = []
             
         # Get current obstacles from stage
-        current_obstacles = usd_helper.get_obstacles_from_stage(
-            only_paths=only_paths,
-            reference_prim_path=self.world_prim_path_stage,
-            ignore_substring=ignore_substring
-        )
+        # cu_world_W = usd_helper.get_obstacles_from_stage(
+        #     only_paths=only_paths,
+        #     reference_prim_path=self.world_prim_path_stage,
+        #     ignore_substring=ignore_substring
+        # )
         
         # Update poses for each obstacle
-        if current_obstacles.objects:
-            for obstacle in current_obstacles.objects:
+        if cu_world_W.objects:
+            for obstacle in cu_world_W.objects:
                 obstacle_name = obstacle.name
                 obs_type = obstacle.__class__.__name__ if hasattr(obstacle, "__class__") else "Unknown"
                 
@@ -288,13 +295,13 @@ class WorldModelWrapper:
                         )
 
         # Optionally try to detect and add new obstacles that might have been introduced
-        self.add_new_obstacles_from_stage(
-            usd_helper,
-            only_paths=only_paths,
-            reference_prim_path=self.world_prim_path_stage,
-            ignore_substring=ignore_substring,
-            silent=True,
-        )
+        # self.add_new_obstacles_from_stage(
+        #     usd_helper,
+        #     only_paths=only_paths,
+        #     reference_prim_path=self.world_prim_path_stage,
+        #     ignore_substring=ignore_substring,
+        #     silent=True,
+        # )
     
     def _update_base_frame(self, new_base_frame: np.ndarray):
         """

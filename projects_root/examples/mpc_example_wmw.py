@@ -220,7 +220,7 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
 
     # Initialize WorldModelWrapper for efficient obstacle updates
     world_cfg = WorldConfig()
-    world_wrapper = WorldModelWrapper(
+    cu_world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
         robot_prim_path_stage=robot_prim_path,
@@ -248,7 +248,6 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
 
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
-        # world_cfg,
         world_cfg,
         use_cuda_graph=True,
         use_cuda_graph_metrics=True,
@@ -324,20 +323,23 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
         # Initialize world model wrapper once (replaces the expensive recreation every 1000 steps)
         if not world_initialized and step_index > 20:
             print("Initializing WorldModelWrapper (one-time setup)...")
-            collision_world = world_wrapper.initialize_from_stage(
-                usd_helper=usd_help,
-                only_paths=[obs_root_prim_path],
-                ignore_substring=[
+            
+            cu_world_R: WorldConfig = usd_help.get_obstacles_from_stage(
+                only_paths=["/World"], # prim paths to search for obstacles under
+                reference_prim_path= robot_prim_path, # to get obs poses w.r.t. robot base frame (not world frame),
+                ignore_substring=[ # ignore these substrings when searching for obstacles in stage (hide them from the search)
                     robot_prim_path,
                     target_prim_path, 
                     # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
                     "/curobo",
                 ]
             )
+
+            cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_stage(cu_world_R)
             # Update MPC world collision checker with the initialized world
-            mpc.world_coll_checker.load_collision_model(collision_world)
+            mpc.world_coll_checker.load_collision_model(cu_col_world_R)
             # Set the collision checker reference in the wrapper
-            world_wrapper.set_collision_checker(mpc.world_coll_checker)
+            cu_world_wrapper.set_collision_checker(mpc.world_coll_checker)
             world_initialized = True
             print("WorldModelWrapper initialized successfully!")
         
@@ -345,21 +347,31 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
         # if world_initialized and step_index % 10 == 0:
         if world_initialized:
             
-            
-            # Efficiently update obstacle poses without recreating the world
-            world_wrapper.update(
-                usd_helper=usd_help,
-                only_paths=[obs_root_prim_path], 
+            cu_world_W: WorldConfig = usd_help.get_obstacles_from_stage(
+                only_paths=[obs_root_prim_path],
+                reference_prim_path="/World",
                 ignore_substring=[
                     robot_prim_path,
                     target_prim_path,
-                    "/World/defaultGroundPlane", 
+                    "/World/defaultGroundPlane",
                     "/curobo",
                 ]
             )
+            # Efficiently update obstacle poses without recreating the world
+            cu_world_wrapper.update(
+                cu_world_W=cu_world_W,
+                # usd_helper=usd_help,
+                # only_paths=[obs_root_prim_path], 
+                # ignore_substring=[
+                #     robot_prim_path,
+                #     target_prim_path,
+                #     "/World/defaultGroundPlane", 
+                #     "/curobo",
+                # ]
+            )
 
             # Detect and add any new obstacles that may have been introduced during runtime
-            world_wrapper.add_new_obstacles_from_stage(
+            cu_world_wrapper.add_new_obstacles_from_stage(
                 usd_helper=usd_help,
                 reference_prim_path=robot_prim_path,
                 only_paths=[obs_root_prim_path],

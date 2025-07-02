@@ -65,6 +65,10 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
     from projects_root.autonomous_arm import AutonomousArm
+    from projects_root.utils.world_model_wrapper import WorldModelWrapper
+    from projects_root.utils.handy_utils import get_rollouts_in_world_frame
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
+    
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
     a = torch.zeros(4, device="cuda:0")
 
@@ -299,28 +303,15 @@ def main(meta_config_paths: List[str]):
             use_col_pred=OBS_PREDICTION and len(col_pred_with[i]) > 0  # Enable collision prediction
             )
         )
-    
-    # ENVIRONMENT OBSTACLES - INITIALIZATION
-    # col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
-    # env_obstacles = [] # list of obstacles in the world
-    # for obstacle in col_ob_cfg:
-    #     obstacle = Obstacle(my_world, **obstacle)
-    #     for i in range(len(robot_world_models)):
-    #         world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
-    #         print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
-    #     env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
+    # cu_worlds_wrappers = [WorldModelWrapper(robot_world_models[i], X_robots[i], robots[i].prim_path, X_robots[i],verbosity=2) for i in range(n_robots)]
+
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
     # wait for play button in simulator to be pushed
     wait_for_playing(my_world, simulation_app,autoplay=True) 
     
-    
-    
-    # FIRST: Pre-populate robot context with sphere counts BEFORE init_solver()
-    # robot_sphere_counts already calculated above when creating robots
-    
-    
+
     # Populate robot context BEFORE solver initialization
     for i in range(n_robots):
         # Get MPC config values for this specific robot
