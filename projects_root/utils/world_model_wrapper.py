@@ -19,7 +19,7 @@ and provides efficient updates to individual obstacle poses.
 """
 
 # Standard Library
-from typing import List, Optional, Union, Any, Dict
+from typing import List, Optional, Tuple, Union, Any, Dict
 
 # Third Party
 import numpy as np
@@ -62,10 +62,9 @@ class WorldModelWrapper:
     
     def __init__(
         self, 
-        world_config: WorldConfig,
-        X_associated_robot_W: np.ndarray,
+        world_config: WorldConfig, 
+        X_robot_W: np.ndarray,
         robot_prim_path_stage: str,
-
         X_world: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
         world_prim_path_stage: str = "/World", 
         verbosity: int = 2,
@@ -75,8 +74,8 @@ class WorldModelWrapper:
         Initialize the world model wrapper.
         
         Args:
-            world_config: The associated Robot's Initial (collision) world configuration with potentially already existed obstacles (world collision model configuration). 
-            X_associated_robot_W: Base frame pose [x, y, z, qw, qx, qy, qz] of the robot which is associated with this collision model, expressed in world
+            world_config: The associated Robot's Initial (collision) world configuration with potentially already existed obstacles (world collision model configuration). Curobo's object, has nothing to do with the simualtor (isaac sim).
+            X_robot_W: Base frame pose [x, y, z, qw, qx, qy, qz] of the robot which is associated with this collision model, expressed in world
             robot_prim_path_stage: str: the prim path of the prim that is associated with the robot. You should normally not change it (unless you know what you are doing).
             X_world: World base frame pose [x, y, z, qw, qx, qy, qz]. Should be normally position = 0,0,0 (xyz) and orientation (quat)= 1,0,0,0 (wxyz). Change it only in the rare case when the world frame is not at the origin.
             world_prim_path_stage: str = "/World" - the prim path of the prim that is associated with the world frame. You should normally not change it (unless you know what you are doing).
@@ -84,7 +83,7 @@ class WorldModelWrapper:
             pose_change_threshold: Threshold (in meters) for considering pose changes, before the obstacle is considered moved and the collision model is updated.
         """
         self.world_config = world_config
-        self.base_frame = np.array(X_associated_robot_W) 
+        self.base_frame = np.array(X_robot_W) 
         self.world_base_frame = np.array(X_world) 
         self.robot_prim_path_stage = robot_prim_path_stage
         self.world_prim_path_stage = world_prim_path_stage
@@ -112,7 +111,7 @@ class WorldModelWrapper:
         ignore_substring: Optional[List[str]] = None
     ) -> WorldConfig:
         """
-        Initialize the collision world from USD stage obstacles.
+        Initialize the collision world from current USD stage obstacles.
         
         This should be called once to create the initial collision world.
         After this, use update() to efficiently update obstacle poses.
@@ -191,18 +190,27 @@ class WorldModelWrapper:
         self,
         usd_helper: UsdHelper,
         only_paths: List[str] = ["/World"],
-        ignore_substring: Optional[List[str]] = None
+        ignore_substring: Optional[List[str]] = None,
+        new_base_frame: Optional[np.ndarray] = None,
+        
     ):
         """
         Efficiently update obstacle poses without recreating the collision world.
         
-        This method reads current obstacle poses from the stage and updates only
-        the poses in the existing collision checker, avoiding expensive recreation.
+        This method reads current obstacle poses from the stage (except the ones that are in the ignore_substring list) and updates only
+        the poses in the existing collision checker, AVOIDING EXPENSIVE RECREATION (that's the key change comapred to the original curobo's examples, like in mpc_example.py or motion_gen_reacher.py where they recreate the collision world every time the robot moves).
         
         Args:
             usd_helper: USD helper instance for reading current obstacle poses
             only_paths: List of paths to search for obstacles
-            ignore_substring: List of substrings to ignore in obstacle names
+            ignore_substring: List of substrings to ignore in obstacle names. 
+            Should contain all the prim paths that you dont want to update their poses. 
+            That's ideal for the case when you have a static objects, which you dont want to update their poses.
+            For example, if you have a ground/plane/table, add their prim paths to this list.
+            new_base_frame: Set to a np.array (x,y,z,qw,qx,qy,qz) only when using movable base robot, and only when you want to upadate the world model base frame (to bas as the new base frame of the robot, instead of the old base frame).
+            In this case, the base frame of the robot (the robot which is associated with this collision model),
+            is not fixed and can change. In this case, the base frame of the robot is updated to the new pose and the collision model is updated accordingly. 
+            For example, if you have a movable base robot, set this to true. But if you have fixed base robot like robotic arm, set this to false.
         """
         if not self._initialized:
             log_error("WorldModelWrapper not initialized. Call initialize_from_stage() first.")
@@ -211,7 +219,10 @@ class WorldModelWrapper:
         if self.collision_checker is None:
             log_error("Collision checker not set. Call set_collision_checker() first.")
             return
-            
+        
+        if new_base_frame is not None:
+            self.update_base_frame(new_base_frame)
+
         if ignore_substring is None:
             ignore_substring = []
             

@@ -213,7 +213,7 @@ def main(robot_base_frame):
     world_cfg = WorldConfig()
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
-        X_associated_robot_W=robot_base_frame,
+        X_robot_W=robot_base_frame,
         robot_prim_path_stage=robot_prim_path,
         verbosity=4
     )
@@ -335,12 +335,7 @@ def main(robot_base_frame):
         # Efficient world update every 10 steps (instead of expensive recreation every 1000 steps)
         # if world_initialized and step_index % 10 == 0:
         if world_initialized:
-            # Update robot base frame in case robot has moved
-            # for movable robot base frame:
-            # if hasattr(robot, 'get_world_pose'):
-            #     robot_position, robot_orientation = robot.get_world_pose()
-            #     robot_base_frame = np.concatenate([robot_position, robot_orientation])
-            #     world_wrapper.update_base_frame(robot_base_frame)
+            
             
             # Efficiently update obstacle poses without recreating the world
             world_wrapper.update(
