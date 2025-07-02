@@ -150,15 +150,18 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
-def main(robot_base_frame, target_prim_path, obs_root_prim_path):
+def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_path):
     """
     Args:
         robot_base_frame: [x, y, z, qw, qx, qy, qz] pose of the robot's base frame in world frame. Originally as [0,0,0,1,0,0,0] 
-        target_prim_path: prim path of the target object. Must be under /World at this point.
+        target_prim_subpath: prim path of the target object *w.r. to world prim path* .
         obs_root_prim_path: 
             path to where you should put all your isaac sim obstacles udner.
             prim path of the root prim in which the obstacles are. All obstacles should be put under %obs_root_prim_path%/obstacle name Drag obstacles under this prim path.
+        world_prim_path: prim path of the world prim. ()
     """
+
+    target_prim_path = world_prim_path + target_prim_subpath
     # Get robot base frame from command line arguments
     # robot_base_frame = np.array(args.robot_base_frame)
     print(f"Robot base frame set to: {robot_base_frame}")
@@ -167,7 +170,7 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
     my_world = World(stage_units_in_meters=1.0)
     stage = my_world.stage
 
-    xform = stage.DefinePrim("/World", "Xform")
+    xform = stage.DefinePrim(world_prim_path, "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
     # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
@@ -219,11 +222,10 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
     # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     # Initialize WorldModelWrapper for efficient obstacle updates
-    world_cfg = WorldConfig()
+    world_cfg = WorldConfig() # initial world config, empty (could also contain obs...)
     cu_world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
-        robot_prim_path_stage=robot_prim_path,
         verbosity=2
     )
 
@@ -323,19 +325,20 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
         # Initialize world model wrapper once (replaces the expensive recreation every 1000 steps)
         if not world_initialized and step_index > 20:
             print("Initializing WorldModelWrapper (one-time setup)...")
+            # take env's (real world/simulator) curobo-world -> pass to wrapper -> get curobo-collision-world.
+            cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
+                cu_world_R=usd_help.get_obstacles_from_stage(
+                    only_paths=[world_prim_path], # prim paths to search for obstacles under
+                    reference_prim_path= robot_prim_path, # to get obs poses w.r.t. robot base frame (not world frame),
+                    ignore_substring=[ # ignore these substrings when searching for obstacles in stage (hide them from the search)
+                        robot_prim_path,
+                        target_prim_path, 
+                        # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
+                        "/curobo",
+                    ]
+                ),
+            ) # initialized to collision world
             
-            cu_world_R: WorldConfig = usd_help.get_obstacles_from_stage(
-                only_paths=["/World"], # prim paths to search for obstacles under
-                reference_prim_path= robot_prim_path, # to get obs poses w.r.t. robot base frame (not world frame),
-                ignore_substring=[ # ignore these substrings when searching for obstacles in stage (hide them from the search)
-                    robot_prim_path,
-                    target_prim_path, 
-                    # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
-                    "/curobo",
-                ]
-            )
-
-            cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_stage(cu_world_R)
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)
             # Set the collision checker reference in the wrapper
@@ -351,7 +354,7 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
             cu_world_wrapper.update(
                 cu_world_W=usd_help.get_obstacles_from_stage(
                     only_paths=[obs_root_prim_path],
-                    reference_prim_path="/World",
+                    reference_prim_path=world_prim_path,
                     ignore_substring=[
                         robot_prim_path,
                         target_prim_path,
@@ -362,7 +365,7 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
             )
 
             # Detect and add any new obstacles that may have been introduced during runtime
-            cu_world_wrapper.add_new_obstacles_from_stage(
+            cu_world_wrapper.add_new_obstacles_from_cu_world(
                 cu_world_R=usd_help.get_obstacles_from_stage(
                     only_paths=[obs_root_prim_path],
                     reference_prim_path=robot_prim_path,
@@ -374,16 +377,7 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
                     ]
                 ),
             )
-                # usd_helper=usd_help,
-                # reference_prim_path=robot_prim_path,
-                # only_paths=[obs_root_prim_path],
-                # cu_world_R=cu_world_R,
-                # ignore_substring=[
-                #    robot_prim_path,
-                #     target_prim_path,
-                #     "/World/defaultGroundPlane",
-                #     "/curobo",
-                #]
+ 
             
         # position and orientation of target virtual cube:
         cube_position, cube_orientation = target.get_world_pose() # p_goal_W, q_goal_W
@@ -473,5 +467,6 @@ def main(robot_base_frame, target_prim_path, obs_root_prim_path):
 
 if __name__ == "__main__":
     robot_base_frame = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0])
-    main(robot_base_frame, target_prim_path="/World/target",obs_root_prim_path="/World")
+    world_prim_path = "/World"
+    main(robot_base_frame, target_prim_subpath="/target",obs_root_prim_path=world_prim_path, world_prim_path=world_prim_path)
     simulation_app.close() 
