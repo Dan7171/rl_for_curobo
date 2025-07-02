@@ -213,7 +213,7 @@ def main(robot_base_frame):
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         base_frame=robot_base_frame,
-        verbosity=3
+        verbosity=4
     )
 
     init_curobo = False
@@ -343,7 +343,6 @@ def main(robot_base_frame):
             world_wrapper.update(
                 usd_helper=usd_help,
                 only_paths=["/World"],
-                # reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target",

@@ -19,7 +19,7 @@ and provides efficient updates to individual obstacle poses.
 """
 
 # Standard Library
-from typing import List, Optional, Union, Any
+from typing import List, Optional, Union, Any, Dict
 
 # Third Party
 import numpy as np
@@ -86,6 +86,8 @@ class WorldModelWrapper:
         self.collision_world = None
         self.collision_checker = None
         self.obstacle_names = set()
+        # Track last known world-frame pose of each obstacle for change detection
+        self._last_world_poses: Dict[str, np.ndarray] = {}
         self._initialized = False
         # internal step counter for periodic summaries
         self._step_counter = 0
@@ -150,6 +152,11 @@ class WorldModelWrapper:
         self._extract_obstacle_names()
         self._initialized = True
 
+        # Initialize last pose cache
+        if stage_obstacles.objects:
+            for _obs in stage_obstacles.objects:
+                self._last_world_poses[_obs.name] = np.array(_obs.pose)
+
         if self.verbosity >= 1:
             self._print_world_summary(header=True, list_names=(self.verbosity >= 2))
 
@@ -211,8 +218,18 @@ class WorldModelWrapper:
                 obs_type = obstacle.__class__.__name__ if hasattr(obstacle, "__class__") else "Unknown"
                 
                 if obstacle_name in self.obstacle_names:
-                    # Transform obstacle pose from world frame to base frame
+                    # Current obstacle world pose
                     world_pose = np.array(obstacle.pose)  # [x, y, z, qw, qx, qy, qz]
+
+                    # Check if pose actually changed since last update
+                    last_pose = self._last_world_poses.get(obstacle_name)
+                    if last_pose is not None and np.allclose(last_pose, world_pose, atol=1e-5):
+                        # Skip unchanged obstacle to avoid spurious "MOVED" logs
+                        continue
+                    # Update cache
+                    self._last_world_poses[obstacle_name] = world_pose.copy()
+                    
+                    # Transform obstacle pose from world frame to base frame
                     base_frame_pose = self._transform_pose_world_to_base(world_pose)
                     
                     # Create CuRobo Pose object
@@ -381,6 +398,8 @@ class WorldModelWrapper:
                         # 2) keep track locally
                         self.obstacle_names.add(obs.name)
                         newly_added.append(f"{obs.name} (type: {obs.__class__.__name__})")
+                        # Cache its pose for future change detection
+                        self._last_world_poses[obs.name] = np.array(obs.pose)
 
                         # Print pose info for each newly added obstacle
                         if self.verbosity >= 1:
@@ -438,14 +457,14 @@ class WorldModelWrapper:
             name_by_type.setdefault(obj_type, []).append(name)
 
         if header:
-            log_info("===== Collision-world Summary =====")
+            self._vprint("===== Collision-world Summary =====")
         summary = ", ".join([f"{t}: {c}" for t, c in type_counts.items()])
-        log_info("Obstacle counts → " + summary)
+        self._vprint("Obstacle counts → " + summary)
         if list_names:
             for t, names in name_by_type.items():
-                log_info(f"  {t}: {', '.join(sorted(names))}")
+                self._vprint(f"  {t}: {', '.join(sorted(names))}")
         if header:
-            log_info("====================================")
+            self._vprint("====================================")
 
     # --------------------------------------------------------------
     # Internal helper for printing respecting verbosity
