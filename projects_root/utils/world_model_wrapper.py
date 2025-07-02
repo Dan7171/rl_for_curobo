@@ -65,7 +65,8 @@ class WorldModelWrapper:
         world_config: WorldConfig,
         base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
         world_base_frame: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
-        verbosity: int = 2
+        verbosity: int = 2,
+        pose_change_threshold: float = 1e-6,
     ):
         """
         Initialize the world model wrapper.
@@ -75,12 +76,14 @@ class WorldModelWrapper:
             base_frame: Base frame pose [x, y, z, qw, qx, qy, qz] - typically robot base frame
             robot_base_frame: World base frame pose [x, y, z, qw, qx, qy, qz] - typically identity
             verbosity: Verbosity level for logging
+            pose_change_threshold: Threshold for considering pose changes
         """
         self.world_config = world_config
         self.base_frame = np.array(base_frame)
         self.world_base_frame = np.array(world_base_frame)
         self.tensor_args = TensorDeviceType()
         self.verbosity = int(verbosity)
+        self.pose_change_threshold = float(pose_change_threshold)
         
         # Will be set after first initialization
         self.collision_world = None
@@ -223,7 +226,9 @@ class WorldModelWrapper:
 
                     # Check if pose actually changed since last update
                     last_pose = self._last_world_poses.get(obstacle_name)
-                    if last_pose is not None and np.allclose(last_pose, world_pose, atol=1e-5):
+                    if last_pose is not None and np.allclose(
+                        last_pose, world_pose, atol=self.pose_change_threshold
+                    ):
                         # Skip unchanged obstacle to avoid spurious "MOVED" logs
                         continue
                     # Update cache

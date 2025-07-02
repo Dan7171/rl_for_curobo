@@ -331,7 +331,8 @@ def main(robot_base_frame):
             print("WorldModelWrapper initialized successfully!")
         
         # Efficient world update every 10 steps (instead of expensive recreation every 1000 steps)
-        if world_initialized and step_index % 10 == 0:
+        # if world_initialized and step_index % 10 == 0:
+        if world_initialized:
             # Update robot base frame in case robot has moved
             # for movable robot base frame:
             # if hasattr(robot, 'get_world_pose'):
