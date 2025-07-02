@@ -113,7 +113,8 @@ from curobo.types.robot import JointState
 from curobo.types.state import JointState
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
-
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
+from projects_root.utils.handy_utils import get_rollouts_in_world_frame
 # Project utilities
 from projects_root.utils.world_model_wrapper import WorldModelWrapper
 
@@ -215,7 +216,7 @@ def main(robot_base_frame):
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
         robot_prim_path_stage=robot_prim_path,
-        verbosity=4
+        verbosity=2
     )
 
     init_curobo = False
@@ -288,7 +289,7 @@ def main(robot_base_frame):
             for _ in range(10):
                 my_world.step(render=True)
             init_world = True
-        draw_points(mpc.get_visual_rollouts())
+        draw_points(get_rollouts_in_world_frame(mpc.get_visual_rollouts(), robot_base_frame))
 
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -340,7 +341,7 @@ def main(robot_base_frame):
             # Efficiently update obstacle poses without recreating the world
             world_wrapper.update(
                 usd_helper=usd_help,
-                only_paths=["/World"],
+                only_paths=["/World"], 
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target",
@@ -363,16 +364,17 @@ def main(robot_base_frame):
             )
 
         # position and orientation of target virtual cube:
-        cube_position, cube_orientation = target.get_world_pose()
-
+        cube_position, cube_orientation = target.get_world_pose() # p_goal_W, q_goal_W
         if past_pose is None:
             past_pose = cube_position + 1.0
 
         if np.linalg.norm(cube_position - past_pose) > 1e-3:
-            # Set EE teleop goals, use cube for simple non-vr init:
-            X_target_W = np.concatenate([cube_position, cube_orientation])
-            X_target_R = world_wrapper._transform_pose_world_to_base(X_target_W)
-            p_goal_R, q_goal_R = X_target_R[:3], X_target_R[3:]
+            p_goal_R, q_goal_R = FrameUtils.world_to_F(
+                robot_base_frame[:3],    # base frame position in world
+                robot_base_frame[3:],    # base frame orientation in world  
+                cube_position,         # position in world
+                cube_orientation       # orientation in world
+            )
 
             ik_goal = Pose(
                 position=tensor_args.to_device(p_goal_R),

@@ -53,7 +53,7 @@ from curobo.util.logger import log_info, log_warn, log_error
 
 class WorldModelWrapper:
     """
-    Efficient world model wrapper that avoids recreation of collision world.
+    *Efficient*  wrapper for curobo world models that avoids recreation of collision world.
     
     This wrapper initializes the world model once using obstacles from stage,
     then provides efficient updates to individual obstacle poses without
@@ -221,7 +221,7 @@ class WorldModelWrapper:
             return
         
         if new_base_frame is not None:
-            self.update_base_frame(new_base_frame)
+            self._update_base_frame(new_base_frame)
 
         if ignore_substring is None:
             ignore_substring = []
@@ -294,7 +294,7 @@ class WorldModelWrapper:
             silent=True,
         )
     
-    def update_base_frame(self, new_base_frame: np.ndarray):
+    def _update_base_frame(self, new_base_frame: np.ndarray):
         """
         Update the base frame pose.
         
@@ -352,7 +352,7 @@ class WorldModelWrapper:
     
     def _transform_pose_world_to_base(self, world_pose: np.ndarray) -> np.ndarray:
         """
-        Transform pose from world frame to base frame.
+        Transform pose from world frame to the world model (the robot's) base frame.
         
         Args:
             world_pose: Pose in world frame [x, y, z, qw, qx, qy, qz]
