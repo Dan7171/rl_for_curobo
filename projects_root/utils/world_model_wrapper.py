@@ -118,8 +118,8 @@ class WorldModelWrapper:
         
         Args:
             usd_helper: USD helper instance for reading stage obstacles
-            only_paths: List of paths to search for obstacles
-            ignore_substring: List of substrings to ignore in obstacle names
+            only_paths: List of paths to search for obstacles under (other paths are ignored).
+            ignore_substring: List of (prim paths in stage) to ignore when searching for obstacles in stage, in the only_paths list.
             
         Returns:
             WorldConfig: The initialized collision world configuration
@@ -139,10 +139,12 @@ class WorldModelWrapper:
         #     print(obstacle.name)
         # print("--------------------------------")
             
-        # Combine with initial world config
-        collision_world = stage_obstacles.get_collision_check_world()
+        # make a curobo world config object (curobo's object, has nothing to do with the simualtor (isaac sim))
+        # from the stage obstacles (isaac sim's stage full of obstacles)
+        collision_world = stage_obstacles.get_collision_check_world() 
         
-        # Add initial world config obstacles
+        # Reading the obstacles from the world config (curobo's object, has nothing to do with the simualtor (isaac sim))
+        # and adding them to the collision world (curobo's object, has nothing to do with the simualtor (isaac sim))
         if self.world_config.cuboid:
             for cuboid in self.world_config.cuboid:
                 collision_world.add_obstacle(cuboid)

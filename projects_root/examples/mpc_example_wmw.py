@@ -150,7 +150,15 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
-def main(robot_base_frame):
+def main(robot_base_frame, target_prim_path, obs_root_prim_path):
+    """
+    Args:
+        robot_base_frame: [x, y, z, qw, qx, qy, qz] pose of the robot's base frame in world frame. Originally as [0,0,0,1,0,0,0] 
+        target_prim_path: prim path of the target object. Must be under /World at this point.
+        obs_root_prim_path: 
+            path to where you should put all your isaac sim obstacles udner.
+            prim path of the root prim in which the obstacles are. All obstacles should be put under %obs_root_prim_path%/obstacle name Drag obstacles under this prim path.
+    """
     # Get robot base frame from command line arguments
     # robot_base_frame = np.array(args.robot_base_frame)
     print(f"Robot base frame set to: {robot_base_frame}")
@@ -170,7 +178,7 @@ def main(robot_base_frame):
 
     # Make a target to follow
     target = cuboid.VisualCuboid(
-        "/World/target",
+        target_prim_path,
         position=np.array([1.5, 1, 0.5]),
         orientation=np.array([0, 1, 0, 0]),
         color=np.array([1.0, 0, 0]),
@@ -318,10 +326,10 @@ def main(robot_base_frame):
             print("Initializing WorldModelWrapper (one-time setup)...")
             collision_world = world_wrapper.initialize_from_stage(
                 usd_helper=usd_help,
-                only_paths=["/World"],
+                only_paths=[obs_root_prim_path],
                 ignore_substring=[
                     robot_prim_path,
-                    "/World/target", 
+                    target_prim_path, 
                     # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
                     "/curobo",
                 ]
@@ -341,10 +349,10 @@ def main(robot_base_frame):
             # Efficiently update obstacle poses without recreating the world
             world_wrapper.update(
                 usd_helper=usd_help,
-                only_paths=["/World"], 
+                only_paths=[obs_root_prim_path], 
                 ignore_substring=[
                     robot_prim_path,
-                    "/World/target",
+                    target_prim_path,
                     "/World/defaultGroundPlane", 
                     "/curobo",
                 ]
@@ -354,10 +362,10 @@ def main(robot_base_frame):
             world_wrapper.add_new_obstacles_from_stage(
                 usd_helper=usd_help,
                 reference_prim_path=robot_prim_path,
-                only_paths=["/World"],
+                only_paths=[obs_root_prim_path],
                 ignore_substring=[
                     robot_prim_path,
-                    "/World/target",
+                    target_prim_path,
                     "/World/defaultGroundPlane",
                     "/curobo",
                 ]
@@ -451,5 +459,5 @@ def main(robot_base_frame):
 
 if __name__ == "__main__":
     robot_base_frame = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0])
-    main(robot_base_frame)
+    main(robot_base_frame, target_prim_path="/World/target",obs_root_prim_path="/World")
     simulation_app.close() 
