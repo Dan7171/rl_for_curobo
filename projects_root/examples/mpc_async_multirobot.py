@@ -301,14 +301,14 @@ def main(meta_config_paths: List[str]):
         )
     
     # ENVIRONMENT OBSTACLES - INITIALIZATION
-    col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
-    env_obstacles = [] # list of obstacles in the world
-    for obstacle in col_ob_cfg:
-        obstacle = Obstacle(my_world, **obstacle)
-        for i in range(len(robot_world_models)):
-            world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
-            print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
-        env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
+    # col_ob_cfg = load_yaml(collision_obstacles_cfg_path)
+    # env_obstacles = [] # list of obstacles in the world
+    # for obstacle in col_ob_cfg:
+    #     obstacle = Obstacle(my_world, **obstacle)
+    #     for i in range(len(robot_world_models)):
+    #         world_model_idx = obstacle.add_to_world_model(robot_world_models[i], X_robots[i])#  usd_helper=usd_help) # inplace modification of the world model with the obstacle
+    #         print(f"Obstacle {obstacle.name} added to world model {world_model_idx}")
+    #     env_obstacles.append(obstacle) # add the obstacle to the list of obstacles
     world_prim = stage.GetPrimAtPath("/World")
     stage.SetDefaultPrim(world_prim)
     
@@ -366,11 +366,11 @@ def main(meta_config_paths: List[str]):
         robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
         # Some technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
         robots[i].robot._articulation_view.initialize() 
-        # Get initialized collision checker of robot
-        checker = robots[i].get_cchecker() # available only after init_solver
-        ccheckers.append(checker)
-        for j in range(len(env_obstacles)):
-            env_obstacles[j].register_ccheckers([checker])
+        # # Get initialized collision checker of robot
+        # checker = robots[i].get_cchecker() # available only after init_solver
+        # ccheckers.append(checker)
+        # for j in range(len(env_obstacles)):
+        #     env_obstacles[j].register_ccheckers([checker])
     
     # for i in range(len(env_obstacles)):
     #     env_obstacles[i].register_ccheckers(ccheckers)
