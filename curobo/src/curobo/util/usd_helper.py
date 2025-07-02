@@ -492,13 +492,24 @@ class UsdHelper:
         only_substring: Optional[List[str]] = None,
         ignore_substring: Optional[List[str]] = None,
         reference_prim_path: Optional[str] = None,
-        timecode: float = 0,
+        timecode: Optional[float] = None,
     ) -> WorldConfig:
+        # Query transforms at the requested time.  If no explicit timecode was
+        # provided we fallback to `Usd.TimeCode.Default()` which corresponds to
+        # the current (live) values in Isaac-Sim.  This is crucial for picking
+        # up interactive object movements that are authored during simulation
+        # and therefore don't have baked time-samples at t=0.
+
+        # We rely on the globally imported `Usd` (imported at the top of this
+        # module) instead of a local import to keep static analysers happy.
+
+        self._xform_cache.Clear()
+        tcode = timecode if timecode is not None else Usd.TimeCode.Default()
+        self._xform_cache.SetTime(tcode)
+
         # read obstacles from usd by iterating through all prims:
         obstacles = {"cuboid": [], "sphere": None, "mesh": None, "cylinder": None, "capsule": None}
         r_T_w = None
-        self._xform_cache.Clear()
-        self._xform_cache.SetTime(timecode)
         if reference_prim_path is not None:
             reference_prim = self.stage.GetPrimAtPath(reference_prim_path)
             r_T_w, _ = get_prim_world_pose(self._xform_cache, reference_prim, inverse=True)
