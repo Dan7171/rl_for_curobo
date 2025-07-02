@@ -117,6 +117,7 @@ from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import
 from projects_root.utils.handy_utils import get_rollouts_in_world_frame
 # Project utilities
 from projects_root.utils.world_model_wrapper import WorldModelWrapper
+from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
 
 ############################################################
 
@@ -255,6 +256,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         use_cuda_graph_metrics=True,
         use_cuda_graph_full_step=False,
         self_collision_check=True,
+        # Use the mesh collision checker (includes primitive support automatically)
         collision_checker_type=CollisionCheckerType.MESH,
         collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
         use_mppi=True,
@@ -288,6 +290,8 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     
     # Initialize world model wrapper once - this replaces the repeated world recreation
     world_initialized = False
+    # Cache of prim paths already known to the collision world
+    known_prim_paths: set[str] = set()
     
     init_world = False
     cmd_state_full = None
@@ -327,6 +331,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             print("Initializing WorldModelWrapper (one-time setup)...")
             # take env's (real world/simulator) curobo-world -> pass to wrapper -> get curobo-collision-world.
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
+                # Convert raw USD obstacles to a collision-supported world (meshes + cuboids)
                 cu_world_R=usd_help.get_obstacles_from_stage(
                     only_paths=[world_prim_path], # prim paths to search for obstacles under
                     reference_prim_path= robot_prim_path, # to get obs poses w.r.t. robot base frame (not world frame),
@@ -336,49 +341,77 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                         # "/World/defaultGroundPlane", # comment out if you want to ignore the ground plane
                         "/curobo",
                     ]
-                ),
+                ).get_collision_check_world(),
             ) # initialized to collision world
             
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)
             # Set the collision checker reference in the wrapper
             cu_world_wrapper.set_collision_checker(mpc.world_coll_checker)
+            # Record the prims that are currently considered obstacles
+            ignore_list = [
+                robot_prim_path,
+                target_prim_path,
+                "/World/defaultGroundPlane",
+                "/curobo",
+            ]
+
+            known_prim_paths = set(cu_world_wrapper.get_obstacle_names())
+
             world_initialized = True
             print("WorldModelWrapper initialized successfully!")
         
-        # Efficient world update every 10 steps (instead of expensive recreation every 1000 steps)
-        # if world_initialized and step_index % 10 == 0:
-        if world_initialized:
+        
+        # ------------------------------------------------------------------
+        # Detect *new* prims cheaply; load geometry only when necessary
+        # ------------------------------------------------------------------
+        if world_initialized: #cu_world_wrapper.is_initialized():
             
-            # Efficiently update obstacle poses without recreating the world
-            cu_world_wrapper.update(
-                cu_world_W=usd_help.get_obstacles_from_stage(
-                    only_paths=[obs_root_prim_path],
-                    reference_prim_path=world_prim_path,
-                    ignore_substring=[
-                        robot_prim_path,
-                        target_prim_path,
-                        "/World/defaultGroundPlane",
-                        "/curobo",
-                    ]
-                ), 
-            )
+            
+            # ------------------------------------------------------------------
+            # Fast pose update (no heavy geometry traversal)
+            # ------------------------------------------------------------------
+            ignore_list = [
+                robot_prim_path,
+                target_prim_path,
+                "/World/defaultGroundPlane",
+                "/curobo",
+            ]
 
-            # Detect and add any new obstacles that may have been introduced during runtime
-            cu_world_wrapper.add_new_obstacles_from_cu_world(
-                cu_world_R=usd_help.get_obstacles_from_stage(
-                    only_paths=[obs_root_prim_path],
-                    reference_prim_path=robot_prim_path,
-                    ignore_substring=[
-                        robot_prim_path,
-                        target_prim_path,
-                        "/World/defaultGroundPlane",
-                        "/curobo",
-                    ]
-                ),
+            pose_dict = get_stage_poses(
+                usd_helper=usd_help,
+                only_paths=[obs_root_prim_path],
+                reference_prim_path=world_prim_path,
+                ignore_substring=ignore_list,
             )
- 
+            print(f"debug pose_dict: {pose_dict}")
+            cu_world_wrapper.update_from_pose_dict(pose_dict)
+
             
+            current_paths = set(
+                list_relevant_prims(usd_help, [obs_root_prim_path], ignore_list)
+            )
+            print(f"debug current_paths: {current_paths}")
+            print(f"debug known_prim_paths: {known_prim_paths}")
+            new_paths = current_paths - known_prim_paths
+            if new_paths:
+                print(f"debug new_paths!!! {new_paths}")
+
+                new_world_cfg = usd_help.get_obstacles_from_stage(
+                    only_paths=list(new_paths),
+                    reference_prim_path=robot_prim_path,
+                    ignore_substring=ignore_list,
+                ).get_collision_check_world()
+
+                if new_world_cfg.objects:  # add only if we got actual obstacles
+                    cu_world_wrapper.add_new_obstacles_from_cu_world(
+                        cu_world_R=new_world_cfg,
+                        silent=False,
+                    )
+                    # Track real obstacle names so future pose updates work
+                    for obj in new_world_cfg.objects:
+                        known_prim_paths.add(obj.name)
+        
         # position and orientation of target virtual cube:
         cube_position, cube_orientation = target.get_world_pose() # p_goal_W, q_goal_W
         if past_pose is None:

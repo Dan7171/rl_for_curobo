@@ -434,3 +434,54 @@ class WorldModelWrapper:
     @staticmethod
     def _pose_str(arr: np.ndarray) -> str:
         return np.round(arr.astype(float), 2).tolist().__str__()
+
+    # ------------------------------------------------------------------
+    # Public API – lightweight per-frame pose update (simulator-agnostic)
+    # ------------------------------------------------------------------
+    def update_from_pose_dict(self, pose_dict: Dict[str, List[float]]):
+        """Update obstacle poses using a dict *{name: [x,y,z,qw,qx,qy,qz]}*.
+
+        This avoids the heavy `UsdHelper.get_obstacles_from_stage()` call and
+        lets higher-level code supply just the current poses of already known
+        obstacles.
+
+        *New* obstacles are ignored here – caller may detect them separately
+        and invoke `add_new_obstacles_from_cu_world()` when necessary.
+        """
+
+        if not self._initialized or self.collision_checker is None:
+            return
+
+        for name, pose_list in pose_dict.items():
+            if name not in self.obstacle_names:
+                # Unknown object – handled elsewhere
+                continue
+
+            pose_arr = np.asarray(pose_list, dtype=float)
+
+            last_pose = self._last_world_poses.get(name)
+            if last_pose is not None and np.allclose(
+                last_pose, pose_arr, atol=self.pose_change_threshold
+            ):
+                continue  # unchanged
+
+            self._last_world_poses[name] = pose_arr.copy()
+
+            # Convert to robot base frame
+            base_pose = self._transform_pose_world_to_base(pose_arr)
+
+            cu_pose = Pose(
+                position=self.tensor_args.to_device(base_pose[:3]),
+                quaternion=self.tensor_args.to_device(base_pose[3:]),
+            )
+
+            try:
+                self.collision_checker.update_obstacle_pose(
+                    name=name,
+                    w_obj_pose=cu_pose,
+                    env_idx=0,
+                )
+                if self.verbosity >= 3:
+                    self._vprint(f"{name} MOVED (fast-dict)")
+            except Exception as e:
+                log_warn(f"update_from_pose_dict failed for {name}: {e}")

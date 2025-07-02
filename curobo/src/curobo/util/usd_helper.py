@@ -831,6 +831,46 @@ class UsdHelper:
     def save(self):
         self.stage.Save()
 
+    # ------------------------------------------------------------------
+    # Lightweight pose query used every simulation step
+    # ------------------------------------------------------------------
+    def get_prim_poses(
+        self,
+        prim_paths: List[str],
+        reference_prim_path: Optional[str] = None,
+        timecode: Optional[float] = None,
+    ) -> Dict[str, List[float]]:
+        """Return poses for a list of prims as [x,y,z,qw,qx,qy,qz].
+
+        Args:
+            prim_paths: list of USD prim paths.
+            reference_prim_path: express poses in that frame; world if None.
+            timecode: specific USD time; None → live values.
+        """
+
+        tc = timecode if timecode is not None else Usd.TimeCode.Default()
+
+        self._xform_cache.Clear()
+        self._xform_cache.SetTime(tc)
+
+        # reference transform (world→reference)
+        ref_T_w = None
+        if reference_prim_path is not None:
+            ref_prim = self.stage.GetPrimAtPath(reference_prim_path)
+            ref_T_w, _ = get_prim_world_pose(self._xform_cache, ref_prim, inverse=True)
+
+        out: Dict[str, List[float]] = {}
+        for p in prim_paths:
+            prim = self.stage.GetPrimAtPath(p)
+            if not prim.IsValid():
+                continue
+            mat, _ = get_prim_world_pose(self._xform_cache, prim)
+            if ref_T_w is not None:
+                mat = ref_T_w @ mat
+            pose = Pose.from_matrix(torch.as_tensor(mat)).tolist()
+            out[p] = pose
+        return out
+
     @staticmethod
     def write_trajectory_animation(
         robot_model_file: str,
