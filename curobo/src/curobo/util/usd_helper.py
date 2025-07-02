@@ -355,19 +355,40 @@ def get_mesh_attrs(prim, cache=None, transform=None) -> Mesh:
     points = [np.ravel(x) for x in points]
     # points = np.ndarray(points)
 
-    faces = list(prim.GetAttribute("faceVertexIndices").Get())
+    # ------------------------------------------------------------------
+    # Face processing – support arbitrary polygon sizes (not just triangles)
+    # ------------------------------------------------------------------
+    face_indices = list(prim.GetAttribute("faceVertexIndices").Get())
+    face_counts = list(prim.GetAttribute("faceVertexCounts").Get())
 
-    face_count = list(prim.GetAttribute("faceVertexCounts").Get())
-    # assume faces are 3:
-    if len(faces) / 3 != len(face_count):
-        log_warn(
-            "Mesh faces "
-            + str(len(faces) / 3)
-            + " are not matching faceVertexCounts "
-            + str(len(face_count))
-        )
+    # Convert polygons to triangles when necessary (fan-triangulation).
+    # This allows loading meshes that use quads (e.g. the default ground plane)
+    # or n-gons without silently skipping them.
+    faces = []  # list of triangle index triplets
+    idx = 0
+    for cnt in face_counts:
+        verts = face_indices[idx : idx + cnt]
+        idx += cnt
+
+        if cnt < 3:
+            # Degenerate face – skip but warn once
+            log_warn(
+                f"Skipping degenerate face with <3 vertices on prim {prim.GetPath()}"
+            )
+            continue
+
+        if cnt == 3:
+            faces.append(verts)
+        else:
+            # Fan-triangulate polygon (v0,v1,v2), (v0,v2,v3), ...
+            for i in range(1, cnt - 1):
+                faces.append([verts[0], verts[i], verts[i + 1]])
+
+    if not faces:
+        # No valid faces extracted – skip mesh
+        log_warn(f"Mesh {prim.GetPath()} has no valid triangular faces – skipping.")
         return None
-    faces = np.array(faces).reshape(len(face_count), 3).tolist()
+
     if prim.GetAttribute("xformOp:scale").IsValid():
         scale = list(prim.GetAttribute("xformOp:scale").Get())
     else:

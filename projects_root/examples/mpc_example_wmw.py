@@ -197,19 +197,20 @@ def main(robot_base_frame):
 
     articulation_controller = robot.get_articulation_controller()
 
-    world_cfg_table = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    )
-    world_cfg_table.cuboid[0].pose[2] -= 0.04
-    world_cfg1 = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    ).get_mesh_world()
-    world_cfg1.mesh[0].name += "_mesh"
-    world_cfg1.mesh[0].pose[2] = -10.5
+    # world_cfg_table = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # )
+    # world_cfg_table.cuboid[0].pose[2] -= 0.04
+    # world_cfg1 = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # ).get_mesh_world()
+    # world_cfg1.mesh[0].name += "_mesh"
+    # world_cfg1.mesh[0].pose[2] = -10.5
 
-    world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
+    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     # Initialize WorldModelWrapper for efficient obstacle updates
+    world_cfg = WorldConfig()
     world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_associated_robot_W=robot_base_frame,
@@ -222,21 +223,22 @@ def main(robot_base_frame):
 
     robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
 
-    world_cfg_table = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    )
-    world_cfg1 = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    ).get_mesh_world()
-    world_cfg1.mesh[0].pose[2] = -10.0
+    # world_cfg_table = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # )
+    # world_cfg1 = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # ).get_mesh_world()
+    # world_cfg1.mesh[0].pose[2] = -10.0
 
-    world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
+    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
 
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
+        # world_cfg,
         world_cfg,
         use_cuda_graph=True,
         use_cuda_graph_metrics=True,
@@ -319,7 +321,7 @@ def main(robot_base_frame):
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target", 
-                    "/World/defaultGroundPlane",
+                    # "/World/defaultGroundPlane",
                     "/curobo",
                 ]
             )

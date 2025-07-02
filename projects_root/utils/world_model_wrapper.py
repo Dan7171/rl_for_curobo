@@ -129,7 +129,12 @@ class WorldModelWrapper:
             reference_prim_path=reference_prim_path,
             ignore_substring=ignore_substring
         )
-        
+        # debug:
+        # print("stage_obstacles.objects:")
+        # for obstacle in stage_obstacles.objects:
+        #     print(obstacle.name)
+        # print("--------------------------------")
+            
         # Combine with initial world config
         collision_world = stage_obstacles.get_collision_check_world()
         
