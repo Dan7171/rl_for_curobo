@@ -238,8 +238,12 @@ def render_geom_approx_to_spheres(collision_world):
         except Exception:
             pass
 
+    stage = None  # Will capture Omni stage after first sphere is created
+
     while len(obs_spheres) < len(all_sph):
         p, r = all_sph[len(obs_spheres)]
+
+        # Create sphere – this will auto-generate a new material prim
         sp = sphere.VisualSphere(
             prim_path=f"/curobo/obs_sphere_{len(obs_spheres)}",
             position=np.ravel(p),
@@ -247,13 +251,28 @@ def render_geom_approx_to_spheres(collision_world):
             color=np.array([1.0, 0.6, 0.1]),
         )
 
-        # Bind shared material if available
-        if shared_mat_path is not None:
-            try:
-                rel = sp.prim.GetRelationship("material:binding")
+        # On creation update stage reference
+        if stage is None:
+            stage = sp.prim.GetStage()
+
+        try:
+            rel = sp.prim.GetRelationship("material:binding")
+            orig_targets = rel.GetTargets()
+            new_mat_path = orig_targets[0] if orig_targets else None
+
+            # Rebind to shared material if one exists
+            if shared_mat_path is not None:
                 rel.SetTargets([shared_mat_path])
-            except Exception:
-                pass
+
+                # Remove the auto-generated material prim to avoid duplicates
+                if new_mat_path and stage.GetPrimAtPath(new_mat_path):
+                    stage.RemovePrim(new_mat_path)
+            else:
+                # First sphere becomes the reference material
+                if new_mat_path:
+                    shared_mat_path = new_mat_path
+        except Exception:
+            pass
 
         obs_spheres.append(sp)
 
