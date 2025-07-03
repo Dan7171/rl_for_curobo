@@ -136,7 +136,9 @@ r
     if stage is None:
         stage = ctx.get_stage()
 
-    usd_path_str = str(pathlib.Path(usd_path).expanduser())
+    # Use an absolute path so the reference always resolves regardless of
+    # where the stage is saved or which asset search paths are configured.
+    usd_path_str = str(pathlib.Path(usd_path).expanduser().resolve(strict=False))
 
     created_paths: list[str] = []
 
@@ -174,7 +176,7 @@ if __name__ == "__main__":
     sim_app = init_app()
     world = make_world(set_default_prim=True, to_Xform=False)
     created_paths = load_prims_from_usd(
-        "usd_collection/envs/World-_360_conveyor.usd",
+        "usd_collection/envs/World-_360_conveyor_handcrafter_obs.usd",
         prim_paths=["/World/_360_conveyor"],
         dest_root="/World",
         stage=world.stage,

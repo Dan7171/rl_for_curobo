@@ -200,7 +200,7 @@ def draw_points(rollouts: torch.Tensor):
 obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
 
 
-def render_geom_approx_to_spheres(collision_world,n_spheres=300):
+def render_geom_approx_to_spheres(collision_world,n_spheres=200):
     """Visualize an approximate geometry (collection of spheres) for each obstacle.
 
     Notes:
@@ -225,8 +225,8 @@ def render_geom_approx_to_spheres(collision_world,n_spheres=300):
         collision_world,
         robot_base_frame.tolist(),
         n_spheres=n_spheres,
-        fit_type=SphereFitType.SAMPLE_SURFACE,
-        radius_scale=0.05,  # 5 % of smallest OBB side for visibility
+        fit_type=Mesh, # SphereFitType.VOXEL_SURFACE,#SphereFitType.SAMPLE_SURFACE,
+        radius_scale=0.02,  # 5 % of smallest OBB side for visibility
     )
 
     if not all_sph:
@@ -325,14 +325,90 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
     # my_world.scene.add_default_ground_plane()
+
+    
+    def get_paths_to_ignore_from(prim_paths):
+        """Return a flat list of prim paths that *should be ignored* when
+        building the CuRobo collision world.
+
+        Every prim that lies under one of *prim_paths* **and** whose full
+        path **does NOT** contain the marker substring ``"_curobo_obs"`` is
+        considered *visual only* and will be ignored by the collision world
+        builder.
+
+        Parameters
+        ----------
+        prim_paths : list[str]
+            Root prim paths (already present in the current stage) that were
+            referenced via :pyfunc:`load_prims_from_usd`.
+
+        Returns
+        -------
+        list[str]
+            All prim paths under the provided roots that should be skipped
+            when collecting obstacles.
+        """
+
+        try:
+            from pxr import Usd  # type: ignore
+        except ImportError:
+            # In unit-test / headless environments pxr might be missing –
+            # fall back to an empty list so the rest of the script keeps running.
+            return []
+
+        ignore_list: list[str] = []
+
+        # Build a set for fast prefix checks
+        roots = set(prim_paths)
+
+        for prim in stage.Traverse():  # 'stage' captured from outer scope
+            p_str = str(prim.GetPath())
+
+            # Keep only prims that live under one of the provided roots
+            root_match = None
+            for r in roots:
+                if p_str.startswith(r):
+                    root_match = r
+                    break
+            if root_match is None:
+                continue  # not under any monitored root
+
+            # Skip the root itself; ignoring it would hide every child via the
+            # substring-based filter that CuRobo uses downstream.
+            if p_str == root_match:
+                continue
+
+            # Keep geometry that is explicitly marked as a collision obstacle
+            if "_curobo_obs" in p_str:
+                continue
+
+            ignore_list.append(p_str)
+
+        return ignore_list
+        
+        
     created_paths = load_prims_from_usd(
-        "usd_collection/envs/World-_360_conveyor.usd",
+        "usd_collection/envs/_360_conveyor_handcrafter_obs.usd",
         prim_paths=["/World/_360_conveyor"],
         dest_root="/World",
         stage=my_world.stage,
-
+        
     )
 
+    # ------------------------------------------------------------------
+    # Sanity-check: make sure the referenced prims actually materialised.
+    #               This avoids spending minutes in the sim only to notice
+    #               that the conveyor came in empty because the primPath was
+    #               miss-typed.
+    # ------------------------------------------------------------------
+    for _pp in created_paths:
+        _prim = my_world.stage.GetPrimAtPath(_pp)
+        if not _prim.IsValid() or len(_prim.GetChildren()) == 0:
+            raise RuntimeError(
+                f"[load_prims_from_usd] Prim '{_pp}' is empty or invalid – "
+                "verify that the source USD actually contains this path."
+            )
+    paths_to_ignore_in_curobo_world_model = get_paths_to_ignore_from(created_paths)
     # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
     # Make a target to follow
@@ -407,8 +483,8 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     mpc_config = MpcSolverConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
-        use_cuda_graph=True,
-        use_cuda_graph_metrics=True,
+        use_cuda_graph=False,  # disable to isolate CUDA graph issues
+        use_cuda_graph_metrics=False,
         use_cuda_graph_full_step=False,
         self_collision_check=True,
         # Use the mesh collision checker (includes primitive support automatically)
@@ -502,6 +578,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                     robot_prim_path,
                     target_prim_path,
                     "/curobo",
+                    *paths_to_ignore_in_curobo_world_model,
                 ],
             )
 
@@ -514,9 +591,29 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             else:
                 _init_cu_world = _raw_world.get_collision_check_world()
 
+            # Validate meshes before pushing to CUDA – helps track CUDA 700 errors
+            try:
+                _validate_mesh_list(_init_cu_world.mesh, "Pre-CUDA")
+            except ValueError as e:
+                import traceback, sys
+
+                print("\n[MeshValidationError]", e)
+                traceback.print_exc()
+                sys.exit(1)
+
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
                 cu_world_R=_init_cu_world,
             )
+            
+            # Extra validation after CuRobo converts meshes (they may be re-ordered)
+            try:
+                _validate_mesh_list(cu_col_world_R.mesh, "Post-CuRobo")
+            except ValueError as e:
+                import traceback, sys
+
+                print("\n[MeshValidationError]", e)
+                traceback.print_exc()
+                sys.exit(1)
             
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)
@@ -528,6 +625,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 target_prim_path,
                 "/World/defaultGroundPlane",
                 "/curobo",
+                *paths_to_ignore_in_curobo_world_model,
             ]
 
             known_prim_paths = set(cu_world_wrapper.get_obstacle_names())
@@ -550,6 +648,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 target_prim_path,
                 "/World/defaultGroundPlane",
                 "/curobo",
+                *paths_to_ignore_in_curobo_world_model,
             ]
 
             pose_dict = get_stage_poses(
@@ -679,7 +778,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         # ------------------------------------------------------------------
         # OPTIONAL: visualize obstacle bounding spheres (simplified)
         # ------------------------------------------------------------------
-        if args.show_bnd_spheres and world_initialized and step_index % 5 == 0:
+        if args.show_bnd_spheres and world_initialized and step_index % 20 == 0:
             render_geom_approx_to_spheres(cu_world_wrapper.get_collision_world())
 
 
@@ -713,22 +812,119 @@ def simplify_mesh_obstacles(world: WorldConfig, face_limit: int):
                     decimate = getattr(tri, "simplify_quadratic_decimation", None)
                     if callable(decimate):
                         tri = decimate(face_limit)
-                        m.vertices = tri.vertices
-                        m.faces = tri.faces
-                        print(f"[MeshDecimate] {m.name}: {face_cnt} → {len(tri.faces)} faces")
+                        m.vertices = tri.vertices.astype(np.float32).tolist()
+                        m.faces = tri.faces.astype(np.int32).tolist()
+                        print(f"[MeshDecimate] {m.name}: {face_cnt} → {len(tri.faces)} faces (trimesh)")
                     else:
-                        print(f"[MeshDecimate] trimesh lacks decimator – converting {m.name} to OBB")
-                        # Replace heavy mesh with its oriented bounding box cuboid
-                        obb = m.get_cuboid()
-                        if world.cuboid is None:
-                            world.cuboid = []
-                        world.cuboid.append(obb)
-                        world.mesh.remove(m)
-                        continue
+                        # ------------------------------------------------------------------
+                        # Fallback 1 ‑ try Open3D quadric decimator
+                        # ------------------------------------------------------------------
+                        _decimated = False
+                        try:
+                            import open3d as o3d  # type: ignore
+
+                            mesh_o = o3d.geometry.TriangleMesh(
+                                o3d.utility.Vector3dVector(verts),
+                                o3d.utility.Vector3iVector(faces),
+                            )
+                            mesh_o.remove_duplicated_vertices()
+                            mesh_o.remove_degenerate_triangles()
+                            mesh_o.remove_duplicated_triangles()
+                            mesh_o.remove_non_manifold_edges()
+                            mesh_o = mesh_o.simplify_quadric_decimation(face_limit)
+                            if len(mesh_o.triangles) > 0:
+                                m.vertices = np.asarray(mesh_o.vertices, dtype=np.float32).tolist()
+                                m.faces = np.asarray(mesh_o.triangles, dtype=np.int32).tolist()
+                                print(
+                                    f"[MeshDecimate-O3D] {m.name}: {face_cnt} → {len(mesh_o.triangles)} faces"
+                                )
+                                _decimated = True
+                        except ImportError:
+                            pass
+                        except Exception as e:
+                            print(f"[MeshDecimate-O3D] Failed for {m.name}: {e}")
+
+                        # ------------------------------------------------------------------
+                        # Fallback 2 ‑ try PyMeshLab decimator
+                        # ------------------------------------------------------------------
+                        if not _decimated:
+                            try:
+                                import pymeshlab  # type: ignore
+
+                                ms = pymeshlab.MeshSet()
+                                ms.add_mesh(
+                                    pymeshlab.Mesh(verts, faces),
+                                    m.name,
+                                )
+                                # Quadratic edge collapse decimation
+                                ms.simplification_quadric_edge_collapse_decimation(
+                                    targetfacenum=face_limit, preservenormal=True, preservetopology=True
+                                )
+                                new_mesh = ms.current_mesh()
+                                if new_mesh.face_number() > 0:
+                                    m.vertices = new_mesh.vertex_matrix().astype(np.float32).tolist()
+                                    m.faces = new_mesh.face_matrix().astype(np.int32).tolist()
+                                    print(
+                                        f"[MeshDecimate-MS] {m.name}: {face_cnt} → {new_mesh.face_number()} faces"
+                                    )
+                                    _decimated = True
+                            except ImportError:
+                                pass
+                            except Exception as e:
+                                print(f"[MeshDecimate-MS] Failed for {m.name}: {e}")
+
+                        # ------------------------------------------------------------------
+                        # Final fallback ‑ replace with OBB if still not decimated
+                        # ------------------------------------------------------------------
+                        if not _decimated:
+                            print(
+                                f"[MeshDecimate] No available decimator – converting {m.name} to OBB"
+                            )
+                            obb = m.get_cuboid()
+                            if world.cuboid is None:
+                                world.cuboid = []
+                            world.cuboid.append(obb)
+                            world.mesh.remove(m)
+                            continue
                 except ImportError:
                     print("[MeshDecimate] trimesh not installed – skipping mesh simplification")
                 except Exception as e:
                     print(f"[MeshDecimate] Failed to decimate {m.name}: {e}")
+
+
+def _validate_mesh_list(mesh_list, name_hint=""):
+    """Sanity-check every CuRobo Mesh in *mesh_list*.
+
+    Raises:
+        ValueError if any mesh contains
+            • wrong vertex/face shape
+            • face index outside vertex range
+            • NaN / Inf coordinates
+            • degenerate triangles
+    """
+
+    import numpy as _np
+
+    for mesh in mesh_list or []:
+        v = _np.asarray(mesh.vertices)
+        f = _np.asarray(mesh.faces)
+
+        if v is None or f is None:
+            raise ValueError(f"[{name_hint}] {mesh.name} – missing vertices or faces")
+        if v.ndim != 2 or v.shape[1] != 3:
+            raise ValueError(f"[{name_hint}] {mesh.name} – vertices have shape {v.shape}")
+        if f.ndim != 2 or f.shape[1] != 3:
+            raise ValueError(f"[{name_hint}] {mesh.name} – faces have shape {f.shape}")
+        if f.max() >= len(v):
+            raise ValueError(
+                f"[{name_hint}] {mesh.name} – face index out of range (max {f.max()} ≥ {len(v)})"
+            )
+        if _np.any(_np.isnan(v)) or _np.any(_np.isinf(v)):
+            raise ValueError(f"[{name_hint}] {mesh.name} – vertices contain NaN/Inf")
+        # Degenerate triangles: any two indices equal
+        bad = _np.where((f[:, 0] == f[:, 1]) | (f[:, 0] == f[:, 2]) | (f[:, 1] == f[:, 2]))[0]
+        if bad.size:
+            raise ValueError(f"[{name_hint}] {mesh.name} – {bad.size} degenerate triangles")
 
 
 if __name__ == "__main__":
