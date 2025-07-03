@@ -65,7 +65,7 @@ parser.add_argument(
 parser.add_argument(
     "--max_mesh_faces",
     type=int,
-    default=300, # 0 means no decimation, 50 considered small
+    default=2000, # 0 means no decimation, 50 considered small
     help="If > 0, simplify mesh obstacles to at most this many faces using trimesh QEM decimation.",
 )
 
@@ -81,15 +81,24 @@ args = parser.parse_args()
 ###########################################################
 
 # Third Party
-from omni.isaac.kit import SimulationApp
+from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics, make_world
+simulation_app = init_app()
+my_world = make_world(ground_plane=True, set_default_prim=True, to_Xform=True)
 
-simulation_app = SimulationApp(
-    {
-        "headless": args.headless_mode is not None,
-        "width": "1920",
-        "height": "1080",
-    }
-)
+
+
+
+
+
+# from omni.isaac.kit import SimulationApp
+
+# simulation_app = SimulationApp(
+#     {
+#         "headless": args.headless_mode is not None,
+#         "width": "1920",
+#         "height": "1080",
+#     }
+# )
 
 # Third Party
 # Enable the layers and stage windows in the UI
@@ -128,7 +137,7 @@ from typing import Any
 
 # Third Party
 from projects_root.utils.helper import add_extensions, add_robot_to_scene
-from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics
+from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics, make_world
 
 # CuRobo
 # from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
@@ -191,7 +200,7 @@ def draw_points(rollouts: torch.Tensor):
 obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
 
 
-def render_geom_approx_to_spheres(collision_world):
+def render_geom_approx_to_spheres(collision_world,n_spheres=300):
     """Visualize an approximate geometry (collection of spheres) for each obstacle.
 
     Notes:
@@ -215,7 +224,7 @@ def render_geom_approx_to_spheres(collision_world):
     all_sph = WorldModelWrapper.make_geom_approx_to_spheres(
         collision_world,
         robot_base_frame.tolist(),
-        n_spheres=50,
+        n_spheres=n_spheres,
         fit_type=SphereFitType.SAMPLE_SURFACE,
         radius_scale=0.05,  # 5 % of smallest OBB side for visibility
     )
@@ -298,30 +307,32 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             prim path of the root prim in which the obstacles are. All obstacles should be put under %obs_root_prim_path%/obstacle name Drag obstacles under this prim path.
         world_prim_path: prim path of the world prim. ()
     """
-    
+    global sim_app, my_world
     target_prim_path = world_prim_path + target_prim_subpath
     # Get robot base frame from command line arguments
     # robot_base_frame = np.array(args.robot_base_frame)
     print(f"Robot base frame set to: {robot_base_frame}")
     
     # assuming obstacles are in objects_path:
-    my_world = World(stage_units_in_meters=1.0)
+    # my_world = World(stage_units_in_meters=1.0)
     activate_gpu_dynamics(my_world)
     stage = my_world.stage
 
-    xform = stage.DefinePrim(world_prim_path, "Xform")
-    stage.SetDefaultPrim(xform)
+    #xform = stage.DefinePrim(world_prim_path, "Xform")
+    # stage.SetDefaultPrim(xform)
+    
     stage.DefinePrim("/curobo", "Xform")
     # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
-    my_world.scene.add_default_ground_plane()
-    load_prims_from_usd(
-        usd_path="usd_collection/envs/conveyor_track_round.usd",
-        # prim_paths=["/World/rotating_conveyor_and_box"],
-        dest_root="/World/rotating_conveyor_and_box",
-        stage=stage
+    # my_world.scene.add_default_ground_plane()
+    created_paths = load_prims_from_usd(
+        "usd_collection/envs/World-_360_conveyor.usd",
+        prim_paths=["/World/_360_conveyor"],
+        dest_root="/World",
+        stage=my_world.stage,
+
     )
-    
+
     # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
     # Make a target to follow
@@ -721,7 +732,7 @@ def simplify_mesh_obstacles(world: WorldConfig, face_limit: int):
 
 
 if __name__ == "__main__":
-    robot_base_frame = np.array([1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+    robot_base_frame = np.array([-0.75, -0.33, 0.0, 1.0, 0.0, 0.0, 0.0])
     world_prim_path = "/World"
     main(robot_base_frame, target_prim_subpath="/target",obs_root_prim_path=world_prim_path, world_prim_path=world_prim_path)
     simulation_app.close() 
