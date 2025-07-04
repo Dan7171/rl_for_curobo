@@ -350,6 +350,28 @@ RUN $omni_python -m pip install --no-cache-dir matplotlib
 # and accept the long compile time.
 # RUN $omni_python -m pip install --no-cache-dir rclpy
 
+# -----------------------------------------------------------------------------
+# Create non-root user for Isaac-Sim
+# -----------------------------------------------------------------------------
+ARG USERNAME=isaac
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+
+# Create the user
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
+    && apt-get update \
+    && apt-get install -y sudo \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Give the user access to Isaac-Sim and workspace directories
+RUN chown -R $USERNAME:$USERNAME /isaac-sim /workspaces /pkgs
+
+# Set the default user
+USER $USERNAME
+WORKDIR /home/$USERNAME
+
 # # -----------------------------------------------------------------------------
 # # Entry point
 # # -----------------------------------------------------------------------------
