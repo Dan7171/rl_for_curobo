@@ -169,19 +169,22 @@ def get_simulation_app(headless: bool = True):  # -> SimulationApp when availabl
     sim_app = init_app(headless=headless)
     return sim_app
 
-
 if __name__ == "__main__":
 
     # Example: load only the conveyor, skip the ground plane for demonstration
     sim_app = init_app()
     world = make_world(set_default_prim=True, to_Xform=False)
+
     created_paths = load_prims_from_usd(
-        "usd_collection/envs/World-_360_conveyor_handcrafter_obs.usd",
+        "usd_collection/envs/_360_conveyor_handcrafter_obs.usd",
         prim_paths=["/World/_360_conveyor"],
         dest_root="/World",
         stage=world.stage,
-
+        
     )
+    
+
+    
     #print('USD loaded to stage. Loaded prims to next paths:\n', created_paths)
 
     print("Isaac-Sim running – close the window or press Ctrl+C to exit.")

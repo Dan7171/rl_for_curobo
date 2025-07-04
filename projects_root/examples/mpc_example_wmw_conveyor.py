@@ -65,7 +65,7 @@ parser.add_argument(
 parser.add_argument(
     "--max_mesh_faces",
     type=int,
-    default=2000, # 0 means no decimation, 50 considered small
+    default=500, # 0 means no decimation, 50 considered small
     help="If > 0, simplify mesh obstacles to at most this many faces using trimesh QEM decimation.",
 )
 
@@ -200,7 +200,7 @@ def draw_points(rollouts: torch.Tensor):
 obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
 
 
-def render_geom_approx_to_spheres(collision_world,n_spheres=200):
+def render_geom_approx_to_spheres(collision_world,n_spheres=50):
     """Visualize an approximate geometry (collection of spheres) for each obstacle.
 
     Notes:
@@ -225,8 +225,8 @@ def render_geom_approx_to_spheres(collision_world,n_spheres=200):
         collision_world,
         robot_base_frame.tolist(),
         n_spheres=n_spheres,
-        fit_type=Mesh, # SphereFitType.VOXEL_SURFACE,#SphereFitType.SAMPLE_SURFACE,
-        radius_scale=0.02,  # 5 % of smallest OBB side for visibility
+        fit_type=SphereFitType.SAMPLE_SURFACE, # SphereFitType.VOXEL_SURFACE,#,
+        radius_scale=0.1,  # 5 % of smallest OBB side for visibility
     )
 
     if not all_sph:
@@ -408,7 +408,9 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 f"[load_prims_from_usd] Prim '{_pp}' is empty or invalid – "
                 "verify that the source USD actually contains this path."
             )
+    print(f"Created paths: {created_paths}")
     paths_to_ignore_in_curobo_world_model = get_paths_to_ignore_from(created_paths)
+    print(f"Paths to ignore in curobo world model: {paths_to_ignore_in_curobo_world_model}")
     # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
     # Make a target to follow
