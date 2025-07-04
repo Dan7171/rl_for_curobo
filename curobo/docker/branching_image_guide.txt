@@ -1,0 +1,118 @@
+Here's how to create an updated version of your Docker image while preserving the original:
+
+### Step-by-Step Process:
+
+1. **Run the existing image interactively** (with your preferred mode):
+```bash
+# For root mode (temporary):
+docker run -it --gpus all --name curobo_updater curobo_isaac45:latest bash
+
+# Or non-root mode:
+docker run -it --gpus all --user isaac --name curobo_updater curobo_isaac45:latest bash
+```
+
+2. **Make your changes** inside the container:
+```bash
+# Example: Install a package
+apt-get update && apt-get install -y your-package
+# Or via pip:
+/isaac-sim/python.sh -m pip install new-package
+```
+
+3. **Commit changes to new image** (from another terminal on host):
+```bash
+docker commit curobo_updater yourusername/curobo_isaac45:updated-v1
+```
+# syntax: docker commit [OPTIONS] CONTAINER REPOSITORY[:TAG]
+
+4. **Verify the new image**:
+```bash
+docker images | grep curobo_isaac45
+```
+
+### Best Practices:
+- **Tag intelligently**: Use version tags like `:updated-v1` rather than `:latest`
+- **Layer carefully**: Group related commands in single RUN statements to minimize layers
+- **Document changes**:
+```bash
+docker history yourusername/curobo_isaac45:updated-v1
+```
+
+### Alternative (Recommended) Method Using Dockerfile:
+1. Create a new Dockerfile:
+```dockerfile
+FROM curobo_isaac45:latest
+
+USER root  # If needing root for installs
+RUN apt-get update && apt-get install -y your-package
+USER isaac # Switch back
+
+# Verify non-root can still run Isaac Sim
+CMD ["/isaac-sim/isaac-sim.sh"]
+```
+
+2. Build the new version:
+```bash
+docker build -t yourusername/curobo_isaac45:updated-v1 -f NewDockerfile .
+```
+
+### Key Advantages:
+- Original image remains untouched (`curobo_isaac45:latest` stays intact)
+- New image (`updated-v1`) contains all your additions
+- Full audit trail of changes
+- Can easily roll back if needed
+
+Would you like me to:
+1. Generate a complete Dockerfile for your specific updates?
+2. Show how to push this new version to Docker Hub?
+3. Or demonstrate the interactive commit process live?
+
+
+
+
+
+
+######### commit with comment! #############
+Yes! You can add a commit message (like Git) using the `-m` flag. Here's the full syntax with a comment:
+
+### Basic Version:
+```bash
+docker commit -m "Your descriptive message here" curobo_updater yourusername/curobo_isaac45:updated-v1
+```
+
+### Enhanced Example:
+```bash
+docker commit \
+  -m "Added ROS2 navigation stack and updated VPI to v3.1.5" \
+  -a "Your Name <your.email@example.com>" \
+  curobo_updater \
+  yourusername/curobo_isaac45:updated-v1
+```
+
+### Key Flags:
+- `-m` : Commit message (supports multi-line with `\n`)
+- `-a` : Author information (optional but recommended)
+
+### How to Verify:
+```bash
+docker inspect yourusername/curobo_isaac45:updated-v1 | grep -A 3 Comment
+```
+
+### Pro Tip:
+For complex changes, include:
+1. What changed (packages installed/configs modified)
+2. Why (e.g., "Fixes MDL material loading issue")
+3. Test status (e.g., "Verified Isaac Sim launches")
+
+Example:
+```bash
+docker commit \
+  -m $'Added nvidia-mdl 2025.1.0\n- Fixes WhiteShadowCatcher missing module\n- Tested with USD scene /Isaac/Environments/Simple_Warehouse' \
+  curobo_updater \
+  yourusername/curobo_isaac45:mdl-fix
+```
+
+Would you like me to:
+1. Show how to add these messages retroactively to existing images?
+2. Demonstrate multi-line commit messages?
+3. Or see how this appears in Docker Hub's UI?
