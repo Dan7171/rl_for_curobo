@@ -1,0 +1,6 @@
+Image name:tag,image tag id,tag base (image inherited from),docker hub commit,git commit,how to run,changes/description,url
+"de257/curobo_isaac45:latest
+",sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6,No base: this is the first original image,,,,"First image I built.
+Built based on the original curobo’s docker build scripts
+Contents:
+Isaac-sim4.5",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/latest/sha256-5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6

@@ -611,7 +611,6 @@ generated_multi_arm_configs/ur5e_3_arm.yml
 projects_root/K_ARM_EXTENSION_PLAN.md
 projects_root/__init__.py
 projects_root/autonomous_arm.py
-projects_root/start_apptainer_isaac_sim.sh
 projects_root/test_transforms.py
 projects_root/centralized_mpc_k_arms_planning/readme_tutorial.md
 projects_root/cluster/display_connection.sh
@@ -688,6 +687,8 @@ projects_root/utils/colors.py
 projects_root/utils/compose_code_base_to_file.py
 projects_root/utils/decorators.py
 projects_root/utils/draw.py
+projects_root/utils/dynamic_scene_manager.py
+projects_root/utils/handy_utils.py
 projects_root/utils/helper.py
 projects_root/utils/issacsim.py
 projects_root/utils/joint_state.py
@@ -696,6 +697,9 @@ projects_root/utils/plot_spheres.py
 projects_root/utils/quaternion.py
 projects_root/utils/size.py
 projects_root/utils/transforms.py
+projects_root/utils/usd_pose_helper.py
+projects_root/utils/usd_utils.py
+projects_root/utils/world_model_wrapper.py
 projects_root/utils/hpc_utils/README_MAIN.md
 projects_root/utils/hpc_utils/README_MPC_CLIENT_SERVER.md
 projects_root/utils/hpc_utils/__init__.py

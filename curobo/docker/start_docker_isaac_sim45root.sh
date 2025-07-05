@@ -25,7 +25,7 @@ echo "--------------------------------"
 # Initialize default values
 CONTAINER_REGISTRY='de257' # change this to your own registry after pulling the image from the registry
 IMAGE_NAME='curobo_isaac45' 
-IMAGE_TAG='latest'
+IMAGE_TAG='v1_rl_for_curobo_module_installed' # 'latest'
 CONTAINER_NAME='curobo_isaac45_root_container'
 DC_ENABLED='true'
 DC_DEV_ID='002'
@@ -112,7 +112,7 @@ echo " cd $REPO_PATH_CONTAINER"
 echo "- change cd to curobo original repo:"
 echo " cd /pkgs/curobo"
 echo "- MPC example:"
-echo "In mounted repo, run: omni_python $REPO_PATH_CONTAINER/curobo/examples/isaac_sim/mpc_example.py"
+echo "In mounted repo, run: cd $REPO_PATH_CONTAINER && omni_python $REPO_PATH_CONTAINER/projects/rl_for_curobo/examples/isaac_sim/mpc_example.py" # must make sure first the package rl_for_curobo is installed, for that run image tag v1 or above 
 echo "In original repo, run: omni_python /pkgs/curobo/examples/isaac_sim/mpc_example.py"
 echo ""
 echo "*Toolkit:*"
