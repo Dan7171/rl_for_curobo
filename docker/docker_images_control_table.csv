@@ -51,7 +51,7 @@ Isaac sim’s python interpreted (omni_python): 3.10
 
 Acess to our repo (rl_for_curobo): X (Not yet, rl_for_curobo module not yet installed. This happened only in  sha256:dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb (next version)
 
-",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/latest/sha256-5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6
+",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256:bc99ed7e4ea3af807c8743d25ce7cba139b3c9c240b45ceec77b5511a81ea26a?tab=layers
 5.7.25,"de257/curobo_isaac45:v1_rl_for_curobo_module_installed
 ",sha256:dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb,sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6,https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256-dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb,"ID: f062fde0bf5cb7c72686b03a2e25596adb14fca8
 URL:https://github.com/Dan7171/rl_for_curobo/commit/f062fde0bf5cb7c72686b03a2e25596adb14fca8 ",curobo/docker/start_docker_isaac_sim45root.sh ,"1. I ran the base image (using curobo/docker/start_docker_isaac_sim45root.sh (in previous git commit version to this one))
@@ -59,3 +59,5 @@ URL:https://github.com/Dan7171/rl_for_curobo/commit/f062fde0bf5cb7c72686b03a2e25
 3. I ran “docker commit”  (as decribed in the toolkit at curobo/docker/start_docker_isaac_sim45root.sh) and saved it under the new tag (v1…)
 4. I modified curobo/docker/start_docker_isaac_sim45root.sh to defaultly use the new tag 
 5. I pushed both git and docker commits to dockerhub and github",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256-dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb
+5.7.25,"de257/curobo_isaac45:v1_rl_for_curobo_module_installed
+",sha256:bc99ed7e4ea3af807c8743d25ce7cba139b3c9c240b45ceec77b5511a81ea26a,,,,curobo/docker/start_docker_isaac_sim45rootv1.sh  # but it wasnt really made by building! It was made by making the changes by hand and then run docker commit,"Same description of the previouse line (v1, meaning the change was to actually install rl_for_curobo module (and also curobo modules from rl_for_curobo dir and not as in the base installation)) but I wasnt doing in correctly in the first trial, so now its fixed",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256:bc99ed7e4ea3af807c8743d25ce7cba139b3c9c240b45ceec77b5511a81ea26a?tab=layers

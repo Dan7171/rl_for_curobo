@@ -388,8 +388,8 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         
         
     created_paths = load_prims_from_usd(
-        "usd_collection/envs/_360_conveyor_handcrafter_obs.usd",
-        prim_paths=["/World/_360_conveyor"],
+        "usd_collection/envs/cv_fixed.usd",
+        prim_paths=["/cv"],
         dest_root="/World",
         stage=my_world.stage,
         
@@ -532,14 +532,16 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     add_extensions(simulation_app, args.headless_mode)
     spheres = None  # For robot collision sphere visualization
     while simulation_app.is_running():
-        try:
-            os.removedirs("tmp/debug_world_models")
-        except:
-            pass
-        os.makedirs("tmp/debug_world_models", exist_ok=True)
-        if step % 500 == 0 and step > 0:
-            print(f"Saving world model at step {step}")
-            save_curobo_world(f"tmp/debug_world_models/world_model_{step}.obj",cu_world_wrapper.get_collision_world())
+        
+        # uncomment to save world model
+        # try:
+        #     os.removedirs("tmp/debug_world_models")
+        # except:
+        #     pass
+        # os.makedirs("tmp/debug_world_models", exist_ok=True)
+        # if step % 500 == 0 and step > 0:
+        #     print(f"Saving world model at step {step}")
+        #     save_curobo_world(f"tmp/debug_world_models/world_model_{step}.obj",cu_world_wrapper.get_collision_world())
                 
         if not init_world:
             for _ in range(10):

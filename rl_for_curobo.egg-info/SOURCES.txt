@@ -718,5 +718,6 @@ start_here/austin_guide.txt
 start_here/installation.txt
 start_here/manual_stats_austin.py
 start_here/migration_from_4_to_4.5.txt_core_changes
+tests/test_world_model_wrapper.py
 third_party/meshlab/MeshLab2023.12-linux.AppImage
 third_party/meshlab/debug_mesh.obj

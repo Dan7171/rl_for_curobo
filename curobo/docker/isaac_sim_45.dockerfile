@@ -1,3 +1,19 @@
+#################
+# This docker file builds:
+# Ubuntu 22.04
+# CUDA 11.8
+# Isaac Sim 4.5.0 (omni_python is 3.10)
+# Curobo as in original (as in original curobo docker file of isaac sim =< 4.0.0)
+# Isaac_ros_ws 3.2.0 
+# Ros 2 humble (python 3.10 as same as omni_python)
+
+# Build result (image created): should be identical to the image:
+# de257/curobo_isaac45
+# Tag version: sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6
+# can be pulled from:https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/latest/sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6
+#################
+
+
 
 #############################################
 #################################################
@@ -376,3 +392,4 @@ WORKDIR /home/$USERNAME
 # # Entry point
 # # -----------------------------------------------------------------------------
 # ENTRYPOINT ["bash"] 
+
