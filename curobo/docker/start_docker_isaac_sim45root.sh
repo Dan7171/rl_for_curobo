@@ -135,7 +135,8 @@ echo "--------------------------------"
 docker run \
   $DC_OPTIONS \
   --name $CONTAINER_NAME \
-  --entrypoint bash -it \
+  -it \
+  --entrypoint bash \
   --gpus all \
   -e "ACCEPT_EULA=Y" \
   --rm \
@@ -155,5 +156,6 @@ docker run \
   -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
   --volume /dev:/dev \
-  ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+  ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+  -c "source /opt/ros/humble/setup.sh && bash"
 

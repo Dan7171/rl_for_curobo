@@ -51,11 +51,11 @@ Isaac sim’s python interpreted (omni_python): 3.10
 
 Acess to our repo (rl_for_curobo): X (Not yet, rl_for_curobo module not yet installed. This happened only in  sha256:dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb (next version)
 
-",X
+",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/latest/sha256-5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6
 5.7.25,"de257/curobo_isaac45:v1_rl_for_curobo_module_installed
 ",sha256:dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb,sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6,https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256-dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb,"ID: f062fde0bf5cb7c72686b03a2e25596adb14fca8
 URL:https://github.com/Dan7171/rl_for_curobo/commit/f062fde0bf5cb7c72686b03a2e25596adb14fca8 ",curobo/docker/start_docker_isaac_sim45root.sh ,"1. I ran the base image (using curobo/docker/start_docker_isaac_sim45root.sh (in previous git commit version to this one))
 2. I installed rl_for_curobo as module (on omni_python – isaac sim python which already installed curobo in the base image)
 3. I ran “docker commit”  (as decribed in the toolkit at curobo/docker/start_docker_isaac_sim45root.sh) and saved it under the new tag (v1…)
 4. I modified curobo/docker/start_docker_isaac_sim45root.sh to defaultly use the new tag 
-5. I pushed both git and docker commits to dockerhub and github",
+5. I pushed both git and docker commits to dockerhub and github",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256-dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb
