@@ -10,6 +10,9 @@
 # its affiliates is strictly prohibited.
 #
 
+import sys, os
+# dynamic imports in container- temp solution instead of 'omni_python - pip install .' (in rl_for_curobo dir)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
     # Third Party
@@ -289,12 +292,15 @@ def render_geom_approx_to_spheres(collision_world,n_spheres=50):
 
     # Update current prims
     for idx, (p, r) in enumerate(all_sph):
-        obs_spheres[idx].set_world_pose(position=np.ravel(p))
+        # Explicitly update both position and orientation (identity quaternion) – some
+        # Isaac Sim versions ignore translation-only updates when orientation is
+        # omitted.
+        obs_spheres[idx].set_world_pose(position=np.ravel(p), orientation=np.array([1.0, 0.0, 0.0, 0.0]))
         obs_spheres[idx].set_radius(r)
 
     # Hide surplus prims, if any
     for idx in range(len(all_sph), len(obs_spheres)):
-        obs_spheres[idx].set_world_pose(position=np.array([0, 0, -10]))
+        obs_spheres[idx].set_world_pose(position=np.array([0, 0, -10]), orientation=np.array([1.0, 0.0, 0.0, 0.0]))
 
 
 def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_path):
@@ -388,8 +394,8 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         
         
     created_paths = load_prims_from_usd(
-        "usd_collection/envs/cv_fixed.usd",
-        prim_paths=["/cb"],
+        "usd_collection/envs/cv_simple.usd",
+        prim_paths=["/World/ConveyorTrack_01"], # ConveyorTrack, Cube
         dest_root="/World",
         stage=my_world.stage,
         
@@ -409,7 +415,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 "verify that the source USD actually contains this path."
             )
     print(f"Created paths: {created_paths}")
-    paths_to_ignore_in_curobo_world_model = get_paths_to_ignore_from(created_paths)
+    paths_to_ignore_in_curobo_world_model = []# get_paths_to_ignore_from(created_paths)
     print(f"Paths to ignore in curobo world model: {paths_to_ignore_in_curobo_world_model}")
     # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
@@ -595,29 +601,29 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             else:
                 _init_cu_world = _raw_world.get_collision_check_world()
 
-            # Validate meshes before pushing to CUDA – helps track CUDA 700 errors
-            try:
-                _validate_mesh_list(_init_cu_world.mesh, "Pre-CUDA")
-            except ValueError as e:
-                import traceback, sys
+            # # Validate meshes before pushing to CUDA – helps track CUDA 700 errors
+            # try:
+            #     _validate_mesh_list(_init_cu_world.mesh, "Pre-CUDA")
+            # except ValueError as e:
+            #     import traceback, sys
 
-                print("\n[MeshValidationError]", e)
-                traceback.print_exc()
-                sys.exit(1)
+            #     print("\n[MeshValidationError]", e)
+            #     traceback.print_exc()
+            #     sys.exit(1)
 
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
                 cu_world_R=_init_cu_world,
             )
             
-            # Extra validation after CuRobo converts meshes (they may be re-ordered)
-            try:
-                _validate_mesh_list(cu_col_world_R.mesh, "Post-CuRobo")
-            except ValueError as e:
-                import traceback, sys
+            # # Extra validation after CuRobo converts meshes (they may be re-ordered)
+            # try:
+            #     _validate_mesh_list(cu_col_world_R.mesh, "Post-CuRobo")
+            # except ValueError as e:
+            #     import traceback, sys
 
-                print("\n[MeshValidationError]", e)
-                traceback.print_exc()
-                sys.exit(1)
+            #     print("\n[MeshValidationError]", e)
+            #     traceback.print_exc()
+            #     sys.exit(1)
             
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)

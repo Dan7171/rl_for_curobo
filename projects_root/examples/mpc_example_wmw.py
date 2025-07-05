@@ -447,10 +447,11 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     add_extensions(simulation_app, args.headless_mode)
     spheres = None  # For robot collision sphere visualization
     while simulation_app.is_running():
-        try:
-            os.removedirs("tmp/debug_world_models")
-        except:
-            pass
+        # uncomment to save world model
+        # try:
+        #     os.removedirs("tmp/debug_world_models")
+        # except:
+        #     pass
         # os.makedirs("tmp/debug_world_models", exist_ok=True)
         # if step % 500 == 0 and step > 0:
         #     print(f"Saving world model at step {step}")
