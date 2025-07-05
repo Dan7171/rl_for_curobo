@@ -1,6 +1,61 @@
-Image name:tag,image tag id,tag base (image inherited from),docker hub commit,git commit,how to run,changes/description,url
-"de257/curobo_isaac45:latest
-",sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6,No base: this is the first original image,,,,"First image I built.
-Built based on the original curobo’s docker build scripts
-Contents:
-Isaac-sim4.5",https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/latest/sha256-5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6
+Image creation date,Image name:tag,image tag id,tag base (image inherited from),docker hub commit,git commit (when created),how to run,changes/description,url docker
+4.7.25,"de257/curobo_isaac45:latest
+",sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6,No base: this is the first original image,de257/curobo_isaac45:latest,"ID: e107e51abc682a687fa0f954a75952a8c8547c8c
+URL: https://github.com/Dan7171/rl_for_curobo/commit/e107e51abc682a687fa0f954a75952a8c8547c8c","1. Go to git commit: 0151d5a8bedd070a54ce2291024e626322a4a0dd (will work even a in a few commits before that, but script is now updated so I can safely tell it’ll run on this commit and how to run it). URL: https://github.com/Dan7171/rl_for_curobo/commit/f062fde0bf5cb7c72686b03a2e25596adb14fca8
+2. In host: run curobo/docker/start_docker_isaac_sim45root.sh in terminal. BUT: Make sure you change the tag to ‘latest’ (row 28. At this point it gets only names, in future I’ll add support in tag ids, sorry). 
+","This is the first image I built.
+
+# IMAGE INSPIRED BY:
+That image is inspired and based by curobo’s docker scripts.
+Built based on the original curobo’s docker image building script:
+Build steps and logic:
+- First, I read curobo original dockerfile curobo/docker/isaac_sim.dockerfile. 
+Using curobo/docker/build_docker.sh one can built it easily.
+
+*Contents (of original curobo’s isaac sim image)*:
+
+Isaac sim: V (support a few version, all =< 4.0.0)
+
+Ros2: X
+
+Isaac Ros workspaces: X
+
+Curobo: V (installed on omni_python)
+
+Access to our repo (rl for curobo): X
+
+Curobo with depth camera and nvblox support: V (installed on omni_python-isaac sim python interpreter)
+
+OS: probably ubuntu 20.04 (based on curobo website and the different process of installing vulkan that they used (which is not needed at 22.04, see the (new)image process below)
+
+Python interpreter to run curobo examples with: Isaac sim’s python interpreter (omni_python): ? (probably3.10 or below)
+
+
+
+# NEW IMAGE BUILDING
+Then inspired by curobo’s image exaplained above,  I built the image using: a custom new script curobo/docker/isaac_sim_45.dockerfile. If you want to re-build just run it as is (no build_docker.sh  script is needed as in curobo’s image…)
+
+
+*Contents (of new (this) image)*:
+
+Isaac-sim:V 4.5.0 
+
+Ros2: V (Used humble, supported on ubuntu 22.04, matching isaac sim 4.5.0 according to isaacsim docs, py3.10 (in internal ros interpreter, but its the same version of )I picked hubmle for two reasons: its the reccomended for isaac sim 4.5.0 and it has the same python version (3.10) as  isaac sim 4.5 has)
+
+Curobo: V (installed on omni_python (just as in the original curobo image)
+
+Isaac Ros workspaces: V (TODO: Need to describe here when I get a chance to play with them)
+
+OS: Ubuntu22.04 (changed from 20.04 of curobo original build, explain some changes in the docker build script (read its comments))
+Isaac sim’s python interpreted (omni_python): 3.10
+
+Acess to our repo (rl_for_curobo): X (Not yet, rl_for_curobo module not yet installed. This happened only in  sha256:dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb (next version)
+
+",X
+5.7.25,"de257/curobo_isaac45:v1_rl_for_curobo_module_installed
+",sha256:dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb,sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6,https://hub.docker.com/repository/docker/de257/curobo_isaac45/tags/v1_rl_for_curobo_module_installed/sha256-dfae759844393fc6ed09eb4292bc27afa750b234d524e5f81e19359b1a80cecb,"ID: f062fde0bf5cb7c72686b03a2e25596adb14fca8
+URL:https://github.com/Dan7171/rl_for_curobo/commit/f062fde0bf5cb7c72686b03a2e25596adb14fca8 ",curobo/docker/start_docker_isaac_sim45root.sh ,"1. I ran the base image (using curobo/docker/start_docker_isaac_sim45root.sh (in previous git commit version to this one))
+2. I installed rl_for_curobo as module (on omni_python – isaac sim python which already installed curobo in the base image)
+3. I ran “docker commit”  (as decribed in the toolkit at curobo/docker/start_docker_isaac_sim45root.sh) and saved it under the new tag (v1…)
+4. I modified curobo/docker/start_docker_isaac_sim45root.sh to defaultly use the new tag 
+5. I pushed both git and docker commits to dockerhub and github",
