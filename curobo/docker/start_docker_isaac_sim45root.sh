@@ -30,6 +30,7 @@ CONTAINER_NAME='curobo_isaac45_root_container'
 DC_ENABLED='true'
 DC_DEV_ID='002'
 REPO_PATH_HOST=$(realpath ~/rl_for_curobo) # must be absolute path
+CMD_IN_CONTAINER='' # No command by default
 
 # Help method
 function show_help() {
@@ -39,7 +40,8 @@ function show_help() {
     echo " --container-name: Name of the Docker container (default: curobo_isaac45_root_container)"
     echo " --dc-enabled: Enable depth camera (default: true)"
     echo " --dec-dev-id: Device ID for depth camera (default: 002). NOTE:# device id for depth camera. You need to run 'lsusb' in linux host to find the device id and pass it"
-    echo " --repo-path-host: project directory location on the host machine, e.g. the directory you cloned this repository into (default: ~/rl_for_curobo)"
+    echo " --repo-path-host: project directory location on the host machine, e.g. the directory you cloned this repository into (default: "")"
+    echo " --cmd (currently not working): command to run in the container after entering the bash terminal in container (default: No command)"
 }
 
 
@@ -70,9 +72,13 @@ while [[ "$#" -gt 0 ]]; do
           REPO_PATH_HOST="$2"
           shift 2
           ;;
+        --cmd)
+          CMD_IN_CONTAINER="$2"
+          shift 2
+          ;;
         *)
-            shift
-            ;;  
+          shift
+          ;;  
     esac
 done
 
@@ -81,6 +87,13 @@ done
 #REPO_PATH_CONTAINER="/root/$(basename "$REPO_PATH_HOST")" # /root/{repo_name}
 REPO_NAME=$(basename "$REPO_PATH_HOST")
 REPO_PATH_CONTAINER="/root/$REPO_NAME"
+
+if [[ -n "$CMD_IN_CONTAINER" ]]; then
+    # DOCKER_CMD=$CMD_IN_CONTAINER
+    DOCKER_CMD="bash -c ${CMD_IN_CONTAINER}"
+else
+    DOCKER_CMD=bash
+fi
 
 # Check if depth camera is enabled
 if [[ "$DC_ENABLED" == "true" ]]; then
@@ -129,9 +142,6 @@ echo "--------------------------------"
 
 
 
-
-
-
 docker run \
   $DC_OPTIONS \
   --name $CONTAINER_NAME \
@@ -157,5 +167,4 @@ docker run \
   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
   --volume /dev:/dev \
   ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
-  -c "source /opt/ros/humble/setup.sh && bash"
-
+  -c "source /opt/ros/humble/setup.sh && $DOCKER_CMD"
