@@ -224,9 +224,9 @@ def render_geom_approx_to_spheres(collision_world,n_spheres=50):
     all_sph = WorldModelWrapper.make_geom_approx_to_spheres(
         collision_world,
         robot_base_frame.tolist(),
-        n_spheres=n_spheres,
-        fit_type=SphereFitType.SAMPLE_SURFACE, # SphereFitType.VOXEL_SURFACE,#,
-        radius_scale=0.1,  # 5 % of smallest OBB side for visibility
+        n_spheres=50,
+        fit_type=SphereFitType.SAMPLE_SURFACE,
+        radius_scale=0.05,  # 5 % of smallest OBB side for visibility
     )
 
     if not all_sph:
@@ -389,7 +389,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         
     created_paths = load_prims_from_usd(
         "usd_collection/envs/cv_fixed.usd",
-        prim_paths=["/cv"],
+        prim_paths=["/cb"],
         dest_root="/World",
         stage=my_world.stage,
         
@@ -416,7 +416,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     # Make a target to follow
     target = cuboid.VisualCuboid(
         target_prim_path,
-        position=np.array([1.5, 1, 0.5]),
+        position=np.array([0.75, 0, 0.5]),
         orientation=np.array([0, 1, 0, 0]),
         color=np.array([1.0, 0, 0]),
         size=0.05,
@@ -460,7 +460,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     cu_world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
-        verbosity=2
+        verbosity=4
     )
 
     init_curobo = False
@@ -587,7 +587,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             )
 
             # 2) Optional mesh decimation
-            simplify_mesh_obstacles(_raw_world, args.max_mesh_faces)
+            # simplify_mesh_obstacles(_raw_world, args.max_mesh_faces)
 
             # 3) Optionally simplify to cuboids for speed
             if args.use_obb_approx:
@@ -654,13 +654,14 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 "/curobo",
                 *paths_to_ignore_in_curobo_world_model,
             ]
-
+            # print(f"ignore_list: {ignore_list}")
             pose_dict = get_stage_poses(
                 usd_helper=usd_help,
                 only_paths=[obs_root_prim_path],
                 reference_prim_path=world_prim_path,
                 ignore_substring=ignore_list,
             )
+            # print(f"pose_dict: {pose_dict}")
             cu_world_wrapper.update_from_pose_dict(pose_dict)
 
             
@@ -680,7 +681,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 )
 
                 # Optional decimation for newly added meshes
-                simplify_mesh_obstacles(_new_raw, args.max_mesh_faces)
+                # simplify_mesh_obstacles(_new_raw, args.max_mesh_faces)
 
                 if args.use_obb_approx:
                     new_world_cfg = WorldConfig.create_obb_world(_new_raw)

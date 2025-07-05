@@ -24,6 +24,7 @@ from typing import List, Optional, Tuple, Union, Any, Dict
 # Third Party
 import numpy as np
 import torch
+import time
 # CuRobo
 from curobo.geom.types import WorldConfig
 from curobo.types.base import TensorDeviceType
@@ -149,8 +150,35 @@ class WorldModelWrapper:
         Args:
             collision_checker: The collision checker instance (e.g., WorldMeshCollision)
         """
+        print("setting collision checker!!!!!!!!")
+        time.sleep(10)
         self.collision_checker = collision_checker
-        log_info("Collision checker set in WorldModelWrapper")
+
+        # ----------------------------------------------------------
+        # Critical: ensure both *references* point to the *same* object
+        # ----------------------------------------------------------
+        # Most CuRobo collision-checker implementations keep their own
+        # `world_model` copy that **is** modified by
+        # `update_obstacle_pose(..., update_cpu_reference=True)`.
+        # The visualiser relies on `get_collision_world()` therefore we
+        # re-bind our `self.collision_world` to that very instance so every
+        # change becomes visible without any extra copying or syncing.
+        try:
+            print("collision_checker attributes:")
+            print(dir(self.collision_checker))
+            print("")
+            print("collision_checker id:")
+            print(id(self.collision_checker))
+            if getattr(self.collision_checker, "world_model", None) is not None:
+                assert id(self.collision_checker.world_model)==id(self.collision_world), "Collision checker world model and self.collision_world must be the same object"
+                self.collision_world = self.collision_checker.world_model
+                print("assetion done:")
+        except Exception:
+            # Fallback – leave previous reference in place
+            raise Exception("Failed to set collision checker reference")
+            pass
+
+        log_info("Collision checker set in WorldModelWrapper (world_model linked)")
     
     def update(
         self,
@@ -222,7 +250,8 @@ class WorldModelWrapper:
                         self.collision_checker.update_obstacle_pose(
                             name=obstacle_name,
                             w_obj_pose=curobo_pose,
-                            env_idx=0
+                            env_idx=0,
+                            update_cpu_reference=True,
                         )
 
                         if self.verbosity >= 1:
@@ -481,6 +510,7 @@ class WorldModelWrapper:
                     name=name,
                     w_obj_pose=cu_pose,
                     env_idx=0,
+                    update_cpu_reference=True,
                 )
                 if self.verbosity >= 3:
                     self._vprint(f"{name} MOVED (fast-dict)")
@@ -555,7 +585,8 @@ class WorldModelWrapper:
                 )
 
                 for s in sph:
-                    pos_w = np.array(s.pose[:3], dtype=float) if getattr(s, "pose", None) else np.zeros(3)
+                    p_attr = getattr(s, "pose", None)
+                    pos_w = np.array(p_attr[:3], dtype=float) if p_attr else np.zeros(3)
                     sphere_list.append((pos_w, float(s.radius)))
             except Exception:
                 # Skip obstacle on failure

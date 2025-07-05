@@ -12,7 +12,7 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 import os
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 import datetime
 import matplotlib.pyplot as plt
 from collections import deque
@@ -46,7 +46,11 @@ from curobo.types.state import JointState
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import cat_sum, cat_sum_horizon
 
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+# Optional import for dynamic obstacle collision predictor
+try:
+    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+except ImportError:
+    DynamicObsCollPredictor = None
 
 import importlib
 
@@ -429,12 +433,12 @@ class ArmBase(RolloutBase, ArmBaseConfig):
             ArmBaseConfig.__init__(self, **vars(config))
         RolloutBase.__init__(self)
         self._init_after_config_load()
-        self._dynamic_obs_coll_predictor: Optional[DynamicObsCollPredictor] = None
+        self._dynamic_obs_coll_predictor: Optional[Any] = None
 
-    def set_dynamic_obs_coll_predictor(self, predictor: DynamicObsCollPredictor):
+    def set_dynamic_obs_coll_predictor(self, predictor: Any):
         self._dynamic_obs_coll_predictor = predictor
-    
-    def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
+
+    def get_dynamic_obs_coll_predictor(self) -> Optional[Any]:
         return self._dynamic_obs_coll_predictor
     
     def set_robot_context(self, env_id: int, robot_id: int, robot_pose: list, col_pred_with: list):

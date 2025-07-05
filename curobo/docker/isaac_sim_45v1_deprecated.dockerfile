@@ -32,7 +32,7 @@ FROM de257/curobo_isaac45@sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef1
 
 # If you build the new image (e.g. option 2 or option 3) keep next lines not commented out
 RUN cd / && git clone https://github.com/Dan7171/rl_for_curobo.git
-RUN cd /rl_for_curobo && pip install -e .
+# RUN cd /rl_for_curobo && pip install -e .
 RUN cd /rl_for_curobo/curobo && SETUPTOOLS_SCM_PRETEND_VERSION=1.0.0 omni_python -m pip install -e .[isaacsim] --no-build-isolation
 
 

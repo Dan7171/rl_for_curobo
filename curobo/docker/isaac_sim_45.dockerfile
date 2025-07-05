@@ -388,6 +388,14 @@ RUN chown -R $USERNAME:$USERNAME /isaac-sim /workspaces /pkgs
 USER $USERNAME
 WORKDIR /home/$USERNAME
 
+# note:
+# In the image, run:
+# RUN cd / && git clone https://github.com/Dan7171/rl_for_curobo.git
+# WARNING: use omni_python's pip, not the system's pip (system pip is set to ros2's python env and we want to use omni_python's python env)
+# RUN cd /rl_for_curobo/curobo && SETUPTOOLS_SCM_PRETEND_VERSION=1.0.0 omni_python -m pip install -e .[isaacsim] --no-build-isolation
+# RUN cd /rl_for_curobo && omni_python - pip  install -e . # not sure if this is needed
+
+
 # # -----------------------------------------------------------------------------
 # # Entry point
 # # -----------------------------------------------------------------------------

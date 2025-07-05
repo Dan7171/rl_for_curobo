@@ -10,6 +10,12 @@
 # its affiliates is strictly prohibited.
 #
 
+# Add current directory to Python path for local imports
+import sys
+import os
+
+# dynamic imports in container- temp solution instead of 'omni_python - pip install .' (in rl_for_curobo dir)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
     # Third Party
@@ -19,6 +25,7 @@ except ImportError:
 
 
 # Third Party
+import time
 import torch
 
 a = torch.zeros(4, device="cuda:0")
@@ -95,7 +102,9 @@ simulation_app = SimulationApp(
 # Enable the layers and stage windows in the UI
 # Standard Library
 import os
-
+# import inspect, projects_root.utils.world_model_wrapper as wmw
+# print("[IMPORT-PATH]", inspect.getfile(wmw.WorldModelWrapper))
+# exit()
 # Third Party
 import carb
 import numpy as np
@@ -278,12 +287,15 @@ def render_geom_approx_to_spheres(collision_world):
 
     # Update current prims
     for idx, (p, r) in enumerate(all_sph):
-        obs_spheres[idx].set_world_pose(position=np.ravel(p))
+        # Explicitly update both position and orientation (identity quaternion) – some
+        # Isaac Sim versions ignore translation-only updates when orientation is
+        # omitted.
+        obs_spheres[idx].set_world_pose(position=np.ravel(p), orientation=np.array([1.0, 0.0, 0.0, 0.0]))
         obs_spheres[idx].set_radius(r)
 
     # Hide surplus prims, if any
     for idx in range(len(all_sph), len(obs_spheres)):
-        obs_spheres[idx].set_world_pose(position=np.array([0, 0, -10]))
+        obs_spheres[idx].set_world_pose(position=np.array([0, 0, -10]), orientation=np.array([1.0, 0.0, 0.0, 0.0]))
 
 
 def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_path):
@@ -363,7 +375,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     cu_world_wrapper = WorldModelWrapper(
         world_config=world_cfg,
         X_robot_W=robot_base_frame,
-        verbosity=2
+        verbosity=4
     )
 
     init_curobo = False
@@ -439,10 +451,10 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             os.removedirs("tmp/debug_world_models")
         except:
             pass
-        os.makedirs("tmp/debug_world_models", exist_ok=True)
-        if step % 500 == 0 and step > 0:
-            print(f"Saving world model at step {step}")
-            save_curobo_world(f"tmp/debug_world_models/world_model_{step}.obj",cu_world_wrapper.get_collision_world())
+        # os.makedirs("tmp/debug_world_models", exist_ok=True)
+        # if step % 500 == 0 and step > 0:
+        #     print(f"Saving world model at step {step}")
+        #     save_curobo_world(f"tmp/debug_world_models/world_model_{step}.obj",cu_world_wrapper.get_collision_world())
                 
         if not init_world:
             for _ in range(10):
@@ -487,7 +499,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             )
 
             # 2) Optional mesh decimation
-            simplify_mesh_obstacles(_raw_world, args.max_mesh_faces)
+            # simplify_mesh_obstacles(_raw_world, args.max_mesh_faces)
 
             # 3) Optionally simplify to cuboids for speed
             if args.use_obb_approx:
@@ -502,7 +514,12 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)
             # Set the collision checker reference in the wrapper
+            print("setting collision checker!!!!!!!!")
+            print("debug 1")
+            time.sleep(10)
             cu_world_wrapper.set_collision_checker(mpc.world_coll_checker)
+            print("debug 2")
+            time.sleep(10)
             # Record the prims that are currently considered obstacles
             ignore_list = [
                 robot_prim_path,
@@ -558,7 +575,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 )
 
                 # Optional decimation for newly added meshes
-                simplify_mesh_obstacles(_new_raw, args.max_mesh_faces)
+                # simplify_mesh_obstacles(_new_raw, args.max_mesh_faces)
 
                 if args.use_obb_approx:
                     new_world_cfg = WorldConfig.create_obb_world(_new_raw)
