@@ -18,14 +18,134 @@
 
 
 #!/bin/bash
+echo "--------------------------------"
+echo "Docker run (as root) script started!"
+echo "--------------------------------"
 
-IMAGE_TAG="${1:-latest}"
-docker run --name curobo_isaac45_root_container --entrypoint bash -it --gpus all -e "ACCEPT_EULA=Y" --rm --network=host \
+# Initialize default values
+CONTAINER_REGISTRY='de257' # change this to your own registry after pulling the image from the registry
+IMAGE_NAME='curobo_isaac45' 
+IMAGE_TAG='latest'
+CONTAINER_NAME='curobo_isaac45_root_container'
+DC_ENABLED='true'
+DC_DEV_ID='002'
+REPO_PATH_HOST=$(realpath ~/rl_for_curobo) # must be absolute path
+
+# Help method
+function show_help() {
+  echo "Usage: ./start_docker_isaac_sim45root.sh --image-name [IMAGE_NAME] --image-tag [IMAGE_TAG] --container-name [CONTAINER_NAME] --dc-enabled [DC_ENABLED] --dc-dev-id [DC_DEV_ID]"
+    echo " --image-name: Name of the Docker image (default: de257/curobo_isaac45)"
+    echo " --image-tage: Tag of the Docker image (default: latest)"
+    echo " --container-name: Name of the Docker container (default: curobo_isaac45_root_container)"
+    echo " --dc-enabled: Enable depth camera (default: true)"
+    echo " --dec-dev-id: Device ID for depth camera (default: 002). NOTE:# device id for depth camera. You need to run 'lsusb' in linux host to find the device id and pass it"
+    echo " --repo-path-host: project directory location on the host machine, e.g. the directory you cloned this repository into (default: ~/rl_for_curobo)"
+}
+
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --image-name)
+            IMAGE_NAME="$2"
+            shift 2
+            ;;  
+        --image-tag)
+            IMAGE_TAG="$2"
+            shift 2
+            ;;  
+        --container-name)
+            CONTAINER_NAME="$2"
+            shift 2
+            ;;  
+        --dc-enabled)
+            DC_ENABLED="$2"
+            shift 2
+            ;;  
+        --dc-dev-id)
+            DC_DEV_ID="$2"
+            shift 2
+            ;;  
+        --repo-path-host)
+          REPO_PATH_HOST="$2"
+          shift 2
+          ;;
+        *)
+            shift
+            ;;  
+    esac
+done
+
+
+
+#REPO_PATH_CONTAINER="/root/$(basename "$REPO_PATH_HOST")" # /root/{repo_name}
+REPO_NAME=$(basename "$REPO_PATH_HOST")
+REPO_PATH_CONTAINER="/root/$REPO_NAME"
+
+# Check if depth camera is enabled
+if [[ "$DC_ENABLED" == "true" ]]; then
+    DC_OPTIONS="--device /dev/bus/usb/$DC_DEV_ID:/dev/bus/usb/$DC_DEV_ID/$DC_DEV_ID \
+    --device /dev/video0:/dev/video0 \
+    "
+    echo using depth camera, you can now run examples like omni_python $REPO_PATH_CONTAINER/curobo/examples/isaac_sim/realsense_reacher.py
+else
+    DC_OPTIONS=""
+fi
+
+echo "--------------------------------"
+echo "Running docker container..."
+echo "--------------------------------"
+echo "*Run variables:*"
+echo "IMAGE_NAME: $IMAGE_NAME"
+echo "IMAGE_TAG: $IMAGE_TAG"
+echo "CONTAINER_NAME: $CONTAINER_NAME"
+echo "DC_ENABLED: $DC_ENABLED"
+echo "DC_DEV_ID: $DC_DEV_ID"
+echo "REPO_PATH_CONTAINER: $REPO_PATH_CONTAINER"
+echo "DC_OPTIOCDNS: $DC_OPTIONS"
+echo ""
+echo "*Quick Start examples:*"
+echo "- isaac sim only:"
+echo "/isaac-sim/isaac-sim.sh"
+echo "- change cd to mounted repo:"
+echo " cd $REPO_PATH_CONTAINER"
+echo "- change cd to curobo original repo:"
+echo " cd /pkgs/curobo"
+echo "- MPC example:"
+echo "In mounted repo, run: omni_python $REPO_PATH_CONTAINER/curobo/examples/isaac_sim/mpc_example.py"
+echo "In original repo, run: omni_python /pkgs/curobo/examples/isaac_sim/mpc_example.py"
+echo ""
+echo "*Toolkit:*"
+echo "- Making a snapshot of the container (to save the state of the container):"
+echo "Step 1-RUN THIS SCRIPT: let this script (we are in) run in first terminal (you are here, so you are already done with that step)"
+echo "Step 2-MAKE CHANGES: if you need to make any changes to the cointaier-do them now...(installing packages, re-arrange dirs etc..)"
+echo "Step 3-COMMIT: After you are done, run this command in terminal 2 (also in host machine):"
+echo "General syntax: docker commit [OPTIONS] CONTAINER REPOSITORY[:TAG]"
+echo "In our case: docker commit -m 'describe the changes...' $CONTAINER_NAME $CONTAINER_REGISTRY/$IMAGE_NAME:Your_new_tag_name_here"
+echo "Step 4-PUSH: Push the new image to the registry (to back them up remotely):"
+echo "docker push $IMAGE_NAME:Your_new_tag_name_here"
+
+echo "--------------------------------"
+
+
+
+
+
+
+docker run \
+  $DC_OPTIONS \
+  --name $CONTAINER_NAME \
+  --entrypoint bash -it \
+  --gpus all \
+  -e "ACCEPT_EULA=Y" \
+  --rm \
+  --network=host \
   --privileged \
   -e "PRIVACY_CONSENT=Y" \
   -v $HOME/.Xauthority:/root/.Xauthority \
   -e "OMNI_KIT_ALLOW_ROOT=1" \
   -e DISPLAY \
+  -v "$REPO_PATH_HOST:/root/$REPO_NAME:rw" \
   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
   -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
   -v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
@@ -35,5 +155,5 @@ docker run --name curobo_isaac45_root_container --entrypoint bash -it --gpus all
   -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
   --volume /dev:/dev \
-  de257/curobo_isaac45:${IMAGE_TAG}
+  ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
 

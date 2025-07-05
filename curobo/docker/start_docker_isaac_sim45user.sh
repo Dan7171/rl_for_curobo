@@ -84,7 +84,7 @@ docker run --name curobo_isaac45_user_container --entrypoint bash --runtime=nvid
         -v ~/docker/isaac-sim/documents/Kit/shared:/isaac-sim/kit/data/documents/Kit/shared:rw \
         -v ~/docker/isaac-sim/documents/Kit:/isaac-sim/kit/data/documents/Kit:rw \
         -v ~/docker/isaac-sim/curobo_assets:/isaac-sim/kit/python/lib/python3.10/site-packages/curobo/content/assets:rw \
-        de257/curobo_isaac45:${IMAGE_TAG}
+        de257/curobo_isaac45:${IMAGE_TAG} 
 
 # -v ~/docker/isaac-sim/cache/asset_browser:/isaac-sim/exts/isaacsim.asset.browser/cache:rw \
 # -v ~/docker/isaac-sim/pkg:/home/isaac/.local/share/ov/pkg:rw \
