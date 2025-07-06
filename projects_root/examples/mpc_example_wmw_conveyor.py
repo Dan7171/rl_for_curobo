@@ -316,22 +316,30 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     stage = my_world.stage
     # my_world.scene.add_default_ground_plane()
 
+    # try:
+    #     while simulation_app.is_running():
+    #         simulation_app.update()
+    # except KeyboardInterrupt:
+    #     pass
+    # finally:
+    #     simulation_app.close()
     
    
     
     cv_xforms_to_load = [ "/World/ConveyorTrack" + x for x in ['', '_01', '_02', '_03', '_04', '_05', '_06', '_07']]
     cu_obs_to_load = ['/World/cv_approx' + x for x in [str(i) for i in range(1, 18)]]
     cv_cube = ['/World/conveyor_cube']
-    created_paths = load_prims_from_usd(
-        "usd_collection/envs/cv_new.usd",
-        prim_paths=cv_xforms_to_load + cu_obs_to_load + cv_cube, # ConveyorTrack, Cube
-        dest_root="/World",
-        stage=my_world.stage,
+
+    # created_paths = load_prims_from_usd(
+    #     "usd_collection/envs/cv_new.usd",
+    #     prim_paths=cv_xforms_to_load + cu_obs_to_load + cv_cube, # ConveyorTrack, Cube
+    #     dest_root="/World",
+    #     stage=my_world.stage,
         
-    )
+    # )
 
     
-    print(f"Created paths: {created_paths}")
+    # print(f"Created paths: {created_paths}")
 
     paths_to_ignore_in_curobo_world_model = cv_xforms_to_load + cv_cube
     print(f"Paths to ignore in curobo world model: {cv_xforms_to_load}")
@@ -533,30 +541,13 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             else:
                 _init_cu_world = _raw_world.get_collision_check_world()
 
-            # # Validate meshes before pushing to CUDA – helps track CUDA 700 errors
-            # try:
-            #     _validate_mesh_list(_init_cu_world.mesh, "Pre-CUDA")
-            # except ValueError as e:
-            #     import traceback, sys
 
-            #     print("\n[MeshValidationError]", e)
-            #     traceback.print_exc()
-            #     sys.exit(1)
 
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
                 cu_world_R=_init_cu_world,
             )
             
-            # # Extra validation after CuRobo converts meshes (they may be re-ordered)
-            # try:
-            #     _validate_mesh_list(cu_col_world_R.mesh, "Post-CuRobo")
-            # except ValueError as e:
-            #     import traceback, sys
 
-            #     print("\n[MeshValidationError]", e)
-            #     traceback.print_exc()
-            #     sys.exit(1)
-            
             # Update MPC world collision checker with the initialized world
             mpc.world_coll_checker.load_collision_model(cu_col_world_R)
             # Set the collision checker reference in the wrapper
