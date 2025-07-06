@@ -516,10 +516,8 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
             # Set the collision checker reference in the wrapper
             print("setting collision checker!!!!!!!!")
             print("debug 1")
-            time.sleep(10)
             cu_world_wrapper.set_collision_checker(mpc.world_coll_checker)
             print("debug 2")
-            time.sleep(10)
             # Record the prims that are currently considered obstacles
             ignore_list = [
                 robot_prim_path,

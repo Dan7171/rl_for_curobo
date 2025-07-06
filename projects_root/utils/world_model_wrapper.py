@@ -150,8 +150,7 @@ class WorldModelWrapper:
         Args:
             collision_checker: The collision checker instance (e.g., WorldMeshCollision)
         """
-        print("setting collision checker!!!!!!!!")
-        time.sleep(10)
+        print("debug setting collision checker!!!!!!!!")
         self.collision_checker = collision_checker
 
         # ----------------------------------------------------------

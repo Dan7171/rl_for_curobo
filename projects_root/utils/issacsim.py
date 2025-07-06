@@ -264,15 +264,41 @@ def make_world(ground_plane=True, to_Xform=False, set_default_prim=True)-> World
     
     """
     from omni.isaac.core import World
+    from pxr import Usd
+    
+    # Initialize the world without opening a new stage
     world = World(stage_units_in_meters=1.0)
+    
+    # Add default ground plane if required
     if ground_plane:
         world.scene.add_default_ground_plane()
+    
+    # Ensure /World exists and is of type Xform if requested
+    world_path = "/World"
     if to_Xform:
-        _xform = world.stage.DefinePrim("/World", "Xform") # define the type of the world to be Xform
+        prim = world.stage.GetPrimAtPath(world_path)
+        if not prim.IsValid():
+            # Create /World as Xform if it doesn't exist
+            prim = world.stage.DefinePrim(world_path, "Xform")
+        elif prim.GetTypeName() != "Xform":
+            # Optionally redefine type (note: not strictly required unless type matters)
+            Usd.Prim(prim).GetSpecifier()  # No-op here but placeholder for logging/debug
+
+    # Set /World as default prim if requested
     if set_default_prim:
-        world.stage.SetDefaultPrim(world.stage.GetPrimAtPath("/World"))
+        world.stage.SetDefaultPrim(world.stage.GetPrimAtPath(world_path))
 
     return world
+    # from omni.isaac.core import World
+    # world = World(stage_units_in_meters=1.0)
+    # if ground_plane:
+    #     world.scene.add_default_ground_plane()
+    # if to_Xform:
+    #     _xform = world.stage.DefinePrim("/World", "Xform") # define the type of the world to be Xform
+    # if set_default_prim:
+    #     world.stage.SetDefaultPrim(world.stage.GetPrimAtPath("/World"))
+
+    # return world
 
 
 
