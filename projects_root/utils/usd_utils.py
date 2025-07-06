@@ -169,24 +169,21 @@ def get_simulation_app(headless: bool = True):  # -> SimulationApp when availabl
     sim_app = init_app(headless=headless)
     return sim_app
 
+
+def load_usd_to_stage(usd_path: str | os.PathLike[str]):
+    import omni.usd
+    # Load the stage
+    omni.usd.get_context().open_stage(usd_path)
+    # Access the loaded stage (optional, if you need to manipulate it)
+    stage = omni.usd.get_context().get_stage()
+    return stage
+
 if __name__ == "__main__":
 
     # Example: load only the conveyor, skip the ground plane for demonstration
     sim_app = init_app()
-    world = make_world(set_default_prim=True, to_Xform=False)
-
-    created_paths = load_prims_from_usd(
-        "usd_collection/envs/_360_conveyor_handcrafter_obs.usd",
-        prim_paths=["/World/_360_conveyor"],
-        dest_root="/World",
-        stage=world.stage,
-        
-    )
+    stage = load_usd_to_stage("usd_collection/envs/cv_new.usd")
     
-
-    
-    #print('USD loaded to stage. Loaded prims to next paths:\n', created_paths)
-
     print("Isaac-Sim running – close the window or press Ctrl+C to exit.")
     try:
         while sim_app.is_running():

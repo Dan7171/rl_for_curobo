@@ -10,6 +10,13 @@
 # its affiliates is strictly prohibited.
 #
 
+# Workaround for Isaac Sim 4.5.0 segmentation fault in Docker
+import os
+os.environ["OMNI_KIT_ALLOW_ROOT"] = "1"
+os.environ["OMNI_KIT_ACCEPT_EULA"] = "Y"
+os.environ["OMNI_USER"] = "admin"
+os.environ["OMNI_PASS"] = "admin"
+os.environ["CUDA_VISIBLE_DEVICES"] = "all"
 
 try:
     # Third Party
