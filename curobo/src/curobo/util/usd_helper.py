@@ -307,9 +307,13 @@ def get_cube_attrs(prim, cache=None, transform=None) -> Cuboid:
     dims = list(prim.GetAttribute("xformOp:scale").Get())
     # scale is 0.5 -> length of 1 will become 0.5,
     dims = [d * size for d in dims]
+    
+    # if any([x == 0 for x in dims]): # bugfix, dimension can be negative
+    #     raise ValueError("zero dimension")
     if any([x <= 0 for x in dims]):
-        raise ValueError("Negative or zero dimension")
-    # dims = [x*2 for x in dims]
+       raise ValueError("Negative or zero dimension")
+    
+    dims = [x*2 for x in dims]
     mat, t_scale = get_prim_world_pose(cache, prim)
 
     if transform is not None:
@@ -515,6 +519,10 @@ class UsdHelper:
             r_T_w, _ = get_prim_world_pose(self._xform_cache, reference_prim, inverse=True)
         all_items = self.stage.Traverse()
         for x in all_items:
+            print("debugging start")
+            print(x.GetPath())
+            print(x.GetTypeName())
+            print("debugging end ")
             if only_paths is not None:
                 if not any([str(x.GetPath()).startswith(k) for k in only_paths]):
                     continue

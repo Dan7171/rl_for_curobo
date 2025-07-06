@@ -173,7 +173,7 @@ class WorldModelWrapper:
         except Exception:
             # Fallback – leave previous reference in place
             raise Exception("Failed to set collision checker reference")
-
+            
         log_info("Collision checker set in WorldModelWrapper (world_model linked)")
     
     def update(

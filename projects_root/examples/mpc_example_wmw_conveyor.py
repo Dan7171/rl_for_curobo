@@ -465,13 +465,13 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     spheres = None  # For robot collision sphere visualization
     
     
-    try:
-        while simulation_app.is_running():
-            simulation_app.update()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        simulation_app.close()
+    # try:
+    #     while simulation_app.is_running():
+    #         simulation_app.update()
+    # except KeyboardInterrupt:
+    #     pass
+    # finally:
+    #     simulation_app.close()
 
     
     
