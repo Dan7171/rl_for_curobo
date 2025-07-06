@@ -4,6 +4,7 @@ async version of projects_root/examples/mpc_moving_obstacles_mpc_mpc.py
 
 # Force non-interactive matplotlib backend to avoid GUI operations from worker threads
 import os
+from typing import Dict
 os.environ.setdefault("MPLBACKEND", "Agg") # ?
 
 import sys
@@ -111,7 +112,8 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from projects_root.utils.world_model_wrapper import WorldModelWrapper
     from projects_root.utils.handy_utils import get_rollouts_in_world_frame
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
-    
+    from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
+
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
     a = torch.zeros(4, device="cuda:0")
 
@@ -286,6 +288,42 @@ def parse_meta_configs(meta_config_paths: List[str]) -> Tuple[List[str], List[st
         
     return robot_config_paths, mpc_config_paths
 
+def init_ccheck_wcfg_in_real() -> WorldConfig:    
+    """
+    Make the initial collision check world configuration.
+    This is the world configuration that will be used for collision checking.
+    Note: must be collision check WorldConfig! not a regular WorldConfig.
+    Also obstacles needs to be expressed in robot frame!
+    """
+    return WorldConfig() # NOTE: this is just a placeholder for now. See TODO
+    # TODO:
+    # Get obstacles from real world
+    # Convert to *collision check* world WorldConfig! (not a regular WorldConfig)
+    # Obstacles need to be expressed in robot frame!
+    # Return the *collision check* WorldConfig
+    # See init_ccheck_wcfg_in_sim() for an example of how to do this in simulation
+
+def init_ccheck_wcfg_in_sim(usd_help:UsdHelper, robot_prim_path:str, target_prim_path:str, ignore_substrings:List[str])->WorldConfig:    
+    """
+    Make the initial collision check world configuration.
+    This is the world configuration that will be used for collision checking.
+    Note: must be collision check WorldConfig! not a regular WorldConfig.
+    Also obstacles needs to be expressed in robot frame!
+    """
+    # Get obstacles from simulation and convert to WorldConfig (not yet collision check world WorldConfig!)
+    cu_world_R = usd_help.get_obstacles_from_stage( 
+        only_paths=['/World'], # look for obs only under the world prim path
+        reference_prim_path=robot_prim_path, # obstacles are expressed in robot frame! (not world frame)
+        ignore_substring=ignore_substrings
+    )
+
+    # Convert raw WorldConfig to collision check world WorldConfig! (Must!)
+    cu_world_R = cu_world_R.get_collision_check_world()
+    
+    return cu_world_R
+
+
+
 def define_run_setup(n_robots:int):
     """
     returns:
@@ -339,13 +377,38 @@ def ctrl_loop_robot(robot_idx: int,
                col_pred_with,
                plans: List[Optional[Any]],
                tensor_args,
+               custom_substrings:List[str],
+               usd_help:Optional[UsdHelper]=None
                ):
-    """Background loop that runs one MPC cycle whenever t_idx increments."""
+    """
+    Background loop that runs one MPC cycle whenever t_idx increments.
+    Args:
+        robot_idx: Index of the robot to control
+        stop_event: Event to signal the robot thread to stop
+        get_t_idx: Function to get the current time step index
+        t_lock: Lock to protect access to the time step index
+        physx_lock: Lock to protect access to the physical simulation state
+        plans_lock: Lock to protect access to the plans
+        robots: List of ArmMpc instances
+        col_pred_with: List of lists of robot indices that each robot will use for dynamic obs prediction
+        plans: List of plans for each robot
+        tensor_args: TensorDeviceType object
+        custom_substrings: List of strings to ignore in the collision check world configuration (apart from the basic default ones (see init_ccheck_wcfg_in_sim))
+    """
+    
+    
     last_step = -1
     r: ArmMpc = robots[robot_idx]
     
+    # Initialize collision check world configuration
+    if SIMULATING:
+        assert usd_help is not None # Type assertion for linter
+        r.reset_wmw(init_ccheck_wcfg_in_sim(usd_help, r.prim_path, r.target_prim_path, custom_substrings)) 
+    else:
+        r.reset_wmw(init_ccheck_wcfg_in_real()) 
+
+    # Control loop
     while not stop_event.is_set():
-        
         # wait for new time step
         with t_lock:
             cur_step = get_t_idx()
@@ -358,11 +421,22 @@ def ctrl_loop_robot(robot_idx: int,
             # publish 
             if OBS_PREDICTION:
                 r.publish(plans, plans_lock)
+        
             # sense
-            if r.use_col_pred:
-                r.sense(plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+            if SIMULATING:
+                update_obs_callback = (r.update_obs_in_sim, {'usd_help':usd_help, 'ignore_substrings':custom_substrings})
+                update_target_callback = (r.update_target_in_sim, {})
+                update_joint_state_callback = (r.update_joint_state_in_sim, {})
             else:
-                r.sense()
+                update_obs_callback = (r.update_obs_in_real, {})
+                update_target_callback = (lambda x: print(f"TODO: Implement update_target_callback in real world"), {})
+                update_joint_state_callback = (lambda x: print(f"TODO: Implement update_joint_state_callback in real world"), {})
+            
+            if r.use_col_pred:
+                r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+            else:
+                r.sense(update_obs_callback, update_target_callback, update_joint_state_callback)
+        
         # plan (improved curobo mpc planning, (torch-heavy, no PhysX))
         action = r.plan(max_attempts=2)
         # command* 
@@ -486,82 +560,70 @@ def main(meta_config_paths: List[str]):
         stage.SetDefaultPrim(stage.GetPrimAtPath("/World")) # TODO: Try removing this and check if it breaks anything (if nothing breaks, remove it)    
         wait_for_playing(my_world, simulation_app, autoplay=True) 
     
-    # Populate robot context BEFORE solver initialization
+    # -----------------------------------------------------------------------------------------
+    # Publish "contexts" 
+    # (each robot context serves robot and other robots solver initialization)
+    # -----------------------------------------------------------------------------------------
     for i in range(n_robots):
-    
-        # ----------------------
-        # Initialize robot context
-        # ----------------------
-        
         if is_dyn_obs_cost_in_cfg(mpc_cfgs[i]):
             n_obstacle_spheres:int = sum(robot_sphere_counts[j] for j in col_pred_with[i])
+            # robot is publishing its context to the global env_topics (so itself and other robots can access it from different modules, instead of passing it as an argument) 
+            # TODO: This is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now   
             publish_robot_context(i, env_topics[i], X_robots[i].tolist(), n_obstacle_spheres, robot_sphere_counts[i], mpc_cfgs[i], col_pred_with[i], mpc_config_paths, robot_config_paths, robot_sphere_counts_split)
             
-            # # Populate robot context directly in env_topics[i]
-            # env_topics[i]["env_id"] = 0
-            # env_topics[i]["robot_id"] = i
-            # env_topics[i]["robot_pose"] = X_robots[i].tolist()
-            # env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
-            # env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
-            # env_topics[i]["horizon"] = mpc_cfgs[i]["model"]["horizon"]
-            # env_topics[i]["n_rollouts"] = mpc_cfgs[i]["mppi"]["num_particles"]
-            # env_topics[i]["col_pred_with"] = col_pred_with[i]
-            
-            # # Add new fields for sparse sphere functionality
-            # env_topics[i]["mpc_config_paths"] = mpc_config_paths
-            # env_topics[i]["robot_config_paths"] = robot_config_paths
-            # env_topics[i]["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
-
-
+    # ----------------------------
+    # Initialize solvers
+    # ----------------------------
     for i, robot in enumerate(robots):
-        # Set robots in initial joint configuration (in curobo they call it  the "retract" config)
-        robot_idx_lists[i] = [robot.robot.get_dof_index(x) for x in robot.j_names]
-        if robot_idx_lists[i] is None:
-            raise RuntimeError(f"Failed to get DOF indices for robot {i}")
-        # Type assertion for linter
-        idx_list = robot_idx_lists[i]
-        assert idx_list is not None
-        robot.init_joints(idx_list)
+        # Set robot in initial joint configuration (in curobo they call it  the "retract" config)
+        _robot_idx_list = [robot.robot.get_dof_index(x) for x in robot.j_names]
+        robot_idx_lists[i] = _robot_idx_list
+        assert _robot_idx_list is not None # Type assertion for linter    
+        robot.init_joints(_robot_idx_list)
+        
         # Init robot mpc solver
         robots[i].init_solver(MPC_DT, DEBUG)
-        # a technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
-        robots[i].robot._articulation_view.initialize() 
+        robots[i].robot._articulation_view.initialize() # TODO: This is a technical required step in isaac 4.5 but check if actually needed https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
 
-     
-    # -------------- Threaded robot loops --------------
-    stop_event = Event()
-    t_lock = Lock()          # Protects access to shared t_idx
-    plans_lock = Lock()      # Protects access to shared plans list
-    physx_lock = Lock()
-    plans: List[Optional[Any]] = [None for _ in range(len(robots))]
-
-    t_idx = 0  # global simulation step index
-    # total_steps_time = 0.0
-    
-        
-    # Spawn one thread per robot
-    robot_threads = [Thread(target=ctrl_loop_robot, args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args), daemon=True) for idx in range(len(robots))]
+    # ----------------------------
+    # Start robot threads
+    # ----------------------------
+    t_idx = 0  # global simulation step index (# = world/sim clock ticks minus 1)
+    stop_event = Event()      # Event to signal robot threads to stop
+    t_lock = Lock()           # Protects access to shared t_idx
+    plans_lock = Lock()       # Protects access to shared plans list
+    physx_lock = Lock()       # Protects access to shared physx state (robot state, etc...)
+    plans: List[Optional[Any]] = [None for _ in range(len(robots))] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
+    custom_ignore_substrings_cu_world = ["/World/defaultGroundPlane", "/curobo", *[robot.target_prim_path for robot in robots],*[robot.prim_path for robot in robots], "/World/ConveyorTrack", '/World/conveyor_cube']
+    robot_threads = [Thread(target=ctrl_loop_robot,args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args, custom_ignore_substrings_cu_world,usd_help), daemon=True) for idx in range(len(robots))] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
     for th in robot_threads:
         th.start()
     
     # point_visualzer_inputs = [] # empty list for draw_points() inputs
     step_batch_start_time = time.time()
     step_batch_size = 100
-    while simulation_app.is_running():
-        with physx_lock:
-            my_world.step(render=True)           
-        with t_lock:
-            t_idx += 1
-        if t_idx % step_batch_size == 0: # step batch size = 100
-            step_batch_time = time.time() - step_batch_start_time
-            print(f"ts: {t_idx}")
-            print("num of actions planned by each robot:")
-            print([robots[i].n_actions_planned for i in range(len(robots))])
-            print(f"overall avg step time: {(step_batch_time/step_batch_size)*1000:.1f} ms")
-            step_batch_start_time = time.time()
-    simulation_app.close() 
-    
-    
+    if SIMULATING:
+        assert simulation_app is not None # Type assertion for linter (it is not None when SIMULATING=True)
+        while simulation_app.is_running():
+            with physx_lock:
+                my_world.step(render=True)           
+            with t_lock:
+                t_idx += 1
+            if t_idx % step_batch_size == 0: # step batch size = 100
+                step_batch_time = time.time() - step_batch_start_time
+                print(f"ts: {t_idx}")
+                print("num of actions planned by each robot:")
+                print([robots[i].n_actions_planned for i in range(len(robots))])
+                print(f"overall avg step time: {(step_batch_time/step_batch_size)*1000:.1f} ms")
+                step_batch_start_time = time.time()
+        simulation_app.close() 
+        
+    else: # Real world (no simulation)
+        while True:
+            with t_lock:
+                t_idx += 1
+            time.sleep(REAL_TIME_EXPECTED_CTRL_DT) # TODO: This is a hack to make the robot threads run at the same speed as the simulation, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
+            
     # Clean up thread pool
     stop_event.set()
     for th in robot_threads:

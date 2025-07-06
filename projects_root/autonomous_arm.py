@@ -51,6 +51,7 @@ from curobo.wrap.reacher.motion_gen import (MotionGen,MotionGenConfig,MotionGenP
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig, PoseCostMetric
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
+from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
 
 # Thread-safety helpers
 from threading import Lock
@@ -439,6 +440,7 @@ class AutonomousArm:
             next_joint_state.jerk = acceleration * 0.0 # it's not used for computations, but it has to be initiated to avoid exceptions
         return next_joint_state
     
+    
     def filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients:FilterCoeff):
         """ Reducing the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
         
@@ -474,7 +476,9 @@ class AutonomousArm:
         js_state_new.jerk[:] = filter_coefficients.jerk * js_state_new.jerk + (1.0 - filter_coefficients.jerk) * js_state_prev.jerk
         return js_state_new
     
-   
+    
+        
+        
     
 class ArmMpc(AutonomousArm):
     def __init__(self, 
@@ -615,7 +619,7 @@ class ArmMpc(AutonomousArm):
         cu_js = cu_js.get_ordered_joint_state(self.solver.rollout_fn.joint_names)
         return cu_js
     
-    def update_target(self):
+    def update_target_in_sim(self):
         """
         Update the robot's target from the scene and sync it with the solver if needed.
         This encapsulates the common pattern of getting target pose and updating the solver.
@@ -641,7 +645,7 @@ class ArmMpc(AutonomousArm):
             self.current_state.joint_names = current_state_partial.joint_names
         self.current_state.copy_(cu_js)
 
-    def update_joint_state(self):
+    def update_joint_state_in_sim(self):
         """
         Update the robot's joint state from simulation and store it in CuRobo format.
         This encapsulates the common pattern of getting simulation joint state, 
@@ -865,7 +869,56 @@ class ArmMpc(AutonomousArm):
         
        
     
-    
+    def update_obs_in_sim(self, usd_help:UsdHelper, ignore_substrings:List[str],paths_to_search_obs_under:List[str]=['/World']):
+        """
+        Sensing and upadting for simulation mode
+        """
+
+        # get poses of all obstacles in the world (in world frame)
+        pose_dict = get_stage_poses(
+            usd_helper=usd_help,
+            only_paths=paths_to_search_obs_under,
+            reference_prim_path='/World', # poses are expressed in world frame
+            ignore_substring=ignore_substrings,
+        )
+        
+        # Fast pose update (only pose updates, no world-model re-initialization as before)
+        self.cu_world_wrapper.update_from_pose_dict(pose_dict)
+        current_paths = set(
+            list_relevant_prims(usd_help, paths_to_search_obs_under, ignore_substrings)
+        )
+
+        new_paths = current_paths - self.cu_world_wrapper.get_known_prims()
+        
+        if new_paths: # Here we are being LAZY! we call expensive get_obstacled_from_stage() only if there are new obstacles!
+            print(f"[NEW OBSTACLES] {new_paths}")
+            
+            # Get basic (non-collision check) WorldConfig from stage
+            new_world_cfg:WorldConfig = usd_help.get_obstacles_from_stage(
+                only_paths=list(new_paths),
+                reference_prim_path=self.prim_path,
+                ignore_substring=ignore_substrings,
+            )
+
+            # Convert to collision check world
+            new_world_cfg = new_world_cfg.get_collision_check_world()
+
+            if new_world_cfg.objects:  # add only if we got actual obstacles
+                self.cu_world_wrapper.add_new_obstacles_from_cu_world(
+                    cu_world_R=new_world_cfg,
+                    silent=False,
+                )
+                # Track real obstacle names so future pose updates work
+                for obj in new_world_cfg.objects:
+                    self.cu_world_wrapper.add_prim_to_known(obj.name)
+
+        
+
+    def update_obs_in_real(self):
+        """
+        Sensing and upadting for real world mode
+        """
+        pass
 
     def get_solver(self) -> MpcSolver:
         return self.solver
@@ -944,11 +997,16 @@ class ArmMpc(AutonomousArm):
         """
         return self.solver.step(self.current_state, shift_steps=shift_steps, seed_traj=seed_traj, max_attempts=max_attempts)
 
-    def sense(self, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None,physx_lock:Optional["Lock"]=None):
+    
+    def sense(self,update_obs_callback:Tuple[Callable, dict], update_target_callback:Tuple[Callable, dict], update_joint_state_callback:Tuple[Callable, dict], plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None,physx_lock:Optional["Lock"]=None):
         """
         Complete robot sensing and state update update cycle: collision prediction, joint state, target, and MPC step.
         
         Args:
+            sense_obs_callback: Callback, and a dict of arguments (arg name: arg value) to sense obstacles (in simulation or real world)
+            update_target_callback: Callback to update target (in simulation or real world)
+            update_joint_state_callback: Callback to update joint state (in simulation or real world)
+            
             plans: List of robot plans from all robots (required if use_col_pred=True)
             col_pred_with: List of robot IDs for collision prediction (required if use_col_pred=True)
             t_idx: Current time step index (required if use_col_pred=True)
@@ -958,7 +1016,10 @@ class ArmMpc(AutonomousArm):
         Returns:
             MPC result from the solver
         """
-        # Update collision predictor if enabled
+
+        
+
+        # Update dynamic obstacles (other robots' plans) collision predictor if enabled
         if self.use_col_pred: # plans_lock should be provided
             if plans_lock is not None: # for the async setup
                 with plans_lock: 
@@ -966,10 +1027,12 @@ class ArmMpc(AutonomousArm):
             else: # for the sync setup
                 self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
         
-        # Update joint state from simulation
-        self.update_joint_state()        
-        # Update target from scene
-        self.update_target()
+        # Update obs poses callback (in simulation or real world)
+        update_obs_callback[0](**update_obs_callback[1])
+        # Update joint state callback
+        update_joint_state_callback[0](**update_joint_state_callback[1])        
+        # Update target callback
+        update_target_callback[0](**update_target_callback[1])
         
         
 
@@ -1006,7 +1069,33 @@ class ArmMpc(AutonomousArm):
     def publish(self, plans, plans_lock:"Lock"):
         with plans_lock:
             plans[self.instance_id] = self.get_plan(valid_spheres_only=False)
+    
+    def reset_wmw(self, initial_world_model:WorldConfig):
 
+        """
+        Reset the WorldModelWrapper.
+        Loads the obstacles from simulation/real world into the WorldModelWrapper.
+        This should happen for example right when simulation/real world flow starts 
+        (at the moment when the identities and initial poses of the obstacles are known).
+        To be clear: You can also add obstacles later or update known obstacles poses, but you.
+        """
+        cu_col_world_R: WorldConfig = self.cu_world_wrapper.initialize_from_cu_world(cu_world_R=initial_world_model)
+        
+
+        # Update MPC world collision checker with the initialized world
+        assert self.solver.world_coll_checker is not None # only for linter (it's not None) 
+        self.solver.world_coll_checker.load_collision_model(cu_col_world_R) 
+        
+        # Set the collision checker reference in the wrapper
+        self.cu_world_wrapper.set_collision_checker(self.solver.world_coll_checker)
+        
+        # Record the prims that are currently considered obstacles (for easy lookup later when checking if update is needed)
+        self.cu_world_wrapper.set_known_prims()
+
+        print("WorldModelWrapper reset finished successfully!")
+        print(f"Known prims in collision world: {self.cu_world_wrapper.get_known_prims()}")
+    
+        
 class ArmCumotion(AutonomousArm):
     def __init__(self, 
                 # robot basic parameters

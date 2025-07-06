@@ -266,7 +266,7 @@ def make_world(ground_plane=True, to_Xform=False, set_default_prim=True)-> World
     from omni.isaac.core import World
     from pxr import Usd
     
-    # Initialize the world without opening a new stage
+    # Initialize the world without opening a new stage in /World
     world = World(stage_units_in_meters=1.0)
     
     # Add default ground plane if required

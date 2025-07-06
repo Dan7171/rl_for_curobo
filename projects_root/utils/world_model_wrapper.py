@@ -183,6 +183,25 @@ class WorldModelWrapper:
 
         log_info("Collision checker set in WorldModelWrapper (world_model linked)")
     
+    def set_known_prims(self):
+        """
+        Set the known prims in the collision world.
+        """
+        self.known_prims:set[str] = set(self.get_obstacle_names())
+
+
+    def get_known_prims(self) -> set[str]:
+        """
+        Get the known prims in the collision world.
+        """
+        return self.known_prims
+    
+    def add_prim_to_known(self, new_prim:str):
+        """
+        Update the known prims in the collision world.
+        """
+        self.known_prims.add(new_prim)
+    
     def update(
         self,
         cu_world_W: WorldConfig,
