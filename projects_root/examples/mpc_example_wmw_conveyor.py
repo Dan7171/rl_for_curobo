@@ -64,13 +64,7 @@ parser.add_argument(
     default=False,
 )
 
-# Optional: decimate complex meshes before loading to GPU.
-parser.add_argument(
-    "--max_mesh_faces",
-    type=int,
-    default=100, # 0 means no decimation, 50 considered small
-    help="If > 0, simplify mesh obstacles to at most this many faces using trimesh QEM decimation.",
-)
+
 
 parser.add_argument(
     "--show_bnd_spheres",
@@ -179,9 +173,7 @@ def draw_points(rollouts: torch.Tensor):
     draw.draw_points(point_list, colors, sizes)
 
 
-# ------------------------------------------------------------------
-# Helper: Render geometry approximations (bounding spheres) for obstacles
-# ------------------------------------------------------------------
+
 
 
 obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
@@ -211,7 +203,7 @@ def render_geom_approx_to_spheres(collision_world,n_spheres=50):
     all_sph = WorldModelWrapper.make_geom_approx_to_spheres(
         collision_world,
         robot_base_frame.tolist(),
-        n_spheres=50,
+        n_spheres=n_spheres,
         fit_type=SphereFitType.SAMPLE_SURFACE,
         radius_scale=0.05,  # 5 % of smallest OBB side for visibility
     )
@@ -299,51 +291,13 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     """
     global sim_app, my_world
     target_prim_path = world_prim_path + target_prim_subpath
-    # Get robot base frame from command line arguments
-    # robot_base_frame = np.array(args.robot_base_frame)
-    print(f"Robot base frame set to: {robot_base_frame}")
-    
-    # assuming obstacles are in objects_path:
-    # my_world = World(stage_units_in_meters=1.0)
     activate_gpu_dynamics(my_world)
     stage = my_world.stage
-
-    #xform = stage.DefinePrim(world_prim_path, "Xform")
-    # stage.SetDefaultPrim(xform)
-    
     stage.DefinePrim("/curobo", "Xform")
-    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
-    # my_world.scene.add_default_ground_plane()
 
-    # try:
-    #     while simulation_app.is_running():
-    #         simulation_app.update()
-    # except KeyboardInterrupt:
-    #     pass
-    # finally:
-    #     simulation_app.close()
-    
-   
-    
-    cv_xforms_to_load = [ "/World/ConveyorTrack" + x for x in ['', '_01', '_02', '_03', '_04', '_05', '_06', '_07']]
-    cu_obs_to_load = ['/World/cv_approx' + x for x in [str(i) for i in range(1, 18)]]
-    cv_cube = ['/World/conveyor_cube']
-
-    # created_paths = load_prims_from_usd(
-    #     "usd_collection/envs/cv_new.usd",
-    #     prim_paths=cv_xforms_to_load + cu_obs_to_load + cv_cube, # ConveyorTrack, Cube
-    #     dest_root="/World",
-    #     stage=my_world.stage,
-        
-    # )
-
-    
-    # print(f"Created paths: {created_paths}")
-
-    paths_to_ignore_in_curobo_world_model = cv_xforms_to_load + cv_cube
-    print(f"Paths to ignore in curobo world model: {cv_xforms_to_load}")
-    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
+    paths_to_ignore_in_curobo_world_model = [ "/World/ConveyorTrack" + x for x in ['', '_01', '_02', '_03', '_04', '_05', '_06', '_07']] + ['/World/conveyor_cube'] # too heavy to load meshes, instead we use obb approximation to cubes
+    print(f"Paths to ignore in curobo world model: {paths_to_ignore_in_curobo_world_model}")
 
     # Make a target to follow
     target = cuboid.VisualCuboid(
@@ -375,17 +329,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
 
     articulation_controller = robot.get_articulation_controller()
 
-    # world_cfg_table = WorldConfig.from_dict(
-    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    # )
-    # world_cfg_table.cuboid[0].pose[2] -= 0.04
-    # world_cfg1 = WorldConfig.from_dict(
-    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    # ).get_mesh_world()
-    # world_cfg1.mesh[0].name += "_mesh"
-    # world_cfg1.mesh[0].pose[2] = -10.5
 
-    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     # Initialize WorldModelWrapper for efficient obstacle updates
     world_cfg = WorldConfig() # initial world config, empty (could also contain obs...)
@@ -462,9 +406,8 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     cmd_state_full = None
     step = 0
     add_extensions(simulation_app, args.headless_mode)
-    spheres = None  # For robot collision sphere visualization
     
-    
+    # stage loop_for_debugging:
     # try:
     #     while simulation_app.is_running():
     #         simulation_app.update()
@@ -472,14 +415,11 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     #     pass
     # finally:
     #     simulation_app.close()
-
-    
-    
     
     
     while simulation_app.is_running():
         
-        # uncomment to save world model
+        # uncomment to save world model snapshots
         # try:
         #     os.removedirs("tmp/debug_world_models")
         # except:
@@ -532,17 +472,9 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 ],
             )
 
-            # 2) Optional mesh decimation
-            # simplify_mesh_obstacles(_raw_world, args.max_mesh_faces)
-
-            # 3) Optionally simplify to cuboids for speed
-            if args.use_obb_approx:
-                _init_cu_world = WorldConfig.create_obb_world(_raw_world)
-            else:
-                _init_cu_world = _raw_world.get_collision_check_world()
 
 
-
+            _init_cu_world = _raw_world.get_collision_check_world()
             cu_col_world_R: WorldConfig = cu_world_wrapper.initialize_from_cu_world(
                 cu_world_R=_init_cu_world,
             )
@@ -583,14 +515,15 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                 "/curobo",
                 *paths_to_ignore_in_curobo_world_model,
             ]
-            # print(f"ignore_list: {ignore_list}")
+            
             pose_dict = get_stage_poses(
                 usd_helper=usd_help,
                 only_paths=[obs_root_prim_path],
                 reference_prim_path=world_prim_path,
                 ignore_substring=ignore_list,
             )
-            # print(f"pose_dict: {pose_dict}")
+
+            # Fast pose update (only pose updates, no world-model re-initialization as before)
             cu_world_wrapper.update_from_pose_dict(pose_dict)
 
             
@@ -609,14 +542,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
                     ignore_substring=ignore_list,
                 )
 
-                # Optional decimation for newly added meshes
-                # simplify_mesh_obstacles(_new_raw, args.max_mesh_faces)
-
-                if args.use_obb_approx:
-                    new_world_cfg = WorldConfig.create_obb_world(_new_raw)
-                else:
-                    new_world_cfg = _new_raw.get_collision_check_world()
-
+                new_world_cfg = _new_raw.get_collision_check_world()
                 if new_world_cfg.objects:  # add only if we got actual obstacles
                     cu_world_wrapper.add_new_obstacles_from_cu_world(
                         cu_world_R=new_world_cfg,
@@ -713,7 +639,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         # OPTIONAL: visualize obstacle bounding spheres (simplified)
         # ------------------------------------------------------------------
         if args.show_bnd_spheres and world_initialized and step_index % 20 == 0:
-            render_geom_approx_to_spheres(cu_world_wrapper.get_collision_world())
+            render_geom_approx_to_spheres(cu_world_wrapper.get_collision_world(),n_spheres=200)
 
 
 ############################################################
@@ -1025,7 +951,7 @@ def _validate_mesh_list(mesh_list, name_hint=""):
 
 
 if __name__ == "__main__":
-    robot_base_frame = np.array([-0.75, -0.33, 0.0, 1.0, 0.0, 0.0, 0.0])
+    robot_base_frame = np.array([-0.5, -0.5, 0.0, 1.0, 0.0, 0.0, 0.0])
     world_prim_path = "/World"
     main(robot_base_frame, target_prim_subpath="/target",obs_root_prim_path=world_prim_path, world_prim_path=world_prim_path)
     simulation_app.close() 
