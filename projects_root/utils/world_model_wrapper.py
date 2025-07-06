@@ -40,6 +40,10 @@ from curobo.util.logger import log_info, log_warn, log_error
 
 class WorldModelWrapper:
     """
+    # wrapper was added so we can optimize the original examples using WorldCfg
+    # original examples re-initialized the world model every time, even when a simple update 
+    # like changing obstacles poses was required. It wasn't efficient and slowed down the control loop.
+    
     *Efficient*  wrapper for curobo world models that avoids recreation of collision world.
     
     This wrapper initializes the world model once using obstacles from real world/simulator,

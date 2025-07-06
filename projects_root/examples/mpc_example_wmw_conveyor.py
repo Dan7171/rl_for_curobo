@@ -380,7 +380,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     usd_help.load_stage(my_world.stage)
     
     # Initialize world model wrapper once - this replaces the repeated world recreation
-    world_initialized = False
+    wmw_initialized = False
     # Cache of prim paths already known to the collision world
     known_prim_paths: set[str] = set()
     
@@ -440,7 +440,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         step_index = step
         
         # Initialize world model wrapper once (replaces the expensive recreation every 1000 steps)
-        if not world_initialized and step_index > 20:
+        if not wmw_initialized and step_index > 20:
             print("Initializing WorldModelWrapper (one-time setup)...")
             # 1) pull raw USD obstacles
             _raw_world = usd_help.get_obstacles_from_stage(
@@ -477,14 +477,14 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
 
             known_prim_paths = set(cu_world_wrapper.get_obstacle_names())
 
-            world_initialized = True
+            wmw_initialized = True
             print("WorldModelWrapper initialized successfully!")
         
         
         # ------------------------------------------------------------------
         # Detect *new* prims cheaply; load geometry only when necessary
         # ------------------------------------------------------------------
-        if world_initialized: #cu_world_wrapper.is_initialized():
+        if wmw_initialized: #cu_world_wrapper.is_initialized():
             
             
             # ------------------------------------------------------------------
@@ -620,7 +620,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
         # ------------------------------------------------------------------
         # OPTIONAL: visualize obstacle bounding spheres (simplified)
         # ------------------------------------------------------------------
-        if args.show_bnd_spheres and world_initialized and step_index % 20 == 0:
+        if args.show_bnd_spheres and wmw_initialized and step_index % 20 == 0:
             render_geom_approx_to_spheres(cu_world_wrapper.get_collision_world(),n_spheres=200)
 
 

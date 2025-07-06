@@ -9,7 +9,7 @@ from typing import List, Optional
 class Topics:
         
     def __init__(self, n_envs=1, robots_per_env=4):
-        self._topics = []
+        self._topics: List[List[dict]] = []
         for i in range(n_envs):
             self._topics.append([])
             for j in range(robots_per_env):
@@ -23,11 +23,11 @@ class Topics:
                 })
             
 
-    def get_default_env(self):
+    def get_default_env(self)->List[dict]:
         return self._topics[0] 
 
     @property
-    def topics(self):
+    def topics(self)->List[List[dict]]:
         return self._topics
 
 

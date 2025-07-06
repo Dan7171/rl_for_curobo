@@ -484,7 +484,7 @@ class UsdHelper:
         reference_prim = self.stage.GetPrimAtPath(prim_path)
         r_T_w, _ = get_prim_world_pose(self._xform_cache, reference_prim, inverse=inverse)
         return r_T_w
-
+    
     def get_obstacles_from_stage(
         self,
         only_paths: Optional[List[str]] = None,

@@ -35,41 +35,54 @@ robots_collision_spheres_configs_parent_dir = "curobo/src/curobo/content/configs
 if True: # imports and initiation (put it in an if statement to collapse it)
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--show_bnd_spheres",
-        action="store_true",
-        help="Render bounding sphere approximations of each obstacle in real-time.",
-        default=False,
-    )
-    args = parser.parse_args()
-    # CRITICAL: Isaac Sim must be imported FIRST before any other modules
-    try:
-        import isaacsim
-    except ImportError:
-        pass
+    
+    if SIMULATING:
+        parser.add_argument( 
+            "--show_bnd_spheres",
+            action="store_true",
+            help="Render bounding sphere approximations of each obstacle in real-time.",
+            default=False,
+        )
+        args = parser.parse_args()
+        # CRITICAL: Isaac Sim must be imported FIRST before any other modules
+        try:
+            import isaacsim
+        except ImportError:
+            pass
+            
+        from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics,make_world
+        from projects_root.utils.usd_utils import load_usd_to_stage
+
+        # Init Isaac Sim app
+        simulation_app = init_app() # SimulationApp
+        # Omniverse and IsaacSim modules
+        from omni.isaac.core import World
         
-    from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics,make_world
-    from projects_root.utils.usd_utils import load_usd_to_stage
+        
+        # Load USD to stage
+        stage = load_usd_to_stage("usd_collection/envs/cv_new.usd") # pxr.Usd.Stage
+        
+        # Init Isaac Sim world
+        my_world:World = make_world(ground_plane=True, set_default_prim=True, to_Xform=True)
+        
+        # Enable GPU dynamics if needed
+        if ENABLE_GPU_DYNAMICS:
+            activate_gpu_dynamics(my_world)
+        # Set simulation dt
+        my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
+        
+        from projects_root.utils.helper import add_extensions # available only after app initiation
+        add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
+        
+        
 
-    # Init Isaac Sim app
-    simulation_app = init_app() # SimulationApp
-    # Omniverse and IsaacSim modules
-    from omni.isaac.core import World
-    
-    
-    # Load USD to stage
-    stage = load_usd_to_stage("usd_collection/envs/cv_new.usd") # pxr.Usd.Stage
-    
-    # Init Isaac Sim world
-    my_world:World = make_world(ground_plane=True, set_default_prim=True, to_Xform=True)
-    
-    # Enable GPU dynamics if needed
-    if ENABLE_GPU_DYNAMICS:
-        activate_gpu_dynamics(my_world)
-    # Set simulation dt
-    my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)     
-
-   
+    else:
+        # TODO: figure out what we do when SIMULATING=False (should not be too hard)
+        my_world = None
+        usd_help = None
+        stage = None
+        tensor_args = None
+        simulation_app = None
     
     # Third party modules (moved after Isaac Sim initialization)
     import time
@@ -78,8 +91,6 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import torch
     import os
     import numpy as np
-    from projects_root.utils.helper import add_extensions # available only after app initiation
-    add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
     
     # Our modules
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
@@ -91,7 +102,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from curobo.geom.types import Sphere, WorldConfig
     from curobo.types.base import TensorDeviceType
     from curobo.types.state import JointState
-    from curobo.util.logger import setup_curobo_logger
+    from curobo.util.logger import setup_logger
     from curobo.util.usd_helper import UsdHelper
     from curobo.util_file import  load_yaml
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
@@ -104,9 +115,117 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
     a = torch.zeros(4, device="cuda:0")
 
+obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
 
-# GPU memory debugging function removed for production
-    
+
+def render_geom_approx_to_spheres(collision_world,n_spheres=50):
+    """Visualize an approximate geometry (collection of spheres) for each obstacle.
+
+    Notes:
+        • Uses SAMPLE_SURFACE sphere fitting with a per–obstacle radius equal to
+          1 % of its smallest OBB extent.
+        • Relies on global variables `robot_base_frame` and `cu_world_wrapper` that
+          are established in the main routine.
+        • Maintains a persistent `obs_spheres` list so VisualSphere prims are
+          created only once and then updated every frame.
+
+    Args:
+        collision_world (WorldConfig): Current CuRobo collision world instance.
+    """
+
+    global obs_spheres, robot_base_frame, cu_world_wrapper
+
+    if collision_world is None or len(collision_world.objects) == 0:
+        return
+
+    # Use the utility in WorldModelWrapper to get sphere list (world-frame)
+    all_sph = WorldModelWrapper.make_geom_approx_to_spheres(
+        collision_world,
+        robot_base_frame.tolist(),
+        n_spheres=n_spheres,
+        fit_type=SphereFitType.SAMPLE_SURFACE,
+        radius_scale=0.05,  # 5 % of smallest OBB side for visibility
+    )
+
+    if not all_sph:
+        return
+
+    # Create extra VisualSphere prims if needed (handle import gracefully during static analysis)
+    try:
+        from omni.isaac.core.objects import sphere  # type: ignore
+    except ImportError:  # Fallback if omniverse modules are unavailable in the analysis env
+        return
+
+    # Get shared material from first sphere (if any)
+    shared_mat_path = None
+    if obs_spheres:
+        try:
+            first_rel = obs_spheres[0].prim.GetRelationship("material:binding")
+            targets = first_rel.GetTargets()
+            if targets:
+                shared_mat_path = targets[0]
+        except Exception:
+            pass
+
+    stage = None  # Will capture Omni stage after first sphere is created
+
+    while len(obs_spheres) < len(all_sph):
+        p, r = all_sph[len(obs_spheres)]
+
+        # Create sphere – this will auto-generate a new material prim
+        sp = sphere.VisualSphere(
+            prim_path=f"/curobo/obs_sphere_{len(obs_spheres)}",
+            position=np.ravel(p),
+            radius=r,
+            color=np.array([1.0, 0.6, 0.1]),
+        )
+
+        # On creation update stage reference
+        if stage is None:
+            stage = sp.prim.GetStage()
+
+        try:
+            rel = sp.prim.GetRelationship("material:binding")
+            orig_targets = rel.GetTargets()
+            new_mat_path = orig_targets[0] if orig_targets else None
+
+            # Rebind to shared material if one exists
+            if shared_mat_path is not None:
+                rel.SetTargets([shared_mat_path])
+
+                # Remove the auto-generated material prim to avoid duplicates
+                if new_mat_path and stage.GetPrimAtPath(new_mat_path):
+                    stage.RemovePrim(new_mat_path)
+            else:
+                # First sphere becomes the reference material
+                if new_mat_path:
+                    shared_mat_path = new_mat_path
+        except Exception:
+            pass
+
+        obs_spheres.append(sp)
+
+    # Update current prims
+    for idx, (p, r) in enumerate(all_sph):
+        # Explicitly update both position and orientation (identity quaternion) – some
+        # Isaac Sim versions ignore translation-only updates when orientation is
+        # omitted.
+        obs_spheres[idx].set_world_pose(position=np.ravel(p), orientation=np.array([1.0, 0.0, 0.0, 0.0]))
+        obs_spheres[idx].set_radius(r)
+
+    # Hide surplus prims, if any
+    for idx in range(len(all_sph), len(obs_spheres)):
+        obs_spheres[idx].set_world_pose(position=np.array([0, 0, -10]), orientation=np.array([1.0, 0.0, 0.0, 0.0]))
+
+
+
+
+
+
+
+
+
+
 
 def calculate_robot_sphere_count(robot_cfg):
     """
@@ -248,7 +367,36 @@ def ctrl_loop_robot(robot_idx: int,
         action = r.plan(max_attempts=2)
         # command* 
         r.command(action, num_times=1, physx_lock=physx_lock)
+
+def is_dyn_obs_cost_in_cfg(mpc_cfg:dict) -> bool:
+    """
+    Check if dynamic obstacle cost is enabled in the MPC config.
+    """
+    return "cost" in mpc_cfg and "custom" in mpc_cfg["cost"] and "arm_base" in mpc_cfg["cost"]["custom"] and "dynamic_obs_cost" in mpc_cfg["cost"]["custom"]["arm_base"]
+  
+def publish_robot_context(robot_idx:int, robot_context:dict,robot_pose:list, n_obstacle_spheres:int, robot_sphere_count:int, mpc_cfg:dict, col_pred_with_robot:List[int], mpc_config_paths:List[str], robot_config_paths:List[str], robot_sphere_counts_split:List[Tuple[int, int]]):
+    """
+    Publish robot context ("topics") to the environment topics.
+    TODO: Re-design this whole approach, give better names to the variables ()
+    """
+
+    # Populate robot context directly in env_topics[i]
+    robot_context["env_id"] = 0
+    robot_context["robot_id"] = robot_idx
+    robot_context["robot_pose"] = robot_pose
+    robot_context["n_obstacle_spheres"] = n_obstacle_spheres
     
+    robot_context["n_own_spheres"] = robot_sphere_count
+    robot_context["horizon"] = mpc_cfg["model"]["horizon"]
+    robot_context["n_rollouts"] = mpc_cfg["mppi"]["num_particles"]
+    robot_context["col_pred_with"] = col_pred_with_robot
+    
+    # Add new fields for sparse sphere functionality
+    robot_context["mpc_config_paths"] = mpc_config_paths
+    robot_context["robot_config_paths"] = robot_config_paths
+    robot_context["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
+
+
 def main(meta_config_paths: List[str]):
     """
     Main function for multi-robot MPC simulation with heterogeneous robot models.
@@ -258,58 +406,58 @@ def main(meta_config_paths: List[str]):
             config paths for one robot
         
     """
+    # ------------
+    # Curobo setup 
+    # ------------
+    setup_logger("warn") # curobo logger in warn mode
+    tensor_args = TensorDeviceType() # 
+    if SIMULATING:   
+        # Initialize UsdHelper (helper for USD stage operations by curobo)
+        usd_help = UsdHelper()  
+        stage = my_world.stage  # get the stage from the world
+        usd_help.load_stage(stage) # set self.stage to the stage (self=usd_help)
+        
+        # set /World as Xform prim, and make it the default prim
+        stage.SetDefaultPrim(stage.DefinePrim("/World", "Xform"))
+        
+        # Make also /curobo as Xform prim
+        _curobo_xform = stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
 
-    
-    
-    n_robots = len(meta_config_paths)
-    print(f"Starting multi-robot simulation with {n_robots} robots")
 
+    # ------------------
+    # Config files setup
+    # ------------------    
     # Parse meta-configurations to get robot and MPC config paths
     robot_config_paths, mpc_config_paths = parse_meta_configs(meta_config_paths)
-    
-    # Print robot configuration summary
+    robot_cfgs, mpc_cfgs = [], []
     for i, (robot_path, mpc_path) in enumerate(zip(robot_config_paths, mpc_config_paths)):
+        robot_cfgs.append(load_yaml(robot_path)["robot_cfg"])
+        mpc_cfgs.append(load_yaml(mpc_path))
         print(f"Robot {i}: robot_config='{robot_path}', mpc_config='{mpc_path}'")
+        
+    # -----------------------------------------
+    # Scenario setup (simulation or real world)
+    # -----------------------------------------
     
-    # isaac sim and open usd setup
-    usd_help = UsdHelper()  # Helper for USD stage operations
-    
-    
-    stage = my_world.stage
-    usd_help.load_stage(stage)
-    xform = stage.DefinePrim("/World", "Xform")  # Root transform for all objects
-    stage.SetDefaultPrim(xform)
-    stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
-    
-    # curobo setup (logger, tensor device, etc...)
-    setup_curobo_logger("warn")
-    tensor_args = TensorDeviceType()  # Device configuration for tensor operations
+    n_robots = len(meta_config_paths)
     
     # basic setup of the scenario (robot poses, target poses, target colors, etc...)
     X_robots, col_pred_with, X_targets_R, plot_costs, target_colors = define_run_setup(n_robots)
     
-    # runtime topics (for communication between robots, storing buffers for shared data like robots plans etc...)
+    # runtime topics 
+    # (for communication between robots, storing buffers for shared data like robots plans etc...)
+    # TODO: Change to ros topics
     init_runtime_topics(n_envs=1, robots_per_env=n_robots) 
     runtime_topics = get_topics()
-    env_topics = runtime_topics.get_default_env() if runtime_topics is not None else []
+    env_topics:List[dict] = runtime_topics.get_default_env() if runtime_topics is not None else []
     
-    
-    # curobo joints
-    # robots_cu_js: List[Optional[JointState]] = [None for _ in range(n_robots)]# for visualization of robot spheres
     # robot idx lists (joint indices, will be initialized later)
     robot_idx_lists:List[Optional[List]] = [None for _ in range(n_robots)] 
-    # collision caches (curobo collision checker for each robot)
-    robots_collision_caches = [{"obb": 5, "mesh": 5} for _ in range(n_robots)]
-    # collision world model (curobo world model for each robot. Empty for now, will be initialized later)
-    robot_world_models = [WorldConfig() for _ in range(n_robots)]
-    # curobo robot configs for each robot
-    robot_cfgs = [load_yaml(robot_path)["robot_cfg"] for robot_path in robot_config_paths]
-    # collision checker (curobo collision checker for each robot, empty for now, will be initialized later)
-    ccheckers = []
+
     # Calculate sphere counts for all robots BEFORE creating instances
-    robot_sphere_counts_split = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
-    robot_sphere_counts = [split[0] + split[1] for split in robot_sphere_counts_split]
-    robot_sphere_counts_valid = [split[0] for split in robot_sphere_counts_split]
+    robot_sphere_counts_split:List[Tuple[int, int]] = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs] # split[0] = 'valid' (base, no extra), split[1] = extra
+    robot_sphere_counts:List[int] = [split[0] + split[1] for split in robot_sphere_counts_split] # total (base + extra) sphere count (base + extra)
+    robot_sphere_counts_no_extra:List[int] = [split[0] for split in robot_sphere_counts_split] # valid (base only) sphere count (base only)
 
     
     # ArmMpc instances for each robot (supports heterogeneous robot models)
@@ -317,8 +465,8 @@ def main(meta_config_paths: List[str]):
     for i in range(n_robots):
         robots.append(ArmMpc(
             robot_cfgs[i], 
-            my_world, 
-            usd_help, 
+            my_world, # TODO: figure out what we do when SIMULATING=False (should not be too hard)
+            usd_help, # TODO: figure out what we do when SIMULATING=False (should not be too hard)
             env_id=0,
             robot_id=i,
             p_R=X_robots[i][:3],
@@ -329,49 +477,40 @@ def main(meta_config_paths: List[str]):
             plot_costs=plot_costs[i],
             override_particle_file=mpc_config_paths[i],  # Use individual MPC config per robot
             n_coll_spheres=robot_sphere_counts[i],  # Total spheres (base + extra)
-            n_coll_spheres_valid=robot_sphere_counts_valid[i],  # Valid spheres (base only)
+            n_coll_spheres_valid=robot_sphere_counts_no_extra[i],  # Valid spheres (base only)
             use_col_pred=OBS_PREDICTION and len(col_pred_with[i]) > 0  # Enable collision prediction
             )
         )
-    # cu_worlds_wrappers = [WorldModelWrapper(robot_world_models[i], X_robots[i], robots[i].prim_path, X_robots[i],verbosity=2) for i in range(n_robots)]
-
-    world_prim = stage.GetPrimAtPath("/World")
-    stage.SetDefaultPrim(world_prim)
+    if SIMULATING:
+        # reset default prim to /World
+        stage.SetDefaultPrim(stage.GetPrimAtPath("/World")) # TODO: Try removing this and check if it breaks anything (if nothing breaks, remove it)    
+        wait_for_playing(my_world, simulation_app, autoplay=True) 
     
-    # wait for play button in simulator to be pushed
-    wait_for_playing(my_world, simulation_app,autoplay=True) 
-    
-
     # Populate robot context BEFORE solver initialization
     for i in range(n_robots):
-        # Get MPC config values for this specific robot
-        mpc_config = load_yaml(mpc_config_paths[i])
+    
+        # ----------------------
+        # Initialize robot context
+        # ----------------------
         
-        # Check if this robot has DynamicObsCost enabled
-        has_dynamic_obs_cost = (
-            "cost" in mpc_config and 
-            "custom" in mpc_config["cost"] and 
-            "arm_base" in mpc_config["cost"]["custom"] and 
-            "dynamic_obs_cost" in mpc_config["cost"]["custom"]["arm_base"]
-        )
-        
-        if has_dynamic_obs_cost:
-            n_obstacle_spheres = sum(robot_sphere_counts[j] for j in col_pred_with[i])
+        if is_dyn_obs_cost_in_cfg(mpc_cfgs[i]):
+            n_obstacle_spheres:int = sum(robot_sphere_counts[j] for j in col_pred_with[i])
+            publish_robot_context(i, env_topics[i], X_robots[i].tolist(), n_obstacle_spheres, robot_sphere_counts[i], mpc_cfgs[i], col_pred_with[i], mpc_config_paths, robot_config_paths, robot_sphere_counts_split)
             
-            # Populate robot context directly in env_topics[i]
-            env_topics[i]["env_id"] = 0
-            env_topics[i]["robot_id"] = i
-            env_topics[i]["robot_pose"] = X_robots[i].tolist()
-            env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
-            env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
-            env_topics[i]["horizon"] = mpc_config["model"]["horizon"]
-            env_topics[i]["n_rollouts"] = mpc_config["mppi"]["num_particles"]
-            env_topics[i]["col_pred_with"] = col_pred_with[i]
+            # # Populate robot context directly in env_topics[i]
+            # env_topics[i]["env_id"] = 0
+            # env_topics[i]["robot_id"] = i
+            # env_topics[i]["robot_pose"] = X_robots[i].tolist()
+            # env_topics[i]["n_obstacle_spheres"] = n_obstacle_spheres
+            # env_topics[i]["n_own_spheres"] = robot_sphere_counts[i]
+            # env_topics[i]["horizon"] = mpc_cfgs[i]["model"]["horizon"]
+            # env_topics[i]["n_rollouts"] = mpc_cfgs[i]["mppi"]["num_particles"]
+            # env_topics[i]["col_pred_with"] = col_pred_with[i]
             
-            # Add new fields for sparse sphere functionality
-            env_topics[i]["mpc_config_paths"] = mpc_config_paths
-            env_topics[i]["robot_config_paths"] = robot_config_paths
-            env_topics[i]["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
+            # # Add new fields for sparse sphere functionality
+            # env_topics[i]["mpc_config_paths"] = mpc_config_paths
+            # env_topics[i]["robot_config_paths"] = robot_config_paths
+            # env_topics[i]["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
 
 
     for i, robot in enumerate(robots):
@@ -384,17 +523,9 @@ def main(meta_config_paths: List[str]):
         assert idx_list is not None
         robot.init_joints(idx_list)
         # Init robot mpc solver
-        robots[i].init_solver(robot_world_models[i],robots_collision_caches[i], MPC_DT, DEBUG)
-        # Some technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
+        robots[i].init_solver(MPC_DT, DEBUG)
+        # a technical required step in isaac 4.5 https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
         robots[i].robot._articulation_view.initialize() 
-        # # Get initialized collision checker of robot
-        # checker = robots[i].get_cchecker() # available only after init_solver
-        # ccheckers.append(checker)
-        # for j in range(len(env_obstacles)):
-        #     env_obstacles[j].register_ccheckers([checker])
-    
-    # for i in range(len(env_obstacles)):
-    #     env_obstacles[i].register_ccheckers(ccheckers)
 
      
     # -------------- Threaded robot loops --------------

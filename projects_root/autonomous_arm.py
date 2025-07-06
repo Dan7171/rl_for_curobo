@@ -27,6 +27,7 @@ from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 import omni.kit.commands as cmd
+from projects_root.utils.world_model_wrapper import WorldModelWrapper
 from pxr import Gf
 
 from projects_root.utils.helper import add_robot_to_scene
@@ -129,9 +130,10 @@ class AutonomousArm:
         self.valid_coll_spheres_idx = np.arange(self.n_coll_spheres_valid) # Indices of valid spheres
         
         # robot base frame settings (static, since its an arm and not a mobile robot. Won't change)
-        self.p_R = p_R  
-        self.q_R = q_R 
-        self.X_R = list(p_R) + list(q_R) # robot base frame in world frame
+        self.p_R = p_R  # TODO: naming is not good, should change to p_robot, q_robot, X_robot (the _R implies that the frame is not in the world frame, but in the robot frame. But it is not (the frame is actually in the world frame))
+        self.q_R = q_R # See TODO above
+        self.X_R = list(p_R) + list(q_R) # See TODO above. robot base frame in world frame
+        
         # target settings
         X_target_R = list(p_T_R) + list(q_T_R)
         X_target_W = transform_pose_between_frames(X_target_R, self.X_R) # target frame from robot frame to world frame
@@ -528,7 +530,7 @@ class ArmMpc(AutonomousArm):
   
 
     
-    def init_solver(self,world_model, collision_cache, step_dt_traj_mpc,debug=False):
+    def init_solver(self, step_dt_traj_mpc,debug=False):
         """Initialize the MPC solver.
 
         Args:
@@ -536,21 +538,28 @@ class ArmMpc(AutonomousArm):
             collision_cache (_type_): _description_
             step_dt_traj_mpc (_type_): _description_
             dynamic_obs_coll_predictor (_type_): _description_
+        
         """
-        # if hasattr(self, "dynamic_obs_col_pred"):
-        #     dynamic_obs_coll_predictor = self.dynamic_obs_col_pred
-        # else:
-        #     dynamic_obs_coll_predictor = None
         
 
+        world_cfg = WorldConfig() # curobo world config (agnostic to the simulation/real world)
+
+        # See wrapper's docstring to understand the motivation for the wrapper.
+        self.cu_world_wrapper = WorldModelWrapper(
+            world_config=world_cfg,
+            X_robot_W=np.array(self.X_R), # robot base frame in world frame
+            verbosity=4
+        )
+
+        # Initialize the MPC solver
         mpc_config = MpcSolverConfig.load_from_robot_config(
             self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
-            world_model, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+            world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
             use_cuda_graph=not debug, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
             use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
             self_collision_check=True, # Enable self-collision check during MPC optimization.
             collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
-            collision_cache=collision_cache,
+            collision_cache={"obb": 30, "mesh": 30}, # collision cache for the robot.
             use_mppi=True,  # Use Model Predictive Path Integral for optimization
             use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
             use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
@@ -560,7 +569,6 @@ class ArmMpc(AutonomousArm):
             override_particle_file=self.override_particle_file, # New
             plot_costs=self.plot_costs # New
         )
-
         
         self.solver = MpcSolver(mpc_config)
         
@@ -578,7 +586,7 @@ class ArmMpc(AutonomousArm):
         goal_buffer = self.solver.setup_solve_single(goal_mpc, 1)
         self.goal_buffer = goal_buffer
         self.solver.update_goal(self.goal_buffer)
-        mpc_result = self.step(max_attempts=2)
+        mpc_result = self.step(max_attempts=2) # initiation step
 
 
 
