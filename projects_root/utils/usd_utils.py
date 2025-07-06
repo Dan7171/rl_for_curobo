@@ -167,7 +167,7 @@ r
 
 
 
-def load_usd_to_stage(usd_path: str | os.PathLike[str]):
+def load_usd_to_stage(usd_path: str | os.PathLike[str])->pxr.Usd.Stage:
     import omni.usd
     # Load the stage
     omni.usd.get_context().open_stage(usd_path)

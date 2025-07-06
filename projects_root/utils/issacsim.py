@@ -114,7 +114,7 @@ def init_app(
     Returns
     -------
     SimulationApp
-        Running SimulationApp handle.
+        Running SimulationApp handle. (Type: SimulationApp)
     """
 
     global _GLOBAL_SIM_APP  # pylint: disable=global-statement

@@ -56,16 +56,6 @@ parser.add_argument(
     default=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
 )
 
-# Optional flag: use cuboid (OBB) approximation for non-cuboid obstacles.
-parser.add_argument(
-    "--use_obb_approx",
-    action="store_true",
-    help="Approximate analytic shapes (capsules/cylinders/spheres) with oriented bounding boxes for faster collision checks.",
-    default=False,
-)
-
-
-
 parser.add_argument(
     "--show_bnd_spheres",
     action="store_true",
