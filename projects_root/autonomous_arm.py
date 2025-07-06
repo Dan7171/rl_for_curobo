@@ -869,7 +869,7 @@ class ArmMpc(AutonomousArm):
         
        
     
-    def update_obs_in_sim(self, usd_help:UsdHelper, ignore_substrings:List[str],paths_to_search_obs_under:List[str]=['/World']):
+    def update_obs_in_sim(self, usd_help:UsdHelper, ignore_list:List[str],paths_to_search_obs_under:List[str]=['/World']):
         """
         Sensing and upadting for simulation mode
         """
@@ -879,13 +879,13 @@ class ArmMpc(AutonomousArm):
             usd_helper=usd_help,
             only_paths=paths_to_search_obs_under,
             reference_prim_path='/World', # poses are expressed in world frame
-            ignore_substring=ignore_substrings,
+            ignore_substring=ignore_list,
         )
         
         # Fast pose update (only pose updates, no world-model re-initialization as before)
         self.cu_world_wrapper.update_from_pose_dict(pose_dict)
         current_paths = set(
-            list_relevant_prims(usd_help, paths_to_search_obs_under, ignore_substrings)
+            list_relevant_prims(usd_help, paths_to_search_obs_under, ignore_list)
         )
 
         new_paths = current_paths - self.cu_world_wrapper.get_known_prims()
@@ -897,7 +897,7 @@ class ArmMpc(AutonomousArm):
             new_world_cfg:WorldConfig = usd_help.get_obstacles_from_stage(
                 only_paths=list(new_paths),
                 reference_prim_path=self.prim_path,
-                ignore_substring=ignore_substrings,
+                ignore_substring=ignore_list,
             )
 
             # Convert to collision check world

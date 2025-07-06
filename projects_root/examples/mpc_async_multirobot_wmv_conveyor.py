@@ -377,7 +377,8 @@ def ctrl_loop_robot(robot_idx: int,
                col_pred_with,
                plans: List[Optional[Any]],
                tensor_args,
-               custom_substrings:List[str],
+               cu_world_never_add:List[str],
+               cu_world_never_update:List[str],
                usd_help:Optional[UsdHelper]=None
                ):
     """
@@ -403,7 +404,7 @@ def ctrl_loop_robot(robot_idx: int,
     # Initialize collision check world configuration
     if SIMULATING:
         assert usd_help is not None # Type assertion for linter
-        r.reset_wmw(init_ccheck_wcfg_in_sim(usd_help, r.prim_path, r.target_prim_path, custom_substrings)) 
+        r.reset_wmw(init_ccheck_wcfg_in_sim(usd_help, r.prim_path, r.target_prim_path, cu_world_never_add)) 
     else:
         r.reset_wmw(init_ccheck_wcfg_in_real()) 
 
@@ -424,7 +425,7 @@ def ctrl_loop_robot(robot_idx: int,
         
             # sense
             if SIMULATING:
-                update_obs_callback = (r.update_obs_in_sim, {'usd_help':usd_help, 'ignore_substrings':custom_substrings})
+                update_obs_callback = (r.update_obs_in_sim, {'usd_help':usd_help, 'ignore_list':cu_world_never_add + cu_world_never_update})
                 update_target_callback = (r.update_target_in_sim, {})
                 update_joint_state_callback = (r.update_joint_state_in_sim, {})
             else:
@@ -594,8 +595,11 @@ def main(meta_config_paths: List[str]):
     plans_lock = Lock()       # Protects access to shared plans list
     physx_lock = Lock()       # Protects access to shared physx state (robot state, etc...)
     plans: List[Optional[Any]] = [None for _ in range(len(robots))] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
-    custom_ignore_substrings_cu_world = ["/World/defaultGroundPlane", "/curobo", *[robot.target_prim_path for robot in robots],*[robot.prim_path for robot in robots], "/World/ConveyorTrack", '/World/conveyor_cube']
-    robot_threads = [Thread(target=ctrl_loop_robot,args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args, custom_ignore_substrings_cu_world,usd_help), daemon=True) for idx in range(len(robots))] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
+    
+    cu_world_never_add = ["/curobo", *[robot.target_prim_path for robot in robots],*[robot.prim_path for robot in robots], "/World/ConveyorTrack", '/World/conveyor_cube'] # never treat these names as obstacles (add them to world model)
+    cu_world_never_update = ["/World/defaultGroundPlane", "/World/cv_approx"] # add here any substring of an onstacle you assume remains static throughout the entire simulation!
+    
+    robot_threads = [Thread(target=ctrl_loop_robot,args=(idx, stop_event, lambda: t_idx, t_lock, physx_lock, plans_lock, robots, col_pred_with, plans, tensor_args, cu_world_never_add, cu_world_never_update, usd_help), daemon=True) for idx in range(len(robots))] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
     for th in robot_threads:
         th.start()
     
