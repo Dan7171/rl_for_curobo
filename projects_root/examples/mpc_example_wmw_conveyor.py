@@ -296,7 +296,7 @@ def main(robot_base_frame, target_prim_subpath, obs_root_prim_path, world_prim_p
     stage.DefinePrim("/curobo", "Xform")
     stage = my_world.stage
 
-    paths_to_ignore_in_curobo_world_model = [ "/World/ConveyorTrack" + x for x in ['', '_01', '_02', '_03', '_04', '_05', '_06', '_07']] + ['/World/conveyor_cube'] # too heavy to load meshes, instead we use obb approximation to cubes
+    paths_to_ignore_in_curobo_world_model = [ "/World/ConveyorTrack" + x for x in ['', '_01', '_02', '_03', '_04', '_05', '_06', '_07']] + ['/World/conveyor_cube' + x for x in ['', '_down']] # too heavy to load meshes, instead we use obb approximation to cubes
     print(f"Paths to ignore in curobo world model: {paths_to_ignore_in_curobo_world_model}")
 
     # Make a target to follow
