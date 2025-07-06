@@ -165,6 +165,16 @@ r
 
     return created_paths
 
+
+
+def load_usd_to_stage(usd_path: str | os.PathLike[str]):
+    import omni.usd
+    # Load the stage
+    omni.usd.get_context().open_stage(usd_path)
+    # Access the loaded stage (optional, if you need to manipulate it)
+    stage = omni.usd.get_context().get_stage()
+    return stage
+
 def get_simulation_app(headless: bool = True):  # -> SimulationApp when available
     sim_app = init_app(headless=headless)
     return sim_app
