@@ -122,13 +122,13 @@ echo "CONTAINER_NAME: $CONTAINER_NAME"
 echo "DC_ENABLED: $DC_ENABLED"
 echo "DC_DEV_ID: $DC_DEV_ID"
 echo "REPO_PATH_CONTAINER: $REPO_PATH_CONTAINER"
-echo "DC_OPTIONS: $DC_OPTIONS"
+echo "DC_OPTIOCDNS: $DC_OPTIONS"
 echo ""
 echo "*Quick Start examples:*"
 echo "- isaac sim only:"
 echo "/isaac-sim/isaac-sim.sh"
-# echo "- change cd to mounted repo:"
-# echo " cd $REPO_PATH_CONTAINER"
+echo "- change cd to mounted repo:"
+echo " cd $REPO_PATH_CONTAINER"
 echo "- change cd to curobo original repo:"
 echo " cd /pkgs/curobo"
 echo "- MPC example:"
@@ -169,7 +169,7 @@ docker run \
   -e "__NV_PRIME_RENDER_OFFLOAD=1" \
   -e "__GLX_VENDOR_LIBRARY_NAME=nvidia" \
   -e "XAUTHORITY=/root/.Xauthority" \
-  -v "$HOME/docker_shared:/workspace/docker_shared:rw" \
+  -v "$REPO_PATH_HOST:/root/$REPO_NAME:rw" \
   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
   -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
   -v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
@@ -179,5 +179,5 @@ docker run \
   -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
   --volume /dev:/dev \
-  ${IMAGE_NAME}:${IMAGE_TAG} \
-  -c "source /opt/ros/humble/setup.sh && $DOCKER_CMD"
+  ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+  -c "cd /root/$REPO_NAME && source /opt/ros/humble/setup.sh && $DOCKER_CMD"

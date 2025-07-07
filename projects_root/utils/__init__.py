@@ -24,3 +24,5 @@ def _setup_paths():
 
 # Auto-setup when this module is imported
 _setup_paths()
+
+

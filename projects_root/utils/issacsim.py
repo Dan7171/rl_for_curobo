@@ -129,8 +129,8 @@ def init_app(
     if app_settings is None:
         app_settings = {
             "headless": False,
-            # "width": "800",
-            # "height": "600",
+            "width": "800",
+            "height": "600",
         }
 
     # Best-effort pre-load – only some versions honour this key.
@@ -281,9 +281,8 @@ def make_world(ground_plane=True, to_Xform=False, set_default_prim=True)-> World
             # Create /World as Xform if it doesn't exist
             prim = world.stage.DefinePrim(world_path, "Xform")
         elif prim.GetTypeName() != "Xform":
-            # Optionally redefine type (note: not strictly required unless type matters)
-            Usd.Prim(prim).GetSpecifier()  # No-op here but placeholder for logging/debug
-
+            # Usd.Prim(prim).GetSpecifier()  # No-op here but placeholder for logging/debug
+            _ = world.stage.DefinePrim("/World", "Xform")
     # Set /World as default prim if requested
     if set_default_prim:
         world.stage.SetDefaultPrim(world.stage.GetPrimAtPath(world_path))

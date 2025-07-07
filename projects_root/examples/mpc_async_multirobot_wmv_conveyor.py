@@ -11,6 +11,7 @@ os.environ.setdefault("MPLBACKEND", "Agg") # ?
 
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
+REAL = False # currently unsupported
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
 ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
 OBS_PREDICTION = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
@@ -70,14 +71,15 @@ if True: # imports and initiation (put it in an if statement to collapse it)
             activate_gpu_dynamics(my_world)
         
         # Set simulation dt
-        my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
+        # my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
+        
         
         from projects_root.utils.helper import add_extensions # available only after app initiation
         add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
         # from omni.isaac.core.utils.physics import set_physics_threads
         
 
-    else:
+    if REAL:
         # TODO: figure out what we do when SIMULATING=False (should not be too hard)
         my_world = None
         usd_help = None
@@ -405,11 +407,12 @@ def ctrl_loop_robot(robot_idx: int,
     if SIMULATING:
         assert usd_help is not None # Type assertion for linter
         r.reset_wmw(init_ccheck_wcfg_in_sim(usd_help, r.prim_path, r.target_prim_path, cu_world_never_add)) 
-    else:
+    if REAL:
         r.reset_wmw(init_ccheck_wcfg_in_real()) 
 
     # Control loop
     while not stop_event.is_set():
+
         # wait for new time step
         with t_lock:
             cur_step = get_t_idx()
@@ -418,29 +421,43 @@ def ctrl_loop_robot(robot_idx: int,
             continue
         last_step = cur_step
 
-        with physx_lock:
-            # publish 
-            if OBS_PREDICTION:
-                r.publish(plans, plans_lock)
-        
-            # sense
+        # publish 
+        if OBS_PREDICTION:
+            sim_js = None
+            real_js = None
             if SIMULATING:
-                update_obs_callback = (r.update_obs_in_sim, {'usd_help':usd_help, 'ignore_list':cu_world_never_add + cu_world_never_update})
-                update_target_callback = (r.update_target_in_sim, {})
-                update_joint_state_callback = (r.update_joint_state_in_sim, {})
-            else:
-                update_obs_callback = (r.update_obs_in_real, {})
-                update_target_callback = (lambda x: print(f"TODO: Implement update_target_callback in real world"), {})
-                update_joint_state_callback = (lambda x: print(f"TODO: Implement update_joint_state_callback in real world"), {})
+                sim_js = r.get_sim_joint_state(sync_new=False) # synced at sense()
+            if REAL:
+                pass # real_js = # TODO: r.get_real_joint_state()
+            r.publish(plans, plans_lock,sim_js,real_js)
+    
+        
+            
+        # sense
+        if SIMULATING:
+            update_obs_callback = (r.update_obs_from_sim, {'usd_help':usd_help, 'ignore_list':cu_world_never_add + cu_world_never_update})
+            update_target_callback = (r.update_target_from_sim, {})
+            update_joint_state_callback = (r.update_cu_js_from_sim, {})
             
             if r.use_col_pred:
-                r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+                r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, physx_lock, plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
             else:
-                r.sense(update_obs_callback, update_target_callback, update_joint_state_callback)
+                r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, physx_lock)
+
+        if REAL:
+            update_obs_callback = (r.update_obs_in_real, {})
+            update_target_callback = (lambda x: print(f"TODO: Implement update_target_callback in real world"), {})
+            update_joint_state_callback = (lambda x: print(f"TODO: Implement update_joint_state_callback in real world"), {})
+            # TODO:
+            # if r.use_col_pred:
+            #     r.sense(update_obs_callback, update_target_callback, update_joint_state_callback,, plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+            # else:
+            #     r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, physx_lock=None)
         
-        # plan (improved curobo mpc planning, (torch-heavy, no PhysX))
+        # plan (our modified mpc planning, (torch-heavy, no PhysX))
         action = r.plan(max_attempts=2)
-        # command* 
+        
+        # command 
         r.command(action, num_times=1, physx_lock=physx_lock)
 
 def is_dyn_obs_cost_in_cfg(mpc_cfg:dict) -> bool:
@@ -497,6 +514,10 @@ def main(meta_config_paths: List[str]):
         
         # Make also /curobo as Xform prim
         _curobo_xform = stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
+
+    if REAL:
+        pass
+        # TODO: init real world
 
 
     # ------------------
@@ -560,7 +581,10 @@ def main(meta_config_paths: List[str]):
         # reset default prim to /World
         stage.SetDefaultPrim(stage.GetPrimAtPath("/World")) # TODO: Try removing this and check if it breaks anything (if nothing breaks, remove it)    
         wait_for_playing(my_world, simulation_app, autoplay=True) 
-    
+    if REAL:
+        pass
+        # TODO: needed?
+        
     # -----------------------------------------------------------------------------------------
     # Publish "contexts" 
     # (each robot context serves robot and other robots solver initialization)
@@ -580,7 +604,12 @@ def main(meta_config_paths: List[str]):
         _robot_idx_list = [robot.robot.get_dof_index(x) for x in robot.j_names]
         robot_idx_lists[i] = _robot_idx_list
         assert _robot_idx_list is not None # Type assertion for linter    
-        robot.init_joints(_robot_idx_list)
+        if SIMULATING:
+            robot.init_joints_in_sim(_robot_idx_list)
+        if REAL:
+            pass 
+            # TODO: INIT JOINT POSITIONS IN REAL WORLD
+            # robot.init_joints(_robot_idx_list)
         
         # Init robot mpc solver
         robots[i].init_solver(MPC_DT, DEBUG)
@@ -609,10 +638,18 @@ def main(meta_config_paths: List[str]):
     if SIMULATING:
         assert simulation_app is not None # Type assertion for linter (it is not None when SIMULATING=True)
         while simulation_app.is_running():
-            with physx_lock:
+            
+            # wait_physx_start = time.time()
+            with physx_lock: 
+                # print(f"main-physx_lock_wait_time,{time.time() - wait_physx_start}")
+                step_start_time = time.time()
                 my_world.step(render=True)           
+                step_end_time = time.time()
+                print(f"main-world-step-time, {step_end_time - step_start_time}")
+                        
             with t_lock:
                 t_idx += 1
+            
             if t_idx % step_batch_size == 0: # step batch size = 100
                 step_batch_time = time.time() - step_batch_start_time
                 print(f"ts: {t_idx}")
@@ -622,7 +659,7 @@ def main(meta_config_paths: List[str]):
                 step_batch_start_time = time.time()
         simulation_app.close() 
         
-    else: # Real world (no simulation)
+    else: # Real world (no simulation) # TODO add support for both or just one of them
         while True:
             with t_lock:
                 t_idx += 1

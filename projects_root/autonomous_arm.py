@@ -8,6 +8,7 @@ from curobo.geom.sdf.world_mesh import WorldMeshCollision
 from curobo.opt.particle.parallel_mppi import ParallelMPPI
 from curobo.rollout.arm_reacher import ArmReacher
 from curobo.rollout.cost.custom.arm_base.dynamic_obs_cost import DynamicObsCost
+from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres
 from curobo.wrap.wrap_mpc import WrapMpc
 import torch
 from typing import Callable, Dict, Union
@@ -257,14 +258,16 @@ class AutonomousArm:
     def _check_robot_static(self, sim_js) -> bool:
         return np.max(np.abs(sim_js.velocities)) < 0.2
     
-    def init_joints(self, idx_list:list):
+    def init_joints_in_sim(self, idx_list:list):
         """Set the maximum efforts for the robot.
         Args:
           
         """
         # robot.robot._articulation_view.initialize()
-        self.robot.set_joint_positions(self.initial_joint_config, idx_list) 
+        self.robot.set_joint_positions(self.initial_joint_config, idx_list)
         self.robot._articulation_view.set_max_efforts(values=np.array([5000 for _ in range(len(idx_list))]), joint_indices=idx_list)
+        _init_sim_js = self.get_sim_joint_state(sync_new=True) # we dont_need the value, only for syncing the state
+        print(f"debug: self.sim_js was set to: {_init_sim_js}")
 
     def get_robot_as_spheres(self, cu_js, express_in_world_frame=False) -> list[Sphere]:
         """Get the robot as spheres from the curobot joints state.
@@ -321,8 +324,20 @@ class AutonomousArm:
     def get_dof_names(self):
         return self.robot.dof_names
 
-    def get_sim_joint_state(self) -> isaac_JointsState:
-        return self.robot.get_joints_state()
+    def get_sim_joint_state(self, sync_new=True) -> isaac_JointsState:
+        if sync_new:
+            sim_js = self.robot.get_joints_state() # from simulation. TODO: change "robot" to sim_robot and add a real_robot attribute
+            self.sim_js = sim_js # update the last synced state
+        else:
+            sim_js = self.sim_js # return the last synced state
+    
+        return sim_js  # last synced state
+        
+    def get_real_joint_state(self, sync_new=True) -> isaac_JointsState:
+        if sync_new:
+            pass
+            # TODO: get new real joint state
+
     
     def get_curobo_joint_state(self, sim_js, zero_vel:bool) -> JointState:
         """Returns the curobo joint configuration (robot joint state represented as a JointState object,
@@ -336,7 +351,7 @@ class AutonomousArm:
             JointState: the robot's joint configuration in curobo's representation.
         """
         if sim_js is None:
-            sim_js = self.get_sim_joint_state()
+            sim_js = self.get_sim_joint_state(sync_new=True) # sync_new=True means that we are getting a new state from the simulation, not from the last synced state
         position = self.tensor_args.to_device(sim_js.positions)
         velocity = self.tensor_args.to_device(sim_js.velocities) * 0.0 if zero_vel else self.tensor_args.to_device(sim_js.velocities)
         acceleration = self.tensor_args.to_device(sim_js.velocities) * 0.0
@@ -344,31 +359,6 @@ class AutonomousArm:
         cu_js = JointState(position=position,velocity=velocity,acceleration=acceleration,jerk=jerk,joint_names=self.get_dof_names()) # joint_names=self.robot.dof_names) 
         return cu_js
     
-    def update_cu_js(self, sim_js, zero_vel=True):
-        cu_js = self.get_curobo_joint_state(sim_js, zero_vel=zero_vel)
-        self.update_current_state(cu_js)
-        return cu_js
-
-    def get_current_spheres_state(self,express_in_world_frame:bool=True, valid_only=True,zero_vel=False):
-        cu_js = self.get_curobo_joint_state(self.get_sim_joint_state(),zero_vel=zero_vel) # zero vel doesent matter since we are getting sphere poses and radii
-        link_spheres_R = self.crm.compute_kinematics_from_joint_state(cu_js).get_link_spheres()
-        p_link_spheres_R = link_spheres_R[:,:,:3].cpu() # position of spheres expressedin robot base frame
-        if express_in_world_frame:
-            p_link_spheres_W = p_link_spheres_R + self.p_R
-            p_link_spheres_F = p_link_spheres_W
-        else:
-            p_link_spheres_F = p_link_spheres_R
-        p_link_spheres_F = p_link_spheres_F.squeeze(0)
-        rad_link_spheres = link_spheres_R[:,:,3].cpu().squeeze(0)
-        
-        if valid_only:
-            sphere_indices = torch.nonzero(rad_link_spheres > 0, as_tuple=True)[0] # valid is positive radius
-            p_link_spheres_F = p_link_spheres_F[sphere_indices]
-            rad_link_spheres = rad_link_spheres[sphere_indices]
-        else:
-            sphere_indices = torch.arange(p_link_spheres_F.shape[0]) # all sphere indices
-
-        return p_link_spheres_F, rad_link_spheres, sphere_indices
         
     @abstractmethod
     def apply_articulation_action(self, art_action:ArticulationAction):
@@ -619,7 +609,7 @@ class ArmMpc(AutonomousArm):
         cu_js = cu_js.get_ordered_joint_state(self.solver.rollout_fn.joint_names)
         return cu_js
     
-    def update_target_in_sim(self):
+    def update_target_from_sim(self):
         """
         Update the robot's target from the scene and sync it with the solver if needed.
         This encapsulates the common pattern of getting target pose and updating the solver.
@@ -635,6 +625,9 @@ class ArmMpc(AutonomousArm):
     
     
     def update_current_state(self, cu_js):
+        """
+        Update curobo formated joint state.
+        """
         if self._cmd_state_full is None:
             self.current_state.copy_(cu_js)
         else:
@@ -645,16 +638,16 @@ class ArmMpc(AutonomousArm):
             self.current_state.joint_names = current_state_partial.joint_names
         self.current_state.copy_(cu_js)
 
-    def update_joint_state_in_sim(self):
+    def update_cu_js_from_sim(self):
         """
         Update the robot's joint state from simulation and store it in CuRobo format.
         This encapsulates the common pattern of getting simulation joint state, 
         converting to CuRobo format, and updating the solver's current state.
         """
-        isaac_sim_joints = self.get_sim_joint_state()
-        self.curobo_format_joints = self.get_curobo_joint_state(isaac_sim_joints)
-        self.update_current_state(self.curobo_format_joints)
-
+        isaac_sim_joints = self.get_sim_joint_state(sync_new=True) # sync_new=True means that we are getting a new state from the simulation, not from the last synced state
+        self.curobo_format_joints = self.get_curobo_joint_state(isaac_sim_joints) # TODO: This is curobo js read from sim! Consider chaning it to be read from real world or make both real and sim js of curob...
+        self.update_current_state(self.curobo_format_joints) # TODO: there are two curobo updates here. One self.curobo_format_joints and one self.current_state. One must be redundant... 
+    
     def get_next_articulation_action(self, js_action):
         """Get articulated action from joint state action (supplied by MPC solver).
         Args:
@@ -758,7 +751,7 @@ class ArmMpc(AutonomousArm):
         """
         return self.solver.solver.optimizers[0].mean_action.squeeze(0)
     
-    def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True) -> Optional[dict]:
+    def get_plan(self, include_task_space:bool=True, n_steps:int=-1 ,valid_spheres_only = True, js_state_sim:Optional[isaac_JointsState]=None, js_state_real=None) -> Optional[dict]:
         """
         Get the H steps plan from the solver. All positions are in the world frame.
         Args:
@@ -807,7 +800,6 @@ class ArmMpc(AutonomousArm):
                 filter_coeff = FilterCoeff(0.01, 0.01, 0.0, 0.0) # custom one to play with the filter weights
             else:
                 filter_coeff = filter_coefficients_solver # the one used by the mpc planner
-        js_state_sim = self.get_sim_joint_state()
         n_dofs = pi_mpc_means.shape[1]
         js_state = JointState(torch.from_numpy(js_state_sim.positions[:n_dofs]), torch.from_numpy(js_state_sim.velocities[:n_dofs]), torch.zeros(n_dofs), self.get_dof_names(),torch.zeros(n_dofs), self.tensor_args)
         js_state_prev = None
@@ -849,7 +841,6 @@ class ArmMpc(AutonomousArm):
                         qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
                     
                     # OPTIMIZED VERSION: Use ultra-fast specialized function
-                    from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres
                     X_world = transform_poses_batched_optimized_for_spheres(torch.cat([pKey, qKey], dim=-1), self_transform)
                     pKey = X_world[...,:3]
                     qKey = X_world[...,3:]
@@ -869,9 +860,9 @@ class ArmMpc(AutonomousArm):
         
        
     
-    def update_obs_in_sim(self, usd_help:UsdHelper, ignore_list:List[str],paths_to_search_obs_under:List[str]=['/World']):
+    def update_obs_from_sim(self, usd_help:UsdHelper, ignore_list:List[str],paths_to_search_obs_under:List[str]=['/World']):
         """
-        Sensing and upadting for simulation mode
+        Sensing obs from simulation and updating the world model
         """
 
         # get poses of all obstacles in the world (in world frame)
@@ -998,7 +989,7 @@ class ArmMpc(AutonomousArm):
         return self.solver.step(self.current_state, shift_steps=shift_steps, seed_traj=seed_traj, max_attempts=max_attempts)
 
     
-    def sense(self,update_obs_callback:Tuple[Callable, dict], update_target_callback:Tuple[Callable, dict], update_joint_state_callback:Tuple[Callable, dict], plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None,physx_lock:Optional["Lock"]=None):
+    def sense(self,update_obs_callback:Tuple[Callable, dict], update_target_callback:Tuple[Callable, dict], update_joint_state_callback:Tuple[Callable, dict],physx_lock:"Lock", plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None):
         """
         Complete robot sensing and state update update cycle: collision prediction, joint state, target, and MPC step.
         
@@ -1027,13 +1018,14 @@ class ArmMpc(AutonomousArm):
             else: # for the sync setup
                 self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
         
-        # Update obs poses callback (in simulation or real world)
-        update_obs_callback[0](**update_obs_callback[1])
-        # Update joint state callback
-        update_joint_state_callback[0](**update_joint_state_callback[1])        
-        # Update target callback
-        update_target_callback[0](**update_target_callback[1])
-        
+        with physx_lock:
+            # Update obs poses callback (in simulation or real world)
+            update_obs_callback[0](**update_obs_callback[1])
+            # Update joint state callback
+            update_joint_state_callback[0](**update_joint_state_callback[1])        
+            # Update target callback
+            update_target_callback[0](**update_target_callback[1])
+            
         
 
     def get_rollouts_in_world_frame(self):
@@ -1066,9 +1058,9 @@ class ArmMpc(AutonomousArm):
         self.last_planned_action = art_action
         return art_action
     
-    def publish(self, plans, plans_lock:"Lock"):
+    def publish(self, plans, plans_lock:"Lock",sim_js=None,real_js=None):
         with plans_lock:
-            plans[self.instance_id] = self.get_plan(valid_spheres_only=False)
+            plans[self.instance_id] = self.get_plan(valid_spheres_only=False,js_state_sim=sim_js, js_state_real=real_js)
     
     def reset_wmw(self, initial_world_model:WorldConfig):
 
