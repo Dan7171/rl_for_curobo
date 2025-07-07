@@ -69,12 +69,16 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         # Enable GPU dynamics if needed
         if ENABLE_GPU_DYNAMICS:
             activate_gpu_dynamics(my_world)
+        else:
+            import carb
+            carb.settings.get_settings().set("/app/physx/workerThreadCount", 8)
+        
         # Set simulation dt
         my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
         
         from projects_root.utils.helper import add_extensions # available only after app initiation
         add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
-        
+        # from omni.isaac.core.utils.physics import set_physics_threads
         
 
     else:

@@ -25,7 +25,7 @@ echo "--------------------------------"
 # Initialize default values
 CONTAINER_REGISTRY='de257' # change this to your own registry after pulling the image from the registry
 IMAGE_NAME='curobo_isaac45' 
-IMAGE_TAG='v1_rl_for_curobo_module_installed' # 'latest'
+IMAGE_TAG='latest' # 'v1_rl_for_curobo_module_installed' # 'latest'
 CONTAINER_NAME='curobo_isaac45_root_container'
 DC_ENABLED='true'
 DC_DEV_ID='002'
@@ -105,6 +105,13 @@ else
     DC_OPTIONS=""
 fi
 
+# Fix X11 forwarding issues
+echo "Setting up X11 forwarding..."
+xhost +local:root
+
+# Ensure cache directories exist
+mkdir -p ~/docker/isaac-sim/cache/{kit,ov,pip,glcache,computecache,logs,data,documents}
+
 echo "--------------------------------"
 echo "Running docker container..."
 echo "--------------------------------"
@@ -154,8 +161,14 @@ docker run \
   --privileged \
   -e "PRIVACY_CONSENT=Y" \
   -v $HOME/.Xauthority:/root/.Xauthority \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
   -e "OMNI_KIT_ALLOW_ROOT=1" \
   -e DISPLAY \
+  -e "NVIDIA_DRIVER_CAPABILITIES=all" \
+  -e "NVIDIA_VISIBLE_DEVICES=all" \
+  -e "__NV_PRIME_RENDER_OFFLOAD=1" \
+  -e "__GLX_VENDOR_LIBRARY_NAME=nvidia" \
+  -e "XAUTHORITY=/root/.Xauthority" \
   -v "$REPO_PATH_HOST:/root/$REPO_NAME:rw" \
   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
   -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \

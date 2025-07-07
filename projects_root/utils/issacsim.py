@@ -129,8 +129,8 @@ def init_app(
     if app_settings is None:
         app_settings = {
             "headless": False,
-            "width": "800",
-            "height": "600",
+            # "width": "800",
+            # "height": "600",
         }
 
     # Best-effort pre-load – only some versions honour this key.
