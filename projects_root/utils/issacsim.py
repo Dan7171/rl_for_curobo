@@ -127,10 +127,23 @@ def init_app(
 
     # Default launch config
     if app_settings is None:
+        # Common:
+
+            # 640×480 (VGA)
+
+            # 1280×720 (HD)
+
+            # 1920×1080 (Full HD)
+
+            # 2560×1440 (QHD)
+
+            # 3840×2160 (4K UHD)
+
+
         app_settings = {
             "headless": False,
-            "width": "800",
-            "height": "600",
+            "width": "640",
+            "height": "480",
         }
 
     # Best-effort pre-load – only some versions honour this key.
