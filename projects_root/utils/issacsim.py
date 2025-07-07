@@ -144,6 +144,7 @@ def init_app(
             "headless": False,
             "width": "640",
             "height": "480",
+            
         }
 
     # Best-effort pre-load – only some versions honour this key.

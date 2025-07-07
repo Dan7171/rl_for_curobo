@@ -31,6 +31,8 @@ collision_obstacles_cfg_path = "projects_root/projects/dynamic_obs/dynamic_obs_p
 robots_cfgs_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/robot/franka"
 mpc_cfg_overide_files_dir = "projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc"
 robots_collision_spheres_configs_parent_dir = "curobo/src/curobo/content/configs/robot"
+import os
+
 
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
@@ -71,7 +73,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
             activate_gpu_dynamics(my_world)
         
         # Set simulation dt
-        # my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
+        my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
         
         
         from projects_root.utils.helper import add_extensions # available only after app initiation
