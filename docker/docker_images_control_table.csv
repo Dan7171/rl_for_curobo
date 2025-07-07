@@ -64,7 +64,7 @@ URL:https://github.com/Dan7171/rl_for_curobo/commit/f062fde0bf5cb7c72686b03a2e25
 5.7.25,"de257/curobo_isaac45:v1_rl_for_curobo_module_installed
 ",sha256:855a0af52459fd2107182d39b66b0bed2cf899aee1f168459de5a9e1cb2c7ee3,,,,,"uninstalled the rl_for_curobo module from omni_python and $PYTHONPATH (ros2, its a bug that it was installed there anyway) and kept only curobo modules (in rl_for_curobo) installed. Now using dynamic import as a temp solution: sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))) ",
 07/07/25,"de257/curobo_isaac45v2:latest
-",sha256:8788435cfb0bdbed1d66680a9d92d7831e0cd1a8e1ef27c9ca0a83ea47524644,de257/curobo_isaac45:latest (if not working try de257/curobo_isaac45@sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6),,,curobo/docker/start_docker_isaac_sim45rootv2.sh ,"
+",sha256:8788435cfb0bdbed1d66680a9d92d7831e0cd1a8e1ef27c9ca0a83ea47524644,de257/curobo_isaac45:latest (if not working try de257/curobo_isaac45@sha256:5f76f7fdf0a7caf1327eeb73392d7b490d851e008aacef14b4ae5d66209098f6),,0f19db4f3beb724fd03eba56461fbc70b8e5a08c,curobo/docker/start_docker_isaac_sim45rootv2.sh ,"
 Copied rl_for_curobo from host to /workspace/rl_for_curobo in image
 Then installed the packages rl_for_curobo and curobo (the one inside rl_for_curobo, not the one under /pkgs/curobo (original installation) using omni_python -m pip -e (editable mode)
 Then saved. Dockerfile available in curobo/docker/isaac_sim_45v2.dockerfile

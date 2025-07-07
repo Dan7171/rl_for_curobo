@@ -89,6 +89,7 @@ def init_app(
         "isaacsim.asset.gen.conveyor",
         "isaacsim.asset.gen.conveyor.ui" ,
         "omni.kit.window.script_editor",
+        "omni.isaac.articulation_inspector",
     ],
     preload_extensions: bool = False,
 ) -> Any:
