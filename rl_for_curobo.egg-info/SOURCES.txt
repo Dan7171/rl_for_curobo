@@ -690,9 +690,11 @@ projects_root/utils/draw.py
 projects_root/utils/dynamic_scene_manager.py
 projects_root/utils/handy_utils.py
 projects_root/utils/helper.py
+projects_root/utils/import_setup.py
 projects_root/utils/issacsim.py
 projects_root/utils/joint_state.py
 projects_root/utils/multi_arm_config_generator.py
+projects_root/utils/path_setup.py
 projects_root/utils/plot_spheres.py
 projects_root/utils/quaternion.py
 projects_root/utils/size.py

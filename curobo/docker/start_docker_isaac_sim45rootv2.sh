@@ -24,9 +24,9 @@ echo "--------------------------------"
 
 # Initialize default values
 CONTAINER_REGISTRY='de257' # change this to your own registry after pulling the image from the registry
-IMAGE_NAME='curobo_isaac45' 
-IMAGE_TAG='v1_rl_for_curobo_module_installed' # 'v1_rl_for_curobo_module_installed' # 'latest'
-CONTAINER_NAME='curobo_isaac45_root_container'
+IMAGE_NAME='curobo_isaac45v2' 
+IMAGE_TAG='latest' # 'v1_rl_for_curobo_module_installed' # 'latest'
+CONTAINER_NAME='curobo_isaac45v2_root_container'
 DC_ENABLED='true'
 DC_DEV_ID='002'
 REPO_PATH_HOST=$(realpath ~/rl_for_curobo) # must be absolute path
@@ -122,13 +122,13 @@ echo "CONTAINER_NAME: $CONTAINER_NAME"
 echo "DC_ENABLED: $DC_ENABLED"
 echo "DC_DEV_ID: $DC_DEV_ID"
 echo "REPO_PATH_CONTAINER: $REPO_PATH_CONTAINER"
-echo "DC_OPTIOCDNS: $DC_OPTIONS"
+echo "DC_OPTIONS: $DC_OPTIONS"
 echo ""
 echo "*Quick Start examples:*"
 echo "- isaac sim only:"
 echo "/isaac-sim/isaac-sim.sh"
-echo "- change cd to mounted repo:"
-echo " cd $REPO_PATH_CONTAINER"
+# echo "- change cd to mounted repo:"
+# echo " cd $REPO_PATH_CONTAINER"
 echo "- change cd to curobo original repo:"
 echo " cd /pkgs/curobo"
 echo "- MPC example:"
@@ -169,7 +169,7 @@ docker run \
   -e "__NV_PRIME_RENDER_OFFLOAD=1" \
   -e "__GLX_VENDOR_LIBRARY_NAME=nvidia" \
   -e "XAUTHORITY=/root/.Xauthority" \
-  -v "$REPO_PATH_HOST:/root/$REPO_NAME:rw" \
+  -v "$HOME/docker_shared:/workspace/docker_shared:rw" \
   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
   -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
   -v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
@@ -179,5 +179,5 @@ docker run \
   -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
   --volume /dev:/dev \
-  ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
-  -c "source /opt/ros/humble/setup.sh && if ! \$omni_python -m pip list | grep -q rl_for_curobo; then echo \"Installing rl_for_curobo package...\"; cd $REPO_PATH_CONTAINER && \$omni_python -m pip install -e .; else echo \"rl_for_curobo package already installed.\"; fi && $DOCKER_CMD"
+  ${IMAGE_NAME}:${IMAGE_TAG} \
+  -c "source /opt/ros/humble/setup.sh && $DOCKER_CMD"

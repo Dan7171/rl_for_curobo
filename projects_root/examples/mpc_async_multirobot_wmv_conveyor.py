@@ -7,9 +7,8 @@ import os
 from typing import Dict
 os.environ.setdefault("MPLBACKEND", "Agg") # ?
 
-import sys
-# TODO: dynamic imports in container- temp solution instead of 'omni_python - pip install .' (in rl_for_curobo dir)
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Clean imports - no path setup needed!
+
 
 SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
 REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
@@ -69,9 +68,6 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         # Enable GPU dynamics if needed
         if ENABLE_GPU_DYNAMICS:
             activate_gpu_dynamics(my_world)
-        else:
-            import carb
-            carb.settings.get_settings().set("/app/physx/workerThreadCount", 8)
         
         # Set simulation dt
         my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)

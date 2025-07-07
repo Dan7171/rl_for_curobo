@@ -1,13 +1,13 @@
 """
-Utils module for RL CuRobo project.
+Import setup for RL CuRobo project.
+Just import this module at the top of any script to set up paths automatically.
 """
 
 import sys
 import os
 from pathlib import Path
 
-# Auto-setup paths when this module is imported
-def _setup_paths():
+def setup_paths():
     """Setup Python paths for the RL CuRobo project."""
     # Get the project root (3 levels up from this file)
     project_root = Path(__file__).parent.parent.parent.absolute()
@@ -23,4 +23,4 @@ def _setup_paths():
             sys.path.insert(0, container_path)
 
 # Auto-setup when this module is imported
-_setup_paths()
+setup_paths() 

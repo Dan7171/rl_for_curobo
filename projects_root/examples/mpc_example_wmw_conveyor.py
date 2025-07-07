@@ -12,7 +12,7 @@
 
 import sys, os
 # dynamic imports in container- temp solution instead of 'omni_python - pip install .' (in rl_for_curobo dir)
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
     # Third Party
