@@ -32,7 +32,7 @@ DC_DEV_ID='002' # device id for depth camera. You need to run 'lsusb' in linux h
 REPO_PATH_HOST=$(realpath ~/rl_for_curobo) # must be absolute path, change this to where you cloned the repo
 CMD_IN_CONTAINER='' # No command by default
 DEV_CONTAINER_VSCODE_ENABLED='false' # Change this to 'true' if you want to use VSCode in the container
-USER='root' # 'host_user'
+USER='root' # 'host_user' root
 
 # Help method
 function show_help() {
@@ -199,7 +199,7 @@ docker run $DC_OPTIONS \
   -v ~/docker/isaac-sim/documents:/home/isaac/Documents:rw \
   --volume /dev:/dev \
   ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
-  -c bash -c "cd $REPO_PATH_CONTAINER && \
+  -c "cd $REPO_PATH_CONTAINER && \
   /isaac-sim/python.sh -m pip uninstall -y rl_for_curobo && \
   /isaac-sim/python.sh -m pip install -e $REPO_PATH_CONTAINER && \
   source /opt/ros/humble/setup.sh && \
