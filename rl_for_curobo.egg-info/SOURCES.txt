@@ -1,7 +1,6 @@
 .gitattributes
 .gitignore
 __init__.py
-bounding_spheres.obj
 capsule.obj
 pyrightconfig.json
 setup.py
@@ -608,7 +607,6 @@ generated_multi_arm_configs/particle_mpc_franka_4_arm.yml
 generated_multi_arm_configs/particle_mpc_ur5e_3_arm.yml
 generated_multi_arm_configs/ur5e_3_arm.urdf
 generated_multi_arm_configs/ur5e_3_arm.yml
-projects_root/K_ARM_EXTENSION_PLAN.md
 projects_root/__init__.py
 projects_root/autonomous_arm.py
 projects_root/test_transforms.py
@@ -679,7 +677,6 @@ projects_root/rl_for_curobo.egg-info/SOURCES.txt
 projects_root/rl_for_curobo.egg-info/dependency_links.txt
 projects_root/rl_for_curobo.egg-info/requires.txt
 projects_root/rl_for_curobo.egg-info/top_level.txt
-projects_root/tests/load_urdf.py
 projects_root/usd/assets/normal_KLT.usd
 projects_root/usd/assets/small_KLT_visual_collision.usd
 projects_root/utils/__init__.py
@@ -720,6 +717,5 @@ start_here/austin_guide.txt
 start_here/installation.txt
 start_here/manual_stats_austin.py
 start_here/migration_from_4_to_4.5.txt_core_changes
-tests/test_world_model_wrapper.py
 third_party/meshlab/MeshLab2023.12-linux.AppImage
 third_party/meshlab/debug_mesh.obj
