@@ -73,23 +73,23 @@ def init_app(
     headless: bool = False,
     *,
     extensions: Optional[Sequence[str]] = [
-        "isaacsim.asset.browser",
-        "omni.asset_validator.ui",
-        "omni.anim.motion_path.bundle",
-        "omni.activity.ui",
-        "omni.anim.curve.bundle",
-        "omni.kit.tool.asset_exporter",
-        "omni.kit.browser.asset",
-        "omni.anim.graph.bundle",
-        "isaacsim.examples.browser",
-        "omni.simready.explorer",
-        "omni.kit.tool.measure",
-        "omni.graph.window.action", 
-        "omni.graph.window.core",
-        "isaacsim.asset.gen.conveyor",
-        "isaacsim.asset.gen.conveyor.ui" ,
-        "omni.kit.window.script_editor",
-        "omni.isaac.articulation_inspector",
+        # "isaacsim.asset.browser",
+        # "omni.asset_validator.ui",
+        # "omni.anim.motion_path.bundle",
+        # "omni.activity.ui",
+        # "omni.anim.curve.bundle",
+        # "omni.kit.tool.asset_exporter",
+        # "omni.kit.browser.asset",
+        # "omni.anim.graph.bundle",
+        # "isaacsim.examples.browser",
+        # "omni.simready.explorer",
+        # "omni.kit.tool.measure",
+        # "omni.graph.window.action", 
+        # "omni.graph.window.core",
+        # "isaacsim.asset.gen.conveyor",
+        # "isaacsim.asset.gen.conveyor.ui" ,
+        # "omni.kit.window.script_editor",
+        # "omni.isaac.articulation_inspector",
     ],
     preload_extensions: bool = False,
     performance_settings: Optional[dict] = None,
@@ -578,12 +578,10 @@ def get_performance_mode_prebuilt_setup(mode='economy'):
     elif mode == 'best':
 
         pass # TODO
-    
+   
     return setup
 
-
-        
-    
+  
 
 
 def activate_gpu_dynamics(my_world):

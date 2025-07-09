@@ -1,125 +1,92 @@
-// .devcontainer/devcontainer.json
 {
-    "name": "Isaac Sim Container",
-    "dockerRun": {
-      "command": "/bin/bash"
-    },
-    "workspaceFolder": "/root/rl_for_curobo",
-    "settings": {
-      "terminal.integrated.defaultProfile.linux": "bash",
-      "python.defaultInterpreterPath": "/isaac-sim/python.sh"
-    },
-    "extensions": [
-      "ms-python.python",
-      "ms-python.vscode-pylance"
-    ]
-  }
+  "name": "Isaac Sim 4.5 + CuRobo Dev Container",
+  "image": "de257/curobo_isaac45v2:latest",
   
-// {
-//     "name": "rl_for_curobo_dev",
-//     "remoteUser": "root",
-//     "context": "..",
-//     "dockerContainer": "curobo_isaac45v2_root_container",
-//     "workspaceFolder": "/root/rl_for_curobo",
-//     "settings": {
-//       "terminal.integrated.shell.linux": "/bin/bash",
-//       "python.pythonPath": "{localEnv:omni_python}"
-//     },
-//     "mounts": [
-//       "source=${localEnv:HOME}/.Xauthority,target=/root/.Xauthority,type=bind",
-//       "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/cache/kit,target=/isaac-sim/kit/cache,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/cache/ov,target=/root/.cache/ov,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/cache/pip,target=/root/.cache/pip,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/cache/glcache,target=/root/.cache/nvidia/GLCache,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/cache/computecache,target=/root/.nv/ComputeCache,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/logs,target=/root/.nvidia-omniverse/logs,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/data,target=/root/.local/share/ov/data,type=bind",
-//       "source=${localEnv:HOME}/docker/isaac-sim/documents,target=/root/Documents,type=bind"
-//     ],
-//     "runArgs": [
-//       "--gpus", "all",
-//       "--privileged",
-//       "--env", "DISPLAY",
-//       "--env", "OMNI_KIT_ALLOW_ROOT=1",
-//       "--env", "NVIDIA_DRIVER_CAPABILITIES=all",
-//       "--env", "NVIDIA_VISIBLE_DEVICES=all",
-//       "--env", "__NV_PRIME_RENDER_OFFLOAD=1",
-//       "--env", "__GLX_VENDOR_LIBRARY_NAME=nvidia",
-//       "--env", "XAUTHORITY=/root/.Xauthority"
-//     ],
-//     "extensions": [
-//       "ms-python.python",
-//       "ms-vscode.cpptools"
-//     ]
-//   }
+  "runArgs": [
+    "--gpus=all",
+    "--privileged",
+    "--network=host",
+    "--device=/dev:/dev",
+    
+    // X11 forwarding for Isaac Sim GUI
+    "-e", "DISPLAY=${localEnv:DISPLAY}",
+    "-e", "XAUTHORITY=/home/isaac/.Xauthority",
+    "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
+    "-v", "${localEnv:HOME}/.Xauthority:/home/isaac/.Xauthority",
+    
+    // Isaac Sim environment variables
+    "-e", "ACCEPT_EULA=Y",
+    "-e", "PRIVACY_CONSENT=Y", 
+    "-e", "OMNI_KIT_ALLOW_ROOT=1",
+    "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
+    "-e", "NVIDIA_VISIBLE_DEVICES=all",
+    "-e", "__NV_PRIME_RENDER_OFFLOAD=1",
+    "-e", "__GLX_VENDOR_LIBRARY_NAME=nvidia",
+    
+    // Cache directories for Isaac Sim performance
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/ov:/home/isaac/.cache/ov:rw", 
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/pip:/home/isaac/.cache/pip:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/glcache:/home/isaac/.cache/nvidia/GLCache:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/computecache:/home/isaac/.nv/ComputeCache:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/logs:/home/isaac/.nvidia-omniverse/logs:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/data:/home/isaac/.local/share/ov/data:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/documents:/home/isaac/Documents:rw"
+  ],
 
+  "containerUser": "root",
+  "remoteUser": "root",
+  
+  "workspaceFolder": "/workspace/rl_for_curobo",
+  
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace/rl_for_curobo,type=bind,consistency=cached"
+  ],
 
+  "postCreateCommand": [
+    "bash", "-c", 
+    "cd /workspace/rl_for_curobo && /isaac-sim/python.sh -m pip uninstall -y rl_for_curobo && /isaac-sim/python.sh -m pip install -e /workspace/rl_for_curobo && source /opt/ros/humble/setup.sh"
+  ],
 
-// // {
-// //     "name": "CuRobo Development",
-// //     "image": "curobo_docker:isaac_sim_4.0.0",
-// //     "remoteUser": "root",
-// //     "workspaceFolder": "/host/rl_for_curobo",
-// //     "runArgs": [
-// //         "--gpus", "all",
-// //         "--privileged",
-// //         "--network=host",
-// //         "-e", "ACCEPT_EULA=Y",
-// //         "-e", "PRIVACY_CONSENT=Y",
-// //         "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
-// //         "-e", "XAUTHORITY=/root/.Xauthority",
-// //         "-e", "__NV_PRIME_RENDER_OFFLOAD=1",
-// //         "-e", "__GLX_VENDOR_LIBRARY_NAME=nvidia",
-// //         "-e", "ISAAC_PATH=/isaac-sim"
-// //     ],
-// //     "mounts": [
-// //         "source=${localEnv:HOME}/.Xauthority,target=/root/.Xauthority,type=bind",
-// //         "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/cache/kit,target=/isaac-sim/kit/cache,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/cache/ov,target=/root/.cache/ov,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/cache/pip,target=/root/.cache/pip,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/cache/glcache,target=/root/.cache/nvidia/GLCache,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/cache/computecache,target=/root/.nv/ComputeCache:rw,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/logs,target=/root/.nvidia-omniverse/logs,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/data,target=/root/.local/share/ov/data,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME}/docker/isaac-sim/documents,target=/root/Documents,type=bind,consistency=cached",
-// //         "source=${localEnv:HOME},target=/host,type=bind,consistency=cached",
-// //         "source=/dev,target=/dev,type=bind"
-// //     ],
-// //     "customizations": {
-// //         "vscode": {
-// //             "extensions": [
-// //                 "ms-python.python",
-// //                 "ms-python.vscode-pylance",
-// //                 "visualstudioexptteam.vscodeintellicode-python"
-// //             ],
-// //             "settings": {
-// //                 "python.defaultInterpreterPath": "/isaac-sim/python.sh",
-// //                 "python.interpreter.path": "/isaac-sim/python.sh",
-// //                 "python.pythonPath": "/isaac-sim/python.sh",
-// //                 "python.languageServer": "Pylance",
-// //                 "python.analysis.extraPaths": [
-// //                     "/isaac-sim/",
-// //                     "/pkgs/curobo",
-// //                     "/isaac-sim/kit/exts/omni.isaac.core/omni/isaac/core",
-// //                     "/isaac-sim/kit/exts/omni.isaac.core_nodes/omni/isaac/core_nodes"
-// //                 ],
-// //                 "python.analysis.typeCheckingMode": "basic",
-// //                 "python.analysis.autoImportCompletions": true,
-// //                 "python.analysis.indexing": true,
-// //                 "python.analysis.packageIndexDepths": [
-// //                     {
-// //                         "name": "*",
-// //                         "depth": 3
-// //                     }
-// //                 ],
-// //                 "python.autoComplete.extraPaths": [
-// //                     "/isaac-sim/",
-// //                     "/pkgs/curobo"
-// //                 ]
-// //             }
-// //         }
-// //     },
-// //     "postCreateCommand": "/host/rl_for_curobo/projects_root/docker/guest/startup.sh && bash"
-// // }
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.pylint", 
+        "ms-toolsai.jupyter",
+        "ms-vscode.cpptools-extension-pack",
+        "redhat.vscode-yaml",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/isaac-sim/python.sh",
+        "python.terminal.activateEnvironment": false,
+        "python.analysis.extraPaths": [
+          "/isaac-sim",
+          "/pkgs/curobo",
+          "/workspace/rl_for_curobo"
+        ],
+        "python.analysis.autoImportCompletions": true,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash",
+            "args": ["-l"]
+          }
+        },
+        "files.watcherExclude": {
+          "**/cache/**": true,
+          "**/logs/**": true,
+          "**/.nv/**": true,
+          "**/kit/cache/**": true,
+          "**/.cache/**": true
+        }
+      }
+    }
+  },
+
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  }
+}
