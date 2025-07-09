@@ -22,8 +22,8 @@ VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres 
 HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
 HIGHLIGHT_OBS_H = 30
 DEBUG_GPU_MEM = False # If True, then the GPU memory usage will be printed on every call to my_world.step()
-RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
-PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
+# RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
+# PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
 MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
 HEADLESS_ISAAC = False 
 
@@ -52,7 +52,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         except ImportError:
             pass
             
-        from projects_root.utils.issacsim import init_app, wait_for_playing, activate_gpu_dynamics,make_world
+        from projects_root.utils.issacsim import init_app, wait_for_playing, make_world
         from projects_root.utils.usd_utils import load_usd_to_stage
 
         # Init Isaac Sim app

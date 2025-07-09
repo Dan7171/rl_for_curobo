@@ -343,14 +343,15 @@ def wait_for_playing(my_world, simulation_app, autoplay=False):
     my_world.reset()
 
 def setup_sim_performance(world, 
-                          physics_step_dt:Optional[float], 
-                          min_frame_rate:Optional[float], 
-                          gpu_dynamics_enabled:Optional[bool], 
-                          scene_opt_enabled:Optional[bool], 
-                          merge_mesh_tool_enabled:Optional[bool],
-                          rtx_mode:Optional[str],
-                          diable_materials_and_lights:Optional[bool],
-                          dlss_mode:Optional[int]):
+                          physics_step_dt:Optional[float]=None, 
+                          min_frame_rate:Optional[float]=None, 
+                          gpu_dynamics_enabled:Optional[bool]=None, 
+                          scene_opt_enabled:Optional[bool]=None, 
+                          merge_mesh_tool_enabled:Optional[bool]=None,
+                          rtx_mode:Optional[str]=None,
+                          diable_materials_and_lights:Optional[bool]=None,
+                          dlss_mode:Optional[int]=None
+                          ):
     """
     This function allows to set the settings suggested in the next tutorial step by step:
     https://docs.isaacsim.omniverse.nvidia.com/4.5.0/reference_material/sim_performance_optimization_handbook.html
@@ -359,6 +360,8 @@ def setup_sim_performance(world,
     ___________________
     
     Physics Simulation:
+
+    https://docs.omniverse.nvidia.com/extensions/latest/ext_physics/simulation-control/physics-performance.html
     ___________________
     1. Physics Step Size: The physics step size determines the time interval for each physics simulation step. A smaller step size will result in a more accurate simulation but will also require more computational resources and thus slow down the simulation. A larger step size will speed up the simulation but may result in less accurate physics.
     
@@ -415,6 +418,7 @@ def setup_sim_performance(world,
     if physics_step_dt is not None:
         # world.set_physics_step_size(physics_step_dt)
         world.physics_dt = physics_step_dt
+
     if min_frame_rate is not None:
         # world.set_min_simulation_frame_rate(frame_rate)
         import carb.settings

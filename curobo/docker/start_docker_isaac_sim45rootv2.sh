@@ -90,7 +90,7 @@ done
 REPO_NAME=$(basename "$REPO_PATH_HOST")
 REPO_PATH_CONTAINER=/workspace/$REPO_NAME # change this to where you cloned the repo, e.g. "/home/isaac/$REPO_NAME"
 
-if [[ -n "$CMD_IN_CONTAINER" ]]; then
+if [[ -n "$CMD_IN_CONTAINER" ]]; then # if command is provided, use it, otherwise just run "bash" ()
     # DOCKER_CMD=$CMD_IN_CONTAINER
     DOCKER_CMD="$CMD_IN_CONTAINER"
 else
