@@ -73,3 +73,16 @@ Build requires running:
 After installing curobo and rl_for_curobo packages, sets the current directory to /workspace/rl_for_curobo (so everytime we run the container it goes there)
 Running script is available in curobo/docker/start_docker_isaac_sim45rootv2.sh
 ",
+9.7.25,de257/curobo_isaac45v3:latest,sha256:7ca58e2fee4c556b2d11808e5ae23b50cdbe6a26920ae0e13cd46b81b5bf2f21,,,"commit 8636f7fa391283645183c5e2d1806817b7d5ceaa (HEAD -> last_stable_wmw_except_usd_load, origin/last_stable_wmw_except_usd_load)
+Author: Dan7171 <evrondan99@gmail.com>
+Date:   Wed Jul 9 19:55:06 2025 +0300
+
+    curobo_isaacv3 container with installed example of rviz and moveit with isaac sim, inspired by https://www.youtube.com/watch?v=pGje2slp6-s&t=639s .Workspace is installed and tesnted on image under /workspaces//moveit2_UR5 and also availabe in projects_root/examples/ros/moveit2_UR5 for future use. For more info, see readme file in projects_root/examples/ros/moveit2_UR5
+
+",/rl_for_curobo/curobo/docker/start_docker_isaac_sim45v3.sh ,"pushed on top of v2
+Differs from v2 by adding installation of moveit2 and testing it with isaac sim and docker, based on: https://www.youtube.com/watch?v=pGje2slp6-s&t=639s
+Runing script is now v3
+For more details, see commit
+
+
+",
