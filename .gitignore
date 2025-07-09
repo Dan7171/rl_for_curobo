@@ -21,3 +21,4 @@ third_party
 *.pickle
 *.html
 *.pl
+*data

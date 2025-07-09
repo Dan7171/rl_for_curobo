@@ -1,0 +1,137 @@
+[0.089s] DEBUG:colcon:Command line arguments: ['/usr/bin/colcon', 'build']
+[0.089s] DEBUG:colcon:Parsed command line arguments: Namespace(log_base=None, log_level=None, verb_name='build', build_base='build', install_base='install', merge_install=False, symlink_install=False, test_result_base=None, continue_on_error=False, executor='parallel', parallel_workers=16, event_handlers=None, ignore_user_meta=False, metas=['./colcon.meta'], base_paths=['.'], packages_ignore=None, packages_ignore_regex=None, paths=None, packages_up_to=None, packages_up_to_regex=None, packages_above=None, packages_above_and_dependencies=None, packages_above_depth=None, packages_select_by_dep=None, packages_skip_by_dep=None, packages_skip_up_to=None, packages_select_build_failed=False, packages_skip_build_finished=False, packages_select_test_failures=False, packages_skip_test_passed=False, packages_select=None, packages_skip=None, packages_select_regex=None, packages_skip_regex=None, packages_start=None, packages_end=None, cmake_args=None, cmake_target=None, cmake_target_skip_unavailable=False, cmake_clean_cache=False, cmake_clean_first=False, cmake_force_configure=False, ament_cmake_args=None, catkin_cmake_args=None, catkin_skip_building_tests=False, verb_parser=<colcon_defaults.argument_parser.defaults.DefaultArgumentsDecorator object at 0x79dc4f91e440>, verb_extension=<colcon_core.verb.build.BuildVerb object at 0x79dc4f91dff0>, main=<bound method BuildVerb.main of <colcon_core.verb.build.BuildVerb object at 0x79dc4f91dff0>>)
+[0.222s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) check parameters
+[0.222s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) check parameters
+[0.222s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) check parameters
+[0.222s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) check parameters
+[0.222s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) discover
+[0.222s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) discover
+[0.222s] INFO:colcon.colcon_core.package_discovery:Crawling recursively for packages in '/workspace/moveit2_UR5/src'
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ignore', 'ignore_ament_install']
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore'
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore_ament_install'
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_pkg']
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_pkg'
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_meta']
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_meta'
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ros']
+[0.222s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ros'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['cmake', 'python']
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'cmake'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['python_setup_py']
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python_setup_py'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extensions ['ignore', 'ignore_ament_install']
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extension 'ignore'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(build) ignored
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extensions ['ignore', 'ignore_ament_install']
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extension 'ignore'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(install) ignored
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extensions ['ignore', 'ignore_ament_install']
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extension 'ignore'
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(log) ignored
+[0.232s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extensions ['ignore', 'ignore_ament_install']
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extension 'ignore'
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extension 'ignore_ament_install'
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extensions ['colcon_pkg']
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extension 'colcon_pkg'
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extensions ['colcon_meta']
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extension 'colcon_meta'
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extensions ['ros']
+[0.233s] Level 1:colcon.colcon_core.package_identification:_identify(robot_description) by extension 'ros'
+[0.235s] DEBUG:colcon.colcon_core.package_identification:Package 'robot_description' with type 'ros.ament_cmake' and name 'robot_description'
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extensions ['ignore', 'ignore_ament_install']
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extension 'ignore'
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extension 'ignore_ament_install'
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extensions ['colcon_pkg']
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extension 'colcon_pkg'
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extensions ['colcon_meta']
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extension 'colcon_meta'
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extensions ['ros']
+[0.235s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config) by extension 'ros'
+[0.236s] DEBUG:colcon.colcon_core.package_identification:Package 'ur5_moveit_config' with type 'ros.ament_cmake' and name 'ur5_moveit_config'
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extensions ['ignore', 'ignore_ament_install']
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'ignore'
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'ignore_ament_install'
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extensions ['colcon_pkg']
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'colcon_pkg'
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extensions ['colcon_meta']
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'colcon_meta'
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extensions ['ros']
+[0.236s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'ros'
+[0.237s] DEBUG:colcon.colcon_core.package_identification:Found ROS schema reference in package manifest in 'ur5_moveit_config_tutorial'
+[0.237s] WARNING:colcon.colcon_core.package_identification:Failed to parse ROS package manifest in 'ur5_moveit_config_tutorial': Error(s) in package 'ur5_moveit_config_tutorial/package.xml':
+Invalid email "robotmania@gmail" for person "base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s"
+Invalid email "robotmania@gmail" for person "base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s"
+[0.237s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extensions ['cmake', 'python']
+[0.237s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'cmake'
+[0.238s] Level 1:colcon.colcon_core.package_identification:_identify(ur5_moveit_config_tutorial) by extension 'python'
+[0.238s] DEBUG:colcon.colcon_core.package_identification:Package 'ur5_moveit_config_tutorial' with type 'cmake' and name 'ur5_moveit_config_tutorial'
+[0.239s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) using defaults
+[0.239s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) discover
+[0.239s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) using defaults
+[0.239s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) discover
+[0.239s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) using defaults
+[0.264s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'cmake_args' from command line to 'None'
+[0.264s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'cmake_target' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'cmake_target_skip_unavailable' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'cmake_clean_cache' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'cmake_clean_first' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'cmake_force_configure' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'ament_cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'catkin_cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'robot_description' build argument 'catkin_skip_building_tests' from command line to 'False'
+[0.265s] DEBUG:colcon.colcon_core.verb:Building package 'robot_description' with the following arguments: {'ament_cmake_args': None, 'build_base': '/workspace/moveit2_UR5/src/build/robot_description', 'catkin_cmake_args': None, 'catkin_skip_building_tests': False, 'cmake_args': None, 'cmake_clean_cache': False, 'cmake_clean_first': False, 'cmake_force_configure': False, 'cmake_target': None, 'cmake_target_skip_unavailable': False, 'install_base': '/workspace/moveit2_UR5/src/install/robot_description', 'merge_install': False, 'path': '/workspace/moveit2_UR5/src/robot_description', 'symlink_install': False, 'test_result_base': None}
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'cmake_target' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'cmake_target_skip_unavailable' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'cmake_clean_cache' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'cmake_clean_first' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'cmake_force_configure' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'ament_cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'catkin_cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config_tutorial' build argument 'catkin_skip_building_tests' from command line to 'False'
+[0.265s] DEBUG:colcon.colcon_core.verb:Building package 'ur5_moveit_config_tutorial' with the following arguments: {'ament_cmake_args': None, 'build_base': '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial', 'catkin_cmake_args': None, 'catkin_skip_building_tests': False, 'cmake_args': None, 'cmake_clean_cache': False, 'cmake_clean_first': False, 'cmake_force_configure': False, 'cmake_target': None, 'cmake_target_skip_unavailable': False, 'install_base': '/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial', 'merge_install': False, 'path': '/workspace/moveit2_UR5/src/ur5_moveit_config_tutorial', 'symlink_install': False, 'test_result_base': None}
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'cmake_target' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'cmake_target_skip_unavailable' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'cmake_clean_cache' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'cmake_clean_first' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'cmake_force_configure' from command line to 'False'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'ament_cmake_args' from command line to 'None'
+[0.265s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'catkin_cmake_args' from command line to 'None'
+[0.266s] Level 5:colcon.colcon_core.verb:set package 'ur5_moveit_config' build argument 'catkin_skip_building_tests' from command line to 'False'
+[0.266s] DEBUG:colcon.colcon_core.verb:Building package 'ur5_moveit_config' with the following arguments: {'ament_cmake_args': None, 'build_base': '/workspace/moveit2_UR5/src/build/ur5_moveit_config', 'catkin_cmake_args': None, 'catkin_skip_building_tests': False, 'cmake_args': None, 'cmake_clean_cache': False, 'cmake_clean_first': False, 'cmake_force_configure': False, 'cmake_target': None, 'cmake_target_skip_unavailable': False, 'install_base': '/workspace/moveit2_UR5/src/install/ur5_moveit_config', 'merge_install': False, 'path': '/workspace/moveit2_UR5/src/ur5_moveit_config', 'symlink_install': False, 'test_result_base': None}
+[0.266s] INFO:colcon.colcon_core.executor:Executing jobs using 'parallel' executor
+[0.266s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete
+[0.266s] INFO:colcon.colcon_ros.task.ament_cmake.build:Building ROS package in '/workspace/moveit2_UR5/src/robot_description' with build type 'ament_cmake'
+[0.267s] INFO:colcon.colcon_cmake.task.cmake.build:Building CMake package in '/workspace/moveit2_UR5/src/robot_description'
+[0.269s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_core.shell.bat': Not used on non-Windows systems
+[0.269s] INFO:colcon.colcon_core.shell:Skip shell extension 'powershell' for command environment: Not usable outside of PowerShell
+[0.269s] DEBUG:colcon.colcon_core.shell:Skip shell extension 'dsv' for command environment
+[0.274s] INFO:colcon.colcon_cmake.task.cmake.build:Building CMake package in '/workspace/moveit2_UR5/src/ur5_moveit_config_tutorial'
+[0.274s] INFO:colcon.colcon_core.shell:Skip shell extension 'powershell' for command environment: Not usable outside of PowerShell
+[0.274s] DEBUG:colcon.colcon_core.shell:Skip shell extension 'dsv' for command environment
+[0.280s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoking command in '/workspace/moveit2_UR5/src/build/robot_description': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake /workspace/moveit2_UR5/src/robot_description -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/robot_description
+[0.284s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoking command in '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial': /usr/local/bin/cmake /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial
+[0.848s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoked command in '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial' returned '1': /usr/local/bin/cmake /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial
+[0.935s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:closing loop
+[0.935s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:loop closed
+[0.935s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete finished with '1'
+[0.936s] DEBUG:colcon.colcon_core.event_reactor:joining thread
+[0.941s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.notify_send': Could not find 'notify-send'
+[0.941s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.terminal_notifier': Not used on non-Darwin systems
+[0.941s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.win32': Not used on non-Windows systems
+[0.941s] INFO:colcon.colcon_notification.desktop_notification:Sending desktop notification using 'notify2'
+[0.943s] DEBUG:colcon.colcon_notification.desktop_notification.notify2:Failed to initialize notify2: org.freedesktop.DBus.Error.Spawn.ExecFailed: /usr/bin/dbus-launch terminated abnormally without any error message
+[0.943s] DEBUG:colcon.colcon_core.event_reactor:joined thread
+[0.943s] INFO:colcon.colcon_core.shell:Creating prefix script '/workspace/moveit2_UR5/src/install/local_setup.ps1'
+[0.944s] INFO:colcon.colcon_core.shell:Creating prefix util module '/workspace/moveit2_UR5/src/install/_local_setup_util_ps1.py'
+[0.945s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/workspace/moveit2_UR5/src/install/setup.ps1'
+[0.947s] INFO:colcon.colcon_core.shell:Creating prefix script '/workspace/moveit2_UR5/src/install/local_setup.sh'
+[0.947s] INFO:colcon.colcon_core.shell:Creating prefix util module '/workspace/moveit2_UR5/src/install/_local_setup_util_sh.py'
+[0.948s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/workspace/moveit2_UR5/src/install/setup.sh'
+[0.949s] INFO:colcon.colcon_core.shell:Creating prefix script '/workspace/moveit2_UR5/src/install/local_setup.bash'
+[0.949s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/workspace/moveit2_UR5/src/install/setup.bash'
+[0.950s] INFO:colcon.colcon_core.shell:Creating prefix script '/workspace/moveit2_UR5/src/install/local_setup.zsh'
+[0.951s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/workspace/moveit2_UR5/src/install/setup.zsh'

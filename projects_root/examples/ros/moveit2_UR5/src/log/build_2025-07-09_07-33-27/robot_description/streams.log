@@ -1,0 +1,19 @@
+[0.012s] Invoking command in '/workspace/moveit2_UR5/src/build/robot_description': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake /workspace/moveit2_UR5/src/robot_description -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/robot_description
+[0.061s] -- The C compiler identification is GNU 11.4.0
+[0.112s] -- The CXX compiler identification is GNU 11.4.0
+[0.127s] -- Detecting C compiler ABI info
+[0.185s] -- Detecting C compiler ABI info - done
+[0.193s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.194s] -- Detecting C compile features
+[0.194s] -- Detecting C compile features - done
+[0.203s] -- Detecting CXX compiler ABI info
+[0.276s] -- Detecting CXX compiler ABI info - done
+[0.279s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.280s] -- Detecting CXX compile features
+[0.280s] -- Detecting CXX compile features - done
+[0.284s] -- Found ament_cmake: 1.3.11 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.421s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.531s] -- Found urdf: 2.6.1 (/opt/ros/humble/share/urdf/cmake)
+[0.660s] -- Configuring done (0.6s)
+[0.661s] -- Generating done (0.0s)
+[0.663s] -- Build files have been written to: /workspace/moveit2_UR5/src/build/robot_description

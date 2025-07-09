@@ -1,0 +1,2 @@
+Invoking command in '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial': /usr/local/bin/cmake /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial
+Invoked command in '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial' returned '1': /usr/local/bin/cmake /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial

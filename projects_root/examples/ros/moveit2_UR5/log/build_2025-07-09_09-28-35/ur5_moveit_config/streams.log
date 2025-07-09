@@ -1,0 +1,64 @@
+[0.011s] Invoking command in '/workspaces/moveit2_UR5/build/ur5_moveit_config': AMENT_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:/workspaces/isaac_ros_ws/install/isaac_ros_test_cmake:/workspaces/isaac_ros_ws/install/isaac_ros_nitros_bridge_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_tensor_list_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_r2b_galileo:/workspaces/isaac_ros_ws/install/isaac_ros_pointcloud_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_nova_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_common:/workspaces/isaac_ros_ws/install/isaac_ros_bi3d_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_apriltag_interfaces:/workspaces/isaac_ros_ws/install/isaac_common:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake /workspaces/moveit2_UR5/src/ur5_moveit_config -DCMAKE_INSTALL_PREFIX=/workspaces/moveit2_UR5/install/ur5_moveit_config
+[0.054s] -- The C compiler identification is GNU 11.4.0
+[0.107s] -- The CXX compiler identification is GNU 11.4.0
+[0.122s] -- Detecting C compiler ABI info
+[0.180s] -- Detecting C compiler ABI info - done
+[0.189s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.191s] -- Detecting C compile features
+[0.191s] -- Detecting C compile features - done
+[0.198s] -- Detecting CXX compiler ABI info
+[0.268s] -- Detecting CXX compiler ABI info - done
+[0.277s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.277s] -- Detecting CXX compile features
+[0.278s] -- Detecting CXX compile features - done
+[0.282s] -- Found ament_cmake: 1.3.11 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.414s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.595s] -- Configuring done (0.6s)
+[0.595s] -- Generating done (0.0s)
+[0.596s] -- Build files have been written to: /workspaces/moveit2_UR5/build/ur5_moveit_config
+[0.600s] Invoked command in '/workspaces/moveit2_UR5/build/ur5_moveit_config' returned '0': AMENT_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:/workspaces/isaac_ros_ws/install/isaac_ros_test_cmake:/workspaces/isaac_ros_ws/install/isaac_ros_nitros_bridge_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_tensor_list_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_r2b_galileo:/workspaces/isaac_ros_ws/install/isaac_ros_pointcloud_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_nova_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_common:/workspaces/isaac_ros_ws/install/isaac_ros_bi3d_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_apriltag_interfaces:/workspaces/isaac_ros_ws/install/isaac_common:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake /workspaces/moveit2_UR5/src/ur5_moveit_config -DCMAKE_INSTALL_PREFIX=/workspaces/moveit2_UR5/install/ur5_moveit_config
+[0.601s] Invoking command in '/workspaces/moveit2_UR5/build/ur5_moveit_config': AMENT_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:/workspaces/isaac_ros_ws/install/isaac_ros_test_cmake:/workspaces/isaac_ros_ws/install/isaac_ros_nitros_bridge_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_tensor_list_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_r2b_galileo:/workspaces/isaac_ros_ws/install/isaac_ros_pointcloud_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_nova_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_common:/workspaces/isaac_ros_ws/install/isaac_ros_bi3d_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_apriltag_interfaces:/workspaces/isaac_ros_ws/install/isaac_common:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake --build /workspaces/moveit2_UR5/build/ur5_moveit_config -- -j16 -l16
+[0.619s] Invoked command in '/workspaces/moveit2_UR5/build/ur5_moveit_config' returned '0': AMENT_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:/workspaces/isaac_ros_ws/install/isaac_ros_test_cmake:/workspaces/isaac_ros_ws/install/isaac_ros_nitros_bridge_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_tensor_list_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_r2b_galileo:/workspaces/isaac_ros_ws/install/isaac_ros_pointcloud_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_nova_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_common:/workspaces/isaac_ros_ws/install/isaac_ros_bi3d_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_apriltag_interfaces:/workspaces/isaac_ros_ws/install/isaac_common:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake --build /workspaces/moveit2_UR5/build/ur5_moveit_config -- -j16 -l16
+[0.620s] Invoking command in '/workspaces/moveit2_UR5/build/ur5_moveit_config': AMENT_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:/workspaces/isaac_ros_ws/install/isaac_ros_test_cmake:/workspaces/isaac_ros_ws/install/isaac_ros_nitros_bridge_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_tensor_list_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_r2b_galileo:/workspaces/isaac_ros_ws/install/isaac_ros_pointcloud_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_nova_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_common:/workspaces/isaac_ros_ws/install/isaac_ros_bi3d_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_apriltag_interfaces:/workspaces/isaac_ros_ws/install/isaac_common:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake --install /workspaces/moveit2_UR5/build/ur5_moveit_config
+[0.622s] -- Install configuration: ""
+[0.622s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ament_index/resource_index/package_run_dependencies/ur5_moveit_config
+[0.622s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ament_index/resource_index/parent_prefix_path/ur5_moveit_config
+[0.622s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/environment/ament_prefix_path.sh
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/environment/ament_prefix_path.dsv
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/environment/path.sh
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/environment/path.dsv
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/local_setup.bash
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/local_setup.sh
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/local_setup.zsh
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/local_setup.dsv
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/package.dsv
+[0.623s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ament_index/resource_index/packages/ur5_moveit_config
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/cmake/ur5_moveit_configConfig.cmake
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/cmake/ur5_moveit_configConfig-version.cmake
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/package.xml
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/warehouse_db.launch.py
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/static_virtual_joint_tfs.launch.py
+[0.624s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/setup_assistant.launch.py
+[0.625s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/move_group.launch.py
+[0.625s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/spawn_controllers.launch.py
+[0.625s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/demo.launch.py
+[0.625s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/moveit_rviz.launch.py
+[0.625s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/launch/rsp.launch.py
+[0.625s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config
+[0.626s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/sensors_3d.yaml
+[0.626s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ur5
+[0.626s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ur5/ur5.usd
+[0.645s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/kinematics.yaml
+[0.645s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/moveit_controllers.yaml
+[0.645s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ur5.srdf
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/initial_positions.yaml
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ur5.urdf
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/moveit.rviz
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/pilz_cartesian_limits.yaml
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ur5.urdf.xacro
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/joint_limits.yaml
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ros2_controllers.yaml
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/config/ur5.ros2_control.xacro
+[0.646s] -- Installing: /workspaces/moveit2_UR5/install/ur5_moveit_config/share/ur5_moveit_config/.setup_assistant
+[0.653s] Invoked command in '/workspaces/moveit2_UR5/build/ur5_moveit_config' returned '0': AMENT_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/workspaces/moveit2_UR5/install/robot_description:/workspaces/isaac_ros_ws/install/isaac_ros_test_cmake:/workspaces/isaac_ros_ws/install/isaac_ros_nitros_bridge_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_tensor_list_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_r2b_galileo:/workspaces/isaac_ros_ws/install/isaac_ros_pointcloud_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_nova_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_common:/workspaces/isaac_ros_ws/install/isaac_ros_bi3d_interfaces:/workspaces/isaac_ros_ws/install/isaac_ros_apriltag_interfaces:/workspaces/isaac_ros_ws/install/isaac_common:/workspaces/isaac_ros_ws/install/isaac_ros_test:/workspaces/isaac_ros_ws/install/isaac_ros_rosbag_utils:/workspaces/isaac_ros_ws/install/isaac_ros_launch_utils:/workspaces/isaac_ros_ws/install/isaac_common_py:/opt/ros/humble /usr/local/bin/cmake --install /workspaces/moveit2_UR5/build/ur5_moveit_config

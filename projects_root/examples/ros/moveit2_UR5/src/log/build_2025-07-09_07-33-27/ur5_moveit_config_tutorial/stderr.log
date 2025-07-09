@@ -1,0 +1,27 @@
+Error parsing '/workspace/moveit2_UR5/src/ur5_moveit_config_tutorial/package.xml':
+Traceback (most recent call last):
+  File "/opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py", line 150, in <module>
+    main()
+  File "/opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py", line 53, in main
+    raise e
+  File "/opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py", line 49, in main
+    package = parse_package_string(
+  File "/usr/lib/python3/dist-packages/catkin_pkg/package.py", line 788, in parse_package_string
+    pkg.validate(warnings=warnings)
+  File "/usr/lib/python3/dist-packages/catkin_pkg/package.py", line 330, in validate
+    raise InvalidPackage('\n'.join(errors), self.filename)
+catkin_pkg.package.InvalidPackage: Error(s) in package '/workspace/moveit2_UR5/src/ur5_moveit_config_tutorial/package.xml':
+Invalid email "robotmania@gmail" for person "base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s"
+Invalid email "robotmania@gmail" for person "base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s"
+[31mCMake Error at /opt/ros/humble/share/ament_cmake_core/cmake/core/ament_package_xml.cmake:95 (message):
+  execute_process(/usr/bin/python3
+  /opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py
+  /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial/package.xml
+  /workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial/ament_cmake_core/package.cmake)
+  returned error code 1
+Call Stack (most recent call first):
+  /opt/ros/humble/share/ament_cmake_core/cmake/core/ament_package_xml.cmake:49 (_ament_package_xml)
+  /opt/ros/humble/share/ament_cmake_core/cmake/core/ament_package.cmake:63 (ament_package_xml)
+  CMakeLists.txt:6 (ament_package)
+
+[0m

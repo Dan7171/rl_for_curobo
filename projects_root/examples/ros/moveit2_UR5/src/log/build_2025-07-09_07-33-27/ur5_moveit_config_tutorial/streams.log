@@ -1,0 +1,44 @@
+[0.010s] Invoking command in '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial': /usr/local/bin/cmake /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial
+[0.051s] -- The C compiler identification is GNU 11.4.0
+[0.103s] -- The CXX compiler identification is GNU 11.4.0
+[0.121s] -- Detecting C compiler ABI info
+[0.173s] -- Detecting C compiler ABI info - done
+[0.184s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.184s] -- Detecting C compile features
+[0.185s] -- Detecting C compile features - done
+[0.193s] -- Detecting CXX compiler ABI info
+[0.269s] -- Detecting CXX compiler ABI info - done
+[0.272s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.273s] -- Detecting CXX compile features
+[0.273s] -- Detecting CXX compile features - done
+[0.277s] -- Found ament_cmake: 1.3.11 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.415s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.559s] Error parsing '/workspace/moveit2_UR5/src/ur5_moveit_config_tutorial/package.xml':
+[0.559s] Traceback (most recent call last):
+[0.559s]   File "/opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py", line 150, in <module>
+[0.559s]     main()
+[0.559s]   File "/opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py", line 53, in main
+[0.559s]     raise e
+[0.559s]   File "/opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py", line 49, in main
+[0.559s]     package = parse_package_string(
+[0.559s]   File "/usr/lib/python3/dist-packages/catkin_pkg/package.py", line 788, in parse_package_string
+[0.562s]     pkg.validate(warnings=warnings)
+[0.562s]   File "/usr/lib/python3/dist-packages/catkin_pkg/package.py", line 330, in validate
+[0.562s]     raise InvalidPackage('\n'.join(errors), self.filename)
+[0.562s] catkin_pkg.package.InvalidPackage: Error(s) in package '/workspace/moveit2_UR5/src/ur5_moveit_config_tutorial/package.xml':
+[0.562s] Invalid email "robotmania@gmail" for person "base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s"
+[0.563s] Invalid email "robotmania@gmail" for person "base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s"
+[0.569s] [31mCMake Error at /opt/ros/humble/share/ament_cmake_core/cmake/core/ament_package_xml.cmake:95 (message):
+[0.569s]   execute_process(/usr/bin/python3
+[0.569s]   /opt/ros/humble/share/ament_cmake_core/cmake/core/package_xml_2_cmake.py
+[0.569s]   /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial/package.xml
+[0.569s]   /workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial/ament_cmake_core/package.cmake)
+[0.569s]   returned error code 1
+[0.569s] Call Stack (most recent call first):
+[0.569s]   /opt/ros/humble/share/ament_cmake_core/cmake/core/ament_package_xml.cmake:49 (_ament_package_xml)
+[0.572s]   /opt/ros/humble/share/ament_cmake_core/cmake/core/ament_package.cmake:63 (ament_package_xml)
+[0.572s]   CMakeLists.txt:6 (ament_package)
+[0.572s] 
+[0.572s] [0m
+[0.572s] -- Configuring incomplete, errors occurred!
+[0.573s] Invoked command in '/workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial' returned '1': /usr/local/bin/cmake /workspace/moveit2_UR5/src/ur5_moveit_config_tutorial -DCMAKE_INSTALL_PREFIX=/workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial

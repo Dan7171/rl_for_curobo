@@ -1,0 +1,41 @@
+-- Found ament_cmake: 1.3.11 (/opt/ros/humble/share/ament_cmake/cmake)
+-- Configuring done (0.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspace/moveit2_UR5/src/build/ur5_moveit_config_tutorial
+-- Install configuration: ""
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ament_index/resource_index/package_run_dependencies/ur5_moveit_config_tutorial
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ament_index/resource_index/parent_prefix_path/ur5_moveit_config_tutorial
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/environment/ament_prefix_path.sh
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/environment/ament_prefix_path.dsv
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/environment/path.sh
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/environment/path.dsv
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/local_setup.bash
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/local_setup.sh
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/local_setup.zsh
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/local_setup.dsv
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/package.dsv
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ament_index/resource_index/packages/ur5_moveit_config_tutorial
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/cmake/ur5_moveit_config_tutorialConfig.cmake
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/cmake/ur5_moveit_config_tutorialConfig-version.cmake
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/package.xml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/warehouse_db.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/static_virtual_joint_tfs.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/setup_assistant.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/move_group.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/spawn_controllers.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/demo.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/moveit_rviz.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/launch/rsp.launch.py
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/kinematics.yaml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/moveit_controllers.yaml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/ur5.srdf
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/initial_positions.yaml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/moveit.rviz
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/pilz_cartesian_limits.yaml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/ur5.urdf.xacro
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/joint_limits.yaml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/ros2_controllers.yaml
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/config/ur5.ros2_control.xacro
+-- Installing: /workspace/moveit2_UR5/src/install/ur5_moveit_config_tutorial/share/ur5_moveit_config_tutorial/.setup_assistant

@@ -1,0 +1,25 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: robot_description
+    relative_path: urdf/ur5_robotiq85_gripper.xacro
+  srdf:
+    relative_path: config/ur5.srdf
+  package_settings:
+    author_name: base_on_robot_mania_tutorial https://www.youtube.com/watch?v=pGje2slp6-s
+    author_email: robotmania@gmail.com
+    generated_timestamp: 1752071654
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity
+  modified_urdf:
+    xacros:
+      - control_xacro
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity
