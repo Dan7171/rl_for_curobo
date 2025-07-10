@@ -32,7 +32,7 @@ DC_DEV_ID='002' # device id for depth camera. You need to run 'lsusb' in linux h
 REPO_PATH_HOST=$(realpath ~/rl_for_curobo) # must be absolute path, change this to where you cloned the repo
 CMD_IN_CONTAINER='' # No command by default
 DEV_CONTAINER_VSCODE_ENABLED='false' # Change this to 'true' if you want to use VSCode in the container
-USER='root' # 'host_user' root
+USER='host_user' # 'host_user' root
 
 # Help method
 function show_help() {

@@ -1,4 +1,7 @@
+https://code.visualstudio.com/docs/devcontainers/containers 
+
 # Isaac Sim 4.5 + CuRobo Dev Container
+
 
 This dev container configuration allows you to develop with Isaac Sim 4.5 and CuRobo directly in VSCode/Cursor, providing a consistent development environment.
 

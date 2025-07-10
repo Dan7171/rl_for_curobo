@@ -1,58 +1,55 @@
 {
-  "name": "Isaac Sim 4.5 + CuRobo Dev Container",
-  "image": "de257/curobo_isaac45v2:latest",
-  
+  // This devcontainer runs as the host user (UID/GID) to ensure all files in mounted directories retain host ownership.
+  // Do NOT run as root to avoid root-owned files on the host. No chown/sudo is used on mounted directories.
+  "name": "Isaac Sim 4.5 + CuRobo Dev Container (Host User)",
+  "image": "de257/curobo_isaac45v3:latest",
+
   "runArgs": [
+    "--user", "${localEnv:UID}:${localEnv:GID}",
     "--gpus=all",
     "--privileged",
     "--network=host",
     "--device=/dev:/dev",
-    
-    // X11 forwarding for Isaac Sim GUI
     "-e", "DISPLAY=${localEnv:DISPLAY}",
-    "-e", "XAUTHORITY=/home/isaac/.Xauthority",
+    "-e", "XAUTHORITY=${localEnv:HOME}/.Xauthority",
     "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
-    "-v", "${localEnv:HOME}/.Xauthority:/home/isaac/.Xauthority",
-    
-    // Isaac Sim environment variables
+    "-v", "${localEnv:HOME}/.Xauthority:${localEnv:HOME}/.Xauthority",
     "-e", "ACCEPT_EULA=Y",
-    "-e", "PRIVACY_CONSENT=Y", 
-    "-e", "OMNI_KIT_ALLOW_ROOT=1",
+    "-e", "PRIVACY_CONSENT=Y",
+    "-e", "OMNI_KIT_ALLOW_ROOT=0",
     "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
     "-e", "NVIDIA_VISIBLE_DEVICES=all",
     "-e", "__NV_PRIME_RENDER_OFFLOAD=1",
     "-e", "__GLX_VENDOR_LIBRARY_NAME=nvidia",
-    
-    // Cache directories for Isaac Sim performance
     "-v", "${localEnv:HOME}/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw",
-    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/ov:/home/isaac/.cache/ov:rw", 
-    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/pip:/home/isaac/.cache/pip:rw",
-    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/glcache:/home/isaac/.cache/nvidia/GLCache:rw",
-    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/computecache:/home/isaac/.nv/ComputeCache:rw",
-    "-v", "${localEnv:HOME}/docker/isaac-sim/logs:/home/isaac/.nvidia-omniverse/logs:rw",
-    "-v", "${localEnv:HOME}/docker/isaac-sim/data:/home/isaac/.local/share/ov/data:rw",
-    "-v", "${localEnv:HOME}/docker/isaac-sim/documents:/home/isaac/Documents:rw"
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/ov:${localEnv:HOME}/.cache/ov:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/pip:${localEnv:HOME}/.cache/pip:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/glcache:${localEnv:HOME}/.cache/nvidia/GLCache:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/cache/computecache:${localEnv:HOME}/.nv/ComputeCache:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/logs:${localEnv:HOME}/.nvidia-omniverse/logs:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/data:${localEnv:HOME}/.local/share/ov/data:rw",
+    "-v", "${localEnv:HOME}/docker/isaac-sim/documents:${localEnv:HOME}/Documents:rw"
   ],
 
-  "containerUser": "root",
-  "remoteUser": "root",
-  
+  // "containerUser": "${localEnv:USER}",
+  // "remoteUser": "${localEnv:USER}",
+
   "workspaceFolder": "/workspace/rl_for_curobo",
-  
+
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace/rl_for_curobo,type=bind,consistency=cached"
   ],
 
   "postCreateCommand": [
-    "bash", "-c", 
-    "cd /workspace/rl_for_curobo && /isaac-sim/python.sh -m pip uninstall -y rl_for_curobo && /isaac-sim/python.sh -m pip install -e /workspace/rl_for_curobo && source /opt/ros/humble/setup.sh"
+    "bash", "-c",
+    "cd /workspace/rl_for_curobo && /isaac-sim/python.sh -m pip uninstall -y rl_for_curobo && /isaac-sim/python.sh -m pip install -e /workspace/rl_for_curobo && source /opt/ros/humble/setup.sh && bash" 
   ],
 
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.pylint", 
+        "ms-python.pylint",
         "ms-toolsai.jupyter",
         "ms-vscode.cpptools-extension-pack",
         "redhat.vscode-yaml",
