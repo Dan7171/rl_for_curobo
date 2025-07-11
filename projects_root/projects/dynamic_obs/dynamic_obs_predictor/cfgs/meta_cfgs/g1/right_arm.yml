@@ -1,0 +1,2 @@
+robot: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/robot/g1/right_arm.yml
+mpc: projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/multi_arm_decentralized/mpc/g1/right_arm.yml

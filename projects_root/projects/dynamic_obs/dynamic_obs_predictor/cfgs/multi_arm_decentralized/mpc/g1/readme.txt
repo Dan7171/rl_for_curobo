@@ -1,0 +1,1 @@
+moved to curobo/src/curobo/content/configs/robot/g1

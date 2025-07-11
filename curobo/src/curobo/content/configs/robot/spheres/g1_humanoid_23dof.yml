@@ -1,0 +1,198 @@
+collision_spheres: # currently hasd upper body part only (as the lower fixed). TODO: add head collision spheres  
+  right_wrist_roll_rubber_hand:
+    - "center": [0.036, 0.001, -0.0]
+      "radius": 0.03689
+    - "center": [0.077, -0.004, 0.002]
+      "radius": 0.03083
+    - "center": [0.106, -0.005, 0.001]
+      "radius": 0.02753
+    - "center": [0.142, -0.009, -0.004]
+      "radius": 0.02422
+    - "center": [0.027, 0.002, 0.001]
+      "radius": 0.03689
+    - "center": [0.172, -0.008, 0.014]
+      "radius": 0.02312
+    - "center": [0.172, -0.005, -0.021]
+      "radius": 0.02202
+    - "center": [0.06, -0.002, 0.001]
+      "radius": 0.03414
+    - "center": [0.145, -0.004, 0.02]
+      "radius": 0.02092
+    - "center": [0.172, -0.009, -0.002]
+      "radius": 0.02257
+    - "center": [0.181, -0.006, 0.019]
+      "radius": 0.02257
+    - "center": [0.155, -0.006, -0.021]
+      "radius": 0.02202
+    - "center": [0.018, 0.009, -0.011]
+      "radius": 0.02808
+    - "center": [0.015, -0.014, -0.002]
+      "radius": 0.02532
+    - "center": [0.134, -0.009, 0.004]
+      "radius": 0.02422
+    - "center": [0.158, -0.005, 0.028]
+      "radius": 0.01926
+    - "center": [0.197, 0.009, 0.056]
+      "radius": 0.01651
+    - "center": [0.202, -0.005, 0.009]
+      "radius": 0.01541
+    - "center": [0.207, 0.0, 0.028]
+      "radius": 0.01596
+    - "center": [0.213, -0.0, -0.034]
+      "radius": 0.01596
+    - "center": [0.014, 0.013, 0.014]
+      "radius": 0.02367
+    - "center": [0.182, -0.008, -0.002]
+      "radius": 0.02092
+    - "center": [0.212, 0.001, -0.012]
+      "radius": 0.01596
+    - "center": [0.216, 0.001, 0.008]
+      "radius": 0.01596
+    - "center": [0.18, -0.002, 0.047]
+      "radius": 0.01486
+    - "center": [0.231, 0.006, 0.008]
+      "radius": 0.01596
+    - "center": [0.23, 0.004, 0.031]
+      "radius": 0.01541
+    - "center": [0.081, -0.007, 0.001]
+      "radius": 0.02918
+    - "center": [0.234, 0.007, -0.014]
+      "radius": 0.01541
+    - "center": [0.228, 0.01, -0.035]
+      "radius": 0.01541
+  left_wrist_roll_rubber_hand:
+    - "center": [0.031, -0.001, -0.0]
+      "radius": 0.03744
+    - "center": [0.076, 0.003, 0.002]
+      "radius": 0.03138
+    - "center": [0.106, 0.007, 0.001]
+      "radius": 0.02698
+    - "center": [0.135, 0.008, -0.003]
+      "radius": 0.02477
+    - "center": [0.165, 0.008, -0.015]
+      "radius": 0.02312
+    - "center": [0.169, 0.008, 0.014]
+      "radius": 0.02312
+    - "center": [0.049, 0.001, 0.001]
+      "radius": 0.03579
+    - "center": [0.182, 0.007, 0.013]
+      "radius": 0.02202
+    - "center": [0.148, 0.003, 0.025]
+      "radius": 0.02037
+    - "center": [0.024, 0.005, 0.002]
+      "radius": 0.03414
+    - "center": [0.178, 0.007, -0.01]
+      "radius": 0.02202
+    - "center": [0.021, -0.009, -0.01]
+      "radius": 0.02863
+    - "center": [0.153, 0.006, -0.02]
+      "radius": 0.02202
+    - "center": [0.022, -0.006, 0.006]
+      "radius": 0.03193
+    - "center": [0.141, 0.009, 0.003]
+      "radius": 0.02422
+    - "center": [0.091, 0.005, 0.001]
+      "radius": 0.02918
+    - "center": [0.135, 0.004, 0.016]
+      "radius": 0.02037
+    - "center": [0.171, 0.006, -0.027]
+      "radius": 0.01981
+    - "center": [0.2, -0.013, 0.056]
+      "radius": 0.01651
+    - "center": [0.213, 0.003, 0.009]
+      "radius": 0.01541
+    - "center": [0.208, 0.003, -0.011]
+      "radius": 0.01541
+    - "center": [0.201, 0.003, 0.027]
+      "radius": 0.01596
+    - "center": [0.185, -0.003, 0.049]
+      "radius": 0.01596
+    - "center": [0.221, -0.001, 0.03]
+      "radius": 0.01596
+    - "center": [0.226, -0.004, -0.034]
+      "radius": 0.01486
+    - "center": [0.205, -0.0, -0.032]
+      "radius": 0.01596
+    - "center": [0.012, 0.013, -0.013]
+      "radius": 0.02147
+    - "center": [0.235, -0.008, 0.008]
+      "radius": 0.01596
+    - "center": [0.23, -0.01, -0.014]
+      "radius": 0.01486
+    - "center": [0.064, 0.002, 0.001]
+      "radius": 0.03359
+  left_elbow_link:
+    - "center": [0.071, 0.002, -0.011]
+      "radius": 0.04819
+  right_elbow_link:
+    - "center": [0.071, -0.002, -0.011]
+      "radius": 0.04819
+  right_shoulder_pitch_link:
+    - "center": [-0.0, -0.038, -0.016]
+      "radius": 0.05007
+    - "center": [-0.0, -0.038, -0.016]
+      "radius": 0.05007
+  left_shoulder_pitch_link:
+    - "center": [-0.0, 0.04, -0.014]
+      "radius": 0.05007
+  right_shoulder_roll_link:
+    - "center": [0.001, -0.006, -0.08]
+      "radius": 0.0426
+    - "center": [0.002, -0.011, -0.065]
+      "radius": 0.03923
+  left_shoulder_roll_link:
+    - "center": [-0.001, 0.006, -0.08]
+      "radius": 0.0426
+    - "center": [0.002, 0.002, -0.065]
+      "radius": 0.03923
+  right_shoulder_yaw_link:
+    - "center": [0.015, 0.003, -0.084]
+      "radius": 0.04784
+    - "center": [-0.006, 0.002, -0.077]
+      "radius": 0.04784
+    - "center": [-0.016, 0.004, -0.021]
+      "radius": 0.04079
+    - "center": [-0.016, -0.002, -0.048]
+      "radius": 0.04079
+  left_shoulder_yaw_link:
+    - "center": [0.012, -0.002, -0.088]
+      "radius": 0.04684
+    - "center": [-0.01, -0.005, -0.072]
+      "radius": 0.04332
+    - "center": [-0.016, 0.002, -0.02]
+      "radius": 0.03979
+    - "center": [0.023, -0.005, -0.08]
+      "radius": 0.04543
+  pelvis:
+    - "center": [-0.001, -0.005, -0.062]
+      "radius": 0.08794
+  left_hip_pitch_link:
+    - "center": [0.002, 0.038, -0.006]
+      "radius": 0.05386
+    - "center": [0.002, 0.062, -0.006]
+      "radius": 0.06886
+    - "center": [0.032, 0.055, -0.095]
+      "radius": 0.06818
+  right_hip_pitch_link:
+    - "center": [0.037, -0.045, -0.106]
+      "radius": 0.06886
+    - "center": [0.004, -0.043, -0.008]
+      "radius": 0.06818
+  torso_link:
+    - "center": [0.007, -0.028, 0.119]
+      "radius": 0.07444
+    - "center": [0.002, 0.044, 0.132]
+      "radius": 0.06654
+    - "center": [-0.001, 0.047, 0.231]
+      "radius": 0.06733
+    - "center": [0.008, -0.047, 0.225]
+      "radius": 0.06575
+    - "center": [-0.012, -0.004, -0.001]
+      "radius": 0.06338
+    - "center": [0.003, -0.028, 0.043]
+      "radius": 0.06259
+    - "center": [0.005, 0.032, 0.031]
+      "radius": 0.06259
+  head_link:
+    - "center": [0.0, -0.0, 0.0]
+      "radius": 0.1

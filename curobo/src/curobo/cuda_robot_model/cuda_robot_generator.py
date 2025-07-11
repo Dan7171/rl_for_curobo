@@ -750,6 +750,8 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
         with profiler.record_function("robot_generator/build_collision_spheres"):
             for j_idx, j in enumerate(collision_link_names):
                 # print(j_idx)
+                
+                print("debug, " , j_idx, j)
                 n_spheres = len(collision_spheres[j])
                 link_spheres = torch.zeros(
                     (n_spheres, 4), dtype=cpu_tensor_args.dtype, device=cpu_tensor_args.device

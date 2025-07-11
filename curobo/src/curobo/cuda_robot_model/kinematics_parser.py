@@ -148,7 +148,10 @@ class KinematicsParser:
         """
         chain_links = [ee_link]
         link = ee_link
+        # print("debugging: parent map full\n", self._parent_map)
+        #print("debugging: parent map keys\n", self._parent_map.keys())
         while link != base_link:
+            print("debugging: ", link, self._parent_map[link]["parent"])
             link = self._parent_map[link]["parent"]
             # add link to chain:
             chain_links.append(link)
