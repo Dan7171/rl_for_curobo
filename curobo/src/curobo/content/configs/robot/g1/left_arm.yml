@@ -97,13 +97,13 @@ robot_cfg:
     lock_joints: # Lock active joints in the kinematic tree. This will convert the joint to a fixed joint with joint angle given from this dictionary.
       # floating_base_joint: -0.4
       # pelvis_contour_joint: -0.4
-      left_hip_pitch_joint: 0.0
+      left_hip_pitch_joint: 0.0 # standing position
       # left_hip_roll_joint: 0.05
       # left_hip_yaw_joint: -0.05
       # left_knee_joint: 0.0
       # left_ankle_pitch_joint: 0.0
       # left_ankle_roll_joint: 0.8
-      right_hip_pitch_joint: 0.8
+      right_hip_pitch_joint: 0.0 # standing position
       # right_hip_roll_joint: -0.3
       # right_hip_yaw_joint: -0.3
       # right_knee_joint: 0.0
@@ -127,7 +127,7 @@ robot_cfg:
       # left_wrist_roll_joint: 0.0
       
       # right arm joints
-      right_shoulder_pitch_joint: -1.4
+      right_shoulder_pitch_joint: 0 # to the side
       right_shoulder_roll_joint: 0.2
       right_shoulder_yaw_joint: 0.0
       right_elbow_joint: 1.2
@@ -136,7 +136,7 @@ robot_cfg:
     
     collision_sphere_buffer: 0.005
 
-    self_collision_buffer:
+    self_collision_buffer: # making collision spheres bigger to avoid self-collisions
       # world: 0.001
       pelvis: 0.001
       torso_link: 0.001
@@ -145,6 +145,7 @@ robot_cfg:
       left_shoulder_roll_link: 0.001
       right_shoulder_roll_link: 0.001
       right_elbow_joint: 0.001
+      head_link: 0.001
 
     self_collision_ignore: {}
 
@@ -160,7 +161,7 @@ robot_cfg:
         - left_shoulder_yaw_joint
         - left_elbow_joint
         - left_wrist_roll_joint
-      retract_config: [-1.4, -0.2, 0.0, 1.2, 0.0]
+      retract_config: [0, 0.0, 0.0, 0.0, 0.0]
       null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0] #, 1.0, 1.0, 1.0]
       cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0] #, 1.0, 1.0, 1.0] # ?
       max_acceleration: 10.0 # todo: check this (a guess, I could not find the max jerk of G1 anywhere in the docs)

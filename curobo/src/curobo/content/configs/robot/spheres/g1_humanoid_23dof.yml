@@ -180,19 +180,19 @@ collision_spheres: # currently hasd upper body part only (as the lower fixed). T
       "radius": 0.06818
   torso_link:
     - "center": [0.007, -0.028, 0.119]
-      "radius": 0.07444
+      "radius": 0.08
     - "center": [0.002, 0.044, 0.132]
-      "radius": 0.06654
+      "radius": 0.08
     - "center": [-0.001, 0.047, 0.231]
-      "radius": 0.06733
+      "radius": 0.08
     - "center": [0.008, -0.047, 0.225]
-      "radius": 0.06575
+      "radius": 0.08
     - "center": [-0.012, -0.004, -0.001]
-      "radius": 0.06338
+      "radius": 0.08
     - "center": [0.003, -0.028, 0.043]
-      "radius": 0.06259
+      "radius": 0.08
     - "center": [0.005, 0.032, 0.031]
-      "radius": 0.06259
+      "radius": 0.08
   head_link:
-    - "center": [0.0, -0.0, 0.0]
-      "radius": 0.1
+    - "center": [0.0, 0.0, 0.45]
+      "radius": 0.07
