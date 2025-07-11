@@ -84,6 +84,7 @@ robot_cfg:
       - left_shoulder_yaw_link
       - left_elbow_link
       - left_wrist_roll_rubber_hand
+      - dummy_ee_left_link
 
       # right arm - 5 links
       - right_shoulder_pitch_link
@@ -98,8 +99,8 @@ robot_cfg:
       right_hip_pitch_joint: 0.0 # standing position
       waist_yaw_joint: 0.0
       # right arm joints
-      right_shoulder_pitch_joint: 0 # to the side
-      right_shoulder_roll_joint: 0.2
+      right_shoulder_pitch_joint: 0.5 # to the side
+      right_shoulder_roll_joint: -0.5
       right_shoulder_yaw_joint: 0.0
       right_elbow_joint: 1.2
       right_wrist_roll_joint: 0.0
@@ -147,9 +148,10 @@ robot_cfg:
       # left arm
       left_shoulder_pitch_link: 0.001
       left_shoulder_roll_link: 0.001
+      left_shoulder_yaw_link: 0.001
+
       left_elbow_link: 0.001
       left_hip_pitch_link: 0.001
-      left_shoulder_yaw_link: 0.001
       left_wrist_roll_rubber_hand: 0.001
 
       # right arm    
@@ -160,7 +162,24 @@ robot_cfg:
       right_shoulder_yaw_link: 0.001
       right_wrist_roll_rubber_hand: 0.001
       
-    self_collision_ignore: {}
+    self_collision_ignore: {
+      "left_shoulder_pitch_link":["left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
+      "left_shoulder_roll_link":["left_shoulder_pitch_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
+      "left_shoulder_yaw_link": ["left_shoulder_roll_link", "left_shoulder_pitch_link", "left_elbow_link", "torso_link"],
+      "left_elbow_link": ["left_shoulder_roll_link", "left_shoulder_pitch_link", "left_shoulder_yaw_link","left_wrist_roll_rubber_hand"],
+      "left_wrist_roll_rubber_hand": ["left_elbow_link"],
+
+      "right_shoulder_pitch_link": ["right_shoulder_roll_link", "right_shoulder_yaw_link", "right_elbow_link", "torso_link"],
+      "right_shoulder_roll_link": ["right_shoulder_pitch_link", "right_shoulder_yaw_link", "right_elbow_link", "torso_link"],
+      "right_shoulder_yaw_link": ["right_shoulder_pitch_link", "right_shoulder_roll_link", "right_elbow_link", "torso_link"],
+      "right_elbow_link": ["right_shoulder_pitch_link", "right_shoulder_roll_link", "right_shoulder_yaw_link", "right_wrist_roll_rubber_hand"],
+      "right_wrist_roll_rubber_hand": ["right_elbow_link"],
+
+      "pelvis": ["torso_link", "left_hip_pitch_link", "right_hip_pitch_link"],      
+      "torso_link": ["pelvis","left_shoulder_pitch_link","right_shoulder_pitch_link","left_shoulder_roll_link","right_shoulder_roll_link","left_shoulder_yaw_link","right_shoulder_yaw_link"],
+      "left_hip_pitch_link": ["right_hip_pitch_link","left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link", "left_wrist_roll_rubber_hand", "torso_link"],
+      "right_hip_pitch_link": ["left_hip_pitch_link","right_shoulder_pitch_link", "right_shoulder_roll_link", "right_shoulder_yaw_link", "right_elbow_link", "right_wrist_roll_rubber_hand", "torso_link"],
+      }
     # s_elf_collision_ignore: {
     #   "left_shoulder_pitch_link": ["left_shoulder_roll_link", "left_elbow_link"],
     #   "left_shoulder_roll_link": ["arm_0_panda_link2", "arm_0_panda_link3", "arm_0_panda_link4"],
@@ -181,8 +200,10 @@ robot_cfg:
         - left_elbow_joint
         - left_wrist_roll_joint
         - dummy_ee_left_joint
-      retract_config: [0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]  # Initialize null_space_weight and cspace_distance_weight to a vector of length of joint_names and value 1. If you want to weigh the joints differently use values less than 1.
+      retract_config: [0, 0.3, 0.0, 0.5, 0.0, 0.0]
+      
+      # Initialize null_space_weight and cspace_distance_weight to a vector of length of joint_names and value 1. If you want to weigh the joints differently use values less than 1.
+      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] 
       cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       max_acceleration: 10.0 # todo: check this (a guess, I could not find the max jerk of G1 anywhere in the docs)
-      max_jerk: 50.0 # todo: check this. (a guess, I could not find the max jerk of G1 anywhere in the docs)
+      max_jerk: 15.0 # todo: check this. (a guess, I could not find the max jerk of G1 anywhere in the docs)

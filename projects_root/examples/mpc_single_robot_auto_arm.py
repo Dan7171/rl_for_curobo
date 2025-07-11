@@ -91,6 +91,8 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     import torch
     import os
     import numpy as np
+    from scipy.spatial.transform import Rotation as R
+
     
     # Our modules
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
@@ -117,7 +119,6 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     a = torch.zeros(4, device="cuda:0")
 
 obs_spheres = []  # Will be populated at runtime; keep at module scope for reuse
-
 
 def render_geom_approx_to_spheres(collision_world,n_spheres=50):
     """Visualize an approximate geometry (collection of spheres) for each obstacle.
@@ -297,14 +298,19 @@ def init_ccheck_wcfg_in_sim(usd_help:UsdHelper, robot_prim_path:str, target_prim
 
 
 def define_run_setup():
-
-    X_targets = [0, 0, 0.5, 0, 1, 0, 0] # position and orientation of all targets in world frame (x,y,z,qw, qx,qy,qz)
-    X_robot = [-0.5,0,0,1,0,0,0] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
+    target_orient = [0.5, 0, 0, 0] # for g1 (tmp)
+    # target_orient = [0, 0, 0, 1] # for others (tmp)
+    X_targets = [0.3,0.3, 1] + target_orient # position and orientation of all targets in world frame (x,y,z,qw, qx,qy,qz)
+    X_robot = [0,0,0.8,1,0,0,0] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
     plot_costs = True
     target_colors = npColors.red  
     X_robot_np = np.array(X_robot, dtype=np.float32)
     X_target_R = list(np.array(X_targets[:3]) - X_robot_np[:3]) + list(X_targets[3:])  
     return X_robot_np, X_target_R, plot_costs, target_colors
+
+def isaac_to_scipy_quat(quat):
+    return np.array([quat[1], quat[2], quat[3], quat[0]])
+
 
 def main():
 
@@ -378,7 +384,9 @@ def main():
     # Initialize solvers
     # ----------------------------
     # Set robot in initial joint configuration (in curobo they call it  the "retract" config)
-    _robot_idx_list = [robot.robot.get_dof_index(x) for x in robot.j_names]
+    print("debug")
+    print(robot.j_names)
+    _robot_idx_list = list(range(len(robot.j_names))) # [robot.robot.get_dof_index(x) for x in robot.j_names]
     robot_idx_list = _robot_idx_list
     assert _robot_idx_list is not None # Type assertion for linter    
     if SIMULATING:
@@ -391,7 +399,7 @@ def main():
     # Init robot mpc solver
     robot.init_solver(MPC_DT, DEBUG)
     robot.robot._articulation_view.initialize() # TODO: This is a technical required step in isaac 4.5 but check if actually needed https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
-
+    
     # ----------------------------
     # Start robot  loop
     # ----------------------------
@@ -417,6 +425,9 @@ def main():
             robot.command(action, num_times=1)                    
             my_world.step(render=True)           
             t_idx += 1
+
+            if args.visualize_spheres and t_idx % 2 == 0:
+                robot.visualize_robot_as_spheres(robot.curobo_format_joints)
         
         simulation_app.close() 
         

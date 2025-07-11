@@ -164,8 +164,11 @@ collision_spheres: # currently hasd upper body part only (as the lower fixed). T
     - "center": [0.023, -0.005, -0.08]
       "radius": 0.04543
   pelvis:
+    # - "center": [0.000, 0.00, 0.00]
+    #   "radius": 0.0001    
     - "center": [-0.001, -0.005, -0.062]
-      "radius": 0.08794
+      "radius": 0.08
+
   left_hip_pitch_link:
     - "center": [0.002, 0.038, -0.006]
       "radius": 0.05386
@@ -179,6 +182,9 @@ collision_spheres: # currently hasd upper body part only (as the lower fixed). T
     - "center": [0.004, -0.043, -0.008]
       "radius": 0.06818
   torso_link:
+    # - "center": [0.000, 0.00, 0.00]
+    #   "radius": 0.0001
+    
     - "center": [0.007, -0.028, 0.119]
       "radius": 0.09
     - "center": [0.002, 0.044, 0.132]
