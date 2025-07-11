@@ -342,6 +342,7 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
             self.cspace = CSpaceConfig.load_from_joint_limits(
                 jpv["position"][1, :], jpv["position"][0, :], self.joint_names, self.tensor_args
             )
+       
 
         self.cspace.inplace_reindex(self.joint_names)
         self._update_joint_limits()
@@ -638,6 +639,15 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
         # rebuild kinematic tree with link names added to link pose computation:
         self._build_kinematics_tensors(base_link, new_link_names, chain_link_names)
         if self.collision_spheres is not None and len(self.collision_link_names) > 0:
+            print("debug, collision_spheres")
+            print(self.collision_spheres)
+            print("debug, collision_spheres end")
+            print("debug, collision_link_names")
+            print(self.collision_link_names)
+            print("debug, collision_link_names end")
+            print("debug, collision_sphere_buffer")
+            print(self.collision_sphere_buffer)
+            print("debug, collision_sphere_buffer end")
             self._build_collision_model(
                 self.collision_spheres, self.collision_link_names, self.collision_sphere_buffer
             )
@@ -1152,3 +1162,6 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
         joint_limits["velocity"][1] *= self.cspace.velocity_scale
 
         self._joint_limits = JointLimits(joint_names=self.joint_names, **joint_limits)
+        print("debug, joint_limits")
+        print(self._joint_limits)
+        print("debug, joint_limits end")

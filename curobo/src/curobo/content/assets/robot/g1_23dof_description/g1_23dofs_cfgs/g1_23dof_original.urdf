@@ -714,27 +714,6 @@
       </geometry>
     </collision>
   </link>
-  <link name="dummy_ee_left_link">
-    <visual>
-      <geometry>
-        <box size="0.0001 0.0001 0.0001"/>
-      </geometry>
-    </visual>
-    <collision>
-      <geometry>
-        <box size="0.0001 0.0001 0.0001"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <mass value="0.000001"/>
-      <inertia ixx="0.000001" ixy="0.0" ixz="0.0" iyy="0.000001" iyz="0.0" izz="0.000001"/>
-    </inertial>
-  </link>
-  <joint name="dummy_ee_left_joint" type="fixed">
-    <parent link="left_wrist_roll_rubber_hand"/>
-    <child link="dummy_ee_left_link"/>
-    <origin xyz="0.2 0 0" rpy="0 0 0"/>
-  </joint>
   <link name="right_shoulder_pitch_link">
     <inertial>
       <origin xyz="0 -0.035892 -0.011628" rpy="0 0 0"/>

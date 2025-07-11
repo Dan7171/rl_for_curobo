@@ -1,10 +1,10 @@
 # Corresponds to the left arm of the G1 robot with 23 dofs 
 # https://github.com/unitreerobotics/unitree_ros/tree/master/robots/g1_description
-
+# 
 robot_cfg:
   kinematics:
     base_link: pelvis
-    ee_link: left_wrist_roll_rubber_hand # "left_hand_ee"
+    ee_link: dummy_ee_left_link # left_wrist_roll_rubber_hand # "left_hand_ee"
     use_usd_kinematics: False
 
     # File paths
@@ -15,51 +15,50 @@ robot_cfg:
 
     # Collision configuration
     collision_link_names:  # Name of links to compute sphere positions for use in collision checking.
-
-      # - world
+      # body
       - pelvis
-      # - pelvis_contour_link
-      # - left_hip_roll_link
-      - left_hip_pitch_link
-      # - left_hip_roll_link
-      # - left_knee_link
-      # - left_ankle_pitch_link
-      # - left_ankle_roll_link
-      - right_hip_pitch_link
-      # - right_hip_roll_link
-      # - right_hip_yaw_link
-      # - right_knee_link
-      # - right_ankle_pitch_link
-      # - right_ankle_roll_link
-      
-      
-      # - waist_yaw_fixed_link
       - torso_link
-      # - logo_link
       - head_link
-      # - waist_support_link
-      # - imu_in_torso
-      # - imu_in_pelvis
-
+      # left hip 
+      - left_hip_pitch_link
+      # right hip
+      - right_hip_pitch_link
       # left arm - 5 links
       - left_shoulder_pitch_link
       - left_shoulder_roll_link
       - left_shoulder_yaw_link
       - left_elbow_link
       - left_wrist_roll_rubber_hand
-
       # right arm - 5 links
       - right_shoulder_pitch_link
       - right_shoulder_roll_link
       - right_shoulder_yaw_link
       - right_elbow_link
       - right_wrist_roll_rubber_hand
+      
+      # - world
+      # - pelvis_contour_link
+      # - left_hip_roll_link
+      # - left_hip_roll_link
+      # - left_knee_link
+      # - left_ankle_pitch_link
+      # - left_ankle_roll_link
+      # - right_hip_roll_link
+      # - right_hip_yaw_link
+      # - right_knee_link
+      # - right_ankle_pitch_link
+      # - right_ankle_roll_link      
+      # - waist_yaw_fixed_link
+      # - logo_link
+      # - waist_support_link
+      # - imu_in_torso
+      # - imu_in_pelvis
 
     mesh_link_names: # Names of links to load meshes for visualization. This is only used for exporting visualizations.
       - world
       - pelvis
       - pelvis_contour_link
-      - left_hip_pitch_link
+      - left_hip_yaw_link
       - left_hip_roll_link
       - left_hip_pitch_link
       - left_knee_link
@@ -95,22 +94,30 @@ robot_cfg:
       
     # Freeze lower-body and torso joints so that only the arms/hands are actuated
     lock_joints: # Lock active joints in the kinematic tree. This will convert the joint to a fixed joint with joint angle given from this dictionary.
+      left_hip_pitch_joint: 0.0 # standing position
+      right_hip_pitch_joint: 0.0 # standing position
+      waist_yaw_joint: 0.0
+      # right arm joints
+      right_shoulder_pitch_joint: 0 # to the side
+      right_shoulder_roll_joint: 0.2
+      right_shoulder_yaw_joint: 0.0
+      right_elbow_joint: 1.2
+      right_wrist_roll_joint: 0.0
+      
       # floating_base_joint: -0.4
       # pelvis_contour_joint: -0.4
-      left_hip_pitch_joint: 0.0 # standing position
       # left_hip_roll_joint: 0.05
       # left_hip_yaw_joint: -0.05
       # left_knee_joint: 0.0
       # left_ankle_pitch_joint: 0.0
       # left_ankle_roll_joint: 0.8
-      right_hip_pitch_joint: 0.0 # standing position
+      
       # right_hip_roll_joint: -0.3
       # right_hip_yaw_joint: -0.3
       # right_knee_joint: 0.0
       # right_ankle_pitch_joint: 0.0
       # right_ankle_roll_joint: -1.4
       # waist_yaw_fixed_joint: 0.0
-      waist_yaw_joint: 0.0
       # logo_joint: 1.2
       # head_joint: 0.0
       # waist_support_joint: -0.8
@@ -126,28 +133,40 @@ robot_cfg:
       # left_elbow_joint: 1.2
       # left_wrist_roll_joint: 0.0
       
-      # right arm joints
-      right_shoulder_pitch_joint: 0 # to the side
-      right_shoulder_roll_joint: 0.2
-      right_shoulder_yaw_joint: 0.0
-      right_elbow_joint: 1.2
-      right_wrist_roll_joint: 0.0
       
     
-    collision_sphere_buffer: 0.005
+    collision_sphere_buffer: 0.001
 
     self_collision_buffer: # making collision spheres bigger to avoid self-collisions
-      # world: 0.001
+      
+      # body
       pelvis: 0.001
       torso_link: 0.001
-      left_shoulder_pitch_link: 0.001
-      right_shoulder_pitch_link: 0.001
-      left_shoulder_roll_link: 0.001
-      right_shoulder_roll_link: 0.001
-      right_elbow_joint: 0.001
       head_link: 0.001
+      
+      # left arm
+      left_shoulder_pitch_link: 0.001
+      left_shoulder_roll_link: 0.001
+      left_elbow_link: 0.001
+      left_hip_pitch_link: 0.001
+      left_shoulder_yaw_link: 0.001
+      left_wrist_roll_rubber_hand: 0.001
 
+      # right arm    
+      right_hip_pitch_link: 0.001
+      right_shoulder_roll_link: 0.001
+      right_elbow_link: 0.001
+      right_shoulder_pitch_link: 0.001
+      right_shoulder_yaw_link: 0.001
+      right_wrist_roll_rubber_hand: 0.001
+      
     self_collision_ignore: {}
+    # s_elf_collision_ignore: {
+    #   "left_shoulder_pitch_link": ["left_shoulder_roll_link", "left_elbow_link"],
+    #   "left_shoulder_roll_link": ["arm_0_panda_link2", "arm_0_panda_link3", "arm_0_panda_link4"],
+    #   "arm_0_panda_link2": ["arm_0_panda_link3", "arm_0_panda_link4"],
+    #   "arm_0_panda_link3": ["arm_0_panda_link4", "arm_0_panda_link6"],
+    # }
 
     collision_spheres: spheres/g1_humanoid_23dof.yml
 
@@ -161,8 +180,9 @@ robot_cfg:
         - left_shoulder_yaw_joint
         - left_elbow_joint
         - left_wrist_roll_joint
-      retract_config: [0, 0.0, 0.0, 0.0, 0.0]
-      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0] #, 1.0, 1.0, 1.0]
-      cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0] #, 1.0, 1.0, 1.0] # ?
+        - dummy_ee_left_joint
+      retract_config: [0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]  # Initialize null_space_weight and cspace_distance_weight to a vector of length of joint_names and value 1. If you want to weigh the joints differently use values less than 1.
+      cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       max_acceleration: 10.0 # todo: check this (a guess, I could not find the max jerk of G1 anywhere in the docs)
-      max_jerk: 500.0 # todo: check this. (a guess, I could not find the max jerk of G1 anywhere in the docs)
+      max_jerk: 50.0 # todo: check this. (a guess, I could not find the max jerk of G1 anywhere in the docs)

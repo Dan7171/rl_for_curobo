@@ -596,7 +596,8 @@ class ArmMpc(AutonomousArm):
         
         # publish the target in the runtime topics
         X_target = np.concatenate([p_solverTarget_R, q_solverTarget_R]) # in world frame
-        get_topics().topics[self.env_id][self.instance_id]["target"] = X_target
+        if (all_topics := get_topics()) is not None:
+            all_topics.topics[self.env_id][self.instance_id]["target"] = X_target
 
     def _check_prerequisites_for_syncing_target_pose(self, real_target_position:np.ndarray, real_target_orientation:np.ndarray,sim_js:None) -> bool:
         has_target_pose_changed = self._check_target_pose_changed(real_target_position, real_target_orientation)
@@ -989,7 +990,7 @@ class ArmMpc(AutonomousArm):
         return self.solver.step(self.current_state, shift_steps=shift_steps, seed_traj=seed_traj, max_attempts=max_attempts)
 
     
-    def sense(self,update_obs_callback:Tuple[Callable, dict], update_target_callback:Tuple[Callable, dict], update_joint_state_callback:Tuple[Callable, dict],physx_lock:"Lock", plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None):
+    def sense(self,update_obs_callback:Tuple[Callable, dict], update_target_callback:Tuple[Callable, dict], update_joint_state_callback:Tuple[Callable, dict],physx_lock:Optional["Lock"]=None, plans=None, col_pred_with=None, t_idx=None, tensor_args=None, own_robot_id=None,plans_lock:Optional["Lock"]=None):
         """
         Complete robot sensing and state update update cycle: collision prediction, joint state, target, and MPC step.
         
@@ -1008,25 +1009,30 @@ class ArmMpc(AutonomousArm):
             MPC result from the solver
         """
 
-        
-
-        # Update dynamic obstacles (other robots' plans) collision predictor if enabled
-        if self.use_col_pred: # plans_lock should be provided
-            if plans_lock is not None: # for the async setup
-                with plans_lock: 
-                    self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
-            else: # for the sync setup
-                self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
-        
-        with physx_lock:
+        def other_callbacks():
             # Update obs poses callback (in simulation or real world)
             update_obs_callback[0](**update_obs_callback[1])
             # Update joint state callback
             update_joint_state_callback[0](**update_joint_state_callback[1])        
             # Update target callback
             update_target_callback[0](**update_target_callback[1])
-            
+
+        def col_pred_callback():
+            self.update_col_pred(plans, col_pred_with, t_idx, tensor_args, own_robot_id)
+
+        # Update dynamic obstacles (other robots' plans) collision predictor if enabled
+        if self.use_col_pred: # plans_lock should be provided
+            if plans_lock is not None: # for the async setup
+                with plans_lock: 
+                    col_pred_callback()
+            else: # for the sync setup
+                col_pred_callback()
         
+        if physx_lock is not None:
+            with physx_lock:
+                other_callbacks()
+        else:
+            other_callbacks()
 
     def get_rollouts_in_world_frame(self):
         """
