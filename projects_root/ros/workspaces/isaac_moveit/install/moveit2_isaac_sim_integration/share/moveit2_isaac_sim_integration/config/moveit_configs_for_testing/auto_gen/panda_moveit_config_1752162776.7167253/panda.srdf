@@ -1,1 +1,0 @@
-<robot name="panda"><group name="manipulator"><joint name="panda_joint1" /><joint name="panda_joint2" /><joint name="panda_joint3" /><joint name="panda_joint4" /><joint name="panda_joint5" /><joint name="panda_joint6" /><joint name="panda_joint7" /></group></robot>
