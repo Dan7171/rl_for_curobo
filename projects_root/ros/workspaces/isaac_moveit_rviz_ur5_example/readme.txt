@@ -20,3 +20,7 @@ root@de:~/rl_for_curobo# /isaac-sim/isaac-sim.sh # run isaac sim
 # finally
 click play in isaac sim
 and in rviz set targets to the robot and execut  
+
+# terminal 3:
+# enter docker container as did in terminal 2
+# run projects_root/ros/workspaces/isaac_moveit_rviz_ur5_example/src/send_goal_pose_to_moveit.py

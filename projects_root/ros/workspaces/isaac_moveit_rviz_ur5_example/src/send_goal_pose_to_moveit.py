@@ -7,6 +7,7 @@ from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstrai
 from builtin_interfaces.msg import Duration
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from sensor_msgs.msg import JointState
+from visualization_msgs.msg import Marker, MarkerArray
 import random
 import math
 import numpy as np
@@ -40,6 +41,10 @@ class MoveGroupClient(Node):
             self.get_logger().info('Subscribed to /tf_ee_link for end-effector pose')
         except:
             self.get_logger().info('No /tf_ee_link topic found, will compute FK manually')
+        
+        # Publisher for RViz visualization
+        self._goal_marker_pub = self.create_publisher(Marker, '/goal_pose_marker', 10)
+        self._goal_pose_pub = self.create_publisher(PoseStamped, '/move_group/display_goal_pose', 10)
         
         # Store current joint states
         self._current_joint_states = None
@@ -78,6 +83,60 @@ class MoveGroupClient(Node):
         """Callback to receive end-effector pose from TF"""
         self._current_ee_pose = msg.pose
         self.get_logger().info(f'EE pose from TF: pos=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f})')
+
+    def publish_goal_to_rviz(self, target_pose, goal_type):
+        """Publish goal pose to RViz for visualization"""
+        # Create a marker for the goal pose
+        marker = Marker()
+        marker.header.frame_id = "world"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "goal_pose"
+        marker.id = 0
+        marker.type = Marker.ARROW
+        marker.action = Marker.ADD
+        
+        # Set marker position and orientation
+        marker.pose = target_pose
+        marker.scale.x = 0.1  # Arrow length
+        marker.scale.y = 0.02  # Arrow width
+        marker.scale.z = 0.02  # Arrow height
+        
+        # Set color based on goal type
+        if goal_type == 'fixed':
+            marker.color.r = 1.0  # Red
+            marker.color.g = 0.0
+            marker.color.b = 0.0
+        elif goal_type == 'random':
+            marker.color.r = 0.0
+            marker.color.g = 1.0  # Green
+            marker.color.b = 0.0
+        elif goal_type == 'left':
+            marker.color.r = 0.0
+            marker.color.g = 0.0
+            marker.color.b = 1.0  # Blue
+        elif goal_type == 'right':
+            marker.color.r = 1.0
+            marker.color.g = 1.0  # Yellow
+            marker.color.b = 0.0
+        else:
+            marker.color.r = 1.0
+            marker.color.g = 0.0
+            marker.color.b = 1.0  # Magenta
+        
+        marker.color.a = 0.8  # Transparency
+        
+        # Publish marker
+        self._goal_marker_pub.publish(marker)
+        
+        # Also publish as PoseStamped for MoveIt RViz plugin
+        pose_stamped = PoseStamped()
+        pose_stamped.header.frame_id = "world"
+        pose_stamped.header.stamp = self.get_clock().now().to_msg()
+        pose_stamped.pose = target_pose
+        
+        self._goal_pose_pub.publish(pose_stamped)
+        
+        self.get_logger().info(f'Published goal pose to RViz: {goal_type} goal at ({target_pose.position.x:.3f}, {target_pose.position.y:.3f}, {target_pose.position.z:.3f})')
 
     def wait_for_joint_states(self, timeout=5.0):
         """Wait for joint states to be received"""
@@ -340,7 +399,32 @@ class MoveGroupClient(Node):
         pos, quat = self.ur5_forward_kinematics(test_joints)
         self.get_logger().info(f'Test position FK: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
 
-    def send_goal(self, goal_type='fixed', test_mode=False):
+    def get_available_planners(self):
+        """Get list of available planners for the arm group"""
+        # Common MoveIt planners
+        common_planners = [
+            "RRTConnect",
+            "RRT",
+            "RRTstar", 
+            "PRM",
+            "PRMstar",
+            "BKPIECE",
+            "KPIECE",
+            "BiTRRT",
+            "FMT",
+            "STRIDE",
+            "CHOMP",
+            "STOMP",
+            "OMPL"
+        ]
+        
+        self.get_logger().info("=== Available Planners ===")
+        for i, planner in enumerate(common_planners):
+            self.get_logger().info(f"{i+1}. {planner}")
+        
+        return common_planners
+
+    def send_goal(self, goal_type='fixed', test_mode=False, planner_id="RRTConnect"):
         # Test forward kinematics first
         self.test_forward_kinematics()
         
@@ -351,6 +435,10 @@ class MoveGroupClient(Node):
 
         # If in test mode, just print joint states and exit
         if test_mode:
+            if self._current_joint_states is None:
+                self.get_logger().error('No joint states available in test mode')
+                return
+                
             self.get_logger().info('=== TEST MODE: Current Joint States ===')
             arm_joint_names = [
                 'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
@@ -381,6 +469,10 @@ class MoveGroupClient(Node):
 
         # Set planning group
         goal_msg.request.group_name = 'arm'
+
+        # Set planner ID
+        goal_msg.request.planner_id = planner_id
+        self.get_logger().info(f'Using planner: {planner_id}')
 
         # Set planning time
         goal_msg.request.allowed_planning_time = 5.0
@@ -425,6 +517,9 @@ class MoveGroupClient(Node):
         self.get_logger().info(f'Goal end-effector pose: position=({target_pose.position.x:.3f}, {target_pose.position.y:.3f}, {target_pose.position.z:.3f})')
         self.get_logger().info(f'Goal orientation: w={target_pose.orientation.w:.3f}, x={target_pose.orientation.x:.3f}, y={target_pose.orientation.y:.3f}, z={target_pose.orientation.z:.3f}')
 
+        # Publish goal to RViz for visualization
+        self.publish_goal_to_rviz(target_pose, goal_type)
+
         # ===== POSITION CONSTRAINT =====
         # Create a position constraint that defines where the end-effector should be
         position_constraint = PositionConstraint()
@@ -462,7 +557,7 @@ class MoveGroupClient(Node):
         goal_msg.planning_options.planning_scene_diff.is_diff = True
 
         # Send and handle result
-        self.get_logger().info('Sending goal to MoveIt...')
+        self.get_logger().info(f'Sending goal to MoveIt using {planner_id} planner...')
         future = self._client.send_goal_async(goal_msg)
         rclpy.spin_until_future_complete(self, future)
 
@@ -493,10 +588,18 @@ def main():
     if test_mode:
         node.send_goal('fixed', test_mode=True)
     else:
+        # Show available planners
+        node.get_available_planners()
+        
         # You can change the goal_type here to get different goals:
         # Options: 'fixed', 'random', 'left', 'right', 'high', 'low'
         goal_type = 'fixed'  # Change this to get different goals each time
-        node.send_goal(goal_type, test_mode=False)
+        
+        # You can change the planner here:
+        # Common options: "RRTConnect", "RRT", "RRTstar", "PRM", "CHOMP", "STOMP"
+        planner_id = "RRTstar"  # Change this to use different planners
+        
+        node.send_goal(goal_type, test_mode=False, planner_id=planner_id)
     
     node.destroy_node()
     rclpy.shutdown()
