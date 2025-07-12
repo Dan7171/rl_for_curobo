@@ -21,8 +21,15 @@ robot_cfg:
       - head_link
       # left hip 
       - left_hip_pitch_link
+      - left_hip_roll_link
+      - left_hip_yaw_link
+      
       # right hip
       - right_hip_pitch_link
+      - right_hip_roll_link
+      - right_hip_yaw_link
+      
+
       # left arm - 5 links
       - left_shoulder_pitch_link
       - left_shoulder_roll_link
@@ -96,7 +103,13 @@ robot_cfg:
     # Freeze lower-body and torso joints so that only the arms/hands are actuated
     lock_joints: # Lock active joints in the kinematic tree. This will convert the joint to a fixed joint with joint angle given from this dictionary.
       left_hip_pitch_joint: 0.0 # standing position
-      right_hip_pitch_joint: 0.0 # standing position
+      left_hip_roll_joint: 0.0
+      left_hip_yaw_joint: 0.0
+      
+      right_hip_pitch_joint: 0.0
+      right_hip_roll_joint: 0.0
+      right_hip_yaw_joint: 0.0
+
       waist_yaw_joint: 0.0
       # right arm joints
       right_shoulder_pitch_joint: 0.5 # to the side
@@ -136,56 +149,65 @@ robot_cfg:
       
       
     
-    collision_sphere_buffer: 0.001
+    collision_sphere_buffer: 0.0001
 
     self_collision_buffer: # making collision spheres bigger to avoid self-collisions
       
       # body
-      pelvis: 0.001
-      torso_link: 0.001
-      head_link: 0.001
+      pelvis: 0.0001
+      torso_link: 0.0001
+      head_link: 0.0001
       
       # left arm
-      left_shoulder_pitch_link: 0.001
-      left_shoulder_roll_link: 0.001
-      left_shoulder_yaw_link: 0.001
+      left_shoulder_pitch_link: 0.0001
+      left_shoulder_roll_link: 0.0001
+      left_shoulder_yaw_link: 0.0001
+      left_elbow_link: 0.0001
+      left_wrist_roll_rubber_hand: 0.0001
 
-      left_elbow_link: 0.001
-      left_hip_pitch_link: 0.001
-      left_wrist_roll_rubber_hand: 0.001
+      # left hip
+      left_hip_pitch_link: 0.0001
+      left_hip_roll_link: 0.0001
+      left_hip_yaw_link: 0.0001
+
+      
 
       # right arm    
-      right_hip_pitch_link: 0.001
-      right_shoulder_roll_link: 0.001
-      right_elbow_link: 0.001
-      right_shoulder_pitch_link: 0.001
-      right_shoulder_yaw_link: 0.001
-      right_wrist_roll_rubber_hand: 0.001
+      right_hip_pitch_link: 0.0001
+      right_shoulder_roll_link: 0.0001
+      right_elbow_link: 0.0001
+      right_shoulder_pitch_link: 0.0001
+      right_shoulder_yaw_link: 0.0001
+      right_wrist_roll_rubber_hand: 0.0001
       
+      # right hip
+      right_hip_pitch_link: 0.0001
+      right_hip_roll_link: 0.0001
+      right_hip_yaw_link: 0.0001
+
     self_collision_ignore: {
-      "left_shoulder_pitch_link":["left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
-      "left_shoulder_roll_link":["left_shoulder_pitch_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
-      "left_shoulder_yaw_link": ["left_shoulder_roll_link", "left_shoulder_pitch_link", "left_elbow_link", "torso_link"],
+      "left_shoulder_pitch_link":["head_link","left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
+      "left_shoulder_roll_link":["head_link","left_shoulder_pitch_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
+      "left_shoulder_yaw_link": ["left_shoulder_roll_link", "left_shoulder_pitch_link", "left_elbow_link"],
       "left_elbow_link": ["left_shoulder_roll_link", "left_shoulder_pitch_link", "left_shoulder_yaw_link","left_wrist_roll_rubber_hand"],
       "left_wrist_roll_rubber_hand": ["left_elbow_link"],
 
-      "right_shoulder_pitch_link": ["right_shoulder_roll_link", "right_shoulder_yaw_link", "right_elbow_link", "torso_link"],
-      "right_shoulder_roll_link": ["right_shoulder_pitch_link", "right_shoulder_yaw_link", "right_elbow_link", "torso_link"],
-      "right_shoulder_yaw_link": ["right_shoulder_pitch_link", "right_shoulder_roll_link", "right_elbow_link", "torso_link"],
+      "right_shoulder_pitch_link": ["head_link","right_shoulder_roll_link", "right_shoulder_yaw_link", "right_elbow_link", "torso_link"],
+      "right_shoulder_roll_link": ["head_link","right_shoulder_pitch_link", "right_shoulder_yaw_link", "right_elbow_link", "torso_link"],
+      "right_shoulder_yaw_link": ["right_shoulder_pitch_link", "right_shoulder_roll_link", "right_elbow_link"],
       "right_elbow_link": ["right_shoulder_pitch_link", "right_shoulder_roll_link", "right_shoulder_yaw_link", "right_wrist_roll_rubber_hand"],
       "right_wrist_roll_rubber_hand": ["right_elbow_link"],
 
       "pelvis": ["torso_link", "left_hip_pitch_link", "right_hip_pitch_link"],      
-      "torso_link": ["pelvis","left_shoulder_pitch_link","right_shoulder_pitch_link","left_shoulder_roll_link","right_shoulder_roll_link","left_shoulder_yaw_link","right_shoulder_yaw_link"],
-      "left_hip_pitch_link": ["right_hip_pitch_link","left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link", "left_wrist_roll_rubber_hand", "torso_link"],
-      "right_hip_pitch_link": ["left_hip_pitch_link","right_shoulder_pitch_link", "right_shoulder_roll_link", "right_shoulder_yaw_link", "right_elbow_link", "right_wrist_roll_rubber_hand", "torso_link"],
+      "torso_link": ["head_link","pelvis","left_shoulder_pitch_link","right_shoulder_pitch_link","left_shoulder_roll_link","right_shoulder_roll_link"],
+      "head_link": ["torso_link","left_shoulder_pitch_link","right_shoulder_pitch_link","left_shoulder_roll_link","right_shoulder_roll_link"],
+      "left_hip_pitch_link": ["left_hip_roll_link", "left_hip_yaw_link","left_shoulder_pitch_link", "left_shoulder_roll_link", "torso_link"],
+      "left_hip_roll_link": ["left_hip_pitch_link", "left_hip_yaw_link","left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link" ],
+      "left_hip_yaw_link": ["left_hip_pitch_link", "left_hip_roll_link", "left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link"],
+      "right_hip_pitch_link": ["right_hip_roll_link", "right_hip_yaw_link","right_shoulder_pitch_link", "right_shoulder_roll_link", "torso_link"],
+      "right_hip_roll_link": ["right_hip_pitch_link", "right_hip_yaw_link","right_shoulder_pitch_link", "right_shoulder_roll_link", "torso_link"],
+      "right_hip_yaw_link": ["right_hip_pitch_link", "right_hip_roll_link", "right_shoulder_pitch_link", "right_shoulder_roll_link", "torso_link"],
       }
-    # s_elf_collision_ignore: {
-    #   "left_shoulder_pitch_link": ["left_shoulder_roll_link", "left_elbow_link"],
-    #   "left_shoulder_roll_link": ["arm_0_panda_link2", "arm_0_panda_link3", "arm_0_panda_link4"],
-    #   "arm_0_panda_link2": ["arm_0_panda_link3", "arm_0_panda_link4"],
-    #   "arm_0_panda_link3": ["arm_0_panda_link4", "arm_0_panda_link6"],
-    # }
 
     collision_spheres: spheres/g1_humanoid_23dof.yml
 

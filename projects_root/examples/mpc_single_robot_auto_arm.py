@@ -39,7 +39,8 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     
     if SIMULATING:
         parser.add_argument("--visualize_spheres",action="store_true",help="When True, visualizes robot spheres",default=False,)
-        parser.add_argument("--robot", type=str, default="franka.yml", help="robot configuration to load")
+        # parser.add_argument("--robot", type=str, default="franka.yml", help="robot configuration to load")
+        parser.add_argument("--mcfg", type=str, default="", help="path to meta-config-file configuration to load")
         parser.add_argument( "--show_bnd_spheres",action="store_true",help="Render bounding sphere approximations of each obstacle in real-time.",default=False,)
         args = parser.parse_args()
         # CRITICAL: Isaac Sim must be imported FIRST before any other modules
@@ -86,35 +87,21 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     
     # Third party modules (moved after Isaac Sim initialization)
     import time
-    from threading import Thread, Event, Lock
-    from typing import List, Optional, Tuple, Any
+    from typing import List
     import torch
     import os
     import numpy as np
-    from scipy.spatial.transform import Rotation as R
 
-    
     # Our modules
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
-    from projects_root.utils.transforms import transform_poses_batched
     from projects_root.autonomous_arm import ArmMpc
-    from projects_root.utils.draw import draw_points
     from projects_root.utils.colors import npColors
     # CuRobo modules
-    from curobo.geom.types import Sphere, WorldConfig
-    from curobo.types.base import TensorDeviceType
-    from curobo.types.state import JointState
+    from curobo.geom.types import WorldConfig
     from curobo.util.logger import setup_logger
     from curobo.util.usd_helper import UsdHelper
     from curobo.util_file import  load_yaml
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.obstacle import Obstacle
-    from projects_root.autonomous_arm import AutonomousArm
     from projects_root.utils.world_model_wrapper import WorldModelWrapper
-    from projects_root.utils.handy_utils import get_rollouts_in_world_frame
-    from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
-    from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
-
+    
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
     a = torch.zeros(4, device="cuda:0")
 
@@ -334,10 +321,9 @@ def main():
     # ------------------
     # Config files setup
     # ------------------    
-    robot_cfg_path = join_path(get_robot_configs_path(), args.robot) # yml
-    robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
-    mpc_cfg_path = 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' 
-    mpc_cfg = load_yaml(mpc_cfg_path)
+    meta_cfg = load_yaml(args.mcfg)
+    robot_cfg = load_yaml(meta_cfg["robot"])["robot_cfg"]
+    mpc_cfg_path = meta_cfg["mpc"] # 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' 
     
     # -----------------------------------------
     # Scenario setup (simulation or real world)
@@ -428,7 +414,6 @@ def main():
 
             if args.visualize_spheres and t_idx % 2 == 0:
                 robot.visualize_robot_as_spheres(robot.curobo_format_joints)
-        
         simulation_app.close() 
         
     if REAL: # Real world (no simulation) # TODO add support for both or just one of them

@@ -1,0 +1,3 @@
+robot: curobo/src/curobo/content/configs/robot/g1/left_arm.yml
+mpc: projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/particle_mpc.yml
+

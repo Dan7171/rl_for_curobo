@@ -12,20 +12,14 @@ from projects_root.utils.transforms import transform_poses_batched_optimized_for
 from curobo.wrap.wrap_mpc import WrapMpc
 import torch
 from typing import Callable, Dict, Union
-import carb
 import numpy as np
 from abc import abstractmethod
 from torch.func import vmap
 
-
 from omni.isaac.core import World # https://forums.developer.nvidia.com/t/cannot-import-omni-isaac-core/242977/3
 from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
-from omni.isaac.core.objects import DynamicCuboid
-from isaacsim.util.debug_draw import _debug_draw # isaac 4.5
 from omni.isaac.core.objects import VisualSphere
-from omni.isaac.core.utils.stage import add_reference_to_stage
-from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 import omni.kit.commands as cmd
 from projects_root.utils.world_model_wrapper import WorldModelWrapper
@@ -1270,6 +1264,8 @@ class ArmCumotion(AutonomousArm):
             interpolated_plan: interpolated solution, useful for visualization.
 
         """
+        import carb
+
         print("reset_command_planning a new global plan - goal pose has changed!")
             
         # Set EE teleop goals, use cube for simple non-vr init:

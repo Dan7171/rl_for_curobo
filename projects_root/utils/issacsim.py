@@ -118,6 +118,11 @@ def init_app(
     SimulationApp
         Running SimulationApp handle. (Type: SimulationApp)
     """
+    # # CRITICAL: Isaac Sim must be imported FIRST before any other modules
+    # try:
+    #     import isaacsim
+    # except ImportError:
+    #     pass
 
     global _GLOBAL_SIM_APP  # pylint: disable=global-statement
 
@@ -156,13 +161,14 @@ def init_app(
         app_settings = dict(app_settings)  # shallow copy to avoid caller side-effects
         app_settings.setdefault("exts", list(extensions))  # type: ignore[arg-type]
 
-    # Ensure the isaacsim package is importable before anything else.
-    try:
-        import isaacsim  # noqa: F401  # pylint: disable=unused-import  # type: ignore
-    except ImportError:
-        # Harmless when running outside an Isaac-Sim environment – the import
-        # becomes valid once the SimulationApp bootstraps the path.
-        pass
+    # # Ensure the isaacsim package is importable before anything else.
+    # try:
+    #     import isaacsim  # noqa: F401  # pylint: disable=unused-import  # type: ignore
+    #     print("isaacsim imported")
+    # except ImportError:
+    #     # Harmless when running outside an Isaac-Sim environment – the import
+    #     # becomes valid once the SimulationApp bootstraps the path.
+    #     pass
 
     SimulationAppCls = _resolve_sim_app_cls()
     sim_app = SimulationAppCls(app_settings)  # type: ignore[arg-type]
