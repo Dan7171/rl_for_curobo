@@ -477,11 +477,9 @@ class ArmMpc(AutonomousArm):
                 q_T_R=np.array([0, 1, 0, 0]), 
                 target_color=np.array([0, 0.5, 0]), 
                 target_size=0.05, 
-                plot_costs:bool=False,
-                override_particle_file:str=None,
                 n_coll_spheres:int=None,  # Total spheres (base + extra)
                 n_coll_spheres_valid:int=None,  # Valid spheres (base only, no extra)
-                use_col_pred:bool=False  # Enable collision prediction updates
+                use_col_pred:bool=False,  # Enable collision prediction updates
                 ):
         """
         Spawns an arm robot in the scene and setting the target for the robot to follow.
@@ -498,8 +496,6 @@ class ArmMpc(AutonomousArm):
             q_T_R: Target orientation relative to robot base frame
             target_color: RGB color for target visualization
             target_size: Size of target visualization
-            plot_costs: Whether to enable live cost plotting
-            override_particle_file: Path to MPC configuration file to override defaults
             n_coll_spheres: Total number of collision spheres (calculated from calculate_robot_sphere_count)
             n_coll_spheres_valid: Number of valid collision spheres (base spheres only, excluding extra_collision_spheres)
         """
@@ -508,55 +504,58 @@ class ArmMpc(AutonomousArm):
         self._spawn_robot_and_target(usd_help)
         self.articulation_controller = self.robot.get_articulation_controller()
         self._cmd_state_full = None
-        self.override_particle_file = override_particle_file # New. settings in the file will overide the default settings in the default particle_mpc.yml file. For example, num of optimization steps per time step.
-        self.cfg = load_yaml(self.override_particle_file)
-        self.H = self.cfg["model"]["horizon"]
-        self.num_particles = self.cfg["mppi"]["num_particles"]
-        self.plot_costs = plot_costs
         self.use_col_pred = use_col_pred
+        
         
   
 
     
-    def init_solver(self, step_dt_traj_mpc,debug=False):
+    def init_solver(self, cfg:Optional[dict]):
         """Initialize the MPC solver.
 
         Args:
-            world_cfg (_type_): _description_
-            collision_cache (_type_): _description_
-            step_dt_traj_mpc (_type_): _description_
-            dynamic_obs_coll_predictor (_type_): _description_
+
         
         """
         
 
         world_cfg = WorldConfig() # curobo world config (agnostic to the simulation/real world)
-
+        if cfg is not None and "cu_world_wrapper" in cfg and "verbosity" in cfg["cu_world_wrapper"]:
+            verbosity = cfg["cu_world_wrapper"]["verbosity"]
+        else:
+            verbosity = 4
         # See wrapper's docstring to understand the motivation for the wrapper.
         self.cu_world_wrapper = WorldModelWrapper(
             world_config=world_cfg,
             X_robot_W=np.array(self.X_R), # robot base frame in world frame
-            verbosity=4
+            verbosity=verbosity
         )
 
-        # Initialize the MPC solver
-        mpc_config = MpcSolverConfig.load_from_robot_config(
-            self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
-            world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
-            use_cuda_graph=not debug, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
-            use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
-            self_collision_check=True, # Enable self-collision check during MPC optimization.
-            collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
-            collision_cache={"obb": 30, "mesh": 30}, # collision cache for the robot.
-            use_mppi=True,  # Use Model Predictive Path Integral for optimization
-            use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
-            use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
-            store_rollouts=True,  # Store trajectories for visualization
-            step_dt=step_dt_traj_mpc,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.html
-            dynamic_obs_checker=None, # New
-            override_particle_file=self.override_particle_file, # New
-            plot_costs=self.plot_costs # New
-        )
+        if cfg is None or "mpc_solver_config" not in cfg:
+            # Initialize the MPC solver
+            mpc_config = MpcSolverConfig.load_from_robot_config(
+                self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
+                world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+                use_cuda_graph=False, # Use CUDA graph for the optimization step. If you want to set breakpoints in the cost function, set this to False.
+                use_cuda_graph_metrics=True, # Use CUDA graph for computing metrics.
+                self_collision_check=True, # Enable self-collision check during MPC optimization.
+                collision_checker_type=CollisionCheckerType.MESH, # type of collision checker to use. See https://curobo.org/get_started/2c_world_collision.html#world-collision 
+                collision_cache={"obb": 30, "mesh": 30}, # collision cache for the robot.
+                use_mppi=True,  # Use Model Predictive Path Integral for optimization
+                use_lbfgs=False, # Use L-BFGS solver for MPC. Highly experimental.
+                use_es=False, # Use Evolution Strategies (ES) solver for MPC. Highly experimental.
+                store_rollouts=True,  # Store trajectories for visualization
+                step_dt=0.03,  # NOTE: Important! step_dt is the time step to use between each step in the trajectory. If None, the default time step from the configuration~(particle_mpc.yml or gradient_mpc.yml) is used. This dt should match the control frequency at which you are sending commands to the robot. This dt should also be greater than the compute time for a single step. For more info see https://curobo.org/_api/curobo.wrap.reacher.html
+                dynamic_obs_checker=None, # New
+                plot_costs=False # New
+            )
+        else:
+            mpc_config = MpcSolverConfig.load_from_robot_config(
+                self.robot_cfg, #  Robot configuration. Can be a path to a YAML file or a dictionary or an instance of RobotConfig https://curobo.org/_api/curobo.types.robot.html#curobo.types.robot.RobotConfig
+                world_cfg, #  World configuration. Can be a path to a YAML file or a dictionary or an instance of WorldConfig. https://curobo.org/_api/curobo.geom.types.html#curobo.geom.types.WorldConfig
+                **cfg["mpc_solver_config"]
+            )
+
         
         self.solver = MpcSolver(mpc_config)
         
@@ -575,6 +574,8 @@ class ArmMpc(AutonomousArm):
         self.goal_buffer = goal_buffer
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.step(max_attempts=2) # initiation step
+
+        self.robot._articulation_view.initialize() # TODO: This is a technical required step in isaac 4.5 but check if actually needed https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
 
 
 
@@ -1449,73 +1450,7 @@ class ArmCumotion(AutonomousArm):
     
     
     
-"""
-USAGE EXAMPLE - How to update existing code to use ArmMpc instead of FrankaMpc:
-
-OLD CODE (Franka-specific):
-    robots:List[FrankaMpc] = []
-    for i in range(n_robots):
-        robots.append(FrankaMpc(
-            robot_cfgs[i], 
-            my_world, 
-            usd_help, 
-            env_id=0,
-            robot_id=i,
-            p_R=X_Robots[i][:3],
-            q_R=X_Robots[i][3:], 
-            p_T_R=X_target_R[i][:3],
-            q_T_R=X_target_R[i][3:], 
-            target_color=target_colors[i],
-            plot_costs=plot_costs[i],
-            override_particle_file=f"{mpc_cfg_overide_files_dir}/arm{i}.yml"
-        ))
-
-NEW CODE (Generic arm support):
-    # Calculate sphere counts for all robots BEFORE creating instances
-    robot_sphere_counts = [calculate_robot_sphere_count(robot_cfg) for robot_cfg in robot_cfgs]
-    robot_sphere_counts_valid = [calculate_robot_sphere_count_valid(robot_cfg) for robot_cfg in robot_cfgs]
-    
-    robots:List[ArmMpc] = []
-    for i in range(n_robots):
-        robots.append(ArmMpc(
-            robot_cfgs[i], 
-            my_world, 
-            usd_help, 
-            env_id=0,
-            robot_id=i,
-            p_R=X_Robots[i][:3],
-            q_R=X_Robots[i][3:], 
-            p_T_R=X_target_R[i][:3],
-            q_T_R=X_target_R[i][3:], 
-            target_color=target_colors[i],
-            plot_costs=plot_costs[i],
-            override_particle_file=f"{mpc_cfg_overide_files_dir}/arm{i}.yml",
-            n_coll_spheres=robot_sphere_counts[i],  # Total spheres (base + extra)
-            n_coll_spheres_valid=robot_sphere_counts_valid[i]  # Valid spheres (base only)
-        ))
-
-HELPER FUNCTIONS NEEDED:
-    def calculate_robot_sphere_count_valid(robot_cfg) -> int:
-        \"\"\"Calculate number of valid collision spheres (base spheres only, no extra)\"\"\"
-        collision_spheres_file = robot_cfg["kinematics"]["collision_spheres"]
-        collision_spheres_path = join_path(get_robot_configs_path(), collision_spheres_file)
-        collision_spheres_cfg = load_yaml(collision_spheres_path)
-        
-        sphere_count = 0
-        if "collision_spheres" in collision_spheres_cfg:
-            for link_name, spheres in collision_spheres_cfg["collision_spheres"].items():
-                sphere_count += len(spheres)
-        
-        return sphere_count  # Return only base spheres, no extra
-
-BENEFITS:
-✅ Supports any arm robot model (Franka, UR, Kinova, etc.)
-✅ No hardcoded sphere counts or robot-specific values  
-✅ Dynamic calculation from config files
-✅ Single source of truth for robot parameters
-✅ Clean separation between configuration and runtime
-✅ Backward compatible with existing MPC configurations
-"""
+ 
 
 # Backward compatibility aliases - allows existing code to continue working
 FrankaMpc = ArmMpc

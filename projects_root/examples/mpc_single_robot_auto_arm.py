@@ -4,45 +4,30 @@ async version of projects_root/examples/mpc_moving_obstacles_mpc_mpc.py
 
 # Force non-interactive matplotlib backend to avoid GUI operations from worker threads
 import os
-from typing import Dict
-
-from curobo.util_file import get_robot_configs_path, join_path
 os.environ.setdefault("MPLBACKEND", "Agg") # ?
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--mcfg", type=str, default="projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/meta_cfg.yml", help="path to meta-config-file configuration to load")
+args = parser.parse_args()
+
+from curobo.util_file import  load_yaml
+meta_cfg = load_yaml(args.mcfg)
+
 
 # Clean imports - no path setup needed!
 
 
-SIMULATING = True # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
-REAL = False # currently unsupported
-REAL_TIME_EXPECTED_CTRL_DT = 0.03 #1 / (The expected control frequency in Hz). Set that to the avg time measurded between two consecutive calls to my_world.step() in real time. To print that time, use: print(f"Time between two consecutive calls to my_world.step() in real time, run with --print_ctrl_rate "True")
-ENABLE_GPU_DYNAMICS = True # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
-OBS_PREDICTION = True # If True, this would be what the original MPC cost function could handle. False means that the cost will consider obstacles as moving and look into the future, while True means that the cost will consider obstacles as static and not look into the future.
-DEBUG = True # Currenly, the main feature of True is to run withoug cuda graphs. When its true, we can set breakpoints inside cuda graph code (like in cost computation in "ArmBase" for example)  
-VISUALIZE_PLANS_AS_DOTS = True # If True, then the predicted paths of the dynamic obstacles will be rendered in the simulation.
-VISUALIZE_MPC_ROLLOUTS = True # If True, then the MPC rollouts will be rendered in the simulation.
-VISUALIZE_ROBOT_COL_SPHERES = False # If True, then the robot collision spheres will be rendered in the simulation.
-HIGHLIGHT_OBS = False # mark the predicted (or not predicted) dynamic obstacles in the simulation
-HIGHLIGHT_OBS_H = 30
-DEBUG_GPU_MEM = False # If True, then the GPU memory usage will be printed on every call to my_world.step()
-RENDER_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
-PHYSICS_STEP_DT = 0.03 # original 1/60. All details were moved to notes/all_dts_in_one_place_explained.txt
-MPC_DT = 0.03 # independent of the other dt's, but if you want the mpc to simulate the real step change, set it to be as RENDER_DT and PHYSICS_STEP_DT.
-HEADLESS_ISAAC = False 
-
-
-
+SIMULATING = meta_cfg["env"]["simulation"]["is_on"] # if False, then we are running the robot in real time (i.e. the robot will move as fast as the real time allows)
+REAL = meta_cfg["env"]["real"]["is_on"] # currently unsupported
+ENABLE_GPU_DYNAMICS = meta_cfg["env"]["simulation"]["enable_gpu_dynamics"] # # GPU DYNAMICS - OPTIONAL (originally was disabled)# GPU Dynamics: Enabling GPU dynamics can potentially speed up the simulation by offloading the physics calculations to the GPU. However, this will only be beneficial if your GPU is powerful enough and not already fully utilized by other tasks. If enabling GPU dynamics slows down the simulation, it may be that your GPU is not able to handle the additional load. You can enable or disable GPU dynamics in your script using the world.set_gpu_dynamics_enabled(enabled) function, where enabled is a boolean value indicating whether GPU dynamics should be enabled.# See: https://docs-prod.omniverse.nvidia.com/isaacsim/latest/reference_material/speedup_cheat_sheet.html?utm_source=chatgpt.com # See: https://docs.isaacsim.omniverse.nvidia.com/latest/reference_material/sim_performance_optimization_handbook.html
+RENDER_DT = meta_cfg["env"]["simulation"]["render_dt"]
+PHYSICS_STEP_DT = meta_cfg["env"]["simulation"]["physics_dt"]
 
 ################### Imports and initiation ########################
 if True: # imports and initiation (put it in an if statement to collapse it)
-    import argparse
-    parser = argparse.ArgumentParser()
     
     if SIMULATING:
-        parser.add_argument("--visualize_spheres",action="store_true",help="When True, visualizes robot spheres",default=False,)
-        # parser.add_argument("--robot", type=str, default="franka.yml", help="robot configuration to load")
-        parser.add_argument("--mcfg", type=str, default="", help="path to meta-config-file configuration to load")
-        parser.add_argument( "--show_bnd_spheres",action="store_true",help="Render bounding sphere approximations of each obstacle in real-time.",default=False,)
-        args = parser.parse_args()
         # CRITICAL: Isaac Sim must be imported FIRST before any other modules
         try:
             import isaacsim
@@ -53,7 +38,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         from projects_root.utils.usd_utils import load_usd_to_stage
 
         # Init Isaac Sim app
-        simulation_app = init_app() # SimulationApp
+        simulation_app = init_app(meta_cfg["env"]["simulation"]["init_app_settings"]) # SimulationApp
         # Omniverse and IsaacSim modules
         from omni.isaac.core import World
         
@@ -73,7 +58,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         
         
         from projects_root.utils.helper import add_extensions # available only after app initiation
-        add_extensions(simulation_app, None if not HEADLESS_ISAAC else 'true') # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
+        add_extensions(simulation_app, meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
         # from omni.isaac.core.utils.physics import set_physics_threads
         
 
@@ -99,7 +84,7 @@ if True: # imports and initiation (put it in an if statement to collapse it)
     from curobo.geom.types import WorldConfig
     from curobo.util.logger import setup_logger
     from curobo.util.usd_helper import UsdHelper
-    from curobo.util_file import  load_yaml
+    
     from projects_root.utils.world_model_wrapper import WorldModelWrapper
     
     # Prevent cuda out of memory errors. Backward competebility with curobo source code...
@@ -284,19 +269,15 @@ def init_ccheck_wcfg_in_sim(usd_help:UsdHelper, robot_prim_path:str, target_prim
     return cu_world_R
 
 
-def define_run_setup():
-    target_orient = [0.5, 0, 0, 0] # for g1 (tmp)
-    # target_orient = [0, 0, 0, 1] # for others (tmp)
-    X_targets = [0.3,0.3, 1] + target_orient # position and orientation of all targets in world frame (x,y,z,qw, qx,qy,qz)
-    X_robot = [0,0,0.8,1,0,0,0] # position and orientation of the robot in world frame (x,y,z,qw, qx,qy,qz)
-    plot_costs = True
-    target_colors = npColors.red  
-    X_robot_np = np.array(X_robot, dtype=np.float32)
-    X_target_R = list(np.array(X_targets[:3]) - X_robot_np[:3]) + list(X_targets[3:])  
-    return X_robot_np, X_target_R, plot_costs, target_colors
+# def define_run_setup(meta_cfg):
+#     X_robot = meta_cfg["auto_arm_cfg"]["X_robot"]
+#     X_target = meta_cfg["auto_arm_cfg"]["X_target"]
+#     target_colors = npColors.red  
+#     X_robot_np = np.array(X_robot, dtype=np.float32)
+#     X_target_R = list(np.array(X_target[:3]) - X_robot_np[:3]) + list(X_target[3:])  
+#     return X_robot_np, X_target_R, target_colors
 
-def isaac_to_scipy_quat(quat):
-    return np.array([quat[1], quat[2], quat[3], quat[0]])
+
 
 
 def main():
@@ -314,6 +295,7 @@ def main():
         stage.SetDefaultPrim(stage.DefinePrim("/World", "Xform"))
         # Make also /curobo as Xform prim
         _curobo_xform = stage.DefinePrim("/curobo", "Xform")  # Transform for CuRobo-specific objects
+    
     if REAL:
         pass
         # TODO: init real world
@@ -321,37 +303,31 @@ def main():
     # ------------------
     # Config files setup
     # ------------------    
-    meta_cfg = load_yaml(args.mcfg)
-    robot_cfg = load_yaml(meta_cfg["robot"])["robot_cfg"]
-    mpc_cfg_path = meta_cfg["mpc"] # 'projects_root/projects/dynamic_obs/dynamic_obs_predictor/cfgs/particle_mpc.yml' 
     
+    robot_cfg = load_yaml(meta_cfg["robot"])["robot_cfg"]
+    auto_arm_cfg = meta_cfg["auto_arm_cfg"]
+    debug_cfg = meta_cfg["debug"]
+
+    visualize_spheres = debug_cfg["visualize_spheres"]["is_on"]
+    visualize_spheres_ts_delta = debug_cfg["visualize_spheres"]["ts_delta"]
     # -----------------------------------------
     # Scenario setup (simulation or real world)
     # -----------------------------------------
-    X_robot, X_target_R, plot_costs, target_color = define_run_setup()
+    
+    
+    X_robot = auto_arm_cfg["X_robot"]
+    X_target = auto_arm_cfg["X_target"]
+    target_color = npColors.red
+    X_robot_np = np.array(X_robot, dtype=np.float32)
+    X_target_R = list(np.array(X_target[:3]) - X_robot_np[:3]) + list(X_target[3:])  
+    
     # Calculate sphere counts for all robots BEFORE creating instances
     _split = calculate_robot_sphere_count(robot_cfg) # split[0] = 'valid' (base, no extra), split[1] = extra
     robot_sphere_counts = _split[0] + _split[1] # total (base + extra) sphere count (base + extra)
     robot_sphere_counts_no_extra = _split[0] # valid (base only) sphere count (base only)
 
     
-    robot = ArmMpc(
-        robot_cfg, 
-        my_world, # TODO: figure out what we do when SIMULATING=False (should not be too hard)
-        usd_help, # TODO: figure out what we do when SIMULATING=False (should not be too hard)
-        env_id=0,
-        robot_id=0,
-        p_R=X_robot[:3],
-        q_R=X_robot[3:], 
-        p_T_R=np.array(X_target_R[:3]),
-        q_T_R=np.array(X_target_R[3:]), 
-        target_color=target_color,
-        plot_costs=plot_costs,
-        override_particle_file=mpc_cfg_path,  # Use individual MPC config per robot
-        n_coll_spheres=robot_sphere_counts,  # Total spheres (base + extra)
-        n_coll_spheres_valid=robot_sphere_counts_no_extra,  # Valid spheres (base only)
-        use_col_pred=False  # Enable collision prediction
-        )
+    robot = ArmMpc(robot_cfg, my_world, usd_help, p_R=X_robot[:3], q_R=X_robot[3:],  p_T_R=np.array(X_target_R[:3]), q_T_R=np.array(X_target_R[3:]),  target_color=target_color, n_coll_spheres=robot_sphere_counts,  n_coll_spheres_valid=robot_sphere_counts_no_extra, use_col_pred=False)
     
     if SIMULATING:
         # reset default prim to /World
@@ -382,9 +358,8 @@ def main():
         # TODO: INIT JOINT POSITIONS IN REAL WORLD
         # robot.init_joints(_robot_idx_list)
     
-    # Init robot mpc solver
-    robot.init_solver(MPC_DT, DEBUG)
-    robot.robot._articulation_view.initialize() # TODO: This is a technical required step in isaac 4.5 but check if actually needed https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
+    
+    robot.init_solver(auto_arm_cfg["init_solver_cfg"])
     
     # ----------------------------
     # Start robot  loop
@@ -412,7 +387,7 @@ def main():
             my_world.step(render=True)           
             t_idx += 1
 
-            if args.visualize_spheres and t_idx % 2 == 0:
+            if visualize_spheres and t_idx % visualize_spheres_ts_delta == 0:
                 robot.visualize_robot_as_spheres(robot.curobo_format_joints)
         simulation_app.close() 
         

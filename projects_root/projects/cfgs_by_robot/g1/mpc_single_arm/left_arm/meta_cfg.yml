@@ -1,3 +1,31 @@
 robot: curobo/src/curobo/content/configs/robot/g1/left_arm.yml
-mpc: projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/particle_mpc.yml
+
+auto_arm_cfg:
+  X_robot: [0, 0, 0.8, 1, 0, 0, 0]
+  X_target: [0.3, 0.3, 1, 0.5, 0, 0, 0]
+  use_col_pred: False
+  
+  init_solver_cfg:
+    cu_world_wrapper:
+      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)  
+    mpc_solver_config: 
+      override_particle_file: projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/particle_mpc.yml
+      use_cuda_graph: False 
+      step_dt: 0.03
+      use_cuda_graph_metrics: True
+      self_collision_check: True
+      collision_checker_type: MESH
+      collision_cache: {"obb": 30, "mesh": 30}
+      use_mppi: True
+      use_lbfgs: False
+      plot_costs: True # for debugging
+
+
+debug:
+  visualize_spheres: 
+    is_on: true 
+    ts_delta: 2 # int
+  world_cu_wrapper:
+    verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
+
 

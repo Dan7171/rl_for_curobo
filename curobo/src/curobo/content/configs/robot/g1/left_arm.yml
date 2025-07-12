@@ -9,17 +9,12 @@ robot_cfg:
 
     # File paths
     urdf_path: "robot/g1_23dof_description/g1_23dofs_cfgs/g1_23dof.urdf"
-    # asset_root_path: "robot/g1_humanoid"
-    # usd_path: "robot/g1_humanoid/g1.usd"
-    # usd_robot_root: "/g1"
 
     # Collision configuration
     collision_link_names:  # Name of links to compute sphere positions for use in collision checking.
-      # body
       - pelvis
       - torso_link
       - head_link
-      # left hip 
       - left_hip_pitch_link
       - left_hip_roll_link
       - left_hip_yaw_link
@@ -43,24 +38,7 @@ robot_cfg:
       - right_elbow_link
       - right_wrist_roll_rubber_hand
       
-      # - world
-      # - pelvis_contour_link
-      # - left_hip_roll_link
-      # - left_hip_roll_link
-      # - left_knee_link
-      # - left_ankle_pitch_link
-      # - left_ankle_roll_link
-      # - right_hip_roll_link
-      # - right_hip_yaw_link
-      # - right_knee_link
-      # - right_ankle_pitch_link
-      # - right_ankle_roll_link      
-      # - waist_yaw_fixed_link
-      # - logo_link
-      # - waist_support_link
-      # - imu_in_torso
-      # - imu_in_pelvis
-
+   
     mesh_link_names: # Names of links to load meshes for visualization. This is only used for exporting visualizations.
       - world
       - pelvis
@@ -118,35 +96,7 @@ robot_cfg:
       right_elbow_joint: 1.2
       right_wrist_roll_joint: 0.0
       
-      # floating_base_joint: -0.4
-      # pelvis_contour_joint: -0.4
-      # left_hip_roll_joint: 0.05
-      # left_hip_yaw_joint: -0.05
-      # left_knee_joint: 0.0
-      # left_ankle_pitch_joint: 0.0
-      # left_ankle_roll_joint: 0.8
-      
-      # right_hip_roll_joint: -0.3
-      # right_hip_yaw_joint: -0.3
-      # right_knee_joint: 0.0
-      # right_ankle_pitch_joint: 0.0
-      # right_ankle_roll_joint: -1.4
-      # waist_yaw_fixed_joint: 0.0
-      # logo_joint: 1.2
-      # head_joint: 0.0
-      # waist_support_joint: -0.8
-      # imu_in_torso_joint: -0.8
-      # imu_in_pelvis_joint: -0.3
-      # d435_joint: -0.8
-      # mid360_joint: -0.3
-      
-      # left arm joints (unlocked)
-      # left_shoulder_pitch_joint: -1.4
-      # left_shoulder_roll_joint: 0.2
-      # left_shoulder_yaw_joint: 0.0
-      # left_elbow_joint: 1.2
-      # left_wrist_roll_joint: 0.0
-      
+     
       
     
     collision_sphere_buffer: 0.0001
