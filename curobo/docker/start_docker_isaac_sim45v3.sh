@@ -219,7 +219,7 @@ docker run $DC_OPTIONS \
 # echo "Step 1-RUN THIS SCRIPT: let this script (we are in) run in first terminal (you are here, so you are already done with that step)"
 # echo "Step 2-MAKE CHANGES: if you need to make any changes to the cointaier-do them now...(installing packages, re-arrange dirs etc..)"
 # echo "Step 3-COMMIT: After you are done, run this command in terminal 2 (also in host machine):"
-# echo "General syntax: docker commit [OPTIONS] CONTAINER REPOSITORY[:TAG]"
+# echo "General syntax: docker commit [OPTIONS] $CONTAINER_REGISTRY/$IMAGE_NAME:Your_new_tag_name_here"
 # echo "In our case: docker commit -m 'describe the changes...' $CONTAINER_NAME $CONTAINER_REGISTRY/$IMAGE_NAME:Your_new_tag_name_here (an existing name is also possible)"
 # echo "Step 4-PUSH: Push the new image to the registry (to back them up remotely):"
 # echo "docker push $CONTAINER_REGISTRY/$IMAGE_NAME:Your_new_tag_name_here" 

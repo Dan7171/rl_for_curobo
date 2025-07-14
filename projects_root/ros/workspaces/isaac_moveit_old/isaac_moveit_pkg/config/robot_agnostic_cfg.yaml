@@ -1,0 +1,9 @@
+
+ros:
+  joint_states_topic: /isaac_joint_states # read from isaac sim's robot prim, published by the 'publish joint states' node in the action graph. Action graph node type (ROS2 Publish Joint State))
+  joint_commands_topic: /isaac_joint_commands # published by moveit, read by isaac sim's "ros2 subscribe joint states" node. NOTE: this could be confusing at first. Its node type in action graph is "ROS2 Subscribe Joint state" because this is the node type in isaac sim ros2 bridge that handles subscription to topics which publish messages in the form of "joint states", which is by chance exactly thetype of controller actions we selected to publish (desiredjoint states).
+  time_topic: /clock # Published by the 'ROS2 Publish Clock' omni graph node in the action graph. Publishing the total playing time of the simulation (for anyone who wants to know the time of the simulatio). It's job is to sync the clock of the simulation with the clock of the ros2.
+
+robot:
+  prim_path: /World/robot
+  target_prim_path: /World/target

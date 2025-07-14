@@ -57,8 +57,8 @@ if True: # imports and initiation (put it in an if statement to collapse it)
         my_world.set_simulation_dt(PHYSICS_STEP_DT, RENDER_DT)
         
         
-        from projects_root.utils.helper import add_extensions # available only after app initiation
-        add_extensions(simulation_app, meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
+        # from projects_root.utils.helper import add_extensions # available only after app initiation
+        # add_extensions(simulation_app, meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]) # in all of the examples of curobo it happens somwhere around here, before the simulation begins. I am not sure why, but I kept it as that. 
         # from omni.isaac.core.utils.physics import set_physics_threads
         
 

@@ -1,3 +1,19 @@
+#!/usr/bin/env python3
+"""
+UR5 MoveIt Goal Pose Sender
+
+This script sends goal poses to MoveIt for a UR5 robot arm. It can:
+- Read current joint states from /joint_states topic
+- Compute forward kinematics using UR5 DH parameters
+- Send different types of goal poses (fixed, random, left, right, high, low)
+- Visualize goals in RViz
+- Select different planning algorithms
+- Test mode for debugging joint states
+
+Author: Assistant
+Date: 2024
+"""
+
 import rclpy
 from rclpy.node import Node
 from moveit_msgs.action import MoveGroup
@@ -11,13 +27,27 @@ from visualization_msgs.msg import Marker, MarkerArray
 import random
 import math
 import numpy as np
-
+import time
 from rclpy.action import ActionClient
 
 
 class MoveGroupClient(Node):
+    """
+    A ROS2 node that sends goal poses to MoveIt for UR5 robot arm control.
+    
+    This class handles:
+    - Joint state monitoring
+    - Forward kinematics computation
+    - Goal pose generation
+    - MoveIt action communication
+    - RViz visualization
+    """
+    
     def __init__(self):
+        """Initialize the MoveGroupClient node with all necessary subscribers and publishers."""
         super().__init__('move_group_client')
+        
+        # Action client for MoveIt
         self._client = ActionClient(self, MoveGroup, '/move_action')
         
         # Subscribe to joint states to get current robot state
@@ -42,7 +72,7 @@ class MoveGroupClient(Node):
         except:
             self.get_logger().info('No /tf_ee_link topic found, will compute FK manually')
         
-        # Publisher for RViz visualization
+        # Publishers for RViz visualization
         self._goal_marker_pub = self.create_publisher(Marker, '/goal_pose_marker', 10)
         self._goal_pose_pub = self.create_publisher(PoseStamped, '/move_group/display_goal_pose', 10)
         
@@ -50,12 +80,19 @@ class MoveGroupClient(Node):
         self._current_joint_states = None
         self._joint_states_received = False
         
-        # Wait for action server
+        # Wait for action server to be ready
         self._client.wait_for_server()
         self.get_logger().info('Action server is ready')
 
     def _joint_states_callback(self, msg):
-        """Callback to receive current joint states from robot"""
+        """
+        Callback to receive current joint states from robot.
+        
+        Only logs significant changes to reduce noise in the console.
+        
+        Args:
+            msg: JointState message containing current joint positions and velocities
+        """
         self._current_joint_states = msg
         self._joint_states_received = True
         
@@ -64,11 +101,11 @@ class MoveGroupClient(Node):
             self._last_logged_joint_states = None
             
         if self._last_logged_joint_states is not None:
-            # Check if any joint changed significantly
+            # Check if any joint changed significantly (>1cm threshold)
             significant_change = False
             for i, (name, pos) in enumerate(zip(msg.name, msg.position)):
                 if i < len(self._last_logged_joint_states.position):
-                    if abs(pos - self._last_logged_joint_states.position[i]) > 0.01:  # 1cm threshold
+                    if abs(pos - self._last_logged_joint_states.position[i]) > 0.01:
                         significant_change = True
                         break
             
@@ -80,12 +117,26 @@ class MoveGroupClient(Node):
         self._last_logged_joint_states = msg
 
     def _ee_pose_callback(self, msg):
-        """Callback to receive end-effector pose from TF"""
+        """
+        Callback to receive end-effector pose from TF topic.
+        
+        Args:
+            msg: PoseStamped message containing end-effector pose
+        """
         self._current_ee_pose = msg.pose
         self.get_logger().info(f'EE pose from TF: pos=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f})')
 
     def publish_goal_to_rviz(self, target_pose, goal_type):
-        """Publish goal pose to RViz for visualization"""
+        """
+        Publish goal pose to RViz for visualization.
+        
+        Creates a colored arrow marker and publishes it to RViz topics.
+        Different goal types get different colors for easy identification.
+        
+        Args:
+            target_pose: Pose message containing the goal position and orientation
+            goal_type: String indicating the type of goal (affects marker color)
+        """
         # Create a marker for the goal pose
         marker = Marker()
         marker.header.frame_id = "world"
@@ -139,7 +190,15 @@ class MoveGroupClient(Node):
         self.get_logger().info(f'Published goal pose to RViz: {goal_type} goal at ({target_pose.position.x:.3f}, {target_pose.position.y:.3f}, {target_pose.position.z:.3f})')
 
     def wait_for_joint_states(self, timeout=5.0):
-        """Wait for joint states to be received"""
+        """
+        Wait for joint states to be received from the robot.
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+            
+        Returns:
+            bool: True if joint states received, False if timeout
+        """
         self.get_logger().info('Waiting for joint states...')
         start_time = self.get_clock().now()
         while not self._joint_states_received:
@@ -150,7 +209,17 @@ class MoveGroupClient(Node):
         return True
 
     def rotation_matrix_to_quaternion(self, R):
-        """Convert 3x3 rotation matrix to quaternion (w, x, y, z)"""
+        """
+        Convert 3x3 rotation matrix to quaternion (w, x, y, z).
+        
+        Uses the standard algorithm from euclideanspace.com for robust conversion.
+        
+        Args:
+            R: 3x3 numpy array representing rotation matrix
+            
+        Returns:
+            list: Quaternion as [w, x, y, z]
+        """
         # Ensure R is a 3x3 matrix
         if R.shape != (3, 3):
             return [1.0, 0.0, 0.0, 0.0]  # Identity quaternion
@@ -193,14 +262,38 @@ class MoveGroupClient(Node):
         
         return [w, x, y, z]
 
+    def test_forward_kinematics(self):
+        """
+        Test forward kinematics with known joint angles.
+        
+        Tests FK with home position (all zeros) and a test position
+        to verify the FK computation is working correctly.
+        """
+        # Test with home position (all joints at 0)
+        home_joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        pos, quat = self.ur5_forward_kinematics(home_joints)
+        self.get_logger().info(f'Home position FK test: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
+        
+        # Test with some non-zero angles
+        test_joints = [0.5, -1.0, 0.5, 0.0, 0.0, 0.0]
+        pos, quat = self.ur5_forward_kinematics(test_joints)
+        self.get_logger().info(f'Test position FK: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
+
     def ur5_forward_kinematics(self, joint_angles):
         """
-        Compute UR5 forward kinematics using DH parameters
+        Compute UR5 forward kinematics using DH parameters.
+        
         Based on UR5 DH parameters from the URDF:
-        a = [0.00000, -0.42500, -0.39225,  0.00000,  0.00000,  0.0000]
-        d = [0.089159,  0.00000,  0.00000,  0.10915,  0.09465,  0.0823]
-        alpha = [ 1.570796327, 0, 0, 1.570796327, -1.570796327, 0 ]
-        q_home_offset = [0, -1.570796327, 0, -1.570796327, 0, 0]
+        - a = [0.00000, -0.42500, -0.39225, 0.00000, 0.00000, 0.0000]
+        - d = [0.089159, 0.00000, 0.00000, 0.10915, 0.09465, 0.0823]
+        - alpha = [1.570796327, 0, 0, 1.570796327, -1.570796327, 0]
+        - q_home_offset = [0, -1.570796327, 0, -1.570796327, 0, 0]
+        
+        Args:
+            joint_angles: List of 6 joint angles in radians
+            
+        Returns:
+            tuple: (position, orientation) where position is [x, y, z] and orientation is [w, x, y, z] quaternion
         """
         # UR5 DH parameters
         a = [0.00000, -0.42500, -0.39225, 0.00000, 0.00000, 0.0000]
@@ -244,8 +337,13 @@ class MoveGroupClient(Node):
 
     def get_current_end_effector_pose(self):
         """
-        Get current end-effector pose either from TF topic or by computing FK
-        Returns (position, orientation) or None if not available
+        Get current end-effector pose either from TF topic or by computing FK.
+        
+        First tries to get pose from TF topic, falls back to FK computation
+        if no TF topic is available.
+        
+        Returns:
+            tuple: (position, orientation) or None if not available
         """
         # First try to get from TF topic
         if self._current_ee_pose is not None:
@@ -286,8 +384,14 @@ class MoveGroupClient(Node):
 
     def is_at_goal(self, target_pose, position_tolerance=0.1):
         """
-        Check if the end-effector is already at the goal pose
-        Returns True if within tolerance, False otherwise
+        Check if the end-effector is already at the goal pose.
+        
+        Args:
+            target_pose: Pose message containing the target position and orientation
+            position_tolerance: Maximum distance in meters to consider as "at goal"
+            
+        Returns:
+            bool: True if within tolerance, False otherwise
         """
         # Get current end-effector position
         current_ee = self.get_current_end_effector_pose()
@@ -314,8 +418,19 @@ class MoveGroupClient(Node):
 
     def get_goal_pose(self, goal_type='fixed'):
         """
-        Get different goal poses based on type
-        goal_type options: 'fixed', 'random', 'left', 'right', 'high', 'low'
+        Get different goal poses based on type.
+        
+        Args:
+            goal_type: String specifying the type of goal
+                - 'fixed': Original fixed goal (0.5, 0.0, 0.5)
+                - 'random': Random goal within safe workspace
+                - 'left': Goal to the left side
+                - 'right': Goal to the right side
+                - 'high': High goal position
+                - 'low': Low goal position
+                
+        Returns:
+            Pose: Geometry_msgs/Pose message with target position and orientation
         """
         if goal_type == 'fixed':
             # Original fixed goal
@@ -387,20 +502,13 @@ class MoveGroupClient(Node):
             # Default to fixed goal
             return self.get_goal_pose('fixed')
 
-    def test_forward_kinematics(self):
-        """Test forward kinematics with known joint angles"""
-        # Test with home position (all joints at 0)
-        home_joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        pos, quat = self.ur5_forward_kinematics(home_joints)
-        self.get_logger().info(f'Home position FK test: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
-        
-        # Test with some non-zero angles
-        test_joints = [0.5, -1.0, 0.5, 0.0, 0.0, 0.0]
-        pos, quat = self.ur5_forward_kinematics(test_joints)
-        self.get_logger().info(f'Test position FK: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
-
     def get_available_planners(self):
-        """Get list of available planners for the arm group"""
+        """
+        Get list of available planners for the arm group.
+        
+        Returns:
+            list: List of common MoveIt planner names
+        """
         # Common MoveIt planners
         common_planners = [
             "RRTConnect",
@@ -418,15 +526,30 @@ class MoveGroupClient(Node):
             "OMPL"
         ]
         
-        self.get_logger().info("=== Available Planners ===")
+        print("=== Available Planners ===")
         for i, planner in enumerate(common_planners):
-            self.get_logger().info(f"{i+1}. {planner}")
-        
+            print(f"{i}. {planner}")
         return common_planners
 
     def send_goal(self, goal_type='fixed', test_mode=False, planner_id="RRTConnect"):
+        """
+        Send goal pose to MoveIt for planning and execution.
+        
+        This is the main method that:
+        1. Tests forward kinematics
+        2. Waits for joint states
+        3. Creates MoveIt goal message
+        4. Sends goal to MoveIt
+        5. Handles the response
+        
+        Args:
+            goal_type: Type of goal pose ('fixed', 'random', 'left', 'right', 'high', 'low')
+            test_mode: If True, only print joint states without sending goals
+            planner_id: Name of the planning algorithm to use
+        """
         # Test forward kinematics first
-        self.test_forward_kinematics()
+        if test_mode:
+            self.test_forward_kinematics()
         
         # Wait for current joint states
         if not self.wait_for_joint_states():
@@ -465,6 +588,7 @@ class MoveGroupClient(Node):
             
             return
 
+        # Create MoveIt goal message
         goal_msg = MoveGroup.Goal()
 
         # Set planning group
@@ -579,28 +703,51 @@ class MoveGroupClient(Node):
 
 
 def main():
+    """
+    Main function to run the MoveGroupClient.
+    
+    This function:
+    1. Initializes ROS2
+    2. Creates the MoveGroupClient node
+    3. Shows available planners
+    4. Sends goals based on configuration
+    5. Cleans up and shuts down
+    """
     rclpy.init()
     node = MoveGroupClient()
+    while True:
+        select_mode = int(input("Select mode (1: test, 2: send goal): "))
+        if select_mode in [1, 2]:
+            break
+        else:
+            print("Invalid mode. Please select 1 or 2.")
     
     # Test mode: only print joint states, don't send goals
-    test_mode = False  # Set to False to send actual goals
-    
+    test_mode = select_mode == 1  # Set to True to only print joint states
     if test_mode:
         node.send_goal('fixed', test_mode=True)
+
     else:
         # Show available planners
-        node.get_available_planners()
+        input("Press Enter to show available planners")
+        planner_names = node.get_available_planners()
+        try:
+            planner_index = int(input(f"Select planner (0, {len(planner_names) - 1}) or press enter to use default:0"))
+        except ValueError:
+            planner_index = 0
+            print(f"Planner not selected. Using default planner: {planner_names[planner_index]}")
+            
+        if not planner_index in range(len(planner_names)):
+            planner_index = 0
+            print(f"Invalid planner index. Using default planner: {planner_names[planner_index]}")
+        planner_name = planner_names[planner_index]
+        print(f"Using planner: {planner_name}")
         
         # You can change the goal_type here to get different goals:
         # Options: 'fixed', 'random', 'left', 'right', 'high', 'low'
         goal_type = 'fixed'  # Change this to get different goals each time
-        
-        # You can change the planner here:
-        # Common options: "RRTConnect", "RRT", "RRTstar", "PRM", "CHOMP", "STOMP"
-        planner_id = "RRTstar"  # Change this to use different planners
-        
-        node.send_goal(goal_type, test_mode=False, planner_id=planner_id)
-    
+        node.send_goal(goal_type, test_mode=False, planner_id=planner_name)
+        time.sleep(1000)
     node.destroy_node()
     rclpy.shutdown()
 

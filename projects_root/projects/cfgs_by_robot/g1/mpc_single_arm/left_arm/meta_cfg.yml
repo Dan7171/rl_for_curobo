@@ -28,4 +28,16 @@ debug:
   world_cu_wrapper:
     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
 
+env:
+  simulation:
+    is_on: true
+    enable_gpu_dynamics: true
+    render_dt: 0.03
+    physics_dt: 0.03
+    init_app_settings: null # or a dict with the settings
+  
+  real:
+    is_on: false
+
+
 

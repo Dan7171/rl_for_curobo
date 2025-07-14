@@ -8,8 +8,7 @@ mkdir -p ~/docker/isaac-sim/cache/{kit,ov,pip,glcache,computecache,logs,data,doc
 
 # Set up X11 forwarding permissions
 echo "Setting up X11 forwarding..."
-xhost +local:root
-
+xhost +
 echo "Host setup complete!"
 echo ""
 echo "You can now open this project in VSCode/Cursor and select 'Reopen in Container'"
