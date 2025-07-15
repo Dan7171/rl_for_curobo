@@ -33,7 +33,7 @@ HOST_USER=$(whoami)
 HOST_USER_ID=$(id -u)
 HOST_GROUP_ID=$(id -g)
 
-CONTAINER_USER=$HOST_USER # (or $HOST_USER) NOTE: KEEP 'root' for now!
+CONTAINER_USER=$HOST_USER # dont chagnge this
 
 
 # Help method
@@ -134,7 +134,7 @@ echo "Setting up X11 forwarding..."
 if [[ "$CONTAINER_USER" == "root" ]]; then
   xhost +local:root
 else
-  xhost +local:$HOST_USER
+  xhost +local:developer
 fi
 
 

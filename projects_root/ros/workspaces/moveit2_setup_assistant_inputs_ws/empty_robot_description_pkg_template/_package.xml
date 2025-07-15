@@ -1,0 +1,16 @@
+# FILL THE FIELDS WITH THE @@@@ AND REMOVE THIS COMMENT
+
+
+<?xml version="1.0"?>
+<package format="3">
+  <name>          @@@@ put here the name of your package          </name>
+  <version>2.0.7</version>
+  <description>     @@@@ here add description of the robot       </description>
+  <author email="mail@gmail.com">YOUR NAME HERE</author>
+  <maintainer email="main@gmail.com">YOUR NAME HERE</maintainer>
+  <license>BSD</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <export>
+      <build_type>ament_cmake</build_type>
+  </export>
+</package>

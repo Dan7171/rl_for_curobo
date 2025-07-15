@@ -199,8 +199,8 @@ if isaac_sim_ge_4_5_version:
             ("Context.inputs:domain_id", ros_domain_id),
             # Set the /Franka target prim to Articulation Controller node
             ("ArticulationController.inputs:robotPath", FRANKA_STAGE_PATH),
-            ("PublishJointState.inputs:topicName", "joint_states"),
-            ("SubscribeJointState.inputs:topicName", "joint_commands"),
+            ("PublishJointState.inputs:topicName", "isaac_joint_states"),
+            ("SubscribeJointState.inputs:topicName", "isaac_joint_commands"),
             ("createViewport.inputs:name", REALSENSE_VIEWPORT_NAME),
             ("createViewport.inputs:viewportId", 1),
             ("cameraHelperRgb.inputs:frameId", "sim_camera"),

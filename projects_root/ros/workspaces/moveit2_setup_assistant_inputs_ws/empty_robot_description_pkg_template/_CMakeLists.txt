@@ -1,0 +1,18 @@
+# FILL THE FIELDS WITH THE @@@@ AND REMOVE THIS COMMENT
+
+cmake_minimum_required(VERSION 3.10.2)
+project(@@@@ put here the name of your package  )
+
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(urdf REQUIRED)
+
+install(
+  DIRECTORY
+    meshes
+    urdf
+  DESTINATION
+    share/${PROJECT_NAME}
+)
+
+ament_package()
