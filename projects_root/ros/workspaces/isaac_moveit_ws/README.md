@@ -1,6 +1,6 @@
 # QUICK REAME TLDR:
 ## MUST KNOW!
-1. IN ANY CHANCE TO CODE UDNER projects_root/ros/workspaces/isaac_moveit_ws, YOU MUST RE-BUILD THE PACKAGES. DO THE FOLLOWING:
+1. IN ANY CHANGE TO CODE UDNER projects_root/ros/workspaces/isaac_moveit_ws, YOU MUST RE-BUILD THE PACKAGES. DO THE FOLLOWING:
 
 ```bash
 # AFTER MAKING CHANGES IN CODE...
@@ -51,7 +51,7 @@ echo $SHELL # make sure you are in bash
 source /opt/ros/hubmle/setup.bash # (or sh if not in bash)
 cd /workspace/rl_for_curobo/projects_root/ros/workspaces/isaac_moveit_ws
 source install/setup.bash # sourcing the workspace 
-ros2 run isaac_moveit_main launch_ # running the launch isaac node (opening the omni graph that publishes clock (isaac sim time), the joint states (for rviz/moveit2) and subscribing to the joint state commands comming from moveit after planning directly (or indirectly by publishing from rviz, need to check that)
+ros2 run isaac_moveit_main launch_isaac # running the launch isaac node (opening the omni graph that publishes clock (isaac sim time), the joint states (for rviz/moveit2) and subscribing to the joint state commands comming from moveit after planning directly (or indirectly by publishing from rviz, need to check that)
 ```
 
 

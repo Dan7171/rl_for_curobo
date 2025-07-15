@@ -1,0 +1,18 @@
+# moveit config package path
+moveit_config_pkg_path: /path/to/moveit_config_pkg
+
+# urdf file path - point to the one used in the moveit config package
+urdf_file_path: projects_root/ros/workspaces/moveit2_setup_assistant_inputs_ws/src/my_package/urdf/my_robot.urdf
+
+# initial joint states file path
+initial_joint_states_file_path: /path/to/moveit_config_pkg/config/initial_positions.yaml
+
+
+# sim -> moveit joint states topic (this topic informs moveit of the current joint states in simulation so it can plan a new plan based on it) 
+joint_states_out_topic: /isaac_joint_states # could be any name but must match the one you set in %YOUR JOINT STATES TOPIC NAME% in: projects_root/ros/workspaces/moveit2_setup_assistant_inputs_ws/src/my_package/config/my_robot.ros2_control.xacro under <param name="joint_states_topic">/%YOUR JOINT STATE TOPIC NAME%</param>
+
+# moveit -> sim joint commands topic (this topic is used to send joint commands to the robot in simulation (from outside planner (like moveit))) 
+joint_commands_in_topic: /isaac_joint_commands # could be any name but must match the one you set in %YOUR JOINT COMMANDS TOPIC NAME% in: projects_root/ros/workspaces/moveit2_setup_assistant_inputs_ws/src/my_package/config/my_robot.ros2_control.xacro under <param name="joint_commands_topic">/%YOUR JOINT COMMANDS TOPIC NAME%</param>
+
+ 
+

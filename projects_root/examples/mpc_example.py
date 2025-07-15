@@ -140,6 +140,7 @@ def draw_points(rollouts: torch.Tensor):
 def main():
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
+    my_world.scene.add_default_ground_plane()
     stage = my_world.stage
 
     xform = stage.DefinePrim("/World", "Xform")
