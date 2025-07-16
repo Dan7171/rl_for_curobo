@@ -31,7 +31,12 @@ def add_robot_to_scene(
         position: np.array
         initialize_world: bool
     """
-    
+
+    from curobo.util.usd_helper import set_prim_transform
+    from curobo.util_file import  get_filename, get_path_of_dir, join_path
+    from projects_root.examples.helper import find_articulation_root
+    from omni.isaac.core.robots import Robot
+
     try:
         # Third Party
         from omni.isaac.urdf import _urdf  # isaacsim 2022.2
@@ -119,13 +124,13 @@ def add_robot_to_scene(
         )
 
     # Find the actual articulation root instead of assuming base_link
-    articulation_root_path = find_articulation_root(my_world.stage, robot_path)
+    robot_articulation_root_path = find_articulation_root(my_world.stage, robot_path)
     
     print(f"Robot imported at: {robot_path}")
-    print(f"Articulation root found at: {articulation_root_path}")
+    print(f"Articulation root found at: {robot_articulation_root_path}")
 
     robot_p = Robot(
-        prim_path=articulation_root_path,
+        prim_path=robot_articulation_root_path,
         name=robot_name,
     )
 
@@ -140,197 +145,154 @@ def add_robot_to_scene(
             my_world.initialize_physics()
             robot.initialize()
 
-    return robot, robot_path
+    return robot, robot_path, robot_articulation_root_path
 
+    # original coding example used that:
+    # # Loading the franka robot USD
+    # prims.create_prim(
+    #     robot_path,
+    #     "Xform",
+    #     position=np.array([0, -0.64, 0]),
+    #     orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(0, 0, 1), 90)),
+    #     usd_path=assets_root_path + ROBOT_USD_PATH,
+    # )
 
-args = argparse.ArgumentParser()
-args.add_argument("--cfg_file", type=str, required=True)
-args = args.parse_args()
-cfg_file = args.cfg_file
-with open(cfg_file, "r") as f:
-    cfg = yaml.safe_load(f)
-
-
-# In older versions of Isaac Sim (prior to 4.0), SimulationApp is imported from
-# omni.isaac.kit rather than isaacsim.
-try:
-    from isaacsim import SimulationApp
-except:
-    from omni.isaac.kit import SimulationApp
-CONFIG = {"renderer": "RayTracedLighting", "headless": False}
-simulation_app = SimulationApp(CONFIG)
-
-from omni.isaac.core import World
-world = World(stage_units_in_meters=1.0)
-xform = world.stage.DefinePrim("/World", "Xform")
-world.stage.SetDefaultPrim(xform)
-
-from omni.isaac.core.objects import cuboid
-from omni.isaac.core.robots import Robot
-# from pxr import UsdPhysics
-
-
-
-from curobo.util.usd_helper import set_prim_transform
-from curobo.util_file import  get_filename, get_path_of_dir, join_path
-from projects_root.examples.helper import find_articulation_root
-
-
-robot, robot_path = add_robot_to_scene(world, position=np.array([0, 0, 0]))
-
-# ROBOT_USD_PATH = "/Isaac/Robots/Franka/franka_alt_fingers.usd" # TODO: replace with the urdf
-# CAMERA_PRIM_PATH = "/World/realsense_camera" # f"{robot_path}/panda_hand/geometry/realsense/realsense_camera"
-BACKGROUND_STAGE_PATH = "/background"
-BACKGROUND_USD_PATH = "/Isaac/Environments/Simple_Room/simple_room.usd"
-GRAPH_PATH = "/ActionGraph"
-REALSENSE_VIEWPORT_NAME = "realsense_viewport"
-
-
-
-# Use this flag to identify whether current release is Isaac Sim 4.5 or higher
-isaac_sim_ge_4_5_version = True
-# In older versions of Isaac Sim (prior to 4.5), get_version is imported from
-# omni.isaac.kit rather than isaacsim.core.version.
-try:
-    from isaacsim.core.version import get_version
-except:
-    from omni.isaac.version import get_version
-    isaac_sim_ge_4_5_version = False
-# Check the major version number of Isaac Sim to see if it's four digits, corresponding
-# to Isaac Sim 2023.1.1 or older.  The version numbering scheme changed with the
-# Isaac Sim 4.0 release in 2024.
-is_legacy_isaacsim = len(get_version()[2]) == 4
-
-# More imports that need to compare after we create the app
-
-# In older versions of Isaac Sim (prior to 4.5), modules are imported from
-# omni.isaac.core rather than isaacsim.core.
-try:
-    from isaacsim.core.api import SimulationContext  # noqa E402
-    from isaacsim.core.utils.prims import set_targets  # noqa E402
-    from isaacsim.core.utils import (  # noqa E402
-        extensions,
-        prims,
-        rotations,
-        stage,
-        viewports,
-    )
-except:
-    from omni.isaac.core import SimulationContext  # noqa E402
-    from omni.isaac.core.utils.prims import set_targets  # noqa E402
-    from omni.isaac.core.utils import (  # noqa E402
-        extensions,
-        prims,
-        rotations,
-        stage,
-        viewports,
-    )
-
-# In older versions of Isaac Sim (prior to 4.5), nucleus is imported from
-# omni.isaac.core.utils rather than isaacsim.storage.native.
-if isaac_sim_ge_4_5_version:
-    from isaacsim.storage.native import nucleus
-else:
-    from omni.isaac.core.utils import nucleus  # noqa E402
-
-from pxr import Gf, UsdGeom  # noqa E402
-import omni.graph.core as og  # noqa E402
-import omni
-
-# enable ROS2 bridge extension
-# In older versions of Isaac Sim (prior to 4.5), the ROS 2 bridge is loaded from
-# omni.isaac.ros2_bridge rather than isaacsim.ros2.bridge
-if isaac_sim_ge_4_5_version:
-    extensions.enable_extension("isaacsim.ros2.bridge")
-else:
-    extensions.enable_extension("omni.isaac.ros2_bridge")
-
-simulation_context = SimulationContext(stage_units_in_meters=1.0)
-
-# Locate Isaac Sim assets folder to load environment and robot stages
-assets_root_path = nucleus.get_assets_root_path()
-if assets_root_path is None:
-    carb.log_error("Could not find Isaac Sim assets folder")
-    simulation_app.close()
-    sys.exit()
-
-# Preparing stage
-viewports.set_camera_view(eye=np.array([1.2, 1.2, 0.8]), target=np.array([0, 0, 0.5]))
-
-# Loading the simple_room environment
-stage.add_reference_to_stage(
-    assets_root_path + BACKGROUND_USD_PATH, BACKGROUND_STAGE_PATH
-)
-
-# # Loading the franka robot USD
-# prims.create_prim(
-#     robot_path,
-#     "Xform",
-#     position=np.array([0, -0.64, 0]),
-#     orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(0, 0, 1), 90)),
-#     usd_path=assets_root_path + ROBOT_USD_PATH,
-# )
-
-# add some objects, spread evenly along the X axis
-# with a fixed offset from the robot in the Y and Z
-prims.create_prim(
-    "/cracker_box",
-    "Xform",
-    position=np.array([-0.2, -0.25, 0.15]),
-    orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(1, 0, 0), -90)),
-    usd_path=assets_root_path
-    + "/Isaac/Props/YCB/Axis_Aligned_Physics/003_cracker_box.usd",
-)
-prims.create_prim(
-    "/sugar_box",
-    "Xform",
-    position=np.array([-0.07, -0.25, 0.1]),
-    orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(0, 1, 0), -90)),
-    usd_path=assets_root_path
-    + "/Isaac/Props/YCB/Axis_Aligned_Physics/004_sugar_box.usd",
-)
-prims.create_prim(
-    "/soup_can",
-    "Xform",
-    position=np.array([0.1, -0.25, 0.10]),
-    orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(1, 0, 0), -90)),
-    usd_path=assets_root_path
-    + "/Isaac/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd",
-)
-prims.create_prim(
-    "/mustard_bottle",
-    "Xform",
-    position=np.array([0.0, 0.15, 0.12]),
-    orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(1, 0, 0), -90)),
-    usd_path=assets_root_path
-    + "/Isaac/Props/YCB/Axis_Aligned_Physics/006_mustard_bottle.usd",
-)
-
-simulation_app.update()
-
-try:
-    ros_domain_id = int(os.environ["ROS_DOMAIN_ID"])
-    print("Using ROS_DOMAIN_ID: ", ros_domain_id)
-except ValueError:
-    print("Invalid ROS_DOMAIN_ID integer value. Setting value to 0")
-    ros_domain_id = 0
-except KeyError:
-    print("ROS_DOMAIN_ID environment variable is not set. Setting value to 0")
-    ros_domain_id = 0
-
-
-
-
-
-if isaac_sim_ge_4_5_version:
-    # Create an action graph with ROS component nodes from Isaac Sim 4.5 release and higher
+def get_ros_domain_id():
     try:
-        og_keys_set_values = [
+        ros_domain_id = int(os.environ["ROS_DOMAIN_ID"])
+        print("Using ROS_DOMAIN_ID: ", ros_domain_id)
+    except ValueError:
+        print("Invalid ROS_DOMAIN_ID integer value. Setting value to 0")
+        ros_domain_id = 0
+    except KeyError:
+        print("ROS_DOMAIN_ID environment variable is not set. Setting value to 0")
+        ros_domain_id = 0
+    return ros_domain_id
+
+def init_world():
+    from omni.isaac.core import World
+    world = World(stage_units_in_meters=1.0)
+    xform = world.stage.DefinePrim("/World", "Xform")
+    world.stage.SetDefaultPrim(xform)
+    return world
+
+def init_sim_app():
+    # In older versions of Isaac Sim (prior to 4.0), SimulationApp is imported from
+    # omni.isaac.kit rather than isaacsim.
+    try:
+        from isaacsim import SimulationApp
+    except:
+        from omni.isaac.kit import SimulationApp
+    simulation_app = SimulationApp({"renderer": "RayTracedLighting", "headless": False})
+    return simulation_app
+
+def get_isaac_sim_version():
+    # Use this flag to identify whether current release is Isaac Sim 4.5 or higher
+    isaac_sim_ge_4_5_version = True
+    # In older versions of Isaac Sim (prior to 4.5), get_version is imported from
+    # omni.isaac.kit rather than isaacsim.core.version.
+    try:
+        from isaacsim.core.version import get_version
+    except:
+        from omni.isaac.version import get_version
+        isaac_sim_ge_4_5_version = False
+    # Check the major version number of Isaac Sim to see if it's four digits, corresponding
+    # to Isaac Sim 2023.1.1 or older.  The version numbering scheme changed with the
+    # Isaac Sim 4.0 release in 2024.
+    is_legacy_isaacsim = len(get_version()[2]) == 4
+    return isaac_sim_ge_4_5_version, is_legacy_isaacsim
+
+def get_asset_database_path(simulation_app):
+    # In older versions of Isaac Sim (prior to 4.5), nucleus is imported from
+    # omni.isaac.core.utils rather than isaacsim.storage.native.
+    if isaac_sim_ge_4_5_version:
+        from isaacsim.storage.native import nucleus
+    else:
+        from omni.isaac.core.utils import nucleus  # noqa E402
+    assets_root_path = nucleus.get_assets_root_path()
+    if assets_root_path is None:
+        carb.log_error("Could not find Isaac Sim assets folder")
+        simulation_app.close()
+        sys.exit()
+    return assets_root_path
+
+def enable_extensions(isaac_sim_ge_4_5_version):
+
+    try:
+        from isaacsim.core.utils import (  # noqa E402
+            extensions,
+        )
+    except:
+        from omni.isaac.core.utils import (  # noqa E402
+            extensions,
+        )
+
+    if isaac_sim_ge_4_5_version:
+        extensions.enable_extension("isaacsim.ros2.bridge")
+        extensions.enable_extension("omni.graph.window.action")
+    else:
+        extensions.enable_extension("omni.isaac.ros2_bridge")
+
+def add_props_from_database(assets_root_path):
+    try:
+        from isaacsim.core.utils import (  # noqa E402
+            prims,
+            rotations,
+
+        )
+    except:
+        from omni.isaac.core.utils import (  # noqa E402
+            prims,
+            rotations,
+        )
+    # add some objects, spread evenly along the X axis
+    # with a fixed offset from the robot in the Y and Z
+    from pxr import Gf  # noqa E402
+
+    prims.create_prim(
+        "/cracker_box",
+        "Xform",
+        position=np.array([-0.2, -0.25, 0.15]),
+        orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(1, 0, 0), -90)),
+        usd_path=assets_root_path
+        + "/Isaac/Props/YCB/Axis_Aligned_Physics/003_cracker_box.usd",
+    )
+    prims.create_prim(
+        "/sugar_box",
+        "Xform",
+        position=np.array([-0.07, -0.25, 0.1]),
+        orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(0, 1, 0), -90)),
+        usd_path=assets_root_path
+        + "/Isaac/Props/YCB/Axis_Aligned_Physics/004_sugar_box.usd",
+    )
+    prims.create_prim(
+        "/soup_can",
+        "Xform",
+        position=np.array([0.1, -0.25, 0.10]),
+        orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(1, 0, 0), -90)),
+        usd_path=assets_root_path
+        + "/Isaac/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd",
+    )
+    prims.create_prim(
+        "/mustard_bottle",
+        "Xform",
+        position=np.array([0.0, 0.15, 0.12]),
+        orientation=rotations.gf_rotation_to_np_array(Gf.Rotation(Gf.Vec3d(1, 0, 0), -90)),
+        usd_path=assets_root_path
+        + "/Isaac/Props/YCB/Axis_Aligned_Physics/006_mustard_bottle.usd",
+    )
+
+def init_action_graph(graph_path, simulation_app, joint_states_out_topic, joint_commands_in_topic, robot_path, robot_articulation_root_path, isaac_sim_ge_4_5_version, is_legacy_isaacsim, ros_domain_id):
+    if isaac_sim_ge_4_5_version:
+    # print(f"debug articulation_root_link: {robot_path + cfg['articulation_root_link']}")
+    # Create an action graph with ROS component nodes from Isaac Sim 4.5 release and higher
+        try:
+            og_keys_set_values = [
             ("Context.inputs:domain_id", ros_domain_id),
-            # Set the /Franka target prim to Articulation Controller node
             ("ArticulationController.inputs:robotPath", robot_path),
-            ("PublishJointState.inputs:topicName", cfg["joint_states_out_topic"]),
-            ("SubscribeJointState.inputs:topicName", cfg["joint_commands_in_topic"]),
+            ("PublishJointState.inputs:topicName", joint_states_out_topic),
+            ("PublishJointState.inputs:targetPrim", robot_path), # + "/" + cfg["articulation_root_link"]),
+            ("SubscribeJointState.inputs:topicName", joint_commands_in_topic),
             # ("createViewport.inputs:name", REALSENSE_VIEWPORT_NAME),
             # ("createViewport.inputs:viewportId", 1),
             # ("cameraHelperRgb.inputs:frameId", "sim_camera"),
@@ -345,29 +307,23 @@ if isaac_sim_ge_4_5_version:
 
         # In older versions of Isaac Sim, the articulation controller node contained a
         # "usePath" checkbox input that should be enabled.
-        if is_legacy_isaacsim:
-            og_keys_set_values.insert(
+            if is_legacy_isaacsim:
+                og_keys_set_values.insert(
                 1, ("ArticulationController.inputs:usePath", True)
             )
 
-        og.Controller.edit(
-            {"graph_path": GRAPH_PATH, "evaluator_name": "execution"},
+            og.Controller.edit(
+            {"graph_path": graph_path, "evaluator_name": "execution"},
             {
                 og.Controller.Keys.CREATE_NODES: [
-                    ("OnImpulseEvent", "omni.graph.action.OnImpulseEvent"),
+                    # ("OnImpulseEvent", "omni.graph.action.OnImpulseEvent"),
+                    ("OnTick", "omni.graph.action.OnTick"),
                     ("ReadSimTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
                     ("Context", "isaacsim.ros2.bridge.ROS2Context"),
                     ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
-                    (
-                        "SubscribeJointState",
-                        "isaacsim.ros2.bridge.ROS2SubscribeJointState",
-                    ),
-                    (
-                        "ArticulationController",
-                        "isaacsim.core.nodes.IsaacArticulationController",
-                    ),
+                    ("SubscribeJointState","isaacsim.ros2.bridge.ROS2SubscribeJointState",),
+                    ("ArticulationController","isaacsim.core.nodes.IsaacArticulationController",),
                     ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
-                    ("OnTick", "omni.graph.action.OnTick"),
                     # ("createViewport", "isaacsim.core.nodes.IsaacCreateViewport"),
                     # (
                     #     "getRenderProduct",
@@ -380,45 +336,33 @@ if isaac_sim_ge_4_5_version:
                 ],
                 og.Controller.Keys.CONNECT: [
                     (
-                        "OnImpulseEvent.outputs:execOut",
+                        # "OnImpulseEvent.outputs:execOut",
+                        "OnTick.outputs:tick",
                         "PublishJointState.inputs:execIn",
                     ),
                     (
-                        "OnImpulseEvent.outputs:execOut",
+                        # "OnImpulseEvent.outputs:execOut",
+                        "OnTick.outputs:tick",
                         "SubscribeJointState.inputs:execIn",
                     ),
-                    ("OnImpulseEvent.outputs:execOut", "PublishClock.inputs:execIn"),
                     (
-                        "OnImpulseEvent.outputs:execOut",
+                        # "OnImpulseEvent.outputs:execOut", 
+                        "OnTick.outputs:tick",
+                        "PublishClock.inputs:execIn"),
+                    (
+                        # "OnImpulseEvent.outputs:execOut",
+                        "OnTick.outputs:tick",
                         "ArticulationController.inputs:execIn",
                     ),
                     ("Context.outputs:context", "PublishJointState.inputs:context"),
                     ("Context.outputs:context", "SubscribeJointState.inputs:context"),
                     ("Context.outputs:context", "PublishClock.inputs:context"),
-                    (
-                        "ReadSimTime.outputs:simulationTime",
-                        "PublishJointState.inputs:timeStamp",
-                    ),
-                    (
-                        "ReadSimTime.outputs:simulationTime",
-                        "PublishClock.inputs:timeStamp",
-                    ),
-                    (
-                        "SubscribeJointState.outputs:jointNames",
-                        "ArticulationController.inputs:jointNames",
-                    ),
-                    (
-                        "SubscribeJointState.outputs:positionCommand",
-                        "ArticulationController.inputs:positionCommand",
-                    ),
-                    (
-                        "SubscribeJointState.outputs:velocityCommand",
-                        "ArticulationController.inputs:velocityCommand",
-                    ),
-                    (
-                        "SubscribeJointState.outputs:effortCommand",
-                        "ArticulationController.inputs:effortCommand",
-                    ),
+                    ("ReadSimTime.outputs:simulationTime","PublishJointState.inputs:timeStamp",),
+                    ("ReadSimTime.outputs:simulationTime","PublishClock.inputs:timeStamp",),
+                    ("SubscribeJointState.outputs:jointNames","ArticulationController.inputs:jointNames",),
+                    ("SubscribeJointState.outputs:positionCommand","ArticulationController.inputs:positionCommand",),
+                    ("SubscribeJointState.outputs:velocityCommand","ArticulationController.inputs:velocityCommand",),
+                    ("SubscribeJointState.outputs:effortCommand","ArticulationController.inputs:effortCommand",),
                     # ("OnTick.outputs:tick", "createViewport.inputs:execIn"),
                     # (
                     #     "createViewport.outputs:execOut",
@@ -426,6 +370,7 @@ if isaac_sim_ge_4_5_version:
                     # ),
                     # (
                     #     "createViewport.outputs:viewport",
+                    #     "getRenderPrort.outputs:viewport",
                     #     "getRenderProduct.inputs:viewport",
                     # ),
                     # ("getRenderProduct.outputs:execOut", "setCamera.inputs:execIn"),
@@ -455,19 +400,19 @@ if isaac_sim_ge_4_5_version:
                 og.Controller.Keys.SET_VALUES: og_keys_set_values,
             },
         )
-    except Exception as e:
-        print(e)
 
-else:
+        except Exception as e:
+            print(e)
 
+    else:
     # Create an action graph with ROS component nodes from a pre Isaac Sim 4.5 release
-    try:
-        og_keys_set_values = [
+        try:
+            og_keys_set_values = [
             ("Context.inputs:domain_id", ros_domain_id),
             # Set the /Franka target prim to Articulation Controller node
             ("ArticulationController.inputs:robotPath", robot_path),
-            ("PublishJointState.inputs:topicName", cfg["joint_states_out_topic"]),
-            ("SubscribeJointState.inputs:topicName", cfg["joint_commands_in_topic"]),
+            ("PublishJointState.inputs:topicName", joint_states_out_topic),
+            ("SubscribeJointState.inputs:topicName", joint_commands_in_topic),
             # ("createViewport.inputs:name", REALSENSE_VIEWPORT_NAME),
             ("createViewport.inputs:viewportId", 1),
             ("cameraHelperRgb.inputs:frameId", "sim_camera"),
@@ -483,13 +428,13 @@ else:
 
         # In older versions of Isaac Sim, the articulation controller node contained a
         # "usePath" checkbox input that should be enabled.
-        if is_legacy_isaacsim:
-            og_keys_set_values.insert(
+            if is_legacy_isaacsim:
+                og_keys_set_values.insert(
                 1, ("ArticulationController.inputs:usePath", True)
             )
 
-        og.Controller.edit(
-            {"graph_path": GRAPH_PATH, "evaluator_name": "execution"},
+            og.Controller.edit(
+            {"graph_path": graph_path, "evaluator_name": "execution"},
             {
                 og.Controller.Keys.CREATE_NODES: [
                     ("OnImpulseEvent", "omni.graph.action.OnImpulseEvent"),
@@ -599,25 +544,79 @@ else:
                 og.Controller.Keys.SET_VALUES: og_keys_set_values,
             },
         )
-    except Exception as e:
-        print(e)
+        except Exception as e:
+            print(e)
 
-    simulation_app.update()
+        simulation_app.update()
 
-if isaac_sim_ge_4_5_version:
-    # Setting the /Franka target prim to Publish JointState node
-    set_targets(
+    if isaac_sim_ge_4_5_version:
+    # Setting the  target prim to Publish JointState node
+        set_targets(
         prim=stage.get_current_stage().GetPrimAtPath("/ActionGraph/PublishJointState"),
         attribute="inputs:targetPrim",
-        target_prim_paths=[robot_path],
+        target_prim_paths=[robot_articulation_root_path], # target_prim_paths=[robot_path],
     )
-else:
-    from omni.isaac.core_nodes.scripts.utils import set_target_prims  # noqa E402
+    else:
+        from omni.isaac.core_nodes.scripts.utils import set_target_prims  # noqa E402
+        set_target_prims(
+        primPath="/ActionGraph/PublishJointState", target_prim_paths=[robot_articulation_root_path],# targetPrimPaths=[robot_path]
+    )
 
-    # Setting the /Franka target prim to Publish JointState node
-    set_target_prims(
-        primPath="/ActionGraph/PublishJointState", targetPrimPaths=[robot_path]
+
+BACKGROUND_STAGE_PATH = "/background"
+BACKGROUND_USD_PATH = "/Isaac/Environments/Simple_Room/simple_room.usd"
+GRAPH_PATH = "/ActionGraph"
+REALSENSE_VIEWPORT_NAME = "realsense_viewport"
+ADD_PROPS = True
+
+# get cfg path
+args = argparse.ArgumentParser()
+args.add_argument("--cfg_file", type=str, required=True)
+args = args.parse_args()
+
+# get cfg
+cfg_file = args.cfg_file
+with open(cfg_file, "r") as f:
+    cfg = yaml.safe_load(f)
+
+simulation_app = init_sim_app()
+world = init_world()
+robot, robot_path, robot_articulation_root_path = add_robot_to_scene(world, position=np.array([0, 0, 0]))
+isaac_sim_ge_4_5_version, is_legacy_isaacsim = get_isaac_sim_version()
+assets_root_path = get_asset_database_path(simulation_app)
+try:
+    from isaacsim.core.api import SimulationContext  # noqa E402
+    from isaacsim.core.utils.prims import set_targets  # noqa E402
+    from isaacsim.core.utils import (  # noqa E402
+        stage,
+        viewports,
     )
+except:
+    from omni.isaac.core import SimulationContext  # noqa E402
+    from omni.isaac.core.utils.prims import set_targets  # noqa E402
+    from omni.isaac.core.utils import (  # noqa E402
+        stage,
+        viewports,
+    )
+enable_extensions(isaac_sim_ge_4_5_version)
+import omni.graph.core as og  # noqa E402
+import omni
+simulation_context = SimulationContext(stage_units_in_meters=1.0)
+
+# Loading the simple_room environment
+stage.add_reference_to_stage(
+    assets_root_path + BACKGROUND_USD_PATH, BACKGROUND_STAGE_PATH
+)
+
+# Preparing stage
+viewports.set_camera_view(eye=np.array([1.2, 1.2, 0.8]), target=np.array([0, 0, 0.5]))
+if ADD_PROPS:
+    add_props_from_database(assets_root_path)
+
+simulation_app.update()
+ros_domain_id = get_ros_domain_id()
+
+init_action_graph(GRAPH_PATH, simulation_app, cfg["joint_states_out_topic"], cfg["joint_commands_in_topic"], robot_path, robot_articulation_root_path, isaac_sim_ge_4_5_version, is_legacy_isaacsim, ros_domain_id)
 
 # Fix camera settings since the defaults in the realsense model are inaccurate
 # realsense_prim = camera_prim = UsdGeom.Camera(
@@ -629,7 +628,7 @@ else:
 # realsense_prim.GetFocusDistanceAttr().Set(400)
 
 # set_targets(
-#     prim=stage.get_current_stage().GetPrimAtPath(GRAPH_PATH + "/setCamera"),
+#     prim=stage.get_current_stage().GetPrimAtPath(graph_path + "/setCamera"),
 #     attribute="inputs:cameraPrim",
 #     target_prim_paths=[CAMERA_PRIM_PATH],
 # )
@@ -654,11 +653,11 @@ while simulation_app.is_running():
 
     # Run with a fixed step size
     simulation_context.step(render=True)
-
-    # Tick the Publish/Subscribe JointState, Publish TF and Publish Clock nodes each frame
-    og.Controller.set(
-        og.Controller.attribute("/ActionGraph/OnImpulseEvent.state:enableImpulse"), True
-    )
+    # IMPULSE EVENT WAS REPLACED BY ON TICK NODE
+    # # Tick the Publish/Subscribe JointState, Publish TF and Publish Clock nodes each frame
+    # og.Controller.set(
+    #     og.Controller.attribute("/ActionGraph/OnImpulseEvent.state:enableImpulse"), True
+    # )
 
 simulation_context.stop()
 simulation_app.close()
