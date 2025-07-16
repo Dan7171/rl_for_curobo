@@ -30,7 +30,11 @@ import numpy as np
 
 from rclpy.action import ActionClient
 
-
+# class SRDF:
+#     def __init__(self, srdf_file):
+#         self.srdf_file = srdf_file
+#         self.joint_names = self.get_joint_names()
+# s
 class MoveGroupClient(Node):
     """
     A ROS2 node that sends goal poses to MoveIt for UR5 robot arm control.
@@ -53,371 +57,152 @@ class MoveGroupClient(Node):
         action_name = '/move_action'
         self._client = ActionClient(client_owning_node, action_type,action_name)
         
-        # Subscribe to joint states to get current robot state
-        self._joint_states_sub = self.create_subscription(
-            JointState, 
-            '/joint_states', 
-            self._joint_states_callback, 
-            10
-        )
+        # # Subscribe to joint states to get current robot state
+        # self._joint_states_sub = self.create_subscription(
+        #     JointState, 
+        #     '/joint_states', 
+        #     self._joint_states_callback, 
+        #     10
+        # )
+     
         
-        # Try to subscribe to end-effector pose topic if available
-        self._ee_pose_sub = None
-        self._current_ee_pose = None
-        try:
-            self._ee_pose_sub = self.create_subscription(
-                PoseStamped,
-                '/tf_ee_link',  # Common topic name for end-effector pose
-                self._ee_pose_callback,
-                10
-            )
-            self.get_logger().info('Subscribed to /tf_ee_link for end-effector pose')
-        except:
-            self.get_logger().info('No /tf_ee_link topic found, will compute FK manually')
+        # # Try to subscribe to end-effector pose topic if available
+        # self._ee_pose_sub = None
+        # self._current_ee_pose = None
+        # try:
+        #     self._ee_pose_sub = self.create_subscription(
+        #         PoseStamped,
+        #         '/tf_ee_link',  # Common topic name for end-effector pose
+        #         self._ee_pose_callback,
+        #         10
+        #     )
+        #     self.get_logger().info('Subscribed to /tf_ee_link for end-effector pose')
+        # except:
+        #     self.get_logger().info('No /tf_ee_link topic found, will compute FK manually')
         
         # Publishers for RViz visualization
-        self._goal_marker_pub = self.create_publisher(Marker, '/goal_pose_marker', 10)
-        self._goal_pose_pub = self.create_publisher(PoseStamped, '/move_group/display_goal_pose', 10)
+        # self._goal_marker_pub = self.create_publisher(Marker, '/goal_pose_marker', 10)
+        # self._goal_pose_pub = self.create_publisher(PoseStamped, '/move_group/display_goal_pose', 10)
         
         # Store current joint states
-        self._current_joint_states = None
-        self._joint_states_received = False
+        # self._current_joint_states = None
+        # self._joint_states_received = False
         
         # Wait for action server to be ready
         self._client.wait_for_server()
         self.get_logger().info('Action server is ready')
 
-    def _joint_states_callback(self, msg):
-        """
-        Callback to receive current joint states from robot.
+    # def _joint_states_callback(self, msg):
+    #     """
+    #     Callback to receive current joint states from robot.
         
-        Only logs significant changes to reduce noise in the console.
+    #     Only logs significant changes to reduce noise in the console.
         
-        Args:
-            msg: JointState message containing current joint positions and velocities
-        """
-        self._current_joint_states = msg
-        self._joint_states_received = True
+    #     Args:
+    #         msg: JointState message containing current joint positions and velocities
+    #     """
+    #     self._current_joint_states = msg
+        # self._joint_states_received = True
         
-        # Only log if joint states changed significantly (reduce noise)
-        if not hasattr(self, '_last_logged_joint_states'):
-            self._last_logged_joint_states = None
+        # # Only log if joint states changed significantly (reduce noise)
+        # if not hasattr(self, '_last_logged_joint_states'):
+        #     self._last_logged_joint_states = None
+
+        # if not hasattr(self, 'joint_names'):
+        #     self.joint_names:list[str] = msg.name
+        
+        # if not hasattr(self, '_last_logged_joint_states'):
+        # if self._last_logged_joint_states is not None:
+        #     # Check if any joint changed significantly (>1cm threshold)
+        #     significant_change = False
+        #     for i, (name, pos) in enumerate(zip(msg.name, msg.position)):
+        #         if i < len(self._last_logged_joint_states.position):
+        #             if abs(pos - self._last_logged_joint_states.position[i]) > 0.01:
+        #                 significant_change = True
+        #                 break
             
-        if self._last_logged_joint_states is not None:
-            # Check if any joint changed significantly (>1cm threshold)
-            significant_change = False
-            for i, (name, pos) in enumerate(zip(msg.name, msg.position)):
-                if i < len(self._last_logged_joint_states.position):
-                    if abs(pos - self._last_logged_joint_states.position[i]) > 0.01:
-                        significant_change = True
-                        break
-            
-            if not significant_change:
-                return  # Skip logging if no significant change
+        #     if not significant_change:
+        #         return  # Skip logging if no significant change
         
         # Log only significant changes
-        self.get_logger().info(f'Joint states updated: {[f"{name}: {pos:.4f}" for name, pos in zip(msg.name, msg.position)]}')
-        self._last_logged_joint_states = msg
 
-    def _ee_pose_callback(self, msg):
-        """
-        Callback to receive end-effector pose from TF topic.
-        
-        Args:
-            msg: PoseStamped message containing end-effector pose
-        """
-        self._current_ee_pose = msg.pose
-        self.get_logger().info(f'EE pose from TF: pos=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f})')
+        # self.get_logger().info(f'Joint states updated: {[f"{name}: {pos:.4f}" for name, pos in zip(msg.name, msg.position)]}')
 
-    def publish_goal_to_rviz(self, target_pose, goal_type):
-        """
-        Publish goal pose to RViz for visualization.
+    # def _ee_pose_callback(self, msg):
+    #     """
+    #     Callback to receive end-effector pose from TF topic.
         
-        Creates a colored arrow marker and publishes it to RViz topics.
-        Different goal types get different colors for easy identification.
-        
-        Args:
-            target_pose: Pose message containing the goal position and orientation
-            goal_type: String indicating the type of goal (affects marker color)
-        """
-        # Create a marker for the goal pose
-        marker = Marker()
-        marker.header.frame_id = "world"
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = "goal_pose"
-        marker.id = 0
-        marker.type = Marker.ARROW
-        marker.action = Marker.ADD
-        
-        # Set marker position and orientation
-        marker.pose = target_pose
-        marker.scale.x = 0.1  # Arrow length
-        marker.scale.y = 0.02  # Arrow width
-        marker.scale.z = 0.02  # Arrow height
-        
-        # Set color based on goal type
-        if goal_type == 'fixed':
-            marker.color.r = 1.0  # Red
-            marker.color.g = 0.0
-            marker.color.b = 0.0
-        elif goal_type == 'random':
-            marker.color.r = 0.0
-            marker.color.g = 1.0  # Green
-            marker.color.b = 0.0
-        elif goal_type == 'left':
-            marker.color.r = 0.0
-            marker.color.g = 0.0
-            marker.color.b = 1.0  # Blue
-        elif goal_type == 'right':
-            marker.color.r = 1.0
-            marker.color.g = 1.0  # Yellow
-            marker.color.b = 0.0
-        else:
-            marker.color.r = 1.0
-            marker.color.g = 0.0
-            marker.color.b = 1.0  # Magenta
-        
-        marker.color.a = 0.8  # Transparency
-        
-        # Publish marker
-        self._goal_marker_pub.publish(marker)
-        
-        # Also publish as PoseStamped for MoveIt RViz plugin
-        pose_stamped = PoseStamped()
-        pose_stamped.header.frame_id = "world"
-        pose_stamped.header.stamp = self.get_clock().now().to_msg()
-        pose_stamped.pose = target_pose
-        
-        self._goal_pose_pub.publish(pose_stamped)
-        
-        self.get_logger().info(f'Published goal pose to RViz: {goal_type} goal at ({target_pose.position.x:.3f}, {target_pose.position.y:.3f}, {target_pose.position.z:.3f})')
+    #     Args:
+    #         msg: PoseStamped message containing end-effector pose
+    #     """
+    #     self._current_ee_pose = msg.pose
+    #     self.get_logger().info(f'EE pose from TF: pos=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f})')
 
-    def wait_for_joint_states(self, timeout=5.0):
-        """
-        Wait for joint states to be received from the robot.
+    # def publish_goal_to_rviz(self, target_pose, goal_type):
+    #     """
+    #     Publish goal pose to RViz for visualization.
         
-        Args:
-            timeout: Maximum time to wait in seconds
-            
-        Returns:
-            bool: True if joint states received, False if timeout
-        """
-        self.get_logger().info('Waiting for joint states...')
-        start_time = self.get_clock().now()
-        while not self._joint_states_received:
-            if (self.get_clock().now() - start_time).nanoseconds > timeout * 1e9:
-                self.get_logger().error('Timeout waiting for joint states')
-                return False
-            rclpy.spin_once(self, timeout_sec=0.1)
-        return True
+    #     Creates a colored arrow marker and publishes it to RViz topics.
+    #     Different goal types get different colors for easy identification.
+        
+    #     Args:
+    #         target_pose: Pose message containing the goal position and orientation
+    #         goal_type: String indicating the type of goal (affects marker color)
+    #     """
+    #     # Create a marker for the goal pose
+    #     marker = Marker()
+    #     marker.header.frame_id = "world"
+    #     marker.header.stamp = self.get_clock().now().to_msg()
+    #     marker.ns = "goal_pose"
+    #     marker.id = 0
+    #     marker.type = Marker.ARROW
+    #     marker.action = Marker.ADD
+        
+    #     # Set marker position and orientation
+    #     marker.pose = target_pose
+    #     marker.scale.x = 0.1  # Arrow length
+    #     marker.scale.y = 0.02  # Arrow width
+    #     marker.scale.z = 0.02  # Arrow height
+        
+    #     # Set color based on goal type
+    #     if goal_type == 'fixed':
+    #         marker.color.r = 1.0  # Red
+    #         marker.color.g = 0.0
+    #         marker.color.b = 0.0
+    #     elif goal_type == 'random':
+    #         marker.color.r = 0.0
+    #         marker.color.g = 1.0  # Green
+    #         marker.color.b = 0.0
+    #     elif goal_type == 'left':
+    #         marker.color.r = 0.0
+    #         marker.color.g = 0.0
+    #         marker.color.b = 1.0  # Blue
+    #     elif goal_type == 'right':
+    #         marker.color.r = 1.0
+    #         marker.color.g = 1.0  # Yellow
+    #         marker.color.b = 0.0
+    #     else:
+    #         marker.color.r = 1.0
+    #         marker.color.g = 0.0
+    #         marker.color.b = 1.0  # Magenta
+        
+    #     marker.color.a = 0.8  # Transparency
+        
+    #     # Publish marker
+    #     self._goal_marker_pub.publish(marker)
+        
+    #     # Also publish as PoseStamped for MoveIt RViz plugin
+    #     pose_stamped = PoseStamped()
+    #     pose_stamped.header.frame_id = "world"
+    #     pose_stamped.header.stamp = self.get_clock().now().to_msg()
+    #     pose_stamped.pose = target_pose
+        
+    #     self._goal_pose_pub.publish(pose_stamped)
+        
+    #     self.get_logger().info(f'Published goal pose to RViz: {goal_type} goal at ({target_pose.position.x:.3f}, {target_pose.position.y:.3f}, {target_pose.position.z:.3f})')
 
-    def rotation_matrix_to_quaternion(self, R):
-        """
-        Convert 3x3 rotation matrix to quaternion (w, x, y, z).
-        
-        Uses the standard algorithm from euclideanspace.com for robust conversion.
-        
-        Args:
-            R: 3x3 numpy array representing rotation matrix
-            
-        Returns:
-            list: Quaternion as [w, x, y, z]
-        """
-        # Ensure R is a 3x3 matrix
-        if R.shape != (3, 3):
-            return [1.0, 0.0, 0.0, 0.0]  # Identity quaternion
-        
-        # Method from http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
-        trace = np.trace(R)
-        
-        if trace > 0:
-            S = math.sqrt(trace + 1.0) * 2
-            w = 0.25 * S
-            x = (R[2, 1] - R[1, 2]) / S
-            y = (R[0, 2] - R[2, 0]) / S
-            z = (R[1, 0] - R[0, 1]) / S
-        elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-            S = math.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2
-            w = (R[2, 1] - R[1, 2]) / S
-            x = 0.25 * S
-            y = (R[0, 1] + R[1, 0]) / S
-            z = (R[0, 2] + R[2, 0]) / S
-        elif R[1, 1] > R[2, 2]:
-            S = math.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2
-            w = (R[0, 2] - R[2, 0]) / S
-            x = (R[0, 1] + R[1, 0]) / S
-            y = 0.25 * S
-            z = (R[1, 2] + R[2, 1]) / S
-        else:
-            S = math.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2
-            w = (R[1, 0] - R[0, 1]) / S
-            x = (R[0, 2] + R[2, 0]) / S
-            y = (R[1, 2] + R[2, 1]) / S
-            z = 0.25 * S
-        
-        # Normalize quaternion
-        norm = math.sqrt(w*w + x*x + y*y + z*z)
-        if norm > 0:
-            w /= norm
-            x /= norm
-            y /= norm
-            z /= norm
-        
-        return [w, x, y, z]
 
-    def test_forward_kinematics(self):
-        """
-        Test forward kinematics with known joint angles.
-        
-        Tests FK with home position (all zeros) and a test position
-        to verify the FK computation is working correctly.
-        """
-        # Test with home position (all joints at 0)
-        home_joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        pos, quat = self.ur5_forward_kinematics(home_joints)
-        self.get_logger().info(f'Home position FK test: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
-        
-        # Test with some non-zero angles
-        test_joints = [0.5, -1.0, 0.5, 0.0, 0.0, 0.0]
-        pos, quat = self.ur5_forward_kinematics(test_joints)
-        self.get_logger().info(f'Test position FK: pos=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), quat=({quat[0]:.3f}, {quat[1]:.3f}, {quat[2]:.3f}, {quat[3]:.3f})')
 
-    def ur5_forward_kinematics(self, joint_angles):
-        """
-        Compute UR5 forward kinematics using DH parameters.
-        
-        Based on UR5 DH parameters from the URDF:
-        - a = [0.00000, -0.42500, -0.39225, 0.00000, 0.00000, 0.0000]
-        - d = [0.089159, 0.00000, 0.00000, 0.10915, 0.09465, 0.0823]
-        - alpha = [1.570796327, 0, 0, 1.570796327, -1.570796327, 0]
-        - q_home_offset = [0, -1.570796327, 0, -1.570796327, 0, 0]
-        
-        Args:
-            joint_angles: List of 6 joint angles in radians
-            
-        Returns:
-            tuple: (position, orientation) where position is [x, y, z] and orientation is [w, x, y, z] quaternion
-        """
-        # UR5 DH parameters
-        a = [0.00000, -0.42500, -0.39225, 0.00000, 0.00000, 0.0000]
-        d = [0.089159, 0.00000, 0.00000, 0.10915, 0.09465, 0.0823]
-        alpha = [1.570796327, 0, 0, 1.570796327, -1.570796327, 0]
-        q_home_offset = [0, -1.570796327, 0, -1.570796327, 0, 0]
-        
-        # Apply home offset to joint angles
-        q = [joint_angles[i] + q_home_offset[i] for i in range(6)]
-        
-        # Initialize transformation matrix
-        T = np.eye(4)
-        
-        # Compute forward kinematics for each joint
-        for i in range(6):
-            # DH transformation matrix
-            ct = math.cos(q[i])
-            st = math.sin(q[i])
-            ca = math.cos(alpha[i])
-            sa = math.sin(alpha[i])
-            
-            # DH transformation matrix
-            Ti = np.array([
-                [ct, -st*ca, st*sa, a[i]*ct],
-                [st, ct*ca, -ct*sa, a[i]*st],
-                [0, sa, ca, d[i]],
-                [0, 0, 0, 1]
-            ])
-            
-            # Multiply with current transformation
-            T = T @ Ti
-        
-        # Extract position and orientation
-        position = T[:3, 3]
-        rotation_matrix = T[:3, :3]
-        
-        # Convert rotation matrix to quaternion
-        orientation = self.rotation_matrix_to_quaternion(rotation_matrix)
-        
-        return position, orientation
-
-    def get_current_end_effector_pose(self):
-        """
-        Get current end-effector pose either from TF topic or by computing FK.
-        
-        First tries to get pose from TF topic, falls back to FK computation
-        if no TF topic is available.
-        
-        Returns:
-            tuple: (position, orientation) or None if not available
-        """
-        # First try to get from TF topic
-        if self._current_ee_pose is not None:
-            pos = (self._current_ee_pose.position.x, 
-                   self._current_ee_pose.position.y, 
-                   self._current_ee_pose.position.z)
-            quat = (self._current_ee_pose.orientation.w,
-                   self._current_ee_pose.orientation.x,
-                   self._current_ee_pose.orientation.y,
-                   self._current_ee_pose.orientation.z)
-            self.get_logger().info(f'Using EE pose from TF topic')
-            return pos, quat
-        
-        # If no TF available, compute FK from joint states
-        if self._current_joint_states is None:
-            return None
-            
-        # Get joint positions for UR5 arm (excluding gripper)
-        arm_joint_names = [
-            'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
-            'wrist_2_joint', 'wrist_3_joint', 'wrist_1_joint'
-        ]
-        
-        try:
-            joint_positions = []
-            for joint_name in arm_joint_names:
-                idx = self._current_joint_states.name.index(joint_name)
-                joint_positions.append(self._current_joint_states.position[idx])
-            
-            # Compute forward kinematics
-            position, orientation = self.ur5_forward_kinematics(joint_positions)
-            self.get_logger().info(f'Computed EE pose using FK')
-            return position, orientation
-            
-        except (ValueError, IndexError) as e:
-            self.get_logger().error(f'Error computing FK: {e}')
-            return None
-
-    def is_at_goal(self, target_pose, position_tolerance=0.1):
-        """
-        Check if the end-effector is already at the goal pose.
-        
-        Args:
-            target_pose: Pose message containing the target position and orientation
-            position_tolerance: Maximum distance in meters to consider as "at goal"
-            
-        Returns:
-            bool: True if within tolerance, False otherwise
-        """
-        # Get current end-effector position
-        current_ee = self.get_current_end_effector_pose()
-        if current_ee is None:
-            self.get_logger().warn('Could not get current end-effector pose')
-            return False
-            
-        current_pos, current_quat = current_ee
-        target_pos = (target_pose.position.x, target_pose.position.y, target_pose.position.z)
-        
-        # Calculate distance to target
-        distance = math.sqrt(sum((a - b) ** 2 for a, b in zip(current_pos, target_pos)))
-        
-        self.get_logger().info(f'Current EE position: ({current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f})')
-        self.get_logger().info(f'Target EE position: ({target_pos[0]:.3f}, {target_pos[1]:.3f}, {target_pos[2]:.3f})')
-        self.get_logger().info(f'Distance to target: {distance:.3f} m (tolerance: {position_tolerance:.3f} m)')
-        
-        if distance < position_tolerance:
-            self.get_logger().info(f'End-effector is already at goal position (distance: {distance:.3f}m < {position_tolerance}m)')
-            return True
-            
-        self.get_logger().info(f'End-effector is NOT at goal position (distance: {distance:.3f}m >= {position_tolerance}m)')
-        return False
 
     def get_goal_pose(self, goal_type='fixed'):
         """
@@ -551,44 +336,44 @@ class MoveGroupClient(Node):
             planner_id: Name of the planning algorithm to use
         """
         # Test forward kinematics first
-        self.test_forward_kinematics()
+        # self.test_forward_kinematics()
         
         # Wait for current joint states
-        if not self.wait_for_joint_states():
-            self.get_logger().error('Failed to get current joint states')
-            return
+        # if not self.wait_for_joint_states():
+        #     self.get_logger().error('Failed to get current joint states')
+        #     return
 
-        # If in test mode, just print joint states and exit
-        if test_mode:
-            if self._current_joint_states is None:
-                self.get_logger().error('No joint states available in test mode')
-                return
+        # # If in test mode, just print joint states and exit
+        # if test_mode:
+        #     if self._current_joint_states is None:
+        #         self.get_logger().error('No joint states available in test mode')
+        #         return
                 
-            self.get_logger().info('=== TEST MODE: Current Joint States ===')
-            arm_joint_names = [
-                'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
-                'wrist_2_joint', 'wrist_3_joint', 'wrist_1_joint'
-            ]
+        #     self.get_logger().info('=== TEST MODE: Current Joint States ===')
+        #     arm_joint_names = [
+        #         'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
+        #         'wrist_2_joint', 'wrist_3_joint', 'wrist_1_joint'
+        #     ]
             
-            for joint_name in arm_joint_names:
-                try:
-                    idx = self._current_joint_states.name.index(joint_name)
-                    pos = self._current_joint_states.position[idx] # radians
-                    pos_deg = pos * 180 / math.pi # degrees
-                    vel = self._current_joint_states.velocity[idx] if idx < len(self._current_joint_states.velocity) else 0.0 # radians/s
-                    vel_deg = vel * 180 / math.pi # degrees/s
-                    self.get_logger().info(f'{joint_name}: position (deg)={pos_deg:.4f} deg, velocity (deg/s)={vel_deg:.4f} deg/s')
-                except (ValueError, IndexError):
-                    self.get_logger().warn(f'{joint_name}: not found in joint states')
+        #     for joint_name in arm_joint_names:
+        #         try:
+        #             idx = self._current_joint_states.name.index(joint_name)
+        #             pos = self._current_joint_states.position[idx] # radians
+        #             pos_deg = pos * 180 / math.pi # degrees
+        #             vel = self._current_joint_states.velocity[idx] if idx < len(self._current_joint_states.velocity) else 0.0 # radians/s
+        #             vel_deg = vel * 180 / math.pi # degrees/s
+        #             self.get_logger().info(f'{joint_name}: position (deg)={pos_deg:.4f} deg, velocity (deg/s)={vel_deg:.4f} deg/s')
+        #         except (ValueError, IndexError):
+        #             self.get_logger().warn(f'{joint_name}: not found in joint states')
             
-            # Also print all available joint states
-            self.get_logger().info('=== All Available Joint States ===')
-            for i, name in enumerate(self._current_joint_states.name):
-                pos = self._current_joint_states.position[i]
-                vel = self._current_joint_states.velocity[i] if i < len(self._current_joint_states.velocity) else 0.0
-                self.get_logger().info(f'{name}: position={pos:.4f}, velocity={vel:.4f}')
+        #     # Also print all available joint states
+        #     self.get_logger().info('=== All Available Joint States ===')
+        #     for i, name in enumerate(self._current_joint_states.name):
+        #         pos = self._current_joint_states.position[i]
+        #         vel = self._current_joint_states.velocity[i] if i < len(self._current_joint_states.velocity) else 0.0
+        #         self.get_logger().info(f'{name}: position={pos:.4f}, velocity={vel:.4f}')
             
-            return
+        #     return
 
         # Create MoveIt goal message
         goal_msg = MoveGroup.Goal()

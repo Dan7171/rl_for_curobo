@@ -17,3 +17,5 @@ joint_commands_in_topic: /isaac_joint_commands # could be any name but must matc
 # background usd path - point to the usd file you want to use as the background
 background_usd_path: /Isaac/Environments/Simple_Room/simple_room.usd
 
+num_targets: 2
+

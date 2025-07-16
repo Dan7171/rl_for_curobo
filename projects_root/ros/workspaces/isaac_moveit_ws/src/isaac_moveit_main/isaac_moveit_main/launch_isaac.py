@@ -562,6 +562,19 @@ def init_action_graph(graph_path, simulation_app, joint_states_out_topic, joint_
         primPath="/ActionGraph/PublishJointState", target_prim_paths=[robot_articulation_root_path],# targetPrimPaths=[robot_path]
     )
 
+def spawn_targets(num_targets):
+    from omni.isaac.core.objects import cuboid
+    targets = []
+    for i in range(num_targets):
+        targets.append(cuboid.VisualCuboid(
+            f"/World/target_{i}",
+            position=np.array([0.5, 0, 0.5]),
+            orientation=np.array([0, 1, 0, 0]),
+            color=np.array([1.0, 0, 0]),
+            size=0.05,
+        ))
+    
+    return targets
 
 BACKGROUND_STAGE_PATH = "/background"
 BACKGROUND_USD_PATH = "/Isaac/Environments/Simple_Room/simple_room.usd"
@@ -584,6 +597,10 @@ world = init_world()
 robot, robot_path, robot_articulation_root_path = add_robot_to_scene(world, position=np.array([0, 0, 0]))
 isaac_sim_ge_4_5_version, is_legacy_isaacsim = get_isaac_sim_version()
 assets_root_path = get_asset_database_path(simulation_app)
+num_targets = cfg.get("num_targets",1)
+targets = spawn_targets(num_targets)
+
+
 try:
     from isaacsim.core.api import SimulationContext  # noqa E402
     from isaacsim.core.utils.prims import set_targets  # noqa E402
@@ -615,6 +632,9 @@ if ADD_PROPS:
 
 simulation_app.update()
 ros_domain_id = get_ros_domain_id()
+
+from projects_root.ros.workspaces.isaac_moveit_ws.src.isaac_moveit_main.isaac_moveit_main.target_state_publisher import TargetStatePublisher
+target_state_publisher = TargetStatePublisher(targets)
 
 init_action_graph(GRAPH_PATH, simulation_app, cfg["joint_states_out_topic"], cfg["joint_commands_in_topic"], robot_path, robot_articulation_root_path, isaac_sim_ge_4_5_version, is_legacy_isaacsim, ros_domain_id)
 

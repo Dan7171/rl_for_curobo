@@ -1,21 +1,55 @@
 
+
+
 # Folder structure:
 1. template_ws: workspace for the files from https://www.youtube.com/watch?v=pGje2slp6-s which show an example for ur5 robot
 2. moveit2_setup_assistant_inputs_ws: workspace for making and storing the input packages for moveit setup assistant. These pacakges containt robot descriptions only according to a strict format. 
 3. moveit_cfgs_ws : workspace for the out packages generated automatically by moveit setup assistant
 
+###########################################################
+FULL END TO END PIPELINE FOR MAKING ANY ROBOT (EVEN CUSTOM)
+RUN AS FOLLOWS:
+1. SEND: 
+    1. JOINT STATES FROM ISAAC SIM 4.5 TO MOVEIT 2
+    2. GOALS (FOR PLANNING) FROM EITHER ISAAC SIM/ RVIZ/ OTHER
+2. PLAN MOTION WITH MOVEIT 2 (BASED ON WHAT SENT)
+3. SEND PLAN BACK TO ISAAC SIM
+4. EXECUTE THE PLAN IN ISAAC SIM
+
+ADDITIONALLY, WE WILL VISUALIZE THE ISAAC SIM ROBOT STATE 
+IN RVIZ.
+
+General flow:
+
+##########################################################
 
 # How to make a custom robot working end to end example?
+
 ## Requirements:
 1. a folder (not yet ros package) contains:  
     1. the robot(s) urdf(s) (your_robot_name.urdf or many files like this)
     2. meshe files of the robot if exist (collision, visual)
 2. %robot description package name%: a name for the robot/s description/s packge, that you want to call the new package in ("my_custom_robot", "k_arm_franka", "mix_of_arm_models", "custom_kuka"...).
 3. %moveit robot cfg package name% a name for the auto-generate moveit configuration package. This should be robot specific (unlike ) %robot description package name% which can contain many robots under one package) 
+4. docker image de257/curobo_isaac45v5 or higher (v5,v6...). One can pull it from https://hub.docker.com/repository/docker/de257/curobo_isaac45v5/general
+Let's mark this version %vi%.
 
 ## Steps:
+A. In host machine:
+1. pull the docker image
+2. pull this repo anywhere in your machine ~/home/user/...../this repository (currently named rl_for_curobo)
+3. run: curobo/docker/start_docker_isaac_sim45%vi%user.sh # where %vi% is the image version from earlier. Currently tested with v5 and v6
+# this will put you in the docker image bash terminal in an interactive mode, after preparing the environment (go over the script to understand more).
+# the name of the container %container name% will be normally "cu_is45_%vi%".
+# note: when you need to enter again to that container from a different terminal, run: 
+    docker exec -it %container name% bash # to get the exact %container name% run "docker ps"
+# this command will be mentioned a few times below in this tutorial.    
+
 ### Step 1: making a robot description package 
-1. Copy the folde "empty_robot_description_pkg_template" to moveit2_setup_assistant_inputs_ws/src/empty_robot_description_pkg_template
+#### When? only once for each robot. Then it can be reused. 
+In host: enter the container you launched with: docker exec -it %container name% bash
+In container (from the opened terminal):
+1. Copy the folder "empty_robot_description_pkg_template" to moveit2_setup_assistant_inputs_ws/src/empty_robot_description_pkg_template
 2. rename the folder: from moveit2_setup_assistant_inputs_ws/src/empty_robot_description_pkg_template to from moveit2_setup_assistant_inputs_ws/src/%robot description package name% 
 3. In the renamed folder:
     1. In file: _CMakeLists.txt
@@ -40,7 +74,7 @@
                 <mesh filename=package://%robot description package name%/meshes/visual/mesh filename.some extension
             # if its a *collision* mesh:
                 <mesh filename=package://%robot description package name%/meshes/collision/mesh filename.some extension
-
+    
 # build the new package and source your workspace:
 4. cd projects_root/ros/workspaces/moveit_cfgs_ws
 5. source /opt/ros/humble/setup.bash 
@@ -49,6 +83,9 @@
 # If there are no bugs here, you can proceed to "moveit setup assistant" to make config...
 
 ### Step 2: making moveit config from the robot description package
+#### When? only once for each robot. Then it can be reused. 
+In host: enter the container you launched with: docker exec -it %container name% bash
+In container (from the opened terminal):
 1. source /opt/ros/humble/setup.bash
 2. ros2 launch moveit_setup_assistant setup_assistant.launch.py
 3. load once urdf you made in step 2 (from the package you made)
@@ -56,15 +93,41 @@
 when reaching the last step of saving:
     1. make a new empty directory in the source dir (moveit setup assistant will generate package files into it) 
     as follows: moveit_cfgs_ws/src/%moveit robot cfg package name% # keep empty
-    2. select it in the place to put configs to in the setup assistant (last step)
-    after finishing with the assistant, all files should be there (its a new ros package)
-
+    2. select the new empty directory  as the place to put configs (last step in the setup assustant gui)
+    This will create there automatically a new ros2 package with many config files.
+    (An example can bee seen in projects_root/ros/workspaces/moveit_cfgs_ws/src/franka_dual_arm)
+ 
 5. close the setup assitant
-6. cd moveit_cfgs_ws
-7. colcon build
-8. soucre install/setup.bash
+6. Defaultly, the config files are generated such way they don't allow moveit to communicate with ros topics for reading joint states from and publishing joint commands to.
+Instead, it uses a "dummy (mock) hardware controller simulated by ros. So we need to change it to topic based communication.
+For that we'll do the following steps:
+    a. open the xacro file (automatically generated with moveit setup assistant) found at: projects_root/ros/workspaces/moveit_cfgs_ws/src/%moveit robot cfg package name%/config/%my robot name%.ros2_control.xacro
+    b. replace 2 lines:
+        
+        <!-- By default, set up controllers for simulation. This won't work on real hardware -->
+        <plugin>mock_components/GenericSystem</plugin>
+
+        by next 5 lines:
+
+        <!-- By default, set up controllers for simulation. This won't work on real hardware -->
+        <!-- plugin>mock_components/GenericSystem</plugin -->
+        <plugin>topic_based_ros2_control/TopicBasedSystem</plugin>
+        <param name="joint_commands_topic">/%YOUR JOINT COMMANDS TOPIC NAME%</param>
+        <param name="joint_states_topic">/%YOUR JOINT STATES TOPIC NAME%</param>
+
+        where:
+            %YOUR JOINT COMMANDS TOPIC NAME%, and %YOUR JOINT STATES TOPIC NAME%
+            are two topic names (every valid topic name is ok, normally you'll use /isaac_joint_states and /isaac_joint_commands)
+            later, when using isaac sim we will make sure we make the action graph to use these topic names...
+
+7. cd moveit_cfgs_ws
+8. colcon build
+9. soucre install/setup.bash
 
 ### Step 3: run moveit with the new moveit config
+#### When? Every time you want to run the example.
+In host: enter the container you launched with: docker exec -it %container name% bash
+In container (from the opened terminal):
 1. cd moveit_cfgs_ws
 2. soucre install/setup.bash
 3. cd moveit2_setup_assistant_inputs_ws
@@ -73,7 +136,15 @@ when reaching the last step of saving:
 
 
 ### Step 4: launch isaac sim
-TODO
+#### When? Every time you want to run the example.
+In host: enter the container you launched with: docker exec -it %container name% bash
+In container (from the opened terminal):
+    1. make a new config file based on projects_root/ros/workspaces/isaac_moveit_ws/config/launch_isaac_args_template.yml
+    (you can put it everywhere but for the order put in the same directory as the template: projects_root/ros/workspaces/isaac_moveit_ws/config) or use an existing one.
+    assuming your new copied file is now projects_root/ros/workspaces/isaac_moveit_ws/config/%my_robot_isaac_config.yml%
+    2. in your new file projects_root/ros/workspaces/isaac_moveit_ws/config/%my_robot_isaac_config.yml%:
+        change "moveit_config_pkg_path" to the *absolute* path to your moveit config path: /moveit_cfgs_ws/src/%moveit robot cfg package name%
+        change "urdf_file_path" to the *
 
 
 
