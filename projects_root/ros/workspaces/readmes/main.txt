@@ -20,6 +20,7 @@ ADDITIONALLY, WE WILL VISUALIZE THE ISAAC SIM ROBOT STATE
 IN RVIZ.
 
 General flow:
+for the moveit flow, read here: https://moveit.ai/documentation/concepts/
 
 ##########################################################
 
@@ -89,7 +90,35 @@ In container (from the opened terminal):
 1. source /opt/ros/humble/setup.bash
 2. ros2 launch moveit_setup_assistant setup_assistant.launch.py
 3. load once urdf you made in step 2 (from the package you made)
+# you should make sure the robot is visually loaded here... if not, you probably have error in the urdf, make sure its pointing to the meshes as explaing above.
+
 4. configure your robot, see tutorials here: https://www.youtube.com/watch?v=pGje2slp6-s and in many places in youtube
+
+    a. in self-collisions tab:
+    click generate collion matrix and continue
+
+    b. in the virtual joint tab, set:
+        virtual joint name: virtual_joint
+        child_link: your robot's base link
+        robot_parent_frame: world
+    c. in the planning groups tab:
+       for each group*:
+            - click "add group"
+            - set group name to be some identifier (examples: "arm", "franka_arm", "left_arm") 
+            - select kinematic solver to be the "kdl..." (normally the third)
+            - click "add joints" and drag the joints which you want to plan for in this group*.
+            Include only movable joints**.
+
+        * group is an important moveit term. Disclaimer: As I get it (I may be wrong), a group should be any sub-part of joints with a specific target.
+        for example if you have 2 arms in the robot, and each should have a seperate target (ee goal state for instance)
+        you should specify two seperate groups. "In MoveIt, a planning group refers to a collection of robot joints that are treated as a single unit for motion planning and control. These groups are defined within the robot's configuration (typically in the SRDF file) and allow you to easily specify which parts of the robot you want to move or control at any given time. "
+
+        ** Typically a planning group should include only non-fixed joints (i.e., joints that can move — revolute, prismatic, or floating).
+        Fixed joints do not contribute to the robot’s degrees of freedom and are automatically ignored during planning.
+        You can include links that are connected via fixed joints, but including the fixed joints themselves in the planning group has no effect.
+        Rule of thumb: A planning group should define the movable part(s) of the robot you want to plan motion for.
+
+
 when reaching the last step of saving:
     1. make a new empty directory in the source dir (moveit setup assistant will generate package files into it) 
     as follows: moveit_cfgs_ws/src/%moveit robot cfg package name% # keep empty

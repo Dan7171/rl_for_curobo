@@ -633,8 +633,6 @@ if ADD_PROPS:
 simulation_app.update()
 ros_domain_id = get_ros_domain_id()
 
-from projects_root.ros.workspaces.isaac_moveit_ws.src.isaac_moveit_main.isaac_moveit_main.target_state_publisher import TargetStatePublisher
-target_state_publisher = TargetStatePublisher(targets)
 
 init_action_graph(GRAPH_PATH, simulation_app, cfg["joint_states_out_topic"], cfg["joint_commands_in_topic"], robot_path, robot_articulation_root_path, isaac_sim_ge_4_5_version, is_legacy_isaacsim, ros_domain_id)
 
