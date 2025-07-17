@@ -23,10 +23,12 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'launch_isaac = isaac_moveit_main.launch_isaac_wrapper:main',
-            'goal_sender = isaac_moveit_main.goal_sender:main',
-            'launch_rviz_moveit = isaac_moveit_main.launch_rviz_moveit:main',
-            'moveit_monitor = isaac_moveit_main.moveit_monitor:main',
+        'goal_sender = isaac_moveit_main.goal_sender:main',
+        'moveit_monitor = isaac_moveit_main.moveit_monitor:main',
+        'launch_isaac = isaac_moveit_main.launch_isaac:main',
+        'launch_rviz_moveit = isaac_moveit_main.launch_rviz_moveit:main',
+        'test_dual_arm_action = isaac_moveit_main.test_dual_arm_action:main',
+        # Add more as needed
         ],
     },
 )
