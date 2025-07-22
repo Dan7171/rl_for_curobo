@@ -60,10 +60,14 @@ simulation_app = SimulationApp(
         "height": "1080",
     }
 )
+
 # Third Party
+
+from projects_root.examples.helper import add_extensions, add_robot_to_scene
+add_extensions(simulation_app, args.headless_mode)
+
 import carb
 import numpy as np
-from projects_root.examples.helper import add_extensions, add_robot_to_scene
 from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid, sphere
 
@@ -117,7 +121,7 @@ class Plan:
             
 
 
-class MotionPlanner:
+class CuPlanner:
     
     
             
@@ -135,10 +139,10 @@ class MotionPlanner:
         self.plan = Plan()
         
         # all constrained links that we can set goals for (ee + optional extra links):
-        self.ee_link_name:str = self.motion_gen.kinematics.ee_link
-        self.extra_links_names:list[str] = copy(self.motion_gen.kinematics.link_names)
-        if self.ee_link_name in self.extra_links_names: # ee link should not be in extra links, so we remove it
-            self.extra_links_names.remove(self.ee_link_name)
+        self.ee_link_name:str = self.motion_gen.kinematics.ee_link # end effector link name, based on the robot config
+        self.constrained_links_names:list[str] = copy(self.motion_gen.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
+        if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
+            self.constrained_links_names.remove(self.ee_link_name)
     
         self.plan_goals:dict[str, Pose] = {}
 
@@ -157,7 +161,7 @@ class MotionPlanner:
         Making a new plan. return True if success, False otherwise
         """
         ee_goal = new_goals[self.ee_link_name]
-        extra_links_goals = {link_name:new_goals[link_name] for link_name in self.extra_links_names}
+        extra_links_goals = {link_name:new_goals[link_name] for link_name in self.constrained_links_names}
         result = self.motion_gen.plan_single(
             cu_js.unsqueeze(0), ee_goal, self.plan_config.clone(), link_poses=extra_links_goals
         )
@@ -213,7 +217,7 @@ class MotionPlanner:
         consume = True
         if code == PLAN_NEW:
             # print(f'planning...')
-            succ = self._plan_new(cu_js, goals)
+            _success = self._plan_new(cu_js, goals)
             
         elif code == STOP_IN_PLACE:
             action = JointState(
@@ -256,12 +260,12 @@ class MotionPlanner:
         
     # print("Curobo is Ready")
         
-    def convet_action_to_isaac(
+    def convert_action_to_isaac(
             self, 
             action:JointState, 
             sim_js_names:list[str], 
             order_finder:Callable
-        ):
+        )->ArticulationAction:
 
         """
         convert curobo action to isaac sim action
@@ -285,41 +289,24 @@ class MotionPlanner:
         
 
 def main():
+    setup_curobo_logger("warn")
+
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
     stage = my_world.stage
-
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
-    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
-    stage = my_world.stage
-    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
-    # Make a target to follow
-
-    setup_curobo_logger("warn")
-    past_pose = None
-    n_obstacle_cuboids = 30
-    n_obstacle_mesh = 10
-
-    # warmup curobo instance
+    
     usd_help = UsdHelper()
     usd_help.load_stage(my_world.stage)
-    target_pose = None
 
     tensor_args = TensorDeviceType()
-
     robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-
-    # isaac sim robot
     robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
-    
-    add_extensions(simulation_app, args.headless_mode)
-
     articulation_controller = robot.get_articulation_controller()
 
     world_cfg_table = WorldConfig.from_dict(
@@ -335,72 +322,77 @@ def main():
 
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
     usd_help.add_world_to_stage(world_cfg, base_frame="/World")
+    my_world.scene.add_default_ground_plane()
+    
 
-    motion_gen_config = MotionGenConfig.load_from_robot_config(
+    _motion_gen_config = MotionGenConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
         tensor_args,
         collision_checker_type=CollisionCheckerType.MESH,
         use_cuda_graph=True,
         interpolation_dt=0.03,
-        collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
+        collision_cache={"obb": 30, "mesh": 10},
         collision_activation_distance=0.025,
         fixed_iters_trajopt=True,
         maximum_trajectory_dt=0.5,
         ik_opt_iters=500,
     )
-    plan_config = MotionGenPlanConfig(
+    _plan_config = MotionGenPlanConfig(
         enable_graph=False,
         enable_graph_attempt=4,
         max_attempts=10,
         time_dilation_factor=0.5,
     )
-    planner = MotionPlanner(motion_gen_config, plan_config, {'enable_graph':True, 'warmup_js_trajopt':False})
-    # isaac_sim_plan = Plan()
-    isaac_action = None
-    # cmd_plan = None
-    # cmd_idx = 0
-    my_world.scene.add_default_ground_plane()
-    i = 0
-    spheres = None
+    _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
+    planner = CuPlanner(_motion_gen_config, _plan_config, _warmup_config)
 
-    # read number of targets in link names:
-    link_names = planner.motion_gen.kinematics.link_names
+    # i = 0
+
+    
+    # link_names = planner.motion_gen.kinematics.link_names 
     ee_link_name = planner.motion_gen.kinematics.ee_link
     
     # get link poses at retract configuration:
-    kin_state = planner.motion_gen.kinematics.get_state(planner.motion_gen.get_retract_config().view(1, -1))
-    link_retract_pose = kin_state.link_pose
-
-    t_pos = np.ravel(kin_state.ee_pose.to_list())
-    target = cuboid.VisualCuboid(
-        "/World/target",
-        position=t_pos[:3],
-        orientation=t_pos[3:],
+    retract_kinematics_state = planner.motion_gen.kinematics.get_state(planner.motion_gen.get_retract_config().view(1, -1))
+    links_retract_poses = retract_kinematics_state.link_pose
+    ee_retract_pose = retract_kinematics_state.ee_pose
+    
+    ee_target_prim_path = "/World/target"
+    _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
+    ee_target = cuboid.VisualCuboid(
+        ee_target_prim_path,
+        position=_initial_ee_target_pose[:3],
+        orientation=_initial_ee_target_pose[3:],
         color=np.array([1.0, 0, 0]),
         size=0.05,
     )
 
     # create new targets for new links:
     # ee_idx = link_names.index(ee_link_name)
-    target_links = {}
-    names = []
-    for i in link_names:
-        if i != ee_link_name:
-            k_pose = np.ravel(link_retract_pose[i].to_list())
+    constr_link_name_to_target_prim = {}
+    constr_links_targets_prims_paths = []
+    for link_name in planner.constrained_links_names:
+        if link_name != ee_link_name:
+            target_path = "/World/target_" + link_name
+            constrained_link_retract_pose = np.ravel(links_retract_poses[link_name].to_list())
+            _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
+            
             color = np.random.randn(3) * 0.2
             color[0] += 0.5
             color[1] = 0.5
             color[2] = 0.0
-            target_links[i] = cuboid.VisualCuboid(
-                "/World/target_" + i,
-                position=np.array(k_pose[:3]),
-                orientation=np.array(k_pose[3:]),
+            constr_link_name_to_target_prim[link_name] = cuboid.VisualCuboid(
+                target_path,
+                position=np.array(_initial_constrained_link_target_pose[:3]),
+                orientation=np.array(_initial_constrained_link_target_pose[3:]),
                 color=color,
                 size=0.05,
             )
-            names.append("/World/target_" + i)
+            constr_links_targets_prims_paths.append(target_path)
+    
     i = 0
+    spheres = None
     while simulation_app.is_running():
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -412,7 +404,6 @@ def main():
             continue
 
         step_index = my_world.current_time_step_index
-        # print(step_index)
         if step_index <= 10:
             # my_world.reset()
             robot._articulation_view.initialize()
@@ -433,11 +424,11 @@ def main():
                 reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
-                    "/World/target",
+                    ee_target_prim_path,
                     "/World/defaultGroundPlane",
                     "/curobo",
                 ]
-                + names,
+                + constr_links_targets_prims_paths,
             ).get_collision_check_world()
 
             planner.motion_gen.update_world(obstacles)
@@ -445,12 +436,9 @@ def main():
             carb.log_info("Synced CuRobo world from stage.")
 
         # position and orientation of target virtual cube:
-        cube_position, cube_orientation = target.get_world_pose()
+        # cube_position, cube_orientation = ee_target.get_world_pose()
 
-        if past_pose is None:
-            past_pose = cube_position
-        if target_pose is None:
-            target_pose = cube_position
+  
         sim_js = robot.get_joints_state()
         if sim_js is None:
             print("sim_js is None")
@@ -484,84 +472,32 @@ def main():
                 for si, s in enumerate(sph_list[0]):
                     spheres[si].set_world_pose(position=np.ravel(s.position))
                     spheres[si].set_radius(float(s.radius))
-        # if (
-        #     np.linalg.norm(cube_position - target_pose) > 1e-3
-        #     and np.linalg.norm(past_pose - cube_position) == 0.0
-        #     and np.max(np.abs(sim_js.velocities)) < 0.5
-        # ):
-        # Set EE teleop goals, use cube for simple non-vr init:
-        ee_translation_goal = cube_position
-        ee_orientation_teleop_goal = cube_orientation
-
-        # compute curobo solution:
-        ik_goal = Pose(
-            position=tensor_args.to_device(ee_translation_goal),
-            quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+        
+        p_ee_target, q_ee_target = ee_target.get_world_pose()
+        ee_goal = Pose(
+            position=tensor_args.to_device(p_ee_target),
+            quaternion=tensor_args.to_device(q_ee_target),
         )
+        
         # add link poses:
-        link_poses = {}
-        for i in target_links.keys():
-            c_p, c_rot = target_links[i].get_world_pose()
-            link_poses[i] = Pose(
+        links_goal_poses = {}
+        for link_name in constr_link_name_to_target_prim.keys():
+            c_p, c_rot = constr_link_name_to_target_prim[link_name].get_world_pose()
+            links_goal_poses[link_name] = Pose(
                 position=tensor_args.to_device(c_p),
                 quaternion=tensor_args.to_device(c_rot),
             )
         
-        # succ = planner._plan_new(cu_js, ik_goal, link_poses)
-        goals = {planner.ee_link_name: ik_goal,}
-        for i in target_links.keys():
-            goals[i] = link_poses[i]
+        goals = {planner.ee_link_name: ee_goal,}
+        for link_name in constr_link_name_to_target_prim.keys():
+            goals[link_name] = links_goal_poses[link_name]
+        
         action = planner.yield_action(goals, cu_js, sim_js.velocities)
+        
         if action is not None:
-            isaac_action = planner.convet_action_to_isaac(action, sim_js_names, robot.get_dof_index)
+            isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
             articulation_controller.apply_action(isaac_action)
-            # for _ in range(2):
-            #     my_world.step(render=False)
-        # if succ:
-            # isaac_sim_plan, isaac_idx_list = planner.convert_plan_to_isaac(sim_js_names, robot.get_dof_index)
-            # print("isaac_idx_list=", isaac_idx_list)
-            
-        target_pose = cube_position
-        past_pose = cube_position
-        # if isaac_action is not None:
-        #     articulation_controller.apply_action(isaac_action)
-        #     for _ in range(2):
-        #         my_world.step(render=False)
-
-        # cmd_state = isaac_sim_plan.consume_action()
-        # print("cmd_state=", cmd_state)
-        # if cmd_state is not None:
-            # get full dof state
-            # art_action = ArticulationAction(
-            #     cmd_state.position.cpu().numpy(),
-            #     cmd_state.velocity.cpu().numpy(),
-            #     joint_indices=isaac_idx_list,
-            # )
-            # set desired joint angles obtained from IK:
-            # articulation_controller.apply_action(art_action)
-            
-            # for _ in range(2):
-            #     my_world.step(render=False)
-            
-        # if planner.plan.cmd_plan is not None:
-        #     cmd_state = planner.plan.cmd_plan[planner.plan.cmd_idx]
-            
-        #     # get full dof state
-        #     art_action = ArticulationAction(
-        #         cmd_state.position.cpu().numpy(),
-        #         cmd_state.velocity.cpu().numpy(),
-        #         joint_indices=idx_list,
-        #     )
-        #     # set desired joint angles obtained from IK:
-        #     articulation_controller.apply_action(art_action)
-            
-        #     # planner.plan.cmd_idx += 1
-        #     for _ in range(2):
-        #         my_world.step(render=False)
-            
-        #     if planner.plan.cmd_idx >= len(planner.plan.cmd_plan.position):
-        #         planner.plan.cmd_idx = 0
-        #         planner.plan.cmd_plan = None
+         
 
                 
     simulation_app.close()
@@ -570,328 +506,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-
-# #
-# # Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# #
-# # NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
-# # property and proprietary rights in and to this material, related
-# # documentation and any modifications thereto. Any use, reproduction,
-# # disclosure or distribution of this material and related documentation
-# # without an express license agreement from NVIDIA CORPORATION or
-# # its affiliates is strictly prohibited.
-# #
-
-# try:
-#     # Third Party
-#     import isaacsim
-# except ImportError:
-#     pass
-
-
-# # Third Party
-# import torch
-
-# a = torch.zeros(4, device="cuda:0")
-
-# # Standard Library
-# import argparse
-
-# parser = argparse.ArgumentParser()
-
-# parser.add_argument(
-#     "--headless_mode",
-#     type=str,
-#     default=None,
-#     help="To run headless, use one of [native, websocket], webrtc might not work.",
-# )
-# parser.add_argument(
-#     "--visualize_spheres",
-#     action="store_true",
-#     help="When True, visualizes robot spheres",
-#     default=False,
-# )
-
-
-# parser.add_argument(
-#     "--robot", type=str, default="dual_ur10e.yml", help="robot configuration to load"
-# )
-# args = parser.parse_args()
-
-# ############################################################
-
-# # Third Party
-# from omni.isaac.kit import SimulationApp
-
-# simulation_app = SimulationApp(
-#     {
-#         "headless": args.headless_mode is not None,
-#         "width": "1920",
-#         "height": "1080",
-#     }
-# )
-# # Third Party
-# import carb
-# import numpy as np
-# from projects_root.examples.helper import add_extensions, add_robot_to_scene
-# from omni.isaac.core import World
-# from omni.isaac.core.objects import cuboid, sphere
-
-# ########### OV #################
-# from omni.isaac.core.utils.types import ArticulationAction
-
-# # CuRobo
-# from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-
-# # from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
-# from curobo.geom.sdf.world import CollisionCheckerType
-# from curobo.geom.types import WorldConfig
-# from curobo.rollout.rollout_base import Goal
-# from curobo.types.base import TensorDeviceType
-# from curobo.types.math import Pose
-# from curobo.types.robot import JointState, RobotConfig
-# from curobo.types.state import JointState
-# from curobo.util.logger import setup_curobo_logger
-# from curobo.util.usd_helper import UsdHelper
-# from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
-# from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
-# from projects_root.experiments.core_api.motion_planner.cumotion_planner import CumotionPlanner
-# ############################################################
-
-
-# ########### OV #################;;;;;
-
-
-# ############################################################
-
-
-# def main():
-#     # assuming obstacles are in objects_path:
-#     my_world = World(stage_units_in_meters=1.0)
-#     stage = my_world.stage
-
-#     xform = stage.DefinePrim("/World", "Xform")
-#     stage.SetDefaultPrim(xform)
-#     stage.DefinePrim("/curobo", "Xform")
-#     # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
-#     stage = my_world.stage
-#     # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
-
-#     # Make a target to follow
-
-#     setup_curobo_logger("warn")
-#     past_pose = None
-#     n_obstacle_cuboids = 30
-#     n_obstacle_mesh = 10
-
-#     # warmup curobo instance
-#     usd_help = UsdHelper()
-#     target_pose = None
-
-#     tensor_args = TensorDeviceType()
-
-#     robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
-
-#     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
-#     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-
-#     robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
-
-#     articulation_controller = robot.get_articulation_controller()
-
-#     world_cfg_table = WorldConfig.from_dict(
-#         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-#     )
-#     world_cfg_table.cuboid[0].pose[2] -= 0.02
-
-#     world_cfg1 = WorldConfig.from_dict(
-#         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-#     ).get_mesh_world()
-#     world_cfg1.mesh[0].name += "_mesh"
-#     world_cfg1.mesh[0].pose[2] = -10.5
-
-#     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
-
-    
-#     motion_gen_config = MotionGenConfig.load_from_robot_config(
-#         robot_cfg,
-#         world_cfg,
-#         tensor_args,
-#         collision_checker_type=CollisionCheckerType.MESH,
-#         use_cuda_graph=True,
-#         interpolation_dt=0.03,
-#         collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
-#         collision_activation_distance=0.025,
-#         fixed_iters_trajopt=True,
-#         maximum_trajectory_dt=0.5,
-#         ik_opt_iters=500,
-#     )
-#     plan_config = MotionGenPlanConfig(
-#         enable_graph=False,
-#         enable_graph_attempt=4,
-#         max_attempts=10,
-#         time_dilation_factor=0.5,
-#     )
-#     planner = CumotionPlanner(motion_gen_config, plan_config, warmup_config={'enable_graph': True, 'warmup_js_trajopt': False})
-
-#     print("Curobo is Ready")
-#     add_extensions(simulation_app, args.headless_mode)
-    
-#     usd_help.load_stage(my_world.stage)
-#     usd_help.add_world_to_stage(world_cfg, base_frame="/World")
-
-#     cmd_plan = None
-#     # cmd_idx = 0
-#     my_world.scene.add_default_ground_plane()
-#     i = 0
-#     spheres = None
-
-#     # read number of targets in link names:
-#     link_names = planner.motion_gen.kinematics.link_names
-#     ee_link_name = planner.motion_gen.kinematics.ee_link
-#     # get link poses at retract configuration:
-
-#     kin_state = planner.motion_gen.kinematics.get_state(planner.motion_gen.get_retract_config().view(1, -1))
-
-#     link_retract_pose = kin_state.link_pose
-#     t_pos = np.ravel(kin_state.ee_pose.to_list())
-#     target = cuboid.VisualCuboid(
-#         "/World/target",
-#         position=t_pos[:3],
-#         orientation=t_pos[3:],
-#         color=np.array([1.0, 0, 0]),
-#         size=0.05,
-#     )
-
-#     # create new targets for new links:
-#     ee_idx = link_names.index(ee_link_name)
-#     target_links = {}
-#     names = []
-#     for i in link_names:
-#         if i != ee_link_name:
-#             k_pose = np.ravel(link_retract_pose[i].to_list())
-#             color = np.random.randn(3) * 0.2
-#             color[0] += 0.5
-#             color[1] = 0.5
-#             color[2] = 0.0
-#             target_links[i] = cuboid.VisualCuboid(
-#                 "/World/target_" + i,
-#                 position=np.array(k_pose[:3]),
-#                 orientation=np.array(k_pose[3:]),
-#                 color=color,
-#                 size=0.05,
-#             )
-#             names.append("/World/target_" + i)
-#     i = 0
-#     t_idx = 0
-#     while simulation_app.is_running():
-#         my_world.step(render=True)
-#         if not my_world.is_playing():
-#             if i % 100 == 0:
-#                 print("**** Click Play to start simulation *****")
-#             i += 1
-#             # if step_index == 0:
-#             #    my_world.play()
-#             continue
-
-#         step_index = my_world.current_time_step_index
-#         # print(step_index)
-#         if step_index <= 10:
-#             # my_world.reset()
-#             robot._articulation_view.initialize()
-#             idx_list = [robot.get_dof_index(x) for x in j_names]
-#             robot.set_joint_positions(default_config, idx_list)
-
-#             robot._articulation_view.set_max_efforts(
-#                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
-#             )
-#         if step_index < 20:
-#             continue
-        
-
-        
-#         if step_index == 50 or step_index % 1000 == 0.0:
-#             print("Updating world, reading w.r.t.", robot_prim_path)
-#             obstacles = usd_help.get_obstacles_from_stage(
-#                 only_paths=["/World"],
-#                 reference_prim_path=robot_prim_path,
-#                 ignore_substring=[
-#                     robot_prim_path,
-#                     "/World/target",
-#                     "/World/defaultGroundPlane",
-#                     "/curobo",
-#                 ]
-#                 + names,
-#             ).get_collision_check_world()
-
-#             planner.motion_gen.update_world(obstacles)
-#             print("Updated World")
-#             carb.log_info("Synced CuRobo world from stage.")
-
-#         # position and orientation of target virtual cube:
-#         cube_position, cube_orientation = target.get_world_pose()
-
-#         # if past_pose is None:
-#         #     past_pose = cube_position
-#         # if target_pose is None:
-#         #     target_pose = cube_position
-#         sim_js = robot.get_joints_state()
-#         if sim_js is None:
-#             print("sim_js is None")
-#             continue
-#         sim_js_names = robot.dof_names
-#         cu_js = JointState(
-#             position=tensor_args.to_device(sim_js.positions),
-#             velocity=tensor_args.to_device(sim_js.velocities)*0.0,
-#             acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
-#             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
-#             joint_names=sim_js_names,
-#         )
-#         cu_js = cu_js.get_ordered_joint_state(planner.motion_gen.kinematics.joint_names)
-        
-        
-
-        
-#         constrained_links_goal_poses = {}
-#         for link_name in target_links.keys():
-#             c_p, c_rot = target_links[link_name].get_world_pose()
-#             constrained_links_goal_poses[link_name] = np.concatenate([c_p, c_rot])
-            
-#         if t_idx <=100:
-#             cmd_state = None
-#         else:
-#             cmd_state = planner.yield_action(
-#                 force_plan=False,
-#                 force_stop=False,
-#                 curobo_joint_state=cu_js,
-#                 current_joint_velocities=sim_js.velocities,
-#                 new_target_poses=
-#                 {
-#                 ee_link_name: np.concatenate([cube_position, cube_orientation]),
-#                 'tool1': constrained_links_goal_poses['tool1']
-#                 },
-#                 sim_js_names=sim_js_names,
-#                 get_dof_index=robot.get_dof_index,
-#                 )  
-              
-#         # if cmd_plan is not None:
-#         #     cmd_state = cmd_plan[cmd_idx]
-
-#         # get full dof state
-#         if cmd_state is not None:
-#             art_action = ArticulationAction(
-#                 cmd_state.position.cpu().numpy(),
-#                 cmd_state.velocity.cpu().numpy(),
-#                 joint_indices=idx_list,
-#             )
-#             articulation_controller.apply_action(art_action)
-#         # my_world.step(render=False)
-#         print(f"debug: t_idx={t_idx}")
-#         t_idx += 1
-        
-#     simulation_app.close()
-
-
-# if __name__ == "__main__":
-#     main()
