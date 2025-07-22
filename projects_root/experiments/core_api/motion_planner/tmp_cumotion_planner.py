@@ -130,6 +130,14 @@ class CuPlanner:
                  plan_config:MotionGenPlanConfig, 
                  warmup_config:dict
                 ):
+        """
+        Cumotion planning kit. Can accept goals for end effector and optional extra links (e.g. "constrained" links).
+        To use with multi arm, pass inputs (robot config, urdf, etc) as in this example: curobo/examples/isaac_sim/multi_arm_reacher.py
+        robot config for example: curobo/src/curobo/content/configs/robot/dual_ur10e.yml
+
+        To use with single arm, pass inputs (robot config, urdf, etc) as in this example: curobo/examples/isaac_sim/motion_gen_reacher.py
+        robot config for example: curobo/src/curobo/content/configs/robot/ur10e.yml or franka.yml
+        """
         self.motion_gen_config = motion_gen_config
         self.plan_config = plan_config
         self.warmup_config = warmup_config
@@ -146,12 +154,6 @@ class CuPlanner:
     
         self.plan_goals:dict[str, Pose] = {}
 
-            
-            
-            
-            
-            
-            
             
     def _plan_new(self, 
                   cu_js:JointState,
@@ -238,28 +240,7 @@ class CuPlanner:
             action = self.plan.consume_action() # returns None if no more actions to consume
         
         return action
-     
-    def convert_plan_to_isaac(self, sim_js_names:list[str], get_dof_index:Callable):
-        """
-        convert curobo plan to isaac sim plan
-        returns:
-            isaac_sim_plan: Plan
-            articulation_action_idx_list: list[int]
-        """
-        full_js_plan = deepcopy(self.motion_gen.get_full_js(self.plan.cmd_plan))
-        # get only joint names that are in both:
-        articulation_action_idx_list = []
-        common_js_names = []
-        for x in sim_js_names:
-            if x in full_js_plan.joint_names:
-                articulation_action_idx_list.append(get_dof_index(x))
-                common_js_names.append(x)
-        
-        isaac_cmd_plan = full_js_plan.get_ordered_joint_state(common_js_names)
-        return Plan(cmd_plan=isaac_cmd_plan), articulation_action_idx_list
-        
-    # print("Curobo is Ready")
-        
+         
     def convert_action_to_isaac(
             self, 
             action:JointState, 
@@ -268,7 +249,7 @@ class CuPlanner:
         )->ArticulationAction:
 
         """
-        convert curobo action to isaac sim action
+        A utility function to convert curobo action to isaac sim action (ArticulationAction).
         """
         full_js_action = deepcopy(self.motion_gen.get_full_js(action))
         # get only joint names that are in both:
@@ -346,12 +327,6 @@ def main():
     )
     _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
     planner = CuPlanner(_motion_gen_config, _plan_config, _warmup_config)
-
-    # i = 0
-
-    
-    # link_names = planner.motion_gen.kinematics.link_names 
-    ee_link_name = planner.motion_gen.kinematics.ee_link
     
     # get link poses at retract configuration:
     retract_kinematics_state = planner.motion_gen.kinematics.get_state(planner.motion_gen.get_retract_config().view(1, -1))
@@ -368,12 +343,11 @@ def main():
         size=0.05,
     )
 
-    # create new targets for new links:
-    # ee_idx = link_names.index(ee_link_name)
+    # create target prims for constrained links (optional):
     constr_link_name_to_target_prim = {}
     constr_links_targets_prims_paths = []
     for link_name in planner.constrained_links_names:
-        if link_name != ee_link_name:
+        if link_name != planner.ee_link_name:
             target_path = "/World/target_" + link_name
             constrained_link_retract_pose = np.ravel(links_retract_poses[link_name].to_list())
             _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
