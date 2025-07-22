@@ -167,15 +167,14 @@ class CuPlanner:
     
     def convert_action_to_isaac(
             self, 
-            action:JointState, 
+            full_js_action:JointState, 
             sim_js_names:list[str], 
             order_finder:Callable
-        )->ArticulationAction:
+        )-> ArticulationAction:
 
         """
         A utility function to convert curobo action to isaac sim action (ArticulationAction).
         """
-        full_js_action = action
         # get only joint names that are in both:
         art_action_idx_list = []
         common_js_names = []
@@ -186,8 +185,8 @@ class CuPlanner:
     
         full_ordered_js_action = full_js_action.get_ordered_joint_state(common_js_names)
         articulation_action = ArticulationAction(
-            full_ordered_js_action.position.cpu().numpy(),
-            full_ordered_js_action.velocity.cpu().numpy(),
+            full_ordered_js_action.position.view(-1).cpu().numpy(),
+            # full_ordered_js_action.velocity.cpu().numpy(),
             joint_indices=art_action_idx_list,
         )
         return articulation_action
@@ -705,8 +704,11 @@ def main(planner_type='cumotion'):
             action = planner.yield_action(goals, cu_js)
             
         if action is not None:
+            
             isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
+            
             articulation_controller.apply_action(isaac_action)
+        
          
 
                 
