@@ -175,7 +175,7 @@ class CuPlanner:
         """
         A utility function to convert curobo action to isaac sim action (ArticulationAction).
         """
-        full_js_action = deepcopy(self.solver.get_full_js(action))
+        full_js_action = action
         # get only joint names that are in both:
         art_action_idx_list = []
         common_js_names = []
@@ -365,6 +365,9 @@ class CumotionPlanner(CuPlanner):
         
         if consume:
             action = self.plan.consume_action() # returns None if no more actions to consume
+
+        if action is not None:
+            action = deepcopy(self.solver.get_full_js(action))
         
         return action
          
