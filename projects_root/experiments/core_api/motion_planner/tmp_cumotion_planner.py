@@ -19,7 +19,7 @@ except ImportError:
 
 # Third Party
 from collections.abc import Callable
-from copy import deepcopy
+from copy import copy, deepcopy
 from typing import Optional
 import torch
 
@@ -121,39 +121,128 @@ class MotionPlanner:
     
     
             
-    def __init__(self,motion_gen_config, plan_config, warmup_config):
+    def __init__(self,
+                 motion_gen_config:MotionGenConfig, 
+                 plan_config:MotionGenPlanConfig, 
+                 warmup_config:dict
+                ):
         self.motion_gen_config = motion_gen_config
         self.plan_config = plan_config
         self.warmup_config = warmup_config
         self.motion_gen = MotionGen(self.motion_gen_config)
         print("warming up...")
         self.motion_gen.warmup(**self.warmup_config)
-        self.plan = Plan() 
-
-    def _plan_new(self, 
-                  cu_js:JointState, 
-                  ee_goal:Pose, 
-                  extra_links_goals:Optional[dict[str, Pose]]=None, 
-                  ):
+        self.plan = Plan()
         
+        # all constrained links that we can set goals for (ee + optional extra links):
+        self.ee_link_name:str = self.motion_gen.kinematics.ee_link
+        self.extra_links_names:list[str] = copy(self.motion_gen.kinematics.link_names)
+        if self.ee_link_name in self.extra_links_names: # ee link should not be in extra links, so we remove it
+            self.extra_links_names.remove(self.ee_link_name)
+    
+        self.plan_goals:dict[str, Pose] = {}
+
+            
+            
+            
+            
+            
+            
+            
+    def _plan_new(self, 
+                  cu_js:JointState,
+                  new_goals:dict[str, Pose],
+                  )->bool:
+        """
+        Making a new plan. return True if success, False otherwise
+        """
+        ee_goal = new_goals[self.ee_link_name]
+        extra_links_goals = {link_name:new_goals[link_name] for link_name in self.extra_links_names}
         result = self.motion_gen.plan_single(
             cu_js.unsqueeze(0), ee_goal, self.plan_config.clone(), link_poses=extra_links_goals
         )
         succ = result.success.item()  # ik_result.success.item()
         if succ:
-            print("planned successfully")
+            print("planned successfully, resetting plan...")
             self.plan.cmd_plan = result.get_interpolated_plan()
             self.plan.cmd_idx = 0
+            self.plan_goals = new_goals
             return True
         else:
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             return False
-     
-    def yield_action(self,):
-        pass
     
+    def _outdated_plan_goals(self, goals:dict[str, Pose]):
+        """
+        check if the current plan goals are outdated
+        """
+        for link_name, goal in goals.items():
+            if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
+                return True
+        return False
+    
+    def _in_move(self, joint_velocities:np.ndarray):
+        """
+        check if the joints are in move
+        """
+        # print(f"joint_velocities={joint_velocities}")
+        # print(f"max(abs(joint_velocities))={np.max(np.abs(joint_velocities))}")
+        return np.max(np.abs(joint_velocities)) > 0.5
+    
+    def yield_action(self, goals:dict[str, Pose], cu_js:JointState, joint_velocities:np.ndarray):
+        """
+        goals: dict of link names (both end effector link and extra links) and their updated goal poses.
+        cu_js: current curobo joint state of the robot.
+        joint_velocities: current joint velocities of the robot, as measured by the robot (from simulation, sensors or other sources).
+        returns:
+            action: Union[ArticulationAction, None]
+        """
+        
+        PLAN_NEW = 0 # REPLAN NEXT ACTION SEQUENCE (JOINT POSITIONS)
+        STOP_IN_PLACE = 1 # SEND STOP COMMAND TO JOINT CONTROLLER (VELOCICY 0)
+        CONSUME_FROM_PLAN = 2 # CONTINUE THE CURRENT ACTION SEQUENCE
+
+
+        if self._outdated_plan_goals(goals):
+            if self._in_move(joint_velocities):
+                code = STOP_IN_PLACE
+            else:
+                code = PLAN_NEW
+        else:
+            code = CONSUME_FROM_PLAN
+        consume = True
+        if code == PLAN_NEW:
+            # print(f'planning...')
+            succ = self._plan_new(cu_js, goals)
+            
+        elif code == STOP_IN_PLACE:
+            action = JointState(
+                position=cu_js.position,
+                velocity=cu_js.velocity * 0.0,
+                joint_names=cu_js.joint_names,
+            )
+            # print(f'stopping robot...')
+            consume = False
+
+        elif code == CONSUME_FROM_PLAN:
+            # print(f'consuming current plan...')
+            pass
+        else:
+            raise ValueError(f"Invalid code: {code}")
+        
+        if consume:
+            action = self.plan.consume_action() # returns None if no more actions to consume
+        
+        return action
+     
     def convert_plan_to_isaac(self, sim_js_names:list[str], get_dof_index:Callable):
-        full_js_plan =  deepcopy(self.motion_gen.get_full_js(self.plan.cmd_plan))
+        """
+        convert curobo plan to isaac sim plan
+        returns:
+            isaac_sim_plan: Plan
+            articulation_action_idx_list: list[int]
+        """
+        full_js_plan = deepcopy(self.motion_gen.get_full_js(self.plan.cmd_plan))
         # get only joint names that are in both:
         articulation_action_idx_list = []
         common_js_names = []
@@ -167,7 +256,33 @@ class MotionPlanner:
         
     # print("Curobo is Ready")
         
+    def convet_action_to_isaac(
+            self, 
+            action:JointState, 
+            sim_js_names:list[str], 
+            order_finder:Callable
+        ):
+
+        """
+        convert curobo action to isaac sim action
+        """
+        full_js_action = deepcopy(self.motion_gen.get_full_js(action))
+        # get only joint names that are in both:
+        art_action_idx_list = []
+        common_js_names = []
+        for x in sim_js_names:
+            if x in full_js_action.joint_names:
+                art_action_idx_list.append(order_finder(x))
+                common_js_names.append(x)
     
+        full_ordered_js_action = full_js_action.get_ordered_joint_state(common_js_names)
+        articulation_action = ArticulationAction(
+            full_ordered_js_action.position.cpu().numpy(),
+            full_ordered_js_action.velocity.cpu().numpy(),
+            joint_indices=art_action_idx_list,
+        )
+        return articulation_action
+        
 
 def main():
     # assuming obstacles are in objects_path:
@@ -200,6 +315,7 @@ def main():
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
+    # isaac sim robot
     robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
     
     add_extensions(simulation_app, args.headless_mode)
@@ -240,7 +356,8 @@ def main():
         time_dilation_factor=0.5,
     )
     planner = MotionPlanner(motion_gen_config, plan_config, {'enable_graph':True, 'warmup_js_trajopt':False})
-    isaac_sim_plan = Plan()
+    # isaac_sim_plan = Plan()
+    isaac_action = None
     # cmd_plan = None
     # cmd_idx = 0
     my_world.scene.add_default_ground_plane()
@@ -301,6 +418,7 @@ def main():
             robot._articulation_view.initialize()
             idx_list = [robot.get_dof_index(x) for x in j_names]
             robot.set_joint_positions(default_config, idx_list)
+            robot.set_joint_velocities(np.zeros_like(default_config), idx_list)
 
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
@@ -366,73 +484,64 @@ def main():
                 for si, s in enumerate(sph_list[0]):
                     spheres[si].set_world_pose(position=np.ravel(s.position))
                     spheres[si].set_radius(float(s.radius))
-        if (
-            np.linalg.norm(cube_position - target_pose) > 1e-3
-            and np.linalg.norm(past_pose - cube_position) == 0.0
-            and np.max(np.abs(sim_js.velocities)) < 0.5
-        ):
-            # Set EE teleop goals, use cube for simple non-vr init:
-            ee_translation_goal = cube_position
-            ee_orientation_teleop_goal = cube_orientation
+        # if (
+        #     np.linalg.norm(cube_position - target_pose) > 1e-3
+        #     and np.linalg.norm(past_pose - cube_position) == 0.0
+        #     and np.max(np.abs(sim_js.velocities)) < 0.5
+        # ):
+        # Set EE teleop goals, use cube for simple non-vr init:
+        ee_translation_goal = cube_position
+        ee_orientation_teleop_goal = cube_orientation
 
-            # compute curobo solution:
-            ik_goal = Pose(
-                position=tensor_args.to_device(ee_translation_goal),
-                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+        # compute curobo solution:
+        ik_goal = Pose(
+            position=tensor_args.to_device(ee_translation_goal),
+            quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+        )
+        # add link poses:
+        link_poses = {}
+        for i in target_links.keys():
+            c_p, c_rot = target_links[i].get_world_pose()
+            link_poses[i] = Pose(
+                position=tensor_args.to_device(c_p),
+                quaternion=tensor_args.to_device(c_rot),
             )
-            # add link poses:
-            link_poses = {}
-            for i in target_links.keys():
-                c_p, c_rot = target_links[i].get_world_pose()
-                link_poses[i] = Pose(
-                    position=tensor_args.to_device(c_p),
-                    quaternion=tensor_args.to_device(c_rot),
-                )
-            # succ = planner._plan_new(cu_js, ik_goal, link_poses)
-            # if succ:
-            #     full_js_plan = planner.motion_gen.get_full_js(planner.plan.cmd_plan)
-            #     # get only joint names that are in both:
-            #     idx_list = []
-            #     common_js_names = []
-            #     for x in sim_js_names:
-            #         if x in full_js_plan.joint_names:
-            #             idx_list.append(robot.get_dof_index(x))
-            #             common_js_names.append(x)
-            #     full_js_plan = planner.plan.cmd_plan.get_ordered_joint_state(common_js_names)
-                
-
-            # result = planner.motion_gen.plan_single(
-            #     cu_js.unsqueeze(0), ik_goal, planner.plan_config.clone(), link_poses=link_poses
-            # )
-            # # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
-            # print("debug link poses: ", link_poses)
-            # print("debug ik goal: ", ik_goal)
-            # print("debug cu_js: ", cu_js)
-            # succ = result.success.item()  # ik_result.success.item()
-            # if succ:
-            #     planner.plan.cmd_plan = result.get_interpolated_plan()
-            #     isaac_sim_plan = convert_curobo_plan_to_isaac_plan(planner.plan.cmd_plan, sim_js_names, robot.get_dof_index)
-            succ = planner._plan_new(cu_js, ik_goal, link_poses)
-            if succ:
-                isaac_sim_plan, isaac_idx_list = planner.convert_plan_to_isaac(sim_js_names, robot.get_dof_index)
-                print("isaac_idx_list=", isaac_idx_list)
-            target_pose = cube_position
-        past_pose = cube_position
         
-        cmd_state = isaac_sim_plan.consume_action()
-        print("cmd_state=", cmd_state)
-        if cmd_state is not None:
-            # get full dof state
-            art_action = ArticulationAction(
-                cmd_state.position.cpu().numpy(),
-                cmd_state.velocity.cpu().numpy(),
-                joint_indices=isaac_idx_list,
-            )
-            # set desired joint angles obtained from IK:
-            articulation_controller.apply_action(art_action)
+        # succ = planner._plan_new(cu_js, ik_goal, link_poses)
+        goals = {planner.ee_link_name: ik_goal,}
+        for i in target_links.keys():
+            goals[i] = link_poses[i]
+        action = planner.yield_action(goals, cu_js, sim_js.velocities)
+        if action is not None:
+            isaac_action = planner.convet_action_to_isaac(action, sim_js_names, robot.get_dof_index)
+            articulation_controller.apply_action(isaac_action)
+            # for _ in range(2):
+            #     my_world.step(render=False)
+        # if succ:
+            # isaac_sim_plan, isaac_idx_list = planner.convert_plan_to_isaac(sim_js_names, robot.get_dof_index)
+            # print("isaac_idx_list=", isaac_idx_list)
             
-            for _ in range(2):
-                my_world.step(render=False)
+        target_pose = cube_position
+        past_pose = cube_position
+        # if isaac_action is not None:
+        #     articulation_controller.apply_action(isaac_action)
+        #     for _ in range(2):
+        #         my_world.step(render=False)
+
+        # cmd_state = isaac_sim_plan.consume_action()
+        # print("cmd_state=", cmd_state)
+        # if cmd_state is not None:
+            # get full dof state
+            # art_action = ArticulationAction(
+            #     cmd_state.position.cpu().numpy(),
+            #     cmd_state.velocity.cpu().numpy(),
+            #     joint_indices=isaac_idx_list,
+            # )
+            # set desired joint angles obtained from IK:
+            # articulation_controller.apply_action(art_action)
+            
+            # for _ in range(2):
+            #     my_world.step(render=False)
             
         # if planner.plan.cmd_plan is not None:
         #     cmd_state = planner.plan.cmd_plan[planner.plan.cmd_idx]
