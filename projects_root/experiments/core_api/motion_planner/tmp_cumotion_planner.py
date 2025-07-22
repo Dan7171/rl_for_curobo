@@ -128,13 +128,127 @@ class CuPlanner:
         self.solver = solver
         self.solver_config = solver_config
         
+        # setup all "goal-constrained" links (links that we can set goals for): ee (musts) + (optional) extra links:
+        self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
+        self.constrained_links_names:list[str] = copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
+        if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
+            self.constrained_links_names.remove(self.ee_link_name)
+        
+        # buffer for the state of the current planning goals (for ee link + extra constrained links)
+        self.plan_goals:dict[str, Pose] = {} 
+
+    def _set_goals_to_retract_state(self):
+        """
+        init the plan goals to be as the retract state
+        """
+
+        # get the current state of the robot (at retract configuration) :
+        retract_kinematics_state = self.solver.kinematics.get_state(self.solver.get_retract_config().view(1, -1))
+        links_retract_poses = retract_kinematics_state.link_pose
+        ee_retract_pose = retract_kinematics_state.ee_pose
+
+        # update the plan goals buffer accordingly:
+        self.plan_goals = {self.ee_link_name: ee_retract_pose}
+        for link_name in self.constrained_links_names:
+            self.plan_goals[link_name] = links_retract_poses[link_name]
+
     def yield_action(self, **kwargs)->Optional[JointState]:
         pass
+    
+
+    def _outdated_plan_goals(self, goals:dict[str, Pose]):
+        """
+        check if the current plan goals are outdated
+        """
+        for link_name, goal in goals.items():
+            if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
+                return True
+        return False
+    
+    def convert_action_to_isaac(
+            self, 
+            action:JointState, 
+            sim_js_names:list[str], 
+            order_finder:Callable
+        )->ArticulationAction:
+
+        """
+        A utility function to convert curobo action to isaac sim action (ArticulationAction).
+        """
+        full_js_action = deepcopy(self.solver.get_full_js(action))
+        # get only joint names that are in both:
+        art_action_idx_list = []
+        common_js_names = []
+        for x in sim_js_names:
+            if x in full_js_action.joint_names:
+                art_action_idx_list.append(order_finder(x))
+                common_js_names.append(x)
+    
+        full_ordered_js_action = full_js_action.get_ordered_joint_state(common_js_names)
+        articulation_action = ArticulationAction(
+            full_ordered_js_action.position.cpu().numpy(),
+            full_ordered_js_action.velocity.cpu().numpy(),
+            joint_indices=art_action_idx_list,
+        )
+        return articulation_action
+    
 
 class MpcPlanner(CuPlanner):
     def __init__(self, mpc_config:MpcSolverConfig):
         super().__init__(MpcSolver(mpc_config), mpc_config)
-  
+        self._set_goals_to_retract_state()
+
+    def yield_action(self,goals:dict[str, Pose], cu_js:JointState)->Optional[JointState]:
+        
+        if self._outdated_plan_goals(goals):
+            
+            # update the plan goals:
+            self.plan_goals = goals
+            
+            # update the goal in solver:
+            ee_goal = goals[self.ee_link_name]
+            self._goal_buffer.goal_pose.copy_(ee_goal)
+            for link_name in self.constrained_links_names:
+                assert isinstance(self._goal_buffer.links_goal_pose, dict) # only for linter
+                if link_name in self._goal_buffer.links_goal_pose:
+                    self._goal_buffer.links_goal_pose[link_name].copy_(goals[link_name])
+                else:
+                    self._goal_buffer.links_goal_pose[link_name] = goals[link_name]
+            assert isinstance(self.solver,MpcSolver) # only for linter
+            self.solver.update_goal(self._goal_buffer)
+        
+        mpc_result = self.solver.step(cu_js, max_attempts=2)
+        return mpc_result.js_action
+
+    def _set_goals_to_retract_state(self):
+        
+        
+        # get the current state of the robot (at retract configuration) :
+        assert isinstance(self.solver, MpcSolver) # only for linter
+        retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
+        joint_names = self.solver.rollout_fn.joint_names
+        state = self.solver.rollout_fn.compute_kinematics(
+            JointState.from_position(retract_cfg, joint_names=joint_names)
+        )
+        current_js = JointState.from_position(retract_cfg, joint_names=joint_names)
+        current_pose_ee = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        current_poses_constrained_links = {name: state.link_poses[name] for name in self.constrained_links_names}
+        _initial_ee_target_pose = current_pose_ee
+        _initial_constrained_links_target_poses = current_poses_constrained_links
+        goal = Goal(
+            current_state=current_js,
+            goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
+            goal_pose=_initial_ee_target_pose,
+            links_goal_pose=_initial_constrained_links_target_poses,
+        )
+        self._goal_buffer = self.solver.setup_solve_single(goal, 1)
+        self.solver.update_goal(self._goal_buffer)
+        mpc_result = self.solver.step(current_js, max_attempts=2)
+
+        # update the plan goals buffer accordingly:
+        self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
+        for link_name in self.constrained_links_names:
+            self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
 
 
 class CumotionPlanner(CuPlanner):
@@ -159,14 +273,20 @@ class CumotionPlanner(CuPlanner):
         print("warming up...")
         self.solver.warmup(**self.warmup_config)
         self.plan = Plan()
-        
-        # all constrained links that we can set goals for (ee + optional extra links):
-        self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
-        self.constrained_links_names:list[str] = copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
-        if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
-            self.constrained_links_names.remove(self.ee_link_name)
+        self._set_goals_to_retract_state()
     
-        self.plan_goals:dict[str, Pose] = {}
+        # get link poses at retract configuration:
+        # retract_kinematics_state = self.solver.kinematics.get_state(self.solver.get_retract_config().view(1, -1))
+        # links_retract_poses = retract_kinematics_state.link_pose
+        # ee_retract_pose = retract_kinematics_state.ee_pose
+
+        # # all constrained links that we can set goals for (ee + optional extra links):
+        # self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
+        # self.constrained_links_names:list[str] = copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
+        # if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
+        #     self.constrained_links_names.remove(self.ee_link_name)
+    
+        # self.plan_goals:dict[str, Pose] = {}
 
             
     def _plan_new(self, 
@@ -192,14 +312,7 @@ class CumotionPlanner(CuPlanner):
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             return False
     
-    def _outdated_plan_goals(self, goals:dict[str, Pose]):
-        """
-        check if the current plan goals are outdated
-        """
-        for link_name, goal in goals.items():
-            if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
-                return True
-        return False
+    
     
     def _in_move(self, joint_velocities:np.ndarray):
         """
@@ -255,33 +368,7 @@ class CumotionPlanner(CuPlanner):
         
         return action
          
-    def convert_action_to_isaac(
-            self, 
-            action:JointState, 
-            sim_js_names:list[str], 
-            order_finder:Callable
-        )->ArticulationAction:
-
-        """
-        A utility function to convert curobo action to isaac sim action (ArticulationAction).
-        """
-        full_js_action = deepcopy(self.solver.get_full_js(action))
-        # get only joint names that are in both:
-        art_action_idx_list = []
-        common_js_names = []
-        for x in sim_js_names:
-            if x in full_js_action.joint_names:
-                art_action_idx_list.append(order_finder(x))
-                common_js_names.append(x)
     
-        full_ordered_js_action = full_js_action.get_ordered_joint_state(common_js_names)
-        articulation_action = ArticulationAction(
-            full_ordered_js_action.position.cpu().numpy(),
-            full_ordered_js_action.velocity.cpu().numpy(),
-            joint_indices=art_action_idx_list,
-        )
-        return articulation_action
-        
 class CuAgent:
     def __init__(self, 
                 planner:CuPlanner,
@@ -390,9 +477,9 @@ class CuAgent:
         print("WorldModelWrapper reset finished successfully!")
         print(f"Known prims in collision world: {self.cu_world_wrapper.get_known_prims()}")        
 
-        
-    
-def main():
+
+
+def main(planner_type='cumotion'):
     setup_curobo_logger("warn")
 
     # assuming obstacles are in objects_path:
@@ -401,7 +488,6 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
-
     
     usd_help = UsdHelper()
     usd_help.load_stage(my_world.stage)
@@ -428,36 +514,58 @@ def main():
     usd_help.add_world_to_stage(world_cfg, base_frame="/World")
     my_world.scene.add_default_ground_plane()
     
+    if planner_type == 'cumotion':
+        _motion_gen_config = MotionGenConfig.load_from_robot_config(
+            robot_cfg,
+            world_cfg,
+            tensor_args,
+            collision_checker_type=CollisionCheckerType.MESH,
+            use_cuda_graph=True,
+            interpolation_dt=0.03,
+            collision_cache={"obb": 30, "mesh": 10},
+            collision_activation_distance=0.025,
+            fixed_iters_trajopt=True,
+            maximum_trajectory_dt=0.5,
+            ik_opt_iters=500,
+        )
+        _plan_config = MotionGenPlanConfig(
+            enable_graph=False,
+            enable_graph_attempt=4,
+            max_attempts=10,
+            time_dilation_factor=0.5,
+        )
+        _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
+        
+        planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
+    
+    else:
+        _mpc_config = MpcSolverConfig.load_from_robot_config(
+            robot_cfg,
+            world_cfg,
+            # use_cuda_graph=True,
+            use_cuda_graph=False,
+            use_cuda_graph_metrics=True,
+            use_cuda_graph_full_step=False,
+            self_collision_check=True,
+            collision_checker_type=CollisionCheckerType.MESH,
+            collision_cache={"obb": 30, "mesh": 10},
+            use_mppi=True,
+            use_lbfgs=False,
+            use_es=False,
+            store_rollouts=True,
+            step_dt=0.02,
+        )
+        planner = MpcPlanner(_mpc_config)
 
-    _motion_gen_config = MotionGenConfig.load_from_robot_config(
-        robot_cfg,
-        world_cfg,
-        tensor_args,
-        collision_checker_type=CollisionCheckerType.MESH,
-        use_cuda_graph=True,
-        interpolation_dt=0.03,
-        collision_cache={"obb": 30, "mesh": 10},
-        collision_activation_distance=0.025,
-        fixed_iters_trajopt=True,
-        maximum_trajectory_dt=0.5,
-        ik_opt_iters=500,
-    )
-    _plan_config = MotionGenPlanConfig(
-        enable_graph=False,
-        enable_graph_attempt=4,
-        max_attempts=10,
-        time_dilation_factor=0.5,
-    )
-    _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
-    planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
     cu_agent = CuAgent(planner, cu_world_wrapper_cfg={"verbosity":4})
 
-    # get link poses at retract configuration:
-    retract_kinematics_state = planner.solver.kinematics.get_state(planner.solver.get_retract_config().view(1, -1))
-    links_retract_poses = retract_kinematics_state.link_pose
-    ee_retract_pose = retract_kinematics_state.ee_pose
+    # # get link poses at retract configuration:
+    # retract_kinematics_state = planner.solver.kinematics.get_state(planner.solver.get_retract_config().view(1, -1))
+    # links_retract_poses = retract_kinematics_state.link_pose
+    # ee_retract_pose = retract_kinematics_state.ee_pose
     
     ee_target_prim_path = "/World/target"
+    ee_retract_pose = planner.plan_goals[planner.ee_link_name]
     _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
     ee_target = cuboid.VisualCuboid(
         ee_target_prim_path,
@@ -468,12 +576,13 @@ def main():
     )
 
     # create target prims for constrained links (optional):
+    
     constr_link_name_to_target_prim = {}
     constr_links_targets_prims_paths = []
     for link_name in planner.constrained_links_names:
         if link_name != planner.ee_link_name:
             target_path = "/World/target_" + link_name
-            constrained_link_retract_pose = np.ravel(links_retract_poses[link_name].to_list())
+            constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
             _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
             
             color = np.random.randn(3) * 0.2
@@ -496,9 +605,9 @@ def main():
         "/curobo", 
         *constr_links_targets_prims_paths
         ]
-    cu_world_never_update = []
     cu_agent.reset_col_model_from_isaac_sim(usd_help, robot_prim_path, ignore_substrings=cu_world_never_add)
-
+    cu_world_never_update = [] # objects which we assume that are added in reset_col_model_from_isaac_sim, but we don't want to update them (e.g. because they are static)
+    
     i = 0
     spheres = None
     while simulation_app.is_running():
@@ -530,24 +639,6 @@ def main():
                                                  ignore_list=cu_world_never_add+cu_world_never_update, 
                                                  paths_to_search_obs_under=["/World"]
                                                  )
-        # if step_index == 50 or step_index % 1000 == 0.0:
-        #     print("Updating world, reading w.r.t.", robot_prim_path)
-        #     obstacles = usd_help.get_obstacles_from_stage(
-        #         only_paths=["/World"],
-        #         reference_prim_path=robot_prim_path,
-        #         ignore_substring=[
-        #             robot_prim_path,
-        #             ee_target_prim_path,
-        #             "/World/defaultGroundPlane",
-        #             "/curobo",
-        #         ]
-        #         + constr_links_targets_prims_paths,
-        #     ).get_collision_check_world()
-
-        #     planner.solver.update_world(obstacles)
-        #     print("Updated World")
-        #     carb.log_info("Synced CuRobo world from stage.")
-
 
   
         sim_js = robot.get_joints_state()
@@ -584,13 +675,14 @@ def main():
                     spheres[si].set_world_pose(position=np.ravel(s.position))
                     spheres[si].set_radius(float(s.radius))
         
+        # read pose of the ee link's target (if exist) from isaac sim:
         p_ee_target, q_ee_target = ee_target.get_world_pose()
         ee_goal = Pose(
             position=tensor_args.to_device(p_ee_target),
             quaternion=tensor_args.to_device(q_ee_target),
         )
         
-        # add link poses:
+        # read poses of the constrained links targets (if exist) from isaac sim:
         links_goal_poses = {}
         for link_name in constr_link_name_to_target_prim.keys():
             c_p, c_rot = constr_link_name_to_target_prim[link_name].get_world_pose()
@@ -598,13 +690,17 @@ def main():
                 position=tensor_args.to_device(c_p),
                 quaternion=tensor_args.to_device(c_rot),
             )
-        
+        # set goals for the planner:
         goals = {planner.ee_link_name: ee_goal,}
         for link_name in constr_link_name_to_target_prim.keys():
             goals[link_name] = links_goal_poses[link_name]
         
-        action = planner.yield_action(goals, cu_js, sim_js.velocities)
-        
+        # yield action from the planner:
+        if planner_type == 'cumotion':
+            action = planner.yield_action(goals, cu_js, sim_js.velocities)
+        else:
+            action = planner.yield_action(goals, cu_js)
+            
         if action is not None:
             isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
             articulation_controller.apply_action(isaac_action)
@@ -615,5 +711,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-
+    main(planner_type='cumotion')

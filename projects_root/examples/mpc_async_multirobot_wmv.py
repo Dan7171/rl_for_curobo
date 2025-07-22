@@ -572,8 +572,8 @@ def main(meta_config_paths: List[str]):
             p_T_R=np.array(X_targets_R[i][:3]),
             q_T_R=np.array(X_targets_R[i][3:]), 
             target_color=target_colors[i],
-            plot_costs=plot_costs[i],
-            override_particle_file=mpc_config_paths[i],  # Use individual MPC config per robot
+            # plot_costs=plot_costs[i],
+            # override_particle_file=mpc_config_paths[i],  # Use individual MPC config per robot
             n_coll_spheres=robot_sphere_counts[i],  # Total spheres (base + extra)
             n_coll_spheres_valid=robot_sphere_counts_no_extra[i],  # Valid spheres (base only)
             use_col_pred=OBS_PREDICTION and len(col_pred_with[i]) > 0  # Enable collision prediction
@@ -614,7 +614,7 @@ def main(meta_config_paths: List[str]):
             # robot.init_joints(_robot_idx_list)
         
         # Init robot mpc solver
-        robots[i].init_solver(MPC_DT, DEBUG)
+        robots[i].init_solver(MPC_DT)
         robots[i].robot._articulation_view.initialize() # TODO: This is a technical required step in isaac 4.5 but check if actually needed https://github.com/NVlabs/curobo/commit/0a50de1ba72db304195d59d9d0b1ed269696047f#diff-0932aeeae1a5a8305dc39b778c783b0b8eaf3b1296f87886e9d539a217afd207
 
     # ----------------------------

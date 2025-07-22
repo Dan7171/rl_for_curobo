@@ -8,7 +8,8 @@ os.environ.setdefault("MPLBACKEND", "Agg") # ?
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--mcfg", type=str, default="projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/meta_cfg.yml", help="path to meta-config-file configuration to load")
+# projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/meta_cfg.yml
+parser.add_argument("--mcfg", type=str, default="projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/meta_cfg.yml", help="path to meta-config-file configuration to load")
 args = parser.parse_args()
 
 from curobo.util_file import  load_yaml
