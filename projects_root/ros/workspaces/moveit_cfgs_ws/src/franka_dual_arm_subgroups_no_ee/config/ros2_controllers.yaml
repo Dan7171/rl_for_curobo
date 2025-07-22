@@ -14,8 +14,6 @@ controller_manager:
     all_arms_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
-    joint_state_broadcaster:
-      type: joint_state_broadcaster/JointStateBroadcaster
 
 # Individual arm controllers for single-arm planning (MoveIt tutorial approach)
 left_arm_controller:

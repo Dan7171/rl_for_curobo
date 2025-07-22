@@ -1,0 +1,82 @@
+
+
+env:
+  simulation:
+    is_on: True
+    physics_dt: 0.03
+    render_dt: 0.03
+    enable_gpu_dynamics: True
+    init_app_settings:
+      headless: null # set 'true' to run in headless mode
+
+debug:
+  
+  visualize_spheres: # visualize collision spheres of the robot
+    is_on: false 
+    ts_delta: 2 # int
+  
+  world_cu_wrapper: # world collision wrapper
+    verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
+  
+  show_bnd_spheres: # show sphres bounding curobo obstacles
+    is_on: false
+    ts_delta: 2 # int
+
+# """
+# tbd read more here https://www.mdpi.com/2218-6581/11/1/29
+
+# """
+
+# jerk_metrics = [
+#     'mean_joint_jerk_divided_by_limit',
+#     'max_joint_jerk_divided_by_limit'
+#     ] 
+# safety_metrics = {
+#                 'dist_to_closest_arm':['min' 'avg'],
+#                 'dist_to_closest_obstacle':['min' 'avg']
+#                 }
+
+# experiment_dofs = {
+#     'n_arms':[2,3,4], 
+#     'arm':['panda', 'ur5'],
+#     'env': ['empty',  'static_obstacles', 'moving_obstacles'], 
+#     'motion_planner': [
+#         'dec-mpc-sparse-pred_target-prox-pp', # our proposed method
+#         'dec-mpc-dense-pred_target-prox-pp', # ablation test for sparsity (of other robots spheres, over both time and space)
+#         'dec-mpc-sparse-pred_arb-pp', # arbitrary pp (priority between arms is determined arbitrarily), ablation test for target proximity pp
+#         'dec-mpc-sparse-pred_no-pp', # ablation test for the other pp approaches
+#         'dec-mpc', # ablation test for mpc-pred: aiming to show more collisions between robots
+#         'cent-mpc', # ablation test for dec-mpc-pred: aiming to show slowness and lack of samples 
+#         'dec-cumotion', # ablation test for mpc-pred
+#         'cent-cumotion',
+#         'RRTconnect',
+#         'BiRRT',
+#         'CBS' # TBD which
+#         ],
+#     'challenge': ['static_goal_3','static_goal_10','drifting_goal_3','drifting_goal_10', 'bin_loading'],
+#     'challege_n_seeds': [10,10,10,10,10],
+#     'challenge_timeout': [60,60,60,60,60],
+#     'challenge_metrics': {
+#         'task':['num_goals_achieved_per_arm','num_goals_achieved_total'],
+#         'safety': safety_metrics,
+#         'jerk': jerk_metrics, # tbd read more here https://www.mdpi.com/2218-6581/11/1/29
+#         }        
+#         ,
+#         'drifting_goal_tests': {
+#             'task':['dist_to_target_per_arm','dist_to_target_mean_over_arms'],
+#             'jerk':jerk_metrics,
+#         },
+#         'bin_loading_tests': {
+#             'task':['num_bins_loaded_per_arm','num_bins_loaded_total'],
+#             'jerk':jerk_metrics,
+#         },
+#     } # TBD
+
+
+
+
+ 
+
+
+
+

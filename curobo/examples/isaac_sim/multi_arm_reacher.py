@@ -318,7 +318,9 @@ def main():
                 cu_js.unsqueeze(0), ik_goal, plan_config.clone(), link_poses=link_poses
             )
             # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
-
+            print("debug link poses: ", link_poses)
+            print("debug ik goal: ", ik_goal)
+            print("debug cu_js: ", cu_js)
             succ = result.success.item()  # ik_result.success.item()
             if succ:
                 cmd_plan = result.get_interpolated_plan()
@@ -357,6 +359,8 @@ def main():
             if cmd_idx >= len(cmd_plan.position):
                 cmd_idx = 0
                 cmd_plan = None
+
+                
     simulation_app.close()
 
 

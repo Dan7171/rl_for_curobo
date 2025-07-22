@@ -70,9 +70,7 @@ class UrdfKinematicsParser(KinematicsParser):
                 "jid": jid,
                 "joint_name": j,
             }
-            print("debug")
-            print(self._parent_map[self._robot.joint_map[j].child])
-
+            
     def _get_joint_name(self, idx) -> str:
         """Get the name of the joint at the given index.
 

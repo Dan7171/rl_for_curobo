@@ -856,7 +856,11 @@ class ArmMpc(AutonomousArm):
         
        
     
-    def update_obs_from_sim(self, usd_help:UsdHelper, ignore_list:List[str],paths_to_search_obs_under:List[str]=['/World']):
+    def update_obs_from_sim(self, 
+            usd_help:UsdHelper, 
+            ignore_list:List[str]=['/World/defaultGroundPlane'],
+            paths_to_search_obs_under:List[str]=['/World']
+            ):
         """
         Sensing obs from simulation and updating the world model
         """

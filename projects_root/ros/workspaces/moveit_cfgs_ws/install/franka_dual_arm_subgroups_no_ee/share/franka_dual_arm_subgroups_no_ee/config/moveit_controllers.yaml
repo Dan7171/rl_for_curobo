@@ -4,9 +4,10 @@ moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControll
 
 moveit_simple_controller_manager:
   controller_names:
+    - all_arms_controller
     - left_arm_controller
     - right_arm_controller
-    # all_arms_controller not auto-spawned to avoid resource conflicts
+    
 
   # Individual arm controllers (default for MoveIt tutorial compatibility)
   left_arm_controller:
@@ -20,7 +21,7 @@ moveit_simple_controller_manager:
       - left_panda_joint6
       - left_panda_joint7
     action_ns: follow_joint_trajectory
-    default: true
+    # default: true
   right_arm_controller:
     type: FollowJointTrajectory
     joints:
@@ -33,7 +34,7 @@ moveit_simple_controller_manager:
       - right_panda_joint7
     action_ns: follow_joint_trajectory
     default: true
-  # Combined controller for dual-arm centralized planning (available but not auto-spawned)
+  # Combined controller for dual-arm centralized planning (available but not default)
   all_arms_controller:
     type: FollowJointTrajectory
     joints:
