@@ -307,7 +307,7 @@ def init_ccheck_wcfg_in_real() -> WorldConfig:
     # Return the *collision check* WorldConfig
     # See init_ccheck_wcfg_in_sim() for an example of how to do this in simulation
 
-def init_ccheck_wcfg_in_sim(usd_help:UsdHelper, robot_prim_path:str, target_prim_path:str, ignore_substrings:List[str])->WorldConfig:    
+def init_ccheck_wcfg_in_sim(usd_help:UsdHelper, robot_prim_path:str, ignore_substrings:List[str])->WorldConfig:    
     """
     Make the initial collision check world configuration.
     This is the world configuration that will be used for collision checking.
@@ -408,7 +408,7 @@ def ctrl_loop_robot(robot_idx: int,
     # Initialize collision check world configuration
     if SIMULATING:
         assert usd_help is not None # Type assertion for linter
-        r.reset_wmw(init_ccheck_wcfg_in_sim(usd_help, r.prim_path, r.target_prim_path, cu_world_never_add)) 
+        r.reset_wmw(init_ccheck_wcfg_in_sim(usd_help, r.prim_path, cu_world_never_add)) 
     if REAL:
         r.reset_wmw(init_ccheck_wcfg_in_real()) 
 

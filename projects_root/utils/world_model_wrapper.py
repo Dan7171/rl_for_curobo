@@ -50,6 +50,7 @@ class WorldModelWrapper:
     then provides efficient updates to individual obstacle poses without
     recreating the entire collision world.
     """
+
     
     def __init__(
         self, 
@@ -201,6 +202,10 @@ class WorldModelWrapper:
         Update the known prims in the collision world.
         """
         self.known_prims.add(new_prim)
+    
+    
+        
+    
     
     def update(
         self,
