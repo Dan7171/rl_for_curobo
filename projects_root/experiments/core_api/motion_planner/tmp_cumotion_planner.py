@@ -92,6 +92,25 @@ from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGen
 ############################################################
 
 class MotionPlanner:
+    class Plan:
+        def __init__(self):
+            self.cmd_idx = 0
+            self.cmd_plan: JointState = None
+        
+        def _is_finished(self):
+            return self.cmd_idx >= len(self.cmd_plan.position) - 1
+        
+        def consume_action(self):
+            if self.cmd_plan is None or self._is_finished():
+                self.cmd_idx = 0
+                self.cmd_plan = None
+                return None
+            else:
+                cmd_state = self.cmd_plan[self.cmd_idx]
+                self.cmd_idx += 1
+                return cmd_state
+    
+            
     def __init__(self,motion_gen_config, plan_config, warmup_config):
         self.motion_gen_config = motion_gen_config
         self.plan_config = plan_config
@@ -101,13 +120,11 @@ class MotionPlanner:
         print("warming up...")
         self.motion_gen.warmup(**self.warmup_config)
 
-
+        self.plan = self.Plan()
     
     # print("Curobo is Ready")
         
     
-    # def yield_action(self, force_plan:bool, force_stop:bool, curobo_joint_state:JointState, current_joint_velocities:np.ndarray, new_target_poses:dict[str, np.ndarray], sim_js_names:list[str], get_dof_index:Callable[[str], int]):
-    #     pass
 
 def main():
     # assuming obstacles are in objects_path:
@@ -173,14 +190,6 @@ def main():
         maximum_trajectory_dt=0.5,
         ik_opt_iters=500,
     )
-    # motion_gen = MotionGen(motion_gen_config)
-    # print("warming up...")
-    # motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False)
-
-
-    
-    # print("Curobo is Ready")
-    # add_extensions(simulation_app, args.headless_mode)
     plan_config = MotionGenPlanConfig(
         enable_graph=False,
         enable_graph_attempt=4,
@@ -189,8 +198,8 @@ def main():
     )
     planner = MotionPlanner(motion_gen_config, plan_config, {'enable_graph':True, 'warmup_js_trajopt':False})
     
-    cmd_plan = None
-    cmd_idx = 0
+    # cmd_plan = None
+    # cmd_idx = 0
     my_world.scene.add_default_ground_plane()
     i = 0
     spheres = None
@@ -198,11 +207,11 @@ def main():
     # read number of targets in link names:
     link_names = planner.motion_gen.kinematics.link_names
     ee_link_name = planner.motion_gen.kinematics.ee_link
+    
     # get link poses at retract configuration:
-
     kin_state = planner.motion_gen.kinematics.get_state(planner.motion_gen.get_retract_config().view(1, -1))
-
     link_retract_pose = kin_state.link_pose
+
     t_pos = np.ravel(kin_state.ee_pose.to_list())
     target = cuboid.VisualCuboid(
         "/World/target",
@@ -213,7 +222,7 @@ def main():
     )
 
     # create new targets for new links:
-    ee_idx = link_names.index(ee_link_name)
+    # ee_idx = link_names.index(ee_link_name)
     target_links = {}
     names = []
     for i in link_names:
@@ -345,18 +354,18 @@ def main():
             print("debug cu_js: ", cu_js)
             succ = result.success.item()  # ik_result.success.item()
             if succ:
-                cmd_plan = result.get_interpolated_plan()
-                cmd_plan = planner.motion_gen.get_full_js(cmd_plan)
+                planner.plan.cmd_plan = result.get_interpolated_plan()
+                planner.plan.cmd_plan = planner.motion_gen.get_full_js(planner.plan.cmd_plan)
                 # get only joint names that are in both:
                 idx_list = []
                 common_js_names = []
                 for x in sim_js_names:
-                    if x in cmd_plan.joint_names:
+                    if x in planner.plan.cmd_plan.joint_names:
                         idx_list.append(robot.get_dof_index(x))
                         common_js_names.append(x)
                 # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
 
-                cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
+                planner.plan.cmd_plan = planner.plan.cmd_plan.get_ordered_joint_state(common_js_names)
 
                 cmd_idx = 0
 
@@ -364,9 +373,9 @@ def main():
                 carb.log_warn("Plan did not converge to a solution: " + str(result.status))
             target_pose = cube_position
         past_pose = cube_position
-        if cmd_plan is not None:
-            cmd_state = cmd_plan[cmd_idx]
-
+        
+        cmd_state = planner.plan.consume_action()
+        if cmd_state is not None:
             # get full dof state
             art_action = ArticulationAction(
                 cmd_state.position.cpu().numpy(),
@@ -375,12 +384,29 @@ def main():
             )
             # set desired joint angles obtained from IK:
             articulation_controller.apply_action(art_action)
-            cmd_idx += 1
+            
             for _ in range(2):
                 my_world.step(render=False)
-            if cmd_idx >= len(cmd_plan.position):
-                cmd_idx = 0
-                cmd_plan = None
+            
+        # if planner.plan.cmd_plan is not None:
+        #     cmd_state = planner.plan.cmd_plan[planner.plan.cmd_idx]
+            
+        #     # get full dof state
+        #     art_action = ArticulationAction(
+        #         cmd_state.position.cpu().numpy(),
+        #         cmd_state.velocity.cpu().numpy(),
+        #         joint_indices=idx_list,
+        #     )
+        #     # set desired joint angles obtained from IK:
+        #     articulation_controller.apply_action(art_action)
+            
+        #     # planner.plan.cmd_idx += 1
+        #     for _ in range(2):
+        #         my_world.step(render=False)
+            
+        #     if planner.plan.cmd_idx >= len(planner.plan.cmd_plan.position):
+        #         planner.plan.cmd_idx = 0
+        #         planner.plan.cmd_plan = None
 
                 
     simulation_app.close()
