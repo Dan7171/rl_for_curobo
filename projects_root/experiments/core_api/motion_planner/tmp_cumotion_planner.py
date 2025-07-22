@@ -18,6 +18,9 @@ except ImportError:
 
 
 # Third Party
+from collections.abc import Callable
+from copy import deepcopy
+from typing import Optional
 import torch
 
 a = torch.zeros(4, device="cuda:0")
@@ -91,37 +94,77 @@ from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGen
 
 ############################################################
 
-class MotionPlanner:
-    class Plan:
-        def __init__(self):
+            
+
+
+class Plan:
+    def __init__(self, cmd_idx=0, cmd_plan:Optional[JointState]=None):
+        self.cmd_idx = cmd_idx
+        self.cmd_plan = cmd_plan
+    
+    def _is_finished(self):
+        return self.cmd_idx >= len(self.cmd_plan.position) - 1
+    
+    def consume_action(self):
+        if self.cmd_plan is None or self._is_finished():
             self.cmd_idx = 0
-            self.cmd_plan: JointState = None
-        
-        def _is_finished(self):
-            return self.cmd_idx >= len(self.cmd_plan.position) - 1
-        
-        def consume_action(self):
-            if self.cmd_plan is None or self._is_finished():
-                self.cmd_idx = 0
-                self.cmd_plan = None
-                return None
-            else:
-                cmd_state = self.cmd_plan[self.cmd_idx]
-                self.cmd_idx += 1
-                return cmd_state
+            self.cmd_plan = None
+            return None
+        else:
+            cmd = self.cmd_plan[self.cmd_idx]
+            self.cmd_idx += 1
+            return cmd
+            
+
+
+class MotionPlanner:
+    
     
             
     def __init__(self,motion_gen_config, plan_config, warmup_config):
         self.motion_gen_config = motion_gen_config
         self.plan_config = plan_config
         self.warmup_config = warmup_config
-
         self.motion_gen = MotionGen(self.motion_gen_config)
         print("warming up...")
         self.motion_gen.warmup(**self.warmup_config)
+        self.plan = Plan() 
 
-        self.plan = self.Plan()
+    def _plan_new(self, 
+                  cu_js:JointState, 
+                  ee_goal:Pose, 
+                  extra_links_goals:Optional[dict[str, Pose]]=None, 
+                  ):
+        
+        result = self.motion_gen.plan_single(
+            cu_js.unsqueeze(0), ee_goal, self.plan_config.clone(), link_poses=extra_links_goals
+        )
+        succ = result.success.item()  # ik_result.success.item()
+        if succ:
+            print("planned successfully")
+            self.plan.cmd_plan = result.get_interpolated_plan()
+            self.plan.cmd_idx = 0
+            return True
+        else:
+            carb.log_warn("Plan did not converge to a solution: " + str(result.status))
+            return False
+     
+    def yield_action(self,):
+        pass
     
+    def convert_plan_to_isaac(self, sim_js_names:list[str], get_dof_index:Callable):
+        full_js_plan =  deepcopy(self.motion_gen.get_full_js(self.plan.cmd_plan))
+        # get only joint names that are in both:
+        articulation_action_idx_list = []
+        common_js_names = []
+        for x in sim_js_names:
+            if x in full_js_plan.joint_names:
+                articulation_action_idx_list.append(get_dof_index(x))
+                common_js_names.append(x)
+        
+        isaac_cmd_plan = full_js_plan.get_ordered_joint_state(common_js_names)
+        return Plan(cmd_plan=isaac_cmd_plan), articulation_action_idx_list
+        
     # print("Curobo is Ready")
         
     
@@ -197,7 +240,7 @@ def main():
         time_dilation_factor=0.5,
     )
     planner = MotionPlanner(motion_gen_config, plan_config, {'enable_graph':True, 'warmup_js_trajopt':False})
-    
+    isaac_sim_plan = Plan()
     # cmd_plan = None
     # cmd_idx = 0
     my_world.scene.add_default_ground_plane()
@@ -345,42 +388,45 @@ def main():
                     position=tensor_args.to_device(c_p),
                     quaternion=tensor_args.to_device(c_rot),
                 )
-            result = planner.motion_gen.plan_single(
-                cu_js.unsqueeze(0), ik_goal, planner.plan_config.clone(), link_poses=link_poses
-            )
-            # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
-            print("debug link poses: ", link_poses)
-            print("debug ik goal: ", ik_goal)
-            print("debug cu_js: ", cu_js)
-            succ = result.success.item()  # ik_result.success.item()
+            # succ = planner._plan_new(cu_js, ik_goal, link_poses)
+            # if succ:
+            #     full_js_plan = planner.motion_gen.get_full_js(planner.plan.cmd_plan)
+            #     # get only joint names that are in both:
+            #     idx_list = []
+            #     common_js_names = []
+            #     for x in sim_js_names:
+            #         if x in full_js_plan.joint_names:
+            #             idx_list.append(robot.get_dof_index(x))
+            #             common_js_names.append(x)
+            #     full_js_plan = planner.plan.cmd_plan.get_ordered_joint_state(common_js_names)
+                
+
+            # result = planner.motion_gen.plan_single(
+            #     cu_js.unsqueeze(0), ik_goal, planner.plan_config.clone(), link_poses=link_poses
+            # )
+            # # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
+            # print("debug link poses: ", link_poses)
+            # print("debug ik goal: ", ik_goal)
+            # print("debug cu_js: ", cu_js)
+            # succ = result.success.item()  # ik_result.success.item()
+            # if succ:
+            #     planner.plan.cmd_plan = result.get_interpolated_plan()
+            #     isaac_sim_plan = convert_curobo_plan_to_isaac_plan(planner.plan.cmd_plan, sim_js_names, robot.get_dof_index)
+            succ = planner._plan_new(cu_js, ik_goal, link_poses)
             if succ:
-                planner.plan.cmd_plan = result.get_interpolated_plan()
-                planner.plan.cmd_plan = planner.motion_gen.get_full_js(planner.plan.cmd_plan)
-                # get only joint names that are in both:
-                idx_list = []
-                common_js_names = []
-                for x in sim_js_names:
-                    if x in planner.plan.cmd_plan.joint_names:
-                        idx_list.append(robot.get_dof_index(x))
-                        common_js_names.append(x)
-                # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
-
-                planner.plan.cmd_plan = planner.plan.cmd_plan.get_ordered_joint_state(common_js_names)
-
-                cmd_idx = 0
-
-            else:
-                carb.log_warn("Plan did not converge to a solution: " + str(result.status))
+                isaac_sim_plan, isaac_idx_list = planner.convert_plan_to_isaac(sim_js_names, robot.get_dof_index)
+                print("isaac_idx_list=", isaac_idx_list)
             target_pose = cube_position
         past_pose = cube_position
         
-        cmd_state = planner.plan.consume_action()
+        cmd_state = isaac_sim_plan.consume_action()
+        print("cmd_state=", cmd_state)
         if cmd_state is not None:
             # get full dof state
             art_action = ArticulationAction(
                 cmd_state.position.cpu().numpy(),
                 cmd_state.velocity.cpu().numpy(),
-                joint_indices=idx_list,
+                joint_indices=isaac_idx_list,
             )
             # set desired joint angles obtained from IK:
             articulation_controller.apply_action(art_action)
