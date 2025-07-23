@@ -1,4 +1,8 @@
-general:
+general: # templates to fallback to if not specified in the agent cfg
+  cu_world_wrapper:
+        verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
+        never_add: []
+        never_update: [] 
   solver_cfgs:
     cumotion:
       use_cuda_graph: False 
@@ -48,7 +52,7 @@ general:
   
 agents:  
   - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'cumotion' # mpc or cumotion
+    planner: 'mpc' # mpc or cumotion
     X_robot: [0, 0, 0.0, 1, 0, 0, 0]
     X_targets: [
       [0.5, 0.0, 0.5, 0, 1, 0, 0], # first target is the ee target, rest are constrained links targets (optional)

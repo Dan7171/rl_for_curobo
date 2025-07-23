@@ -413,33 +413,46 @@ class CumotionPlanner(CuPlanner):
             action = deepcopy(self.solver.get_full_js(action))
         
         return action
-         
+        
+
+class SimRobot:
+    def __init__(self, robot, path:str):
+        self.robot = robot
+        self.path = path # prim path of the robot in isaac sim
+        self.articulation_controller = self.robot.get_articulation_controller()
+        self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
+        self.target_path_to_target_prim = {} 
+        
     
 class CuAgent:
     def __init__(self, 
                 planner:CuPlanner,
                 cu_world_wrapper_cfg:dict,
+                robot_cfg:dict,
+                sim_robot:Optional[SimRobot]=None,
                 base_pos=[0.0,0.0,0.0], 
-                base_quat=[1,0,0,0]):
+                base_quat=[1,0,0,0],):
         
         self.planner = planner        
         self.base_pos = base_pos
         self.base_quat = base_quat 
         self.base_pose = base_pos + base_quat
+        self.sim_robot = sim_robot
+        self.robot_cfg = robot_cfg
 
 
-        if "verbosity" in cu_world_wrapper_cfg:
-            verbosity = cu_world_wrapper_cfg["verbosity"] 
-        else:
-            verbosity = 0
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
         assert isinstance(_solver_wm, WorldConfig) # only for linter
         self.cu_world_wrapper = WorldModelWrapper(
             world_config=_solver_wm,
             X_robot_W=np.array(self.base_pose), # robot base frame in world frame
-            verbosity=verbosity
+            verbosity=cu_world_wrapper_cfg["verbosity"] if "verbosity" in cu_world_wrapper_cfg else 0
         )
+        self.cu_world_wrapper_update_policy = {
+            'never_add':cu_world_wrapper_cfg["never_add"], 
+            'never_update':cu_world_wrapper_cfg["never_update"]
+        }
         
     def reset_col_model_from_isaac_sim(self, usd_help:UsdHelper, robot_prim_path:str, ignore_substrings:List[str]):
 
@@ -542,35 +555,36 @@ def main(meta_cfg_path):
     
     meta_cfg = load_yaml(meta_cfg_path)
     agent_list = meta_cfg["agents"]
-    for agent_cfg in agent_list:
+    cu_agents:List[CuAgent] = []
+    for agent_idx, agent_cfg in enumerate(agent_list):
         planner_type = agent_cfg["planner"]
         if len(agent_list) > 1:
             robot_cfg_path = agent_cfg["robot"]
         else:
             robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
         robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
-        j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
-        default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]    
+        # j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
+        # default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]    
         robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world) # isaac robot
-        articulation_controller = robot.get_articulation_controller()
+        sim_robot = SimRobot(robot, robot_prim_path)
         world_cfg = WorldConfig()
 
 
-    # world_cfg_table = WorldConfig.from_dict(
-    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    # )
-    # world_cfg_table.cuboid[0].pose[2] -= 0.02
+        # world_cfg_table = WorldConfig.from_dict(
+        #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+        # )
+        # world_cfg_table.cuboid[0].pose[2] -= 0.02
 
-    # world_cfg1 = WorldConfig.from_dict(
-    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    # ).get_mesh_world()
-    # world_cfg1.mesh[0].name += "_mesh"
-    # world_cfg1.mesh[0].pose[2] = -10.5
+        # world_cfg1 = WorldConfig.from_dict(
+        #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+        # ).get_mesh_world()
+        # world_cfg1.mesh[0].name += "_mesh"
+        # world_cfg1.mesh[0].pose[2] = -10.5
 
-    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
-    # usd_help.add_world_to_stage(world_cfg, base_frame="/World")
-    # my_world.scene.add_default_ground_plane()
-    
+        # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
+        # usd_help.add_world_to_stage(world_cfg, base_frame="/World")
+        # my_world.scene.add_default_ground_plane()
+        
 
 
     
@@ -608,57 +622,65 @@ def main(meta_cfg_path):
         else:
             raise ValueError(f"Invalid planner type: {planner_type}")
         
-        cu_agent = CuAgent(planner, cu_world_wrapper_cfg=meta_cfg["agents"][0]["cu_world_wrapper"])
-
-    # # get link poses at retract configuration:
-    # retract_kinematics_state = planner.solver.kinematics.get_state(planner.solver.get_retract_config().view(1, -1))
-    # links_retract_poses = retract_kinematics_state.link_pose
-    # ee_retract_pose = retract_kinematics_state.ee_pose
-    
-        ee_target_prim_path = "/World/target"
-        ee_retract_pose = planner.plan_goals[planner.ee_link_name]
-        _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
-        ee_target = cuboid.VisualCuboid(
-            ee_target_prim_path,
-            position=_initial_ee_target_pose[:3],
-            orientation=_initial_ee_target_pose[3:],
-            color=np.array([1.0, 0, 0]),
-            size=0.05,
+        cu_world_wrapper_cfg = agent_cfg["cu_world_wrapper"] if "cu_world_wrapper" in agent_cfg else meta_cfg["general"]["cu_world_wrapper"]
+        a = CuAgent(
+            planner, 
+            cu_world_wrapper_cfg=cu_world_wrapper_cfg,
+            robot_cfg=robot_cfg,
+            sim_robot=sim_robot,
         )
+        cu_agents.append(a)
+   
+        if a.sim_robot is not None: # if using simulation
+            # set ee target prims:
+            ee_target_prim_path = f"/World/agent{agent_idx}link{planner.ee_link_name}target"
+            ee_retract_pose = planner.plan_goals[planner.ee_link_name]
+            _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
+            ee_target = cuboid.VisualCuboid(
+                ee_target_prim_path,
+                position=_initial_ee_target_pose[:3],
+                orientation=_initial_ee_target_pose[3:],
+                color=np.array([1.0, 0, 0]),
+                size=0.05,
+            )
+            a.sim_robot.link_name_to_target_path[planner.ee_link_name] = ee_target_prim_path
+            a.sim_robot.target_path_to_target_prim[ee_target_prim_path] = ee_target
 
-    # create target prims for constrained links (optional):
+            # create target prims for constrained links (optional):
+            # constr_link_name_to_target_prim = {}
+            # constr_links_targets_prims_paths = []
+            for link_name in planner.constrained_links_names:
+                if link_name != planner.ee_link_name:
+                    target_path = f"/World/agent{agent_idx}link{link_name}target" 
+                    constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
+                    _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
+                    
+                    color = np.random.randn(3) * 0.2
+                    color[0] += 0.5
+                    color[1] = 0.5
+                    color[2] = 0.0
+                    #constr_link_name_to_target_prim[link_name]
+                    target_prim = cuboid.VisualCuboid(
+                        target_path,
+                        position=np.array(_initial_constrained_link_target_pose[:3]),
+                        orientation=np.array(_initial_constrained_link_target_pose[3:]),
+                        color=color,
+                        size=0.05,
+                    )
+                    # constr_links_targets_prims_paths.append(target_path)
+                    a.sim_robot.link_name_to_target_path[link_name] = target_path    
+                    a.sim_robot.target_path_to_target_prim[target_path] = target_prim 
     
-        constr_link_name_to_target_prim = {}
-        constr_links_targets_prims_paths = []
-        for link_name in planner.constrained_links_names:
-            if link_name != planner.ee_link_name:
-                target_path = "/World/target_" + link_name
-                constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
-                _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
+    # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
+    for a in cu_agents:
+        if a.sim_robot is not None: # if in simulation
+            never_add = [a.sim_robot.path, *list(a.sim_robot.link_name_to_target_path.values()), "/curobo"]
+            for other in cu_agents:
+                if other.sim_robot is not None:
+                    never_add += list(other.sim_robot.link_name_to_target_path.values())
+            a.cu_world_wrapper_update_policy["never_add"] += never_add
+            a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
                 
-                color = np.random.randn(3) * 0.2
-                color[0] += 0.5
-                color[1] = 0.5
-                color[2] = 0.0
-                constr_link_name_to_target_prim[link_name] = cuboid.VisualCuboid(
-                    target_path,
-                    position=np.array(_initial_constrained_link_target_pose[:3]),
-                    orientation=np.array(_initial_constrained_link_target_pose[3:]),
-                    color=color,
-                    size=0.05,
-                )
-                constr_links_targets_prims_paths.append(target_path)
-        
-        cu_world_never_add = meta_cfg["agents"][0]["cu_world_wrapper"]["never_add"] + [
-            robot_prim_path,
-            ee_target_prim_path,
-            "/World/defaultGroundPlane",
-            "/curobo", 
-            *constr_links_targets_prims_paths
-            ]
-        cu_agent.reset_col_model_from_isaac_sim(usd_help, robot_prim_path, ignore_substrings=cu_world_never_add)
-        cu_world_never_update = meta_cfg["agents"][0]["cu_world_wrapper"]["never_update"] # objects which we assume that are added in reset_col_model_from_isaac_sim, but we don't want to update them (e.g. because they are static)
-        
     i = 0
     spheres = None
     while simulation_app.is_running():
@@ -672,92 +694,103 @@ def main(meta_cfg_path):
         step_index = my_world.current_time_step_index
         if step_index <= 10:
             # my_world.reset()
-            robot._articulation_view.initialize()
-            idx_list = [robot.get_dof_index(x) for x in j_names]
-            robot.set_joint_positions(default_config, idx_list)
-            robot.set_joint_velocities(np.zeros_like(default_config), idx_list)
-            robot._articulation_view.set_max_efforts(
-                values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
-            )
+            for a in cu_agents:
+                if a.sim_robot is not None:
+                    a.sim_robot.robot._articulation_view.initialize()
+                    idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
+                    a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"]  , idx_list)
+                    a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
+                    a.sim_robot.robot._articulation_view.set_max_efforts(
+                        values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
+                    )
+        
         if step_index < 20:
             continue
-
-        cu_agent.update_col_model_from_isaac_sim(
-            robot_prim_path, 
-            usd_help, 
-            ignore_list=cu_world_never_add+cu_world_never_update, 
-            paths_to_search_obs_under=["/World"]
-        )
-
-  
-        sim_js = robot.get_joints_state()
-        if sim_js is None:
-            print("sim_js is None")
-            continue
-        sim_js_names = robot.dof_names
-        cu_js = JointState(
-            position=tensor_args.to_device(sim_js.positions),
-            velocity=tensor_args.to_device(sim_js.velocities), # * 0.0? 
-            acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
-            jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
-            joint_names=sim_js_names,
-        ).get_ordered_joint_state(planner.ordered_j_names)
-        if isinstance(planner, MpcPlanner):
-            planner.update_state(cu_js)
-
-        if args.visualize_spheres and step_index % 2 == 0:
-            sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
-
-            if spheres is None:
-                spheres = []
-                # create spheres:
-
-                for si, s in enumerate(sph_list[0]):
-                    sp = sphere.VisualSphere(
-                        prim_path="/curobo/robot_sphere_" + str(si),
-                        position=np.ravel(s.position),
-                        radius=float(s.radius),
-                        color=np.array([0, 0.8, 0.2]),
-                    )
-                    spheres.append(sp)
-            else:
-                for si, s in enumerate(sph_list[0]):
-                    spheres[si].set_world_pose(position=np.ravel(s.position))
-                    spheres[si].set_radius(float(s.radius))
         
-        # read pose of the ee link's target (if exist) from isaac sim:
-        p_ee_target, q_ee_target = ee_target.get_world_pose()
-        ee_goal = Pose(
-            position=tensor_args.to_device(p_ee_target),
-            quaternion=tensor_args.to_device(q_ee_target),
-        )
-        
-        # read poses of the constrained links targets (if exist) from isaac sim:
-        links_goal_poses = {}
-        for link_name in constr_link_name_to_target_prim.keys():
-            c_p, c_rot = constr_link_name_to_target_prim[link_name].get_world_pose()
-            links_goal_poses[link_name] = Pose(
-                position=tensor_args.to_device(c_p),
-                quaternion=tensor_args.to_device(c_rot),
-            )
-        # set goals for the planner:
-        goals = {planner.ee_link_name: ee_goal,}
-        for link_name in constr_link_name_to_target_prim.keys():
-            goals[link_name] = links_goal_poses[link_name]
-        
-        # yield action from the planner:
-        if isinstance(planner, CumotionPlanner):
-            action = planner.yield_action(goals, cu_js, sim_js.velocities)
-        elif isinstance(planner, MpcPlanner):
-            action = planner.yield_action(goals)
-        else:
-            raise ValueError(f"Invalid planner type: {planner_type}")
-        
-        if action is not None:
-            isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
-            articulation_controller.apply_action(isaac_action)
-        
-         
+        # update collision model for all agents
+        for a in cu_agents:
+            if a.sim_robot is not None:
+                a.update_col_model_from_isaac_sim(
+                    a.sim_robot.path, 
+                    usd_help, 
+                    ignore_list=a.cu_world_wrapper_update_policy["never_add"]+a.cu_world_wrapper_update_policy["never_update"], 
+                    paths_to_search_obs_under=["/World"]
+                )
+                robot = a.sim_robot.robot
+                planner = a.planner
+                sim_js = robot.get_joints_state()
+                if sim_js is None:
+                    print("sim_js is None")
+                    continue
+                sim_js_names = robot.dof_names
+                cu_js = JointState(
+                    position=tensor_args.to_device(sim_js.positions),
+                    velocity=tensor_args.to_device(sim_js.velocities), # * 0.0? 
+                    acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
+                    jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
+                    joint_names=sim_js_names,
+                ).get_ordered_joint_state(planner.ordered_j_names)
+                if isinstance(planner, MpcPlanner):
+                    planner.update_state(cu_js)
+
+                if args.visualize_spheres and step_index % 2 == 0:
+                    sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
+
+                    if spheres is None:
+                        spheres = []
+                        # create spheres:
+
+                        for si, s in enumerate(sph_list[0]):
+                            sp = sphere.VisualSphere(
+                                prim_path="/curobo/robot_sphere_" + str(si),
+                                position=np.ravel(s.position),
+                                radius=float(s.radius),
+                                color=np.array([0, 0.8, 0.2]),
+                            )
+                            spheres.append(sp)
+                    else:
+                        for si, s in enumerate(sph_list[0]):
+                            spheres[si].set_world_pose(position=np.ravel(s.position))
+                            spheres[si].set_radius(float(s.radius))
+                
+                # read pose of the ee link's target (if exist) from isaac sim:
+                # p_ee_target, q_ee_target = ee_target.get_world_pose()
+                # ee_goal = Pose(
+                #     position=tensor_args.to_device(p_ee_target),
+                #     quaternion=tensor_args.to_device(q_ee_target),
+                # )
+                
+                # # read poses of the constrained links targets (if exist) from isaac sim:
+                # links_goal_poses = {}
+                # for link_name in constr_link_name_to_target_prim.keys():
+                #     c_p, c_rot = constr_link_name_to_target_prim[link_name].get_world_pose()
+                #     links_goal_poses[link_name] = Pose(
+                #         position=tensor_args.to_device(c_p),
+                #         quaternion=tensor_args.to_device(c_rot),
+                #     )
+                # # set goals for the planner:
+                # goals = {planner.ee_link_name: ee_goal,}
+                # for link_name in constr_link_name_to_target_prim.keys():
+                #     goals[link_name] = links_goal_poses[link_name]
+                goals = {}
+                for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
+                    target_prim = a.sim_robot.target_path_to_target_prim[target_path]
+                    p_target, q_target = target_prim.get_world_pose()
+                    goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
+                
+                # yield action from the planner:
+                if isinstance(planner, CumotionPlanner):
+                    action = planner.yield_action(goals, cu_js, sim_js.velocities)
+                elif isinstance(planner, MpcPlanner):
+                    action = planner.yield_action(goals)
+                else:
+                    raise ValueError(f"Invalid planner type: {planner_type}")
+                
+                if action is not None:
+                    isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
+                    a.sim_robot.articulation_controller.apply_action(isaac_action)
+                
+                
 
                 
     simulation_app.close()
