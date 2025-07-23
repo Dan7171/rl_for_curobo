@@ -17,6 +17,7 @@ from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 import torch
 from warp.context import Union
 
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
 from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
 from projects_root.utils.world_model_wrapper import WorldModelWrapper
 
@@ -33,12 +34,12 @@ parser.add_argument(
     default=None,
     help="To run headless, use one of [native, websocket], webrtc might not work.",
 )
-parser.add_argument(
-    "--visualize_spheres",
-    action="store_true",
-    help="When True, visualizes robot spheres",
-    default=False,
-)
+# parser.add_argument(
+#     "--visualize_spheres",
+#     action="store_true",
+#     help="When True, visualizes robot spheres",
+#     default=False,
+# )
 
 parser.add_argument(
     "--robot", type=str, default="dual_ur10e.yml", help="robot configuration to load"
@@ -60,7 +61,7 @@ simulation_app = SimulationApp(
 
 # Third Party
 
-from projects_root.examples.helper import add_extensions, add_robot_to_scene
+from projects_root.examples.helper import add_extensions
 add_extensions(simulation_app, args.headless_mode)
 
 import carb
@@ -86,7 +87,7 @@ from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
-
+from projects_root.utils.helper import add_robot_to_scene
 ############################################################
 
 
@@ -115,7 +116,14 @@ class Plan:
             return cmd
             
 class CuPlanner:
-    def __init__(self, solver:Union[MotionGen, MpcSolver], solver_config:Union[MotionGenConfig, MpcSolverConfig], ordered_j_names:list[str]):
+    def __init__(self,
+        base_pose:list[float], 
+        solver:Union[MotionGen, MpcSolver], 
+        solver_config:Union[MotionGenConfig, MpcSolverConfig], 
+        ordered_j_names:list[str]
+        ):
+        
+        self.base_pose = base_pose # robot base pose in world frame
         self.solver = solver
         self.solver_config = solver_config
         self.ordered_j_names = ordered_j_names
@@ -184,37 +192,68 @@ class CuPlanner:
         )
         return articulation_action
     
+    def goals_dict_W_to_R(self, robot_pose:list[float], goals_W:dict[str, Pose])->dict[str, Pose]:
+        """
+        convert the goals to the robot's base frame
+        """
+        F = robot_pose
+        goals_R = {}
+        for link_name, goal in goals_W.items():
+            p_goal_R, q_goal_R = FrameUtils.world_to_F(np.array(F[:3]), np.array(F[3:]), goal.position.flatten().cpu().numpy(), goal.quaternion.flatten().cpu().numpy())
+            goals_R[link_name] = Pose(position=self.solver.tensor_args.to_device(torch.from_numpy(p_goal_R)), quaternion=self.solver.tensor_args.to_device(torch.from_numpy(q_goal_R)))
+        return goals_R
+    
+    
+    def goals_dict_R_to_W(self, robot_pose:list[float], goals_R:dict[str, Pose])->dict[str, Pose]:
+        """
+        convert the goals to the world frame
+        """
+        F = robot_pose
+        goals_W = {}
+        for link_name, goal in goals_R.items():
+            p_goal_W, q_goal_W = FrameUtils.F_to_world(np.array(F[:3]), np.array(F[3:]), np.array(goal.position.flatten().cpu().numpy()), np.array(goal.quaternion.flatten().cpu().numpy()))
+            goals_W[link_name] = Pose(position=self.solver.tensor_args.to_device(torch.from_numpy(p_goal_W)), quaternion=self.solver.tensor_args.to_device(torch.from_numpy(q_goal_W)))
+        return goals_W
 
 class MpcPlanner(CuPlanner):
-    def __init__(self, solver_config: MpcSolverConfig):
+    def __init__(self, base_pose:list[float], solver_config: MpcSolverConfig):
         solver = MpcSolver(solver_config)
         ordered_j_names = solver.rollout_fn.joint_names
         self.cmd_state_full = None
 
-        super().__init__(solver, solver_config, ordered_j_names)
+        super().__init__(base_pose, solver, solver_config, ordered_j_names)
         
         retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
         joint_names = self.solver.rollout_fn.joint_names
         state = self.solver.rollout_fn.compute_kinematics(
             JointState.from_position(retract_cfg, joint_names=joint_names)
         )
-        
         self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
-        _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
-        _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names}
-        goal = Goal(
+        
+        
+        # _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        # _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names}
+        
+        initial_goals_R = {self.ee_link_name: Pose(position=state.ee_pos_seq, quaternion=state.ee_quat_seq)}
+        for link_name in self.constrained_links_names:
+            initial_goals_R[link_name] = state.link_poses[link_name]
+        
+        initial_goals_W = self.goals_dict_R_to_W(self.base_pose, initial_goals_R)
+        self.plan_goals = initial_goals_W
+        
+        goal_R = Goal(
             current_state=self.current_state,
             goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
-            goal_pose=_initial_ee_target_pose,
-            links_goal_pose=_initial_constrained_links_target_poses
+            goal_pose=initial_goals_R[self.ee_link_name],
+            links_goal_pose={link_name:initial_goals_R[link_name] for link_name in self.constrained_links_names}
         )
         
-        self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
-        for link_name in self.constrained_links_names:
-            self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
+        # self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
+        # for link_name in self.constrained_links_names:
+        #     self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
         
-        self.goal_buffer = self.solver.setup_solve_single(goal, 1)
-        self.solver.update_goal(self.goal_buffer)
+        self.solver_goal_buf_R = self.solver.setup_solve_single(goal_R, 1)
+        self.solver.update_goal(self.solver_goal_buf_R)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
 
         
@@ -223,13 +262,16 @@ class MpcPlanner(CuPlanner):
     def yield_action(self, goals:dict[str, Pose]):
 
         if self._outdated_plan_goals(goals):
+            # save the new goals for tracking in future if goals changed
             self.plan_goals = goals
-            self.goal_buffer.goal_pose = goals[self.ee_link_name]
-            for link_name in self.constrained_links_names:
-                if link_name in goals:
-                    self.goal_buffer.links_goal_pose[link_name] = goals[link_name]
-            self.goal_buffer.goal_pose.copy_(goals[self.ee_link_name])
-            self.solver.update_goal(self.goal_buffer)
+
+            # update the solver goal buffer with the new goals (in robot frame)
+            goals_R = self.goals_dict_W_to_R(self.base_pose, goals)
+            self.solver_goal_buf_R.goal_pose.copy_(goals_R[self.ee_link_name]) # ee link goal
+            for link_name in self.constrained_links_names: # extra links goals
+                if link_name in goals_R:
+                    self.solver_goal_buf_R.links_goal_pose[link_name] = goals_R[link_name]
+            self.solver.update_goal(self.solver_goal_buf_R)
 
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
         action = mpc_result.js_action
@@ -305,10 +347,11 @@ class MpcPlanner(CuPlanner):
 class CumotionPlanner(CuPlanner):
                 
     def __init__(self,
-                 motion_gen_config:MotionGenConfig, 
-                 plan_config:MotionGenPlanConfig, 
-                 warmup_config:dict
-                ):
+                base_pose:list[float],
+                motion_gen_config:MotionGenConfig, 
+                plan_config:MotionGenPlanConfig, 
+                warmup_config:dict,
+            ):
         """
         Cumotion planning kit. Can accept goals for end effector and optional extra links (e.g. "constrained" links).
         To use with multi arm, pass inputs (robot config, urdf, etc) as in this example: curobo/examples/isaac_sim/multi_arm_reacher.py
@@ -321,7 +364,7 @@ class CumotionPlanner(CuPlanner):
         solver_config = motion_gen_config
         ordered_j_names = solver.kinematics.joint_names
         
-        super().__init__(solver, solver_config, ordered_j_names)
+        super().__init__(base_pose, solver, solver_config, ordered_j_names)
         self.plan_config = plan_config
         self.warmup_config = warmup_config
         self.solver:MotionGen = self.solver # only for linter 
@@ -334,22 +377,24 @@ class CumotionPlanner(CuPlanner):
             
     def _plan_new(self, 
                   cu_js:JointState,
-                  new_goals:dict[str, Pose],
+                  goals:dict[str, Pose],
                   )->bool:
         """
         Making a new plan. return True if success, False otherwise
         """
-        ee_goal = new_goals[self.ee_link_name]
-        extra_links_goals = {link_name:new_goals[link_name] for link_name in self.constrained_links_names}
+     
+        goals_R = self.goals_dict_W_to_R(self.base_pose, goals)
+        ee_goal_R = goals_R[self.ee_link_name]
+        extra_links_goals_R = {link_name:goals_R[link_name] for link_name in self.constrained_links_names}
         result = self.solver.plan_single(
-            cu_js.unsqueeze(0), ee_goal, self.plan_config.clone(), link_poses=extra_links_goals
+            cu_js.unsqueeze(0), ee_goal_R, self.plan_config.clone(), link_poses=extra_links_goals_R
         )
         succ = result.success.item()  # ik_result.success.item()
         if succ:
             print("planned successfully, resetting plan...")
             self.plan.cmd_plan = result.get_interpolated_plan()
             self.plan.cmd_idx = 0
-            self.plan_goals = new_goals
+            self.plan_goals = goals
             return True
         else:
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
@@ -430,13 +475,10 @@ class CuAgent:
                 cu_world_wrapper_cfg:dict,
                 robot_cfg:dict,
                 sim_robot:Optional[SimRobot]=None,
-                base_pos=[0.0,0.0,0.0], 
-                base_quat=[1,0,0,0],):
+                ):
         
         self.planner = planner        
-        self.base_pos = base_pos
-        self.base_quat = base_quat 
-        self.base_pose = base_pos + base_quat
+        self.base_pose = planner.base_pose
         self.sim_robot = sim_robot
         self.robot_cfg = robot_cfg
 
@@ -554,7 +596,7 @@ def main(meta_cfg_path):
     
     
     meta_cfg = load_yaml(meta_cfg_path)
-    agent_list = meta_cfg["agents"]
+    agent_list = meta_cfg["cu_agents"]
     cu_agents:List[CuAgent] = []
     for agent_idx, agent_cfg in enumerate(agent_list):
         planner_type = agent_cfg["planner"]
@@ -563,60 +605,48 @@ def main(meta_cfg_path):
         else:
             robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
         robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
-        # j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
-        # default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]    
-        robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world) # isaac robot
+        base_pose = agent_cfg["base_pose"]
+        robot, robot_prim_path = add_robot_to_scene(robot_cfg, 
+                                                    my_world,
+                                                    position=base_pose[:3], 
+                                                    orientation=base_pose[3:], 
+                                                    # orientation=np.array([1,0,0,0]), 
+                                                    # initialize_world=False,
+                                                    )
+        
         sim_robot = SimRobot(robot, robot_prim_path)
         world_cfg = WorldConfig()
-
-
-        # world_cfg_table = WorldConfig.from_dict(
-        #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-        # )
-        # world_cfg_table.cuboid[0].pose[2] -= 0.02
-
-        # world_cfg1 = WorldConfig.from_dict(
-        #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-        # ).get_mesh_world()
-        # world_cfg1.mesh[0].name += "_mesh"
-        # world_cfg1.mesh[0].pose[2] = -10.5
-
-        # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
-        # usd_help.add_world_to_stage(world_cfg, base_frame="/World")
-        # my_world.scene.add_default_ground_plane()
-        
-
-
     
         if planner_type == 'cumotion':
             _motion_gen_config = MotionGenConfig.load_from_robot_config(
                 robot_cfg,
                 world_cfg,
                 tensor_args,
-                **agent_cfg["cumotion"]["motion_gen_cfg"] if "cumotion" in agent_cfg and "motion_gen_cfg" in agent_cfg["cumotion"] else meta_cfg["general"]["cumotion"]["motion_gen_cfg"],
+                **agent_cfg["cumotion"]["motion_gen_cfg"] if "cumotion" in agent_cfg and "motion_gen_cfg" in agent_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_cfg"],
             )
             _plan_config = MotionGenPlanConfig(
-                **agent_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in agent_cfg and "motion_gen_plan_cfg" in agent_cfg["cumotion"] else meta_cfg["general"]["cumotion"]["motion_gen_plan_cfg"],
+                **agent_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in agent_cfg and "motion_gen_plan_cfg" in agent_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"],
             )
-            _warmup_config = dict(agent_cfg["cumotion"]["warmup_cfg"] if "cumotion" in agent_cfg and "warmup_cfg" in agent_cfg["cumotion"] else meta_cfg["general"]["cumotion"]["warmup_cfg"])            
-            planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
+            _warmup_config = dict(agent_cfg["cumotion"]["warmup_cfg"] if "cumotion" in agent_cfg and "warmup_cfg" in agent_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"])            
+            planner = CumotionPlanner(base_pose, _motion_gen_config, _plan_config, _warmup_config)
         
         elif planner_type == 'mpc':
             _mpc_config = MpcSolverConfig.load_from_robot_config(
                 robot_cfg,
                 world_cfg,
-                **agent_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in agent_cfg and "mpc_solver_cfg" in agent_cfg["mpc"] else meta_cfg["general"]["mpc"]["mpc_solver_cfg"],
+                **agent_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in agent_cfg and "mpc_solver_cfg" in agent_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"],
             )
-            planner = MpcPlanner(_mpc_config)
+            planner = MpcPlanner(base_pose, _mpc_config)
         else:
             raise ValueError(f"Invalid planner type: {planner_type}")
         
-        cu_world_wrapper_cfg = agent_cfg["cu_world_wrapper"] if "cu_world_wrapper" in agent_cfg else meta_cfg["general"]["cu_world_wrapper"]
+        cu_world_wrapper_cfg = agent_cfg["cu_world_wrapper"] if "cu_world_wrapper" in agent_cfg else meta_cfg["default"]["cu_world_wrapper"]
         a = CuAgent(
             planner, 
             cu_world_wrapper_cfg=cu_world_wrapper_cfg,
             robot_cfg=robot_cfg,
             sim_robot=sim_robot,
+            # **agent_cfg["cu_agent_cfg"] if "cu_agent_cfg" in agent_cfg else meta_cfg["default"]["cu_agent_cfg"],
         )
         cu_agents.append(a)
    
@@ -635,9 +665,6 @@ def main(meta_cfg_path):
             a.sim_robot.link_name_to_target_path[planner.ee_link_name] = ee_target_prim_path
             a.sim_robot.target_path_to_target_prim[ee_target_prim_path] = ee_target
 
-            # create target prims for constrained links (optional):
-            # constr_link_name_to_target_prim = {}
-            # constr_links_targets_prims_paths = []
             for link_name in planner.constrained_links_names:
                 if link_name != planner.ee_link_name:
                     target_path = f"/World/agent{agent_idx}link{link_name}target" 
@@ -722,7 +749,7 @@ def main(meta_cfg_path):
                 if isinstance(planner, MpcPlanner):
                     planner.update_state(cu_js)
 
-                if args.visualize_spheres and step_index % 2 == 0:
+                if meta_cfg["default"]["debug"]["visualize_spheres"]["is_on"] and step_index % meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0:
                     sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
 
                     if spheres is None:
@@ -742,25 +769,7 @@ def main(meta_cfg_path):
                             spheres[si].set_world_pose(position=np.ravel(s.position))
                             spheres[si].set_radius(float(s.radius))
                 
-                # read pose of the ee link's target (if exist) from isaac sim:
-                # p_ee_target, q_ee_target = ee_target.get_world_pose()
-                # ee_goal = Pose(
-                #     position=tensor_args.to_device(p_ee_target),
-                #     quaternion=tensor_args.to_device(q_ee_target),
-                # )
-                
-                # # read poses of the constrained links targets (if exist) from isaac sim:
-                # links_goal_poses = {}
-                # for link_name in constr_link_name_to_target_prim.keys():
-                #     c_p, c_rot = constr_link_name_to_target_prim[link_name].get_world_pose()
-                #     links_goal_poses[link_name] = Pose(
-                #         position=tensor_args.to_device(c_p),
-                #         quaternion=tensor_args.to_device(c_rot),
-                #     )
-                # # set goals for the planner:
-                # goals = {planner.ee_link_name: ee_goal,}
-                # for link_name in constr_link_name_to_target_prim.keys():
-                #     goals[link_name] = links_goal_poses[link_name]
+
                 goals = {}
                 for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
                     target_prim = a.sim_robot.target_path_to_target_prim[target_path]
