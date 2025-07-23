@@ -159,17 +159,27 @@ class MpcPlanner:
         state = self.solver.rollout_fn.compute_kinematics(
             JointState.from_position(retract_cfg, joint_names=joint_names)
         )
+        
         self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
-        retract_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names}
         goal = Goal(
             current_state=self.current_state,
             goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
-            goal_pose=retract_pose,
+            goal_pose=_initial_ee_target_pose,
+            links_goal_pose=_initial_constrained_links_target_poses
         )
-        self.goal_buffer = self.solver.setup_solve_single(goal, 1)
         
+        self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
+        for link_name in self.constrained_links_names:
+            self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
+        
+        self.goal_buffer = self.solver.setup_solve_single(goal, 1)
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
+
+ 
+       
 
     def _outdated_plan_goals(self, goals:dict[str, Pose]):
         """
@@ -256,14 +266,14 @@ def main():
     # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
     # Make a target to follow
-    target = cuboid.VisualCuboid(
-        "/World/target",
-        position=np.array([0.5, 0, 0.5]),
-        orientation=np.array([0, 1, 0, 0]),
-        color=np.array([1.0, 0, 0]),
-        size=0.05,
-    )
-
+    # target = cuboid.VisualCuboid(
+    #     "/World/target",
+    #     position=np.array([0.5, 0, 0.5]),
+    #     orientation=np.array([0, 1, 0, 0]),
+    #     color=np.array([1.0, 0, 0]),
+    #     size=0.05,
+    # )
+    
     setup_curobo_logger("warn")
     n_obstacle_cuboids = 30
     n_obstacle_mesh = 10
@@ -334,6 +344,43 @@ def main():
 
     planner = MpcPlanner(MpcSolver(mpc_config), mpc_config)
     mpc = planner.solver
+    
+    ee_target_prim_path = "/World/target"
+    ee_retract_pose = planner.plan_goals[planner.ee_link_name]
+    print(f"ee_retract_pose: {ee_retract_pose}")
+    _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
+    ee_target = cuboid.VisualCuboid(
+        ee_target_prim_path,
+        position=_initial_ee_target_pose[:3],
+        orientation=_initial_ee_target_pose[3:],
+        color=np.array([1.0, 0, 0]),
+        size=0.05,
+    )
+
+    # create target prims for constrained links (optional):
+    
+    constr_link_name_to_target_prim = {}
+    constr_links_targets_prims_paths = []
+    for link_name in planner.constrained_links_names:
+        if link_name != planner.ee_link_name:
+            target_path = "/World/target_" + link_name
+            constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
+            _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
+            
+            color = np.random.randn(3) * 0.2
+            color[0] += 0.5
+            color[1] = 0.5
+            color[2] = 0.0
+            constr_link_name_to_target_prim[link_name] = cuboid.VisualCuboid(
+                target_path,
+                position=np.array(_initial_constrained_link_target_pose[:3]),
+                orientation=np.array(_initial_constrained_link_target_pose[3:]),
+                color=color,
+                size=0.05,
+            )
+            constr_links_targets_prims_paths.append(target_path)
+    
+
     # retract_cfg = mpc.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
     # joint_names = mpc.rollout_fn.joint_names
     # state = mpc.rollout_fn.compute_kinematics(
@@ -421,9 +468,28 @@ def main():
         planner.update_state(cu_js)
 
         # position and orientation of target virtual cube:
-        cube_position, cube_orientation = target.get_world_pose()
-        target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
-        goals = {planner.ee_link_name: target_pose}
+        # cube_position, cube_orientation = target.get_world_pose()
+        p_ee_target, q_ee_target = ee_target.get_world_pose()
+        ee_goal = Pose(
+            position=tensor_args.to_device(p_ee_target),
+            quaternion=tensor_args.to_device(q_ee_target),
+        )
+        
+        # read poses of the constrained links targets (if exist) from isaac sim:
+        links_goal_poses = {}
+        for link_name in constr_link_name_to_target_prim.keys():
+            c_p, c_rot = constr_link_name_to_target_prim[link_name].get_world_pose()
+            links_goal_poses[link_name] = Pose(
+                position=tensor_args.to_device(c_p),
+                quaternion=tensor_args.to_device(c_rot),
+            )
+        # set goals for the planner:
+        goals = {planner.ee_link_name: ee_goal,}
+        for link_name in constr_link_name_to_target_prim.keys():
+            goals[link_name] = links_goal_poses[link_name]
+        
+        # target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
+        # goals = {planner.ee_link_name: target_pose}
         planner.cmd_state_full = planner.yield_action(goals)
         art_action = planner.convert_action_to_isaac(sim_js_names, robot.get_dof_index)
         articulation_controller.apply_action(art_action)
