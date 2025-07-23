@@ -186,78 +186,99 @@ class CuPlanner:
     
 
 class MpcPlanner(CuPlanner):
-    def __init__(self, mpc_config:MpcSolverConfig):
-        solver = MpcSolver(mpc_config)
-        solver_config = mpc_config
+    def __init__(self, solver_config: MpcSolverConfig):
+        solver = MpcSolver(solver_config)
         ordered_j_names = solver.rollout_fn.joint_names
+        self.cmd_state_full = None
 
-        super().__init__(solver,solver_config,ordered_j_names)
-        self.solver:MpcSolver = self.solver # only for linter
-        self._set_goals_to_retract_state()
+        super().__init__(solver, solver_config, ordered_j_names)
         
-    def yield_action(self,goals:dict[str, Pose], cu_js:JointState)->Optional[JointState]:
-        
-        if self._outdated_plan_goals(goals):
-            # update the plan goals:
-            self.plan_goals = goals
-            self._goal_buffer.goal_pose = goals[self.ee_link_name]
-            for link_name in self.constrained_links_names:
-                self._goal_buffer.links_goal_pose[link_name] = goals[link_name]
-            # update the goal in solver:
-            # planner_input_goals_pos = []
-            # planner_input_goals_quat = []
-
-            # for goal_name, goal_pose in goals.items():
-            #     planner_input_goals_pos.append(self.solver.tensor_args.to_device(goal_pose.position))
-            #     planner_input_goals_quat.append(self.solver.tensor_args.to_device(goal_pose.quaternion))    
-            
-            # multi_arm_positions = torch.stack(planner_input_goals_pos, dim=0).unsqueeze(0)   # [num_arms, 3]
-            # multi_arm_quaternions = torch.stack(planner_input_goals_quat, dim=0).unsqueeze(0)  # [num_arms, 4]
-            # ik_goal = Pose(
-            #     position=multi_arm_positions,     # [1, num_arms, 3] tensor for all arms
-            #     quaternion=multi_arm_quaternions  # [1, num_arms, 4] tensor for all arms
-            # )
-            
-            # IMPORTANT: Direct assignment instead of copy_() to preserve multi-arm structure
-            
-            # self._goal_buffer.goal_pose = ik_goal
-            self.solver.update_goal(self._goal_buffer)
-            
-        
-        mpc_result = self.solver.step(cu_js, max_attempts=2)
-        self._cmd_state_full = mpc_result.js_action
-        return self._cmd_state_full
-    
-    def _set_goals_to_retract_state(self):
-        
-        
-        # get the current state of the robot (at retract configuration) :
-        assert isinstance(self.solver, MpcSolver) # only for linter
         retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
         joint_names = self.solver.rollout_fn.joint_names
         state = self.solver.rollout_fn.compute_kinematics(
             JointState.from_position(retract_cfg, joint_names=joint_names)
         )
-        self._current_js = JointState.from_position(retract_cfg, joint_names=joint_names)
         
-        _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq) # set target to retract
-        _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names} # set target to retract
+        self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
+        _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names}
         goal = Goal(
-            current_state=self._current_js,
+            current_state=self.current_state,
             goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
             goal_pose=_initial_ee_target_pose,
-            # links_goal_pose=_initial_constrained_links_target_poses,
+            links_goal_pose=_initial_constrained_links_target_poses
         )
-        self._goal_buffer = self.solver.setup_solve_single(goal, 1)
-        self.solver.update_goal(self._goal_buffer)
-        mpc_result = self.solver.step(self._current_js, max_attempts=2)
-
-        # update the plan goals buffer accordingly:
+        
         self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
         for link_name in self.constrained_links_names:
             self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
         
-        self._cmd_state_full = None
+        self.goal_buffer = self.solver.setup_solve_single(goal, 1)
+        self.solver.update_goal(self.goal_buffer)
+        mpc_result = self.solver.step(self.current_state, max_attempts=2)
+
+        
+
+        
+    def yield_action(self, goals:dict[str, Pose]):
+
+        if self._outdated_plan_goals(goals):
+            self.plan_goals = goals
+            self.goal_buffer.goal_pose = goals[self.ee_link_name]
+            for link_name in self.constrained_links_names:
+                if link_name in goals:
+                    self.goal_buffer.links_goal_pose[link_name] = goals[link_name]
+            self.goal_buffer.goal_pose.copy_(goals[self.ee_link_name])
+            self.solver.update_goal(self.goal_buffer)
+
+        mpc_result = self.solver.step(self.current_state, max_attempts=2)
+        action = mpc_result.js_action
+        self.cmd_state_full = action
+        return mpc_result.js_action
+    
+    def update_state(self, cu_js:JointState):
+        if self.cmd_state_full is None:
+            self.current_state.copy_(cu_js)
+        else:
+            current_state_partial = self.cmd_state_full.get_ordered_joint_state(
+                self.solver.rollout_fn.joint_names
+            )
+            self.current_state.copy_(current_state_partial)
+            self.current_state.joint_names = current_state_partial.joint_names
+            # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
+        # common_js_names = []
+        self.current_state.copy_(cu_js)
+    
+    # def _set_goals_to_retract_state(self):
+        
+        
+    #     # get the current state of the robot (at retract configuration) :
+    #     assert isinstance(self.solver, MpcSolver) # only for linter
+    #     retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
+    #     joint_names = self.solver.rollout_fn.joint_names
+    #     state = self.solver.rollout_fn.compute_kinematics(
+    #         JointState.from_position(retract_cfg, joint_names=joint_names)
+    #     )
+    #     self._current_js = JointState.from_position(retract_cfg, joint_names=joint_names)
+        
+    #     _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq) # set target to retract
+    #     _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names} # set target to retract
+    #     goal = Goal(
+    #         current_state=self._current_js,
+    #         goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
+    #         goal_pose=_initial_ee_target_pose,
+    #         # links_goal_pose=_initial_constrained_links_target_poses,
+    #     )
+    #     self._goal_buffer = self.solver.setup_solve_single(goal, 1)
+    #     self.solver.update_goal(self._goal_buffer)
+    #     mpc_result = self.solver.step(self._current_js, max_attempts=2)
+
+    #     # update the plan goals buffer accordingly:
+    #     self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
+    #     for link_name in self.constrained_links_names:
+    #         self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
+        
+    #     self._cmd_state_full = None
 
     def convert_action_to_isaac(self, full_js_action:JointState, sim_js_names:list[str], order_finder:Callable)->ArticulationAction:
         """
@@ -527,7 +548,7 @@ def main(meta_cfg_path):
     tensor_args = TensorDeviceType()
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
+    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world) # isaac robot
     articulation_controller = robot.get_articulation_controller()
 
     world_cfg_table = WorldConfig.from_dict(
@@ -569,35 +590,17 @@ def main(meta_cfg_path):
         
         planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
     
-    else:
-        if "link_names" in robot_cfg["kinematics"]:
-            num_constrained_links = len(robot_cfg["kinematics"]["link_names"])
-        else:
-            num_constrained_links = 0
-        num_arms = num_constrained_links + 1 # +1 for the end effector link
-        meta_cfg["general"]["solver_cfgs"]["mpc"]["num_arms"] = num_arms
+    elif planner_type == 'mpc':
         _mpc_config = MpcSolverConfig.load_from_robot_config(
             robot_cfg,
             world_cfg,
             **meta_cfg["general"]["solver_cfgs"]["mpc"],
-            # use_cuda_graph=True,
-            # use_cuda_graph=False,
-            # use_cuda_graph_metrics=True,
-            # use_cuda_graph_full_step=False,
-            # self_collision_check=True,
-            # collision_checker_type=CollisionCheckerType.MESH,
-            # collision_cache={"obb": 30, "mesh": 10},
-            # use_mppi=True,
-            # use_lbfgs=False,
-            # use_es=False,
-            # store_rollouts=True,
-            # step_dt=0.02,
-            # plot_costs=True,
         )
-
         planner = MpcPlanner(_mpc_config)
-
-    cu_agent = CuAgent(planner, cu_world_wrapper_cfg={"verbosity":0})
+    else:
+        raise ValueError(f"Invalid planner type: {planner_type}")
+    
+    cu_agent = CuAgent(planner, cu_world_wrapper_cfg=meta_cfg["agents"][0]["cu_world_wrapper"])
 
     # # get link poses at retract configuration:
     # retract_kinematics_state = planner.solver.kinematics.get_state(planner.solver.get_retract_config().view(1, -1))
@@ -638,7 +641,7 @@ def main(meta_cfg_path):
             )
             constr_links_targets_prims_paths.append(target_path)
     
-    cu_world_never_add = [
+    cu_world_never_add = meta_cfg["agents"][0]["cu_world_wrapper"]["never_add"] + [
         robot_prim_path,
         ee_target_prim_path,
         "/World/defaultGroundPlane",
@@ -646,7 +649,7 @@ def main(meta_cfg_path):
         *constr_links_targets_prims_paths
         ]
     cu_agent.reset_col_model_from_isaac_sim(usd_help, robot_prim_path, ignore_substrings=cu_world_never_add)
-    cu_world_never_update = [] # objects which we assume that are added in reset_col_model_from_isaac_sim, but we don't want to update them (e.g. because they are static)
+    cu_world_never_update = meta_cfg["agents"][0]["cu_world_wrapper"]["never_update"] # objects which we assume that are added in reset_col_model_from_isaac_sim, but we don't want to update them (e.g. because they are static)
     
     i = 0
     spheres = None
@@ -656,8 +659,6 @@ def main(meta_cfg_path):
             if i % 100 == 0:
                 print("**** Click Play to start simulation *****")
             i += 1
-            # if step_index == 0:
-            #    my_world.play()
             continue
 
         step_index = my_world.current_time_step_index
@@ -667,25 +668,24 @@ def main(meta_cfg_path):
             idx_list = [robot.get_dof_index(x) for x in j_names]
             robot.set_joint_positions(default_config, idx_list)
             robot.set_joint_velocities(np.zeros_like(default_config), idx_list)
-
             robot._articulation_view.set_max_efforts(
                 values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
             )
         if step_index < 20:
             continue
 
-        cu_agent.update_col_model_from_isaac_sim(robot_prim_path, 
-                                                 usd_help, 
-                                                 ignore_list=cu_world_never_add+cu_world_never_update, 
-                                                 paths_to_search_obs_under=["/World"]
-                                                 )
+        cu_agent.update_col_model_from_isaac_sim(
+            robot_prim_path, 
+            usd_help, 
+            ignore_list=cu_world_never_add+cu_world_never_update, 
+            paths_to_search_obs_under=["/World"]
+        )
 
   
         sim_js = robot.get_joints_state()
         if sim_js is None:
             print("sim_js is None")
             continue
-
         sim_js_names = robot.dof_names
         cu_js = JointState(
             position=tensor_args.to_device(sim_js.positions),
@@ -693,9 +693,10 @@ def main(meta_cfg_path):
             acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
             joint_names=sim_js_names,
-        )
-        cu_js = cu_js.get_ordered_joint_state(planner.ordered_j_names)
-        
+        ).get_ordered_joint_state(planner.ordered_j_names)
+        if isinstance(planner, MpcPlanner):
+            planner.update_state(cu_js)
+
         if args.visualize_spheres and step_index % 2 == 0:
             sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
 
@@ -739,14 +740,13 @@ def main(meta_cfg_path):
         # yield action from the planner:
         if isinstance(planner, CumotionPlanner):
             action = planner.yield_action(goals, cu_js, sim_js.velocities)
-        
         elif isinstance(planner, MpcPlanner):
-            action = planner.yield_action(goals, cu_js)
+            action = planner.yield_action(goals)
+        else:
+            raise ValueError(f"Invalid planner type: {planner_type}")
         
         if action is not None:
-            
             isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
-            
             articulation_controller.apply_action(isaac_action)
         
          

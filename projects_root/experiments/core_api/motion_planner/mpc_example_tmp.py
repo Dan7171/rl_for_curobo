@@ -144,7 +144,6 @@ class MpcPlanner:
         self.solver = solver
         self.solver_config = solver_config
         self.cmd_state_full = None
-        # self.past_pose = None
         self.plan_goals:dict[str, Pose] = {} 
         self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
         self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
@@ -198,23 +197,15 @@ class MpcPlanner:
             for link_name in self.constrained_links_names:
                 if link_name in goals:
                     self.goal_buffer.links_goal_pose[link_name] = goals[link_name]
-            self.solver.update_goal(self.goal_buffer)
-            # self.past_pose = goals[self.ee_link_name]
-
-
-        # if self.past_pose is None \
-        #     or torch.norm(goals[self.ee_link_name].position - self.past_pose.position) > 1e-3 \
-        #     or torch.norm(goals[self.ee_link_name].quaternion - self.past_pose.quaternion) > 1e-3: 
-            
             self.goal_buffer.goal_pose.copy_(goals[self.ee_link_name])
             self.solver.update_goal(self.goal_buffer)
-            # self.past_pose = goals[self.ee_link_name]
-
-
+        
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
-        return mpc_result.js_action
+        action = mpc_result.js_action
+        self.cmd_state_full = action
+        return action
     
-    def convert_action_to_isaac(self, sim_js_names:list[str], order_finder:Callable)->ArticulationAction:
+    def convert_action_to_isaac(self, full_js_action:JointState, sim_js_names:list[str], order_finder:Callable)->ArticulationAction:
         """
         A utility function to convert curobo action to isaac sim action (ArticulationAction).
         """
@@ -222,12 +213,13 @@ class MpcPlanner:
         common_js_names = []
         idx_list = []
         for x in sim_js_names:
-            if x in self.cmd_state_full.joint_names:
+            if x in full_js_action.joint_names:
+            # if x in self.cmd_state_full.joint_names:
                 idx_list.append(order_finder(x))
                 common_js_names.append(x)
 
         cmd_state = self.cmd_state_full.get_ordered_joint_state(common_js_names)
-        self.cmd_state_full = cmd_state
+        # self.cmd_state_full = cmd_state
 
         art_action = ArticulationAction(
             cmd_state.position.view(-1).cpu().numpy(),
@@ -489,9 +481,10 @@ def main():
         
         # target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
         # goals = {planner.ee_link_name: target_pose}
-        planner.cmd_state_full = planner.yield_action(goals)
-        art_action = planner.convert_action_to_isaac(sim_js_names, robot.get_dof_index)
-        articulation_controller.apply_action(art_action)
+        action = planner.yield_action(goals)
+        if action is not None:
+            art_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
+            articulation_controller.apply_action(art_action)
 
         
 
