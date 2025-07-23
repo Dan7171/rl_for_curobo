@@ -177,7 +177,6 @@ class AutonomousArm:
     def _spawn_robot_and_target(self, usd_help:UsdHelper):
         X_R = Pose.from_list(list(self.p_R) + list(self.q_R)) # 
         usd_help.add_subroot(self.world_root, self.subroot_path, X_R)
-        
         self.robot, self.prim_path = add_robot_to_scene(self.robot_cfg, self.world, subroot=self.subroot_path+'/', robot_name=self.robot_name, position=self.p_R, orientation=self.q_R, initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         self.target_prim_path = self.world_root+f'/{self.robot_name}_target'
         self.target = spawn_target(self.target_prim_path, self._p_initTarget, self._q_initTarget, self.initial_target_color, self.initial_target_size)

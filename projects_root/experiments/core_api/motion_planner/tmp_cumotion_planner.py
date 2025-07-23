@@ -606,11 +606,16 @@ def main(meta_cfg_path):
             robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
         robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
         base_pose = agent_cfg["base_pose"]
-        robot, robot_prim_path = add_robot_to_scene(robot_cfg, 
-                                                    my_world,
-                                                    position=base_pose[:3], 
-                                                    orientation=base_pose[3:], 
-                                                    )
+        
+        X_R = Pose.from_list(base_pose[:3] + base_pose[3:])  
+        usd_help.add_subroot('/World', f'/World/robot_{agent_idx}', X_R)
+        robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, subroot=f'/World/robot_{agent_idx}', robot_name=f'robot_{agent_idx}', position=base_pose[:3], orientation=base_pose[3:], initialize_world=True) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
+        
+        # robot, robot_prim_path = add_robot_to_scene(robot_cfg, 
+        #                                             my_world,
+        #                                             position=base_pose[:3], 
+        #                                             orientation=base_pose[3:], 
+        #                                             )
         
         sim_robot = SimRobot(robot, robot_prim_path)
         world_cfg = WorldConfig()
