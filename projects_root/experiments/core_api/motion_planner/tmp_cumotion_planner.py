@@ -1,14 +1,4 @@
-
-#
-# Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-#
-# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
-# property and proprietary rights in and to this material, related
-# documentation and any modifications thereto. Any use, reproduction,
-# disclosure or distribution of this material and related documentation
-# without an express license agreement from NVIDIA CORPORATION or
-# its affiliates is strictly prohibited.
-#
+ 
 
 try:
     # Third Party
@@ -20,6 +10,7 @@ except ImportError:
 # Third Party
 from collections.abc import Callable
 from copy import copy, deepcopy
+import dataclasses
 from typing import Optional
 from typing_extensions import List
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
@@ -162,6 +153,7 @@ class CuPlanner:
         """
         for link_name, goal in goals.items():
             if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
+                print(f"plan goals are outdated for link {link_name}")
                 return True
         return False
     
@@ -194,31 +186,46 @@ class CuPlanner:
 
 class MpcPlanner(CuPlanner):
     def __init__(self, mpc_config:MpcSolverConfig):
-        super().__init__(MpcSolver(mpc_config), mpc_config)
-        self._set_goals_to_retract_state()
+        self._cmd_state_full = None
+        self._current_js = None
 
+        super().__init__(MpcSolver(mpc_config), mpc_config)
+        self.solver:MpcSolver = self.solver # only for linter
+        self._set_goals_to_retract_state()
+        
     def yield_action(self,goals:dict[str, Pose], cu_js:JointState)->Optional[JointState]:
         
         if self._outdated_plan_goals(goals):
-            
             # update the plan goals:
             self.plan_goals = goals
-            
-            # update the goal in solver:
-            ee_goal = goals[self.ee_link_name]
-            self._goal_buffer.goal_pose.copy_(ee_goal)
+            self._goal_buffer.goal_pose = goals[self.ee_link_name]
             for link_name in self.constrained_links_names:
-                assert isinstance(self._goal_buffer.links_goal_pose, dict) # only for linter
-                if link_name in self._goal_buffer.links_goal_pose:
-                    self._goal_buffer.links_goal_pose[link_name].copy_(goals[link_name])
-                else:
-                    self._goal_buffer.links_goal_pose[link_name] = goals[link_name]
-            assert isinstance(self.solver,MpcSolver) # only for linter
+                self._goal_buffer.links_goal_pose[link_name] = goals[link_name]
+            # update the goal in solver:
+            # planner_input_goals_pos = []
+            # planner_input_goals_quat = []
+
+            # for goal_name, goal_pose in goals.items():
+            #     planner_input_goals_pos.append(self.solver.tensor_args.to_device(goal_pose.position))
+            #     planner_input_goals_quat.append(self.solver.tensor_args.to_device(goal_pose.quaternion))    
+            
+            # multi_arm_positions = torch.stack(planner_input_goals_pos, dim=0).unsqueeze(0)   # [num_arms, 3]
+            # multi_arm_quaternions = torch.stack(planner_input_goals_quat, dim=0).unsqueeze(0)  # [num_arms, 4]
+            # ik_goal = Pose(
+            #     position=multi_arm_positions,     # [1, num_arms, 3] tensor for all arms
+            #     quaternion=multi_arm_quaternions  # [1, num_arms, 4] tensor for all arms
+            # )
+            
+            # IMPORTANT: Direct assignment instead of copy_() to preserve multi-arm structure
+            
+            # self._goal_buffer.goal_pose = ik_goal
             self.solver.update_goal(self._goal_buffer)
+            
         
         mpc_result = self.solver.step(cu_js, max_attempts=2)
-        return mpc_result.js_action
-
+        self._cmd_state_full = mpc_result.js_action
+        return self._cmd_state_full
+    
     def _set_goals_to_retract_state(self):
         
         
@@ -229,27 +236,49 @@ class MpcPlanner(CuPlanner):
         state = self.solver.rollout_fn.compute_kinematics(
             JointState.from_position(retract_cfg, joint_names=joint_names)
         )
-        current_js = JointState.from_position(retract_cfg, joint_names=joint_names)
-        current_pose_ee = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
-        current_poses_constrained_links = {name: state.link_poses[name] for name in self.constrained_links_names}
-        _initial_ee_target_pose = current_pose_ee
-        _initial_constrained_links_target_poses = current_poses_constrained_links
+        self._current_js = JointState.from_position(retract_cfg, joint_names=joint_names)
+        
+        _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq) # set target to retract
+        _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names} # set target to retract
         goal = Goal(
-            current_state=current_js,
+            current_state=self._current_js,
             goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
             goal_pose=_initial_ee_target_pose,
-            links_goal_pose=_initial_constrained_links_target_poses,
+            # links_goal_pose=_initial_constrained_links_target_poses,
         )
         self._goal_buffer = self.solver.setup_solve_single(goal, 1)
         self.solver.update_goal(self._goal_buffer)
-        mpc_result = self.solver.step(current_js, max_attempts=2)
+        mpc_result = self.solver.step(self._current_js, max_attempts=2)
 
         # update the plan goals buffer accordingly:
         self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
         for link_name in self.constrained_links_names:
             self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
+        
+        self._cmd_state_full = None
 
+    def convert_action_to_isaac(self, full_js_action:JointState, sim_js_names:list[str], order_finder:Callable)->ArticulationAction:
+        """
+        A utility function to convert curobo action to isaac sim action (ArticulationAction).
+        """
+        # get only joint names that are in both:
+        art_action_idx_list = []
+        common_js_names = []
+        for x in sim_js_names:
+            if x in full_js_action.joint_names:
+                art_action_idx_list.append(order_finder(x))
+                common_js_names.append(x)
 
+        full_ordered_js_action = full_js_action.get_ordered_joint_state(common_js_names)
+        self._cmd_state_full = full_ordered_js_action
+        
+        articulation_action = ArticulationAction(
+            full_ordered_js_action.position.view(-1).cpu().numpy(),
+            # full_ordered_js_action.velocity.cpu().numpy(),
+            joint_indices=art_action_idx_list,
+        )
+        return articulation_action
+    
 class CumotionPlanner(CuPlanner):
                 
     def __init__(self,
@@ -385,9 +414,9 @@ class CuAgent:
 
 
         if "verbosity" in cu_world_wrapper_cfg:
-            verbosity = cu_world_wrapper_cfg["verbosity"] # max
+            verbosity = cu_world_wrapper_cfg["verbosity"] 
         else:
-            verbosity = 4 # max
+            verbosity = 0
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
         assert isinstance(_solver_wm, WorldConfig) # only for linter
@@ -434,7 +463,7 @@ class CuAgent:
         new_paths = current_paths - self.cu_world_wrapper.get_known_prims()
         
         if new_paths: # Here we are being LAZY! we call expensive get_obstacled_from_stage() only if there are new obstacles!
-            print(f"[NEW OBSTACLES] {new_paths}")
+            # print(f"[NEW OBSTACLES] {new_paths}")
             
             # Get basic (non-collision check) WorldConfig from stage
             new_world_cfg:WorldConfig = usd_help.get_obstacles_from_stage(
@@ -481,7 +510,14 @@ class CuAgent:
 
 
 
-def main(planner_type='cumotion'):
+def main(meta_cfg_path):
+    
+    meta_cfg = load_yaml(meta_cfg_path)
+    agent_cfg = meta_cfg["agents"][0]
+    planner_type = agent_cfg["planner"] 
+    robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
+    robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
+
     setup_curobo_logger("warn")
 
     # assuming obstacles are in objects_path:
@@ -495,7 +531,6 @@ def main(planner_type='cumotion'):
     usd_help.load_stage(my_world.stage)
 
     tensor_args = TensorDeviceType()
-    robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
     robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
@@ -541,25 +576,34 @@ def main(planner_type='cumotion'):
         planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
     
     else:
+        if "link_names" in robot_cfg["kinematics"]:
+            num_constrained_links = len(robot_cfg["kinematics"]["link_names"])
+        else:
+            num_constrained_links = 0
+        num_arms = num_constrained_links + 1 # +1 for the end effector link
+        meta_cfg["general"]["solver_cfgs"]["mpc"]["num_arms"] = num_arms
         _mpc_config = MpcSolverConfig.load_from_robot_config(
             robot_cfg,
             world_cfg,
+            **meta_cfg["general"]["solver_cfgs"]["mpc"],
             # use_cuda_graph=True,
-            use_cuda_graph=False,
-            use_cuda_graph_metrics=True,
-            use_cuda_graph_full_step=False,
-            self_collision_check=True,
-            collision_checker_type=CollisionCheckerType.MESH,
-            collision_cache={"obb": 30, "mesh": 10},
-            use_mppi=True,
-            use_lbfgs=False,
-            use_es=False,
-            store_rollouts=True,
-            step_dt=0.02,
+            # use_cuda_graph=False,
+            # use_cuda_graph_metrics=True,
+            # use_cuda_graph_full_step=False,
+            # self_collision_check=True,
+            # collision_checker_type=CollisionCheckerType.MESH,
+            # collision_cache={"obb": 30, "mesh": 10},
+            # use_mppi=True,
+            # use_lbfgs=False,
+            # use_es=False,
+            # store_rollouts=True,
+            # step_dt=0.02,
+            # plot_costs=True,
         )
+
         planner = MpcPlanner(_mpc_config)
 
-    cu_agent = CuAgent(planner, cu_world_wrapper_cfg={"verbosity":4})
+    cu_agent = CuAgent(planner, cu_world_wrapper_cfg={"verbosity":0})
 
     # # get link poses at retract configuration:
     # retract_kinematics_state = planner.solver.kinematics.get_state(planner.solver.get_retract_config().view(1, -1))
@@ -612,6 +656,7 @@ def main(planner_type='cumotion'):
     
     i = 0
     spheres = None
+    cmd_state_full = None # mpc only
     while simulation_app.is_running():
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -650,12 +695,27 @@ def main(planner_type='cumotion'):
         sim_js_names = robot.dof_names
         cu_js = JointState(
             position=tensor_args.to_device(sim_js.positions),
-            velocity=tensor_args.to_device(sim_js.velocities) * 0.0,
+            velocity=tensor_args.to_device(sim_js.velocities), # * 0.0? 
             acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
             joint_names=sim_js_names,
         )
-        cu_js = cu_js.get_ordered_joint_state(planner.solver.kinematics.joint_names)
+        if isinstance(planner, CumotionPlanner):
+            cu_js = cu_js.get_ordered_joint_state(planner.solver.kinematics.joint_names)
+        
+        elif isinstance(planner, MpcPlanner): # todo: try for both mpc and cumotion as in cumotion (if)
+            cu_js = cu_js.get_ordered_joint_state(planner.solver.rollout_fn.joint_names)
+            if planner._cmd_state_full is None:
+                planner._current_js.copy_(cu_js)
+            else:
+                current_state_partial = planner._cmd_state_full.get_ordered_joint_state(
+                    planner.solver.rollout_fn.joint_names
+                )
+                planner._current_js.copy_(current_state_partial)
+                planner._current_js.joint_names = current_state_partial.joint_names
+                # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
+            common_js_names = []
+            planner._current_js.copy_(cu_js)
 
         if args.visualize_spheres and step_index % 2 == 0:
             sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
@@ -698,11 +758,12 @@ def main(planner_type='cumotion'):
             goals[link_name] = links_goal_poses[link_name]
         
         # yield action from the planner:
-        if planner_type == 'cumotion':
+        if isinstance(planner, CumotionPlanner):
             action = planner.yield_action(goals, cu_js, sim_js.velocities)
-        else:
+        
+        elif isinstance(planner, MpcPlanner):
             action = planner.yield_action(goals, cu_js)
-            
+        
         if action is not None:
             
             isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
@@ -716,4 +777,4 @@ def main(planner_type='cumotion'):
 
 
 if __name__ == "__main__":
-    main(planner_type='cumotion')
+    main(meta_cfg_path='projects_root/experiments/benchmarks/cfgs/meta_cfg.yml')

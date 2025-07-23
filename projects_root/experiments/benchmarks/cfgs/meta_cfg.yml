@@ -1,0 +1,58 @@
+general:
+  solver_cfgs:
+    cumotion:
+      use_cuda_graph: False 
+      step_dt: 0.02
+      use_cuda_graph_metrics: True
+      self_collision_check: True
+      collision_checker_type: MESH
+    
+    mpc:
+      override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
+      use_cuda_graph: False 
+      step_dt: 0.03
+      use_cuda_graph_metrics: True
+      self_collision_check: True
+      collision_checker_type: MESH
+      collision_cache: {"obb": 15, "mesh": 15}
+      use_mppi: True
+      use_lbfgs: False
+      plot_costs: False # for debugging
+
+
+  debug:    
+    visualize_spheres: # visualize collision spheres of the robot
+      is_on: false 
+      ts_delta: 2 # int
+    
+    world_cu_wrapper: # world collision wrapper
+      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
+    
+    show_bnd_spheres: # show sphres bounding curobo obstacles
+      is_on: false
+      ts_delta: 2 # int
+
+  env:
+    simulation:
+      is_on: True
+      physics_dt: 0.03
+      render_dt: 0.03
+      enable_gpu_dynamics: True
+      init_app_settings:
+        headless: null # set 'true' to run in headless mode
+      
+    real:
+      is_on: False
+    
+
+  
+agents:  
+  - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'cumotion' # mpc or cumotion
+    X_robot: [0, 0, 0.0, 1, 0, 0, 0]
+    X_targets: [
+      [0.5, 0.0, 0.5, 0, 1, 0, 0], # first target is the ee target, rest are constrained links targets (optional)
+      ] 
+    cu_world_wrapper:
+      verbosity: 2 # 0 to 4 (0 is no output, 4 is max output)  
+
