@@ -18,6 +18,7 @@ except ImportError:
 
 
 # Third Party
+from collections.abc import Callable
 import copy
 from typing_extensions import Union
 import torch
@@ -141,8 +142,9 @@ def draw_points(rollouts: torch.Tensor):
 class MpcPlanner:
     def __init__(self, solver: MpcSolver, solver_config: MpcSolverConfig):
         self.solver = solver
-        self.solver_config = solver_config     
-
+        self.solver_config = solver_config
+        self.cmd_state_full = None
+        self.past_pose = None
         self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
         # self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
 
@@ -165,7 +167,6 @@ class MpcPlanner:
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
 
-        self.past_pose = None
     
     def yield_action(self, goals:dict[str, Pose]):
         if self.past_pose is None \
@@ -186,6 +187,28 @@ class MpcPlanner:
 
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
         return mpc_result.js_action
+    
+    def convert_action_to_isaac(self, sim_js_names:list[str], order_finder:Callable)->ArticulationAction:
+        """
+        A utility function to convert curobo action to isaac sim action (ArticulationAction).
+        """
+        # get only joint names that are in both:
+        common_js_names = []
+        idx_list = []
+        for x in sim_js_names:
+            if x in self.cmd_state_full.joint_names:
+                idx_list.append(order_finder(x))
+                common_js_names.append(x)
+
+        cmd_state = self.cmd_state_full.get_ordered_joint_state(common_js_names)
+        self.cmd_state_full = cmd_state
+
+        art_action = ArticulationAction(
+            cmd_state.position.view(-1).cpu().numpy(),
+            # cmd_state.velocity.cpu().numpy(),
+            joint_indices=idx_list,
+        )
+        return art_action
 
 
 def main():
@@ -213,7 +236,7 @@ def main():
     )
 
     setup_curobo_logger("warn")
-    past_pose = None
+    # past_pose = None
     n_obstacle_cuboids = 30
     n_obstacle_mesh = 10
 
@@ -303,7 +326,7 @@ def main():
 
     usd_help.load_stage(my_world.stage)
     init_world = False
-    cmd_state_full = None
+    # cmd_state_full = None
     step = 0
     add_extensions(simulation_app, args.headless_mode)
     while simulation_app.is_running():
@@ -367,10 +390,10 @@ def main():
             joint_names=sim_js_names,
         )
         cu_js = cu_js.get_ordered_joint_state(mpc.rollout_fn.joint_names)
-        if cmd_state_full is None:
+        if planner.cmd_state_full is None:
             planner.current_state.copy_(cu_js)
         else:
-            current_state_partial = cmd_state_full.get_ordered_joint_state(
+            current_state_partial = planner.cmd_state_full.get_ordered_joint_state(
                 mpc.rollout_fn.joint_names
             )
             planner.current_state.copy_(current_state_partial)
@@ -383,31 +406,32 @@ def main():
         cube_position, cube_orientation = target.get_world_pose()
         target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
         goals = {planner.ee_link_name: target_pose}
-        cmd_state_full = planner.yield_action(goals)
+        planner.cmd_state_full = planner.yield_action(goals)
 
         # mpc_result = mpc.step(planner.current_state, max_attempts=2)
         # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
         succ = True  # ik_result.success.item()
         # cmd_state_full = mpc_result.js_action
-        common_js_names = []
-        idx_list = []
-        for x in sim_js_names:
-            if x in cmd_state_full.joint_names:
-                idx_list.append(robot.get_dof_index(x))
-                common_js_names.append(x)
+        # common_js_names = []
+        # idx_list = []
+        # for x in sim_js_names:
+        #     if x in planner.cmd_state_full.joint_names:
+        #         idx_list.append(robot.get_dof_index(x))
+        #         common_js_names.append(x)
 
-        cmd_state = cmd_state_full.get_ordered_joint_state(common_js_names)
-        cmd_state_full = cmd_state
+        # cmd_state = planner.cmd_state_full.get_ordered_joint_state(common_js_names)
+        # planner.cmd_state_full = cmd_state
 
-        art_action = ArticulationAction(
-            cmd_state.position.view(-1).cpu().numpy(),
-            # cmd_state.velocity.cpu().numpy(),
-            joint_indices=idx_list,
-        )
+        # art_action = ArticulationAction(
+        #     cmd_state.position.view(-1).cpu().numpy(),
+        #     # cmd_state.velocity.cpu().numpy(),
+        #     joint_indices=idx_list,
+        # )
         # positions_goal = articulation_action.joint_positions
-        if step_index % 1000 == 0:
-            print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
+        art_action = planner.convert_action_to_isaac(sim_js_names, robot.get_dof_index)
+        # if step_index % 1000 == 0:
+        #     print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
 
         if succ:
             # set desired joint angles obtained from IK:
