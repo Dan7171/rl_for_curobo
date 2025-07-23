@@ -527,130 +527,138 @@ class CuAgent:
 
 def main(meta_cfg_path):
     
-    meta_cfg = load_yaml(meta_cfg_path)
-    agent_cfg = meta_cfg["agents"][0]
-    planner_type = agent_cfg["planner"] 
-    robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
-    robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
-
-    setup_curobo_logger("warn")
-
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
+    my_world.scene.add_default_ground_plane()
     stage = my_world.stage
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
-    
     usd_help = UsdHelper()
     usd_help.load_stage(my_world.stage)
-
     tensor_args = TensorDeviceType()
-    j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
-    default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world) # isaac robot
-    articulation_controller = robot.get_articulation_controller()
-
-    world_cfg_table = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    )
-    world_cfg_table.cuboid[0].pose[2] -= 0.02
-
-    world_cfg1 = WorldConfig.from_dict(
-        load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
-    ).get_mesh_world()
-    world_cfg1.mesh[0].name += "_mesh"
-    world_cfg1.mesh[0].pose[2] = -10.5
-
-    world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
-    usd_help.add_world_to_stage(world_cfg, base_frame="/World")
-    my_world.scene.add_default_ground_plane()
+    setup_curobo_logger("warn")
     
-    if planner_type == 'cumotion':
-        _motion_gen_config = MotionGenConfig.load_from_robot_config(
-            robot_cfg,
-            world_cfg,
-            tensor_args,
-            collision_checker_type=CollisionCheckerType.MESH,
-            use_cuda_graph=True,
-            interpolation_dt=0.03,
-            collision_cache={"obb": 30, "mesh": 10},
-            collision_activation_distance=0.025,
-            fixed_iters_trajopt=True,
-            maximum_trajectory_dt=0.5,
-            ik_opt_iters=500,
-        )
-        _plan_config = MotionGenPlanConfig(
-            enable_graph=False,
-            enable_graph_attempt=4,
-            max_attempts=10,
-            time_dilation_factor=0.5,
-        )
-        _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
+    
+    meta_cfg = load_yaml(meta_cfg_path)
+    agent_list = meta_cfg["agents"]
+    for agent_cfg in agent_list:
+        planner_type = agent_cfg["planner"]
+        if len(agent_list) > 1:
+            robot_cfg_path = agent_cfg["robot"]
+        else:
+            robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
+        robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
+        j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
+        default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]    
+        robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world) # isaac robot
+        articulation_controller = robot.get_articulation_controller()
+        world_cfg = WorldConfig()
+
+
+    # world_cfg_table = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # )
+    # world_cfg_table.cuboid[0].pose[2] -= 0.02
+
+    # world_cfg1 = WorldConfig.from_dict(
+    #     load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
+    # ).get_mesh_world()
+    # world_cfg1.mesh[0].name += "_mesh"
+    # world_cfg1.mesh[0].pose[2] = -10.5
+
+    # world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
+    # usd_help.add_world_to_stage(world_cfg, base_frame="/World")
+    # my_world.scene.add_default_ground_plane()
+    
+
+
+    
+        if planner_type == 'cumotion':
+            _motion_gen_config = MotionGenConfig.load_from_robot_config(
+                robot_cfg,
+                world_cfg,
+                tensor_args,
+                collision_checker_type=CollisionCheckerType.MESH,
+                use_cuda_graph=True,
+                interpolation_dt=0.03,
+                collision_cache={"obb": 30, "mesh": 10},
+                collision_activation_distance=0.025,
+                fixed_iters_trajopt=True,
+                maximum_trajectory_dt=0.5,
+                ik_opt_iters=500,
+            )
+            _plan_config = MotionGenPlanConfig(
+                enable_graph=False,
+                enable_graph_attempt=4,
+                max_attempts=10,
+                time_dilation_factor=0.5,
+            )
+            _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
+            
+            planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
         
-        planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
-    
-    elif planner_type == 'mpc':
-        _mpc_config = MpcSolverConfig.load_from_robot_config(
-            robot_cfg,
-            world_cfg,
-            **meta_cfg["general"]["solver_cfgs"]["mpc"],
-        )
-        planner = MpcPlanner(_mpc_config)
-    else:
-        raise ValueError(f"Invalid planner type: {planner_type}")
-    
-    cu_agent = CuAgent(planner, cu_world_wrapper_cfg=meta_cfg["agents"][0]["cu_world_wrapper"])
+        elif planner_type == 'mpc':
+            _mpc_config = MpcSolverConfig.load_from_robot_config(
+                robot_cfg,
+                world_cfg,
+                **meta_cfg["general"]["solver_cfgs"]["mpc"],
+            )
+            planner = MpcPlanner(_mpc_config)
+        else:
+            raise ValueError(f"Invalid planner type: {planner_type}")
+        
+        cu_agent = CuAgent(planner, cu_world_wrapper_cfg=meta_cfg["agents"][0]["cu_world_wrapper"])
 
     # # get link poses at retract configuration:
     # retract_kinematics_state = planner.solver.kinematics.get_state(planner.solver.get_retract_config().view(1, -1))
     # links_retract_poses = retract_kinematics_state.link_pose
     # ee_retract_pose = retract_kinematics_state.ee_pose
     
-    ee_target_prim_path = "/World/target"
-    ee_retract_pose = planner.plan_goals[planner.ee_link_name]
-    _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
-    ee_target = cuboid.VisualCuboid(
-        ee_target_prim_path,
-        position=_initial_ee_target_pose[:3],
-        orientation=_initial_ee_target_pose[3:],
-        color=np.array([1.0, 0, 0]),
-        size=0.05,
-    )
+        ee_target_prim_path = "/World/target"
+        ee_retract_pose = planner.plan_goals[planner.ee_link_name]
+        _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
+        ee_target = cuboid.VisualCuboid(
+            ee_target_prim_path,
+            position=_initial_ee_target_pose[:3],
+            orientation=_initial_ee_target_pose[3:],
+            color=np.array([1.0, 0, 0]),
+            size=0.05,
+        )
 
     # create target prims for constrained links (optional):
     
-    constr_link_name_to_target_prim = {}
-    constr_links_targets_prims_paths = []
-    for link_name in planner.constrained_links_names:
-        if link_name != planner.ee_link_name:
-            target_path = "/World/target_" + link_name
-            constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
-            _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
-            
-            color = np.random.randn(3) * 0.2
-            color[0] += 0.5
-            color[1] = 0.5
-            color[2] = 0.0
-            constr_link_name_to_target_prim[link_name] = cuboid.VisualCuboid(
-                target_path,
-                position=np.array(_initial_constrained_link_target_pose[:3]),
-                orientation=np.array(_initial_constrained_link_target_pose[3:]),
-                color=color,
-                size=0.05,
-            )
-            constr_links_targets_prims_paths.append(target_path)
-    
-    cu_world_never_add = meta_cfg["agents"][0]["cu_world_wrapper"]["never_add"] + [
-        robot_prim_path,
-        ee_target_prim_path,
-        "/World/defaultGroundPlane",
-        "/curobo", 
-        *constr_links_targets_prims_paths
-        ]
-    cu_agent.reset_col_model_from_isaac_sim(usd_help, robot_prim_path, ignore_substrings=cu_world_never_add)
-    cu_world_never_update = meta_cfg["agents"][0]["cu_world_wrapper"]["never_update"] # objects which we assume that are added in reset_col_model_from_isaac_sim, but we don't want to update them (e.g. because they are static)
-    
+        constr_link_name_to_target_prim = {}
+        constr_links_targets_prims_paths = []
+        for link_name in planner.constrained_links_names:
+            if link_name != planner.ee_link_name:
+                target_path = "/World/target_" + link_name
+                constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
+                _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
+                
+                color = np.random.randn(3) * 0.2
+                color[0] += 0.5
+                color[1] = 0.5
+                color[2] = 0.0
+                constr_link_name_to_target_prim[link_name] = cuboid.VisualCuboid(
+                    target_path,
+                    position=np.array(_initial_constrained_link_target_pose[:3]),
+                    orientation=np.array(_initial_constrained_link_target_pose[3:]),
+                    color=color,
+                    size=0.05,
+                )
+                constr_links_targets_prims_paths.append(target_path)
+        
+        cu_world_never_add = meta_cfg["agents"][0]["cu_world_wrapper"]["never_add"] + [
+            robot_prim_path,
+            ee_target_prim_path,
+            "/World/defaultGroundPlane",
+            "/curobo", 
+            *constr_links_targets_prims_paths
+            ]
+        cu_agent.reset_col_model_from_isaac_sim(usd_help, robot_prim_path, ignore_substrings=cu_world_never_add)
+        cu_world_never_update = meta_cfg["agents"][0]["cu_world_wrapper"]["never_update"] # objects which we assume that are added in reset_col_model_from_isaac_sim, but we don't want to update them (e.g. because they are static)
+        
     i = 0
     spheres = None
     while simulation_app.is_running():

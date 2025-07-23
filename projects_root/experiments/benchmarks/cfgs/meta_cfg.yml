@@ -48,7 +48,7 @@ general:
   
 agents:  
   - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     X_robot: [0, 0, 0.0, 1, 0, 0, 0]
     X_targets: [
       [0.5, 0.0, 0.5, 0, 1, 0, 0], # first target is the ee target, rest are constrained links targets (optional)
