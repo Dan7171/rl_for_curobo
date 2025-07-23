@@ -184,6 +184,10 @@ class MpcPlanner:
             self.past_pose = goals[self.ee_link_name]
 
 
+        mpc_result = self.solver.step(self.current_state, max_attempts=2)
+        return mpc_result.js_action
+
+
 def main():
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
@@ -345,35 +349,14 @@ def main():
             obstacles.add_obstacle(world_cfg_table.cuboid[0])
             mpc.world_coll_checker.load_collision_model(obstacles)
 
-        # position and orientation of target virtual cube:
-        cube_position, cube_orientation = target.get_world_pose()
-        target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
-        goals = {planner.ee_link_name: target_pose}
-        action = planner.yield_action(goals)
 
-        # if planner.past_pose is None:
-        #     planner.past_pose = cube_position + 1.0
-
-        # if np.linalg.norm(cube_position - planner.past_pose) > 1e-3:
-        #     # Set EE teleop goals, use cube for simple non-vr init:
-        #     ee_translation_goal = cube_position
-        #     ee_orientation_teleop_goal = cube_orientation
-        #     ik_goal = Pose(
-        #         position=tensor_args.to_device(ee_translation_goal),
-        #         quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
-        #     )
-        #     planner.goal_buffer.goal_pose.copy_(ik_goal)
-        #     mpc.update_goal(planner.goal_buffer)
-        #     planner.past_pose = cube_position
-
-        # if not changed don't call curobo:
 
         # get robot current state:
         sim_js = robot.get_joints_state()
         if sim_js is None:
             print("sim_js is None")
             continue
-        js_names = robot.dof_names
+        # js_names = robot.dof_names
         sim_js_names = robot.dof_names
 
         cu_js = JointState(
@@ -396,11 +379,17 @@ def main():
         common_js_names = []
         planner.current_state.copy_(cu_js)
 
-        mpc_result = mpc.step(planner.current_state, max_attempts=2)
+        # position and orientation of target virtual cube:
+        cube_position, cube_orientation = target.get_world_pose()
+        target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
+        goals = {planner.ee_link_name: target_pose}
+        cmd_state_full = planner.yield_action(goals)
+
+        # mpc_result = mpc.step(planner.current_state, max_attempts=2)
         # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
         succ = True  # ik_result.success.item()
-        cmd_state_full = mpc_result.js_action
+        # cmd_state_full = mpc_result.js_action
         common_js_names = []
         idx_list = []
         for x in sim_js_names:
