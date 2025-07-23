@@ -115,9 +115,10 @@ class Plan:
             return cmd
             
 class CuPlanner:
-    def __init__(self, solver:Union[MotionGen, MpcSolver], solver_config:Union[MotionGenConfig, MpcSolverConfig]):
+    def __init__(self, solver:Union[MotionGen, MpcSolver], solver_config:Union[MotionGenConfig, MpcSolverConfig], ordered_j_names:list[str]):
         self.solver = solver
         self.solver_config = solver_config
+        self.ordered_j_names = ordered_j_names
         
         # setup all "goal-constrained" links (links that we can set goals for): ee (musts) + (optional) extra links:
         self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
@@ -186,10 +187,11 @@ class CuPlanner:
 
 class MpcPlanner(CuPlanner):
     def __init__(self, mpc_config:MpcSolverConfig):
-        self._cmd_state_full = None
-        self._current_js = None
+        solver = MpcSolver(mpc_config)
+        solver_config = mpc_config
+        ordered_j_names = solver.rollout_fn.joint_names
 
-        super().__init__(MpcSolver(mpc_config), mpc_config)
+        super().__init__(solver,solver_config,ordered_j_names)
         self.solver:MpcSolver = self.solver # only for linter
         self._set_goals_to_retract_state()
         
@@ -294,7 +296,11 @@ class CumotionPlanner(CuPlanner):
         To use with single arm, pass inputs (robot config, urdf, etc) as in this example: curobo/examples/isaac_sim/motion_gen_reacher.py
         robot config for example: curobo/src/curobo/content/configs/robot/ur10e.yml or franka.yml
         """
-        super().__init__(MotionGen(motion_gen_config), motion_gen_config)
+        solver = MotionGen(motion_gen_config)
+        solver_config = motion_gen_config
+        ordered_j_names = solver.kinematics.joint_names
+        
+        super().__init__(solver, solver_config, ordered_j_names)
         self.plan_config = plan_config
         self.warmup_config = warmup_config
         self.solver:MotionGen = self.solver # only for linter 
@@ -644,7 +650,6 @@ def main(meta_cfg_path):
     
     i = 0
     spheres = None
-    cmd_state_full = None # mpc only
     while simulation_app.is_running():
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -680,6 +685,7 @@ def main(meta_cfg_path):
         if sim_js is None:
             print("sim_js is None")
             continue
+
         sim_js_names = robot.dof_names
         cu_js = JointState(
             position=tensor_args.to_device(sim_js.positions),
@@ -688,22 +694,8 @@ def main(meta_cfg_path):
             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
             joint_names=sim_js_names,
         )
-        if isinstance(planner, CumotionPlanner):
-            cu_js = cu_js.get_ordered_joint_state(planner.solver.kinematics.joint_names)
+        cu_js = cu_js.get_ordered_joint_state(planner.ordered_j_names)
         
-        elif isinstance(planner, MpcPlanner): # todo: try for both mpc and cumotion as in cumotion (if)
-            cu_js = cu_js.get_ordered_joint_state(planner.solver.rollout_fn.joint_names)
-            if planner._cmd_state_full is None:
-                planner._current_js.copy_(cu_js)
-            else:
-                current_state_partial = planner._cmd_state_full.get_ordered_joint_state(
-                    planner.solver.rollout_fn.joint_names
-                )
-                planner._current_js.copy_(current_state_partial)
-                planner._current_js.joint_names = current_state_partial.joint_names
-            common_js_names = []
-            planner._current_js.copy_(cu_js)
-
         if args.visualize_spheres and step_index % 2 == 0:
             sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
 

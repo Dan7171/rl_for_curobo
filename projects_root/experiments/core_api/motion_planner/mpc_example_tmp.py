@@ -150,7 +150,6 @@ class MpcPlanner:
         self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
         if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
             self.constrained_links_names.remove(self.ee_link_name)
-        # self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
 
 
 
