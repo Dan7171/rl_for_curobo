@@ -610,8 +610,6 @@ def main(meta_cfg_path):
                                                     my_world,
                                                     position=base_pose[:3], 
                                                     orientation=base_pose[3:], 
-                                                    # orientation=np.array([1,0,0,0]), 
-                                                    # initialize_world=False,
                                                     )
         
         sim_robot = SimRobot(robot, robot_prim_path)
