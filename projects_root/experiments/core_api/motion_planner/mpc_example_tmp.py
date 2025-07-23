@@ -210,6 +210,18 @@ class MpcPlanner:
         )
         return art_action
 
+    def update_state(self, cu_js:JointState):
+        if self.cmd_state_full is None:
+            self.current_state.copy_(cu_js)
+        else:
+            current_state_partial = self.cmd_state_full.get_ordered_joint_state(
+                self.solver.rollout_fn.joint_names
+            )
+            self.current_state.copy_(current_state_partial)
+            self.current_state.joint_names = current_state_partial.joint_names
+            # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
+        # common_js_names = []
+        self.current_state.copy_(cu_js)
 
 def main():
     # assuming obstacles are in objects_path:
@@ -390,17 +402,7 @@ def main():
             joint_names=sim_js_names,
         )
         cu_js = cu_js.get_ordered_joint_state(mpc.rollout_fn.joint_names)
-        if planner.cmd_state_full is None:
-            planner.current_state.copy_(cu_js)
-        else:
-            current_state_partial = planner.cmd_state_full.get_ordered_joint_state(
-                mpc.rollout_fn.joint_names
-            )
-            planner.current_state.copy_(current_state_partial)
-            planner.current_state.joint_names = current_state_partial.joint_names
-            # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
-        common_js_names = []
-        planner.current_state.copy_(cu_js)
+        planner.update_state(cu_js)
 
         # position and orientation of target virtual cube:
         cube_position, cube_orientation = target.get_world_pose()
