@@ -144,8 +144,12 @@ class MpcPlanner:
         self.solver = solver
         self.solver_config = solver_config
         self.cmd_state_full = None
-        self.past_pose = None
+        # self.past_pose = None
+        self.plan_goals:dict[str, Pose] = {} 
         self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
+        self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
+        if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
+            self.constrained_links_names.remove(self.ee_link_name)
         # self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
 
 
@@ -167,22 +171,35 @@ class MpcPlanner:
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
 
+    def _outdated_plan_goals(self, goals:dict[str, Pose]):
+        """
+        check if the current plan goals are outdated
+        """
+        for link_name, goal in goals.items():
+            if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
+                print(f"plan goals are outdated for link {link_name}")
+                return True
+        return False
     
     def yield_action(self, goals:dict[str, Pose]):
-        if self.past_pose is None \
-            or torch.norm(goals[self.ee_link_name].position - self.past_pose.position) > 1e-3 \
-            or torch.norm(goals[self.ee_link_name].quaternion - self.past_pose.quaternion) > 1e-3: 
-            
-            # ee_translation_goal = goals[self.ee_link_name].position
-            # ee_orientation_teleop_goal = goals[self.ee_link_name].quaternion
-            # # ik_goal = Pose(
-            # #     position=tensor_args.to_device(p_ee_target),
-            # #     quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
-            # # )
 
+        if self._outdated_plan_goals(goals):
+            self.plan_goals = goals
+            self.goal_buffer.goal_pose = goals[self.ee_link_name]
+            for link_name in self.constrained_links_names:
+                if link_name in goals:
+                    self.goal_buffer.links_goal_pose[link_name] = goals[link_name]
+            self.solver.update_goal(self.goal_buffer)
+            # self.past_pose = goals[self.ee_link_name]
+
+
+        # if self.past_pose is None \
+        #     or torch.norm(goals[self.ee_link_name].position - self.past_pose.position) > 1e-3 \
+        #     or torch.norm(goals[self.ee_link_name].quaternion - self.past_pose.quaternion) > 1e-3: 
+            
             self.goal_buffer.goal_pose.copy_(goals[self.ee_link_name])
             self.solver.update_goal(self.goal_buffer)
-            self.past_pose = goals[self.ee_link_name]
+            # self.past_pose = goals[self.ee_link_name]
 
 
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
@@ -248,7 +265,6 @@ def main():
     )
 
     setup_curobo_logger("warn")
-    # past_pose = None
     n_obstacle_cuboids = 30
     n_obstacle_mesh = 10
 
@@ -409,40 +425,10 @@ def main():
         target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
         goals = {planner.ee_link_name: target_pose}
         planner.cmd_state_full = planner.yield_action(goals)
-
-        # mpc_result = mpc.step(planner.current_state, max_attempts=2)
-        # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
-
-        succ = True  # ik_result.success.item()
-        # cmd_state_full = mpc_result.js_action
-        # common_js_names = []
-        # idx_list = []
-        # for x in sim_js_names:
-        #     if x in planner.cmd_state_full.joint_names:
-        #         idx_list.append(robot.get_dof_index(x))
-        #         common_js_names.append(x)
-
-        # cmd_state = planner.cmd_state_full.get_ordered_joint_state(common_js_names)
-        # planner.cmd_state_full = cmd_state
-
-        # art_action = ArticulationAction(
-        #     cmd_state.position.view(-1).cpu().numpy(),
-        #     # cmd_state.velocity.cpu().numpy(),
-        #     joint_indices=idx_list,
-        # )
-        # positions_goal = articulation_action.joint_positions
         art_action = planner.convert_action_to_isaac(sim_js_names, robot.get_dof_index)
-        # if step_index % 1000 == 0:
-        #     print(mpc_result.metrics.feasible.item(), mpc_result.metrics.pose_error.item())
+        articulation_controller.apply_action(art_action)
 
-        if succ:
-            # set desired joint angles obtained from IK:
-            for _ in range(1):
-                articulation_controller.apply_action(art_action)
-
-        else:
-            carb.log_warn("No action is being taken.")
-
+        
 
 ############################################################
 
