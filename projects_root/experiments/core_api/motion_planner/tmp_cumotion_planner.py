@@ -147,10 +147,12 @@ class CuPlanner:
         links_retract_poses = retract_kinematics_state.link_pose
         ee_retract_pose = retract_kinematics_state.ee_pose
 
-        # update the plan goals buffer accordingly:
-        self.plan_goals = {self.ee_link_name: ee_retract_pose}
+        initial_goals_R = {self.ee_link_name: ee_retract_pose}
         for link_name in self.constrained_links_names:
-            self.plan_goals[link_name] = links_retract_poses[link_name]
+            initial_goals_R[link_name] = links_retract_poses[link_name]
+
+        initial_goals_W = self.goals_dict_R_to_W(self.base_pose, initial_goals_R)
+        self.plan_goals = initial_goals_W
 
     def yield_action(self, **kwargs)->Optional[JointState]:
         pass
@@ -248,9 +250,7 @@ class MpcPlanner(CuPlanner):
             links_goal_pose={link_name:initial_goals_R[link_name] for link_name in self.constrained_links_names}
         )
         
-        # self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
-        # for link_name in self.constrained_links_names:
-        #     self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
+  
         
         self.solver_goal_buf_R = self.solver.setup_solve_single(goal_R, 1)
         self.solver.update_goal(self.solver_goal_buf_R)
