@@ -3,15 +3,30 @@ general: # templates to fallback to if not specified in the agent cfg
         verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
         never_add: []
         never_update: [] 
-  solver_cfgs:
-    cumotion:
-      use_cuda_graph: False 
-      step_dt: 0.02
-      use_cuda_graph_metrics: True
+  cumotion:
+    motion_gen_cfg:
+      use_cuda_graph: True 
       self_collision_check: True
       collision_checker_type: MESH
+      collision_cache: {"obb": 15, "mesh": 15}
+      interpolation_dt: 0.03
+      collision_activation_distance: 0.025
+      fixed_iters_trajopt: True
+      maximum_trajectory_dt: 0.5
+      ik_opt_iters: 500
     
-    mpc:
+    motion_gen_plan_cfg:
+      enable_graph: False
+      enable_graph_attempt: 4
+      max_attempts: 10
+      time_dilation_factor: 0.5
+    
+    warmup_cfg:
+      enable_graph: True
+      warmup_js_trajopt: False
+    
+  mpc:
+    mpc_solver_cfg:
       override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
       use_cuda_graph: False 
       step_dt: 0.03
@@ -52,7 +67,7 @@ general: # templates to fallback to if not specified in the agent cfg
   
 agents:  
   - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     X_robot: [0, 0, 0.0, 1, 0, 0, 0]
     X_targets: [
       [0.5, 0.0, 0.5, 0, 1, 0, 0], # first target is the ee target, rest are constrained links targets (optional)

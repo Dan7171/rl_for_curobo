@@ -593,30 +593,19 @@ def main(meta_cfg_path):
                 robot_cfg,
                 world_cfg,
                 tensor_args,
-                collision_checker_type=CollisionCheckerType.MESH,
-                use_cuda_graph=True,
-                interpolation_dt=0.03,
-                collision_cache={"obb": 30, "mesh": 10},
-                collision_activation_distance=0.025,
-                fixed_iters_trajopt=True,
-                maximum_trajectory_dt=0.5,
-                ik_opt_iters=500,
+                **agent_cfg["cumotion"]["motion_gen_cfg"] if "cumotion" in agent_cfg and "motion_gen_cfg" in agent_cfg["cumotion"] else meta_cfg["general"]["cumotion"]["motion_gen_cfg"],
             )
             _plan_config = MotionGenPlanConfig(
-                enable_graph=False,
-                enable_graph_attempt=4,
-                max_attempts=10,
-                time_dilation_factor=0.5,
+                **agent_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in agent_cfg and "motion_gen_plan_cfg" in agent_cfg["cumotion"] else meta_cfg["general"]["cumotion"]["motion_gen_plan_cfg"],
             )
-            _warmup_config = {'enable_graph':True, 'warmup_js_trajopt':False}
-            
+            _warmup_config = dict(agent_cfg["cumotion"]["warmup_cfg"] if "cumotion" in agent_cfg and "warmup_cfg" in agent_cfg["cumotion"] else meta_cfg["general"]["cumotion"]["warmup_cfg"])            
             planner = CumotionPlanner(_motion_gen_config, _plan_config, _warmup_config)
         
         elif planner_type == 'mpc':
             _mpc_config = MpcSolverConfig.load_from_robot_config(
                 robot_cfg,
                 world_cfg,
-                **meta_cfg["general"]["solver_cfgs"]["mpc"],
+                **agent_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in agent_cfg and "mpc_solver_cfg" in agent_cfg["mpc"] else meta_cfg["general"]["mpc"]["mpc_solver_cfg"],
             )
             planner = MpcPlanner(_mpc_config)
         else:
