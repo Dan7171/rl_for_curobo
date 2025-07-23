@@ -141,8 +141,9 @@ def draw_points(rollouts: torch.Tensor):
 class MpcPlanner:
     def __init__(self, solver: MpcSolver, solver_config: MpcSolverConfig):
         self.solver = solver
-        self.solver_config = solver_config        
-        # self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
+        self.solver_config = solver_config     
+
+        self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
         # self.constrained_links_names:list[str] = copy.copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
 
 
@@ -163,7 +164,24 @@ class MpcPlanner:
         
         self.solver.update_goal(self.goal_buffer)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
+
+        self.past_pose = None
     
+    def yield_action(self, goals:dict[str, Pose]):
+        if self.past_pose is None \
+            or torch.norm(goals[self.ee_link_name].position - self.past_pose.position) > 1e-3 \
+            or torch.norm(goals[self.ee_link_name].quaternion - self.past_pose.quaternion) > 1e-3: 
+            
+            # ee_translation_goal = goals[self.ee_link_name].position
+            # ee_orientation_teleop_goal = goals[self.ee_link_name].quaternion
+            # # ik_goal = Pose(
+            # #     position=tensor_args.to_device(p_ee_target),
+            # #     quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+            # # )
+
+            self.goal_buffer.goal_pose.copy_(goals[self.ee_link_name])
+            self.solver.update_goal(self.goal_buffer)
+            self.past_pose = goals[self.ee_link_name]
 
 
 def main():
@@ -329,21 +347,24 @@ def main():
 
         # position and orientation of target virtual cube:
         cube_position, cube_orientation = target.get_world_pose()
+        target_pose = Pose(tensor_args.to_device(cube_position), tensor_args.to_device(cube_orientation))
+        goals = {planner.ee_link_name: target_pose}
+        action = planner.yield_action(goals)
 
-        if past_pose is None:
-            past_pose = cube_position + 1.0
+        # if planner.past_pose is None:
+        #     planner.past_pose = cube_position + 1.0
 
-        if np.linalg.norm(cube_position - past_pose) > 1e-3:
-            # Set EE teleop goals, use cube for simple non-vr init:
-            ee_translation_goal = cube_position
-            ee_orientation_teleop_goal = cube_orientation
-            ik_goal = Pose(
-                position=tensor_args.to_device(ee_translation_goal),
-                quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
-            )
-            planner.goal_buffer.goal_pose.copy_(ik_goal)
-            mpc.update_goal(planner.goal_buffer)
-            past_pose = cube_position
+        # if np.linalg.norm(cube_position - planner.past_pose) > 1e-3:
+        #     # Set EE teleop goals, use cube for simple non-vr init:
+        #     ee_translation_goal = cube_position
+        #     ee_orientation_teleop_goal = cube_orientation
+        #     ik_goal = Pose(
+        #         position=tensor_args.to_device(ee_translation_goal),
+        #         quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+        #     )
+        #     planner.goal_buffer.goal_pose.copy_(ik_goal)
+        #     mpc.update_goal(planner.goal_buffer)
+        #     planner.past_pose = cube_position
 
         # if not changed don't call curobo:
 
