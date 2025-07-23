@@ -271,7 +271,7 @@ class MpcPlanner(CuPlanner):
 
         full_ordered_js_action = full_js_action.get_ordered_joint_state(common_js_names)
         self._cmd_state_full = full_ordered_js_action
-        
+
         articulation_action = ArticulationAction(
             full_ordered_js_action.position.view(-1).cpu().numpy(),
             # full_ordered_js_action.velocity.cpu().numpy(),
@@ -303,18 +303,6 @@ class CumotionPlanner(CuPlanner):
         self.plan = Plan()
         self._set_goals_to_retract_state()
     
-        # get link poses at retract configuration:
-        # retract_kinematics_state = self.solver.kinematics.get_state(self.solver.get_retract_config().view(1, -1))
-        # links_retract_poses = retract_kinematics_state.link_pose
-        # ee_retract_pose = retract_kinematics_state.ee_pose
-
-        # # all constrained links that we can set goals for (ee + optional extra links):
-        # self.ee_link_name:str = self.solver.kinematics.ee_link # end effector link name, based on the robot config
-        # self.constrained_links_names:list[str] = copy(self.solver.kinematics.link_names) # all links that we can set goals for (except ee link), based on the robot config
-        # if self.ee_link_name in self.constrained_links_names: # ee link should not be in extra links, so we remove it
-        #     self.constrained_links_names.remove(self.ee_link_name)
-    
-        # self.plan_goals:dict[str, Pose] = {}
 
             
     def _plan_new(self, 
@@ -713,7 +701,6 @@ def main(meta_cfg_path):
                 )
                 planner._current_js.copy_(current_state_partial)
                 planner._current_js.joint_names = current_state_partial.joint_names
-                # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
             common_js_names = []
             planner._current_js.copy_(cu_js)
 
