@@ -607,15 +607,9 @@ def main(meta_cfg_path):
         robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
         base_pose = agent_cfg["base_pose"]
         
-        X_R = Pose.from_list(base_pose[:3] + base_pose[3:])  
-        usd_help.add_subroot('/World', f'/World/robot_{agent_idx}', X_R)
-        robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, subroot=f'/World/robot_{agent_idx}', robot_name=f'robot_{agent_idx}', position=base_pose[:3], orientation=base_pose[3:], initialize_world=True) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
-        
-        # robot, robot_prim_path = add_robot_to_scene(robot_cfg, 
-        #                                             my_world,
-        #                                             position=base_pose[:3], 
-        #                                             orientation=base_pose[3:], 
-        #                                             )
+    
+        usd_help.add_subroot('/World', f'/World/robot_{agent_idx}', Pose.from_list(base_pose))
+        robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, subroot=f'/World/robot_{agent_idx}', robot_name=f'robot_{agent_idx}', position=base_pose[:3], orientation=base_pose[3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         
         sim_robot = SimRobot(robot, robot_prim_path)
         world_cfg = WorldConfig()
@@ -699,7 +693,9 @@ def main(meta_cfg_path):
                     never_add += list(other.sim_robot.link_name_to_target_path.values())
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
-                
+    
+    my_world.reset()
+    my_world.play()
     i = 0
     spheres = None
     while simulation_app.is_running():

@@ -68,7 +68,7 @@ default: # default values to fallback to if not specified in the agent cfg
 
   
 cu_agents:  
-  - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion
     cu_world_wrapper:
         verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
@@ -78,7 +78,7 @@ cu_agents:
 
     
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     cu_world_wrapper:
         verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
         never_add: []
