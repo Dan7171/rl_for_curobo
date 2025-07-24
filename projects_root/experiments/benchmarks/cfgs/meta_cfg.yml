@@ -40,7 +40,6 @@ default: # default values to fallback to if not specified in the agent cfg
 
   
 
-
   debug:    
     visualize_spheres: # visualize collision spheres of the robot
       is_on: false 
@@ -65,7 +64,6 @@ default: # default values to fallback to if not specified in the agent cfg
     real:
       is_on: False
     
-
   
 cu_agents:  
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
@@ -75,17 +73,16 @@ cu_agents:
         never_add: []
         never_update: [] 
     base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-
+    # col_pred_with: [1] # indics of all robots that the current robot should predict collisions with. Will be used only if override_particle_file of the robot will have the custom cost for dynamic obs and if collision prediction of the planner is supproted (currently only mpc supports it)
     
-  - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'cumotion' # mpc or cumotion
-    cu_world_wrapper:
-        verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
-        never_add: []
-        never_update: [] 
-    base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-
-    
+  # - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion
+  #   cu_world_wrapper:
+  #       verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
+  #       never_add: []
+  #       never_update: [] 
+  #   base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+  #   col_pred_with: [0]
 
       
 

@@ -1,30 +1,10 @@
  
 
-try:
-    # Third Party
-    import isaacsim
-except ImportError:
-    pass
 
-
-# Third Party
-from collections.abc import Callable
-from copy import copy, deepcopy
-import dataclasses
-from typing import Optional
-from typing_extensions import List
-from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
-import torch
-from warp.context import Union
-
-from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
-from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
-from projects_root.utils.world_model_wrapper import WorldModelWrapper
-
-a = torch.zeros(4, device="cuda:0")
-
+ 
 # Standard Library
 import argparse
+
 
 parser = argparse.ArgumentParser()
 
@@ -34,23 +14,19 @@ parser.add_argument(
     default=None,
     help="To run headless, use one of [native, websocket], webrtc might not work.",
 )
-# parser.add_argument(
-#     "--visualize_spheres",
-#     action="store_true",
-#     help="When True, visualizes robot spheres",
-#     default=False,
-# )
-
 parser.add_argument(
     "--robot", type=str, default="dual_ur10e.yml", help="robot configuration to load"
 )
 args = parser.parse_args()
 
-############################################################
+try:
+    # Third Party
+    import isaacsim
+except ImportError:
+    pass
 
-# Third Party
+# Isaac Sim
 from omni.isaac.kit import SimulationApp
-
 simulation_app = SimulationApp(
     {
         "headless": args.headless_mode is not None,
@@ -59,44 +35,51 @@ simulation_app = SimulationApp(
     }
 )
 
-# Third Party
-
 from projects_root.examples.helper import add_extensions
 add_extensions(simulation_app, args.headless_mode)
 
+from abc import abstractmethod
+from collections.abc import Callable
+from copy import copy, deepcopy
+import dataclasses
+import os
+from threading import Lock
+from typing import Optional, Tuple, Dict, Union, Callable
+from curobo.types.tensor import T_DOF
+from typing_extensions import List
+from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
+import torch
 import carb
 import numpy as np
 from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid, sphere
-
-########### OV #################
 from omni.isaac.core.utils.types import ArticulationAction
+from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 
 # CuRobo
-from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-
-# from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
+from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
 from curobo.geom.sdf.world import CollisionCheckerType
 from curobo.geom.types import WorldConfig
 from curobo.rollout.rollout_base import Goal
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from curobo.types.robot import JointState, RobotConfig
-from curobo.types.state import JointState
+from curobo.types.state import JointState, FilterCoeff
 from curobo.util.logger import setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
 from projects_root.utils.helper import add_robot_to_scene
-############################################################
-
-
-########### OV #################;;;;;
-
-
-############################################################
-
-        
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import init_runtime_topics, get_topics
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
+from curobo.rollout.cost.custom.arm_base.dynamic_obs_cost import DynamicObsCost
+from curobo.opt.particle.parallel_mppi import ParallelMPPI
+from curobo.rollout.arm_reacher import ArmReacher
+from curobo.wrap.wrap_mpc import WrapMpc
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
+from projects_root.utils.world_model_wrapper import WorldModelWrapper
+from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
+from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres
 class Plan:
     def __init__(self, cmd_idx=0, cmd_plan:Optional[JointState]=None):
         self.cmd_idx = cmd_idx
@@ -115,6 +98,10 @@ class Plan:
             self.cmd_idx += 1
             return cmd
             
+
+
+
+
 class CuPlanner:
     def __init__(self,
         base_pose:list[float], 
@@ -217,13 +204,32 @@ class CuPlanner:
             goals_W[link_name] = Pose(position=self.solver.tensor_args.to_device(torch.from_numpy(p_goal_W)), quaternion=self.solver.tensor_args.to_device(torch.from_numpy(q_goal_W)))
         return goals_W
 
+    @abstractmethod
+    def get_estimated_plan(self, **kwargs):
+        pass
+
+    
+    def get_col_pred(self,**kwargs)->Optional[DynamicObsCollPredictor]:
+        return None
+    
+    @abstractmethod
+    def update_col_pred(self, plans_board, t, idx, col_pred_with):
+        pass
+    
+
 class MpcPlanner(CuPlanner):
-    def __init__(self, base_pose:list[float], solver_config: MpcSolverConfig):
-        solver = MpcSolver(solver_config)
+
+    def __init__(self, base_pose:list[float], solver_config_dict: dict, robot_cfg:dict, world_cfg:WorldConfig, particle_file_path:str):
+                
+        _solver_cfg = MpcSolverConfig.load_from_robot_config(
+            robot_cfg,
+            world_cfg,
+            **solver_config_dict
+        )
+        solver = MpcSolver(_solver_cfg)
         ordered_j_names = solver.rollout_fn.joint_names
         self.cmd_state_full = None
-
-        super().__init__(base_pose, solver, solver_config, ordered_j_names)
+        super().__init__(base_pose, solver, _solver_cfg, ordered_j_names)
         
         retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
         joint_names = self.solver.rollout_fn.joint_names
@@ -255,8 +261,12 @@ class MpcPlanner(CuPlanner):
         self.solver_goal_buf_R = self.solver.setup_solve_single(goal_R, 1)
         self.solver.update_goal(self.solver_goal_buf_R)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
-
         
+        self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(robot_cfg))
+        self.particle_cfg_dict = load_yaml(particle_file_path)
+        self.particle_file_path = particle_file_path
+        self.solver_cfg_dict = solver_config_dict        
+        self.dyn_obs_cost_in_cfg = "cost" in self.particle_cfg_dict and "custom" in self.particle_cfg_dict["cost"] and "arm_base" in self.particle_cfg_dict["cost"]["custom"] and "dynamic_obs_cost" in self.particle_cfg_dict["cost"]["custom"]["arm_base"]
 
         
     def yield_action(self, goals:dict[str, Pose]):
@@ -287,40 +297,10 @@ class MpcPlanner(CuPlanner):
             )
             self.current_state.copy_(current_state_partial)
             self.current_state.joint_names = current_state_partial.joint_names
-            # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
-        # common_js_names = []
+
         self.current_state.copy_(cu_js)
     
-    # def _set_goals_to_retract_state(self):
-        
-        
-    #     # get the current state of the robot (at retract configuration) :
-    #     assert isinstance(self.solver, MpcSolver) # only for linter
-    #     retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
-    #     joint_names = self.solver.rollout_fn.joint_names
-    #     state = self.solver.rollout_fn.compute_kinematics(
-    #         JointState.from_position(retract_cfg, joint_names=joint_names)
-    #     )
-    #     self._current_js = JointState.from_position(retract_cfg, joint_names=joint_names)
-        
-    #     _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq) # set target to retract
-    #     _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names} # set target to retract
-    #     goal = Goal(
-    #         current_state=self._current_js,
-    #         goal_state=JointState.from_position(retract_cfg, joint_names=joint_names),
-    #         goal_pose=_initial_ee_target_pose,
-    #         # links_goal_pose=_initial_constrained_links_target_poses,
-    #     )
-    #     self._goal_buffer = self.solver.setup_solve_single(goal, 1)
-    #     self.solver.update_goal(self._goal_buffer)
-    #     mpc_result = self.solver.step(self._current_js, max_attempts=2)
-
-    #     # update the plan goals buffer accordingly:
-    #     self.plan_goals = {self.ee_link_name: _initial_ee_target_pose}
-    #     for link_name in self.constrained_links_names:
-    #         self.plan_goals[link_name] = _initial_constrained_links_target_poses[link_name]
-        
-    #     self._cmd_state_full = None
+    
 
     def convert_action_to_isaac(self, full_js_action:JointState, sim_js_names:list[str], order_finder:Callable)->ArticulationAction:
         """
@@ -344,6 +324,281 @@ class MpcPlanner(CuPlanner):
         )
         return articulation_action
     
+
+    def get_policy_means(self) -> torch.Tensor:
+        """Returning the mean values of the mpc policy ([Horizon x N actuated dofs] torch tensor) .
+        Each entry entry i,j is the acceleration command for the joint j at the time step i (i.e. the i-th step in the horizon).
+        The accelerations are then applied at every time step, in order to compute the constant velocity of each joint during state and therfore its target position at the end of this command.
+        This target position will be sent to the articulation controller.
+
+        Returns:
+            policy means: torch.Tensor, [Horizon x N actuated dofs]
+        """
+        return self.solver.solver.optimizers[0].mean_action.squeeze(0)
+    
+    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True) -> Optional[dict]:
+        """
+        Get the H steps "estimated plan" for the robot of the mpc agent. 
+        By "estimated" we mean that mpc doesent really have a plan, so instead we use the mean of the mpc policy to estimate the plan, 
+        and then we "reverse" it (from acceleration to velocity to position) to get the estimated "plan" of the robot.
+
+        Args:
+            planner (MpcPlanner): the mpc planner
+            include_task_space (bool): 
+                if True, return the plan in task space (All positions are in the world frame).
+                Plan includes collision spheres plan (with valid spheres only or not), and the plan of robot links (each for its frame pose).
+                else, return the plan in joint space (returns joint positions).
+
+            n_steps (int): the number of steps in the plan. If -1, return the entire (full available horizon) plan. Defaults to -1.
+
+            valid_spheres_only (bool): if True, return the plan with valid spheres only.
+
+            joints_state (isaac_JointsState): the current joint state of the robot in isaac sim joint state format 
+            (for real robot, wrap the joint states of the robot with this isaac_JointsState class).
+
+
+        Returns:
+            torch.Tensor: the H steps plan.
+        """
+        
+        def map_nested_tensors(d: dict, fn: Callable[[torch.Tensor], torch.Tensor]) -> dict:
+            """Recursively apply fn to all tensor leaves in a nested dict."""
+            out = {}
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    out[k] = map_nested_tensors(v, fn)
+                elif isinstance(v, torch.Tensor):
+                    out[k] = fn(v)
+                else:
+                    raise TypeError(f"Unsupported value type at key '{k}': {type(v)}")
+            return out
+       
+        pi_mpc_means = self.get_policy_means() # (H x num of joints) accelerations (each action is an acceleration vector)
+
+        plan = {'joint_space':
+                {     
+                    'acc': pi_mpc_means, # these are mpc policy means
+                    'vel': torch.zeros(pi_mpc_means.shape), # direct result of acc
+                    'pos': torch.zeros(pi_mpc_means.shape) # direct result of vel
+                }
+            }
+        
+        _wrap_mpc = self.solver.solver
+        _arm_reacher = _wrap_mpc.safety_rollout
+        _kinematics_model = _arm_reacher.dynamics_model
+        _state_filter = _kinematics_model.state_filter
+        filter_coefficients_solver = _state_filter.filter_coeff # READ ONLY: the original coefficients from the mpc planner (used only to read from. No risk that will be changed unexpectdely)
+        control_dt_solver = _state_filter.dt # READ ONLY: the delta between steps in the trajectory, as set in solver. This is what the mpc assumes time delta between steps in horizon is.s
+
+        
+        # translate the plan from joint accelerations only to joint velocities and positions 
+        # js_state = self.get_curobo_joint_state() # current joint state (including pos, vel, acc)
+        apply_js_filter = True # True: Reduce the step size from prev state to new state from 1 to something smaller (depends on the filter coefficients)
+        custom_filter = False # True: Use a custom filter coefficients to play with the filter weights
+        if apply_js_filter:
+            if custom_filter:
+                filter_coeff = FilterCoeff(0.01, 0.01, 0.0, 0.0) # custom one to play with the filter weights
+            else:
+                filter_coeff = filter_coefficients_solver # the one used by the mpc planner
+        n_dofs = pi_mpc_means.shape[1]
+        # dof_names = self.get_dof_names()
+        js_state = JointState(torch.from_numpy(joints_state.positions[:n_dofs]), torch.from_numpy(joints_state.velocities[:n_dofs]), torch.zeros(n_dofs), dof_names,torch.zeros(n_dofs), self.solver.tensor_args)
+        js_state_prev = None
+        # js_state.jerk = torch.zeros_like(js_state.velocity) # we don't really need this for computations, but it has to be initiated to avoid exceptions in the filtering
+        
+        for h, action in enumerate(pi_mpc_means):
+            if apply_js_filter:
+                js_state = self._filter_joint_state(js_state_prev, js_state, filter_coeff) 
+            next_js_state = self._integrate_acc(action, js_state, control_dt_solver) # this will be the new joint state after applying the acceleration the mpc policy commands for this step for dt_planning seconds
+            plan['joint_space']['vel'][h] = next_js_state.velocity.squeeze()
+            plan['joint_space']['pos'][h] = next_js_state.position.squeeze()
+            js_state = next_js_state # JointState(next_js_state.position, next_js_state.velocity, next_js_state.acceleration,js_state.joint_names, js_state.jerk)
+            js_state_prev = js_state
+        
+        if include_task_space: # get plan in task space (robot spheres)            
+            # compute forward kinematics
+            p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(self.solver.tensor_args.to_device(plan['joint_space']['pos'])) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+            task_space_plan = {'ee': {'p': p_eeplan, 'q': q_eeplan}, 'links': {'p': p_linksplan, 'q': q_linksplan}, 'spheres': {'p': prad_spheresPlan[:,:,:3], 'r': prad_spheresPlan[:,:,3]}}
+            plan['task_space'] = task_space_plan
+            
+            # remove spheres that are not valid (i.e. negative radius)
+            if valid_spheres_only: # removes the (4) extra spheres reserved for simulating a picked object as part of the robot after picked
+                plan['task_space']['spheres']['p'] = plan['task_space']['spheres']['p'][:, :n_col_spheres_valid]
+                plan['task_space']['spheres']['r'] = plan['task_space']['spheres']['r'][:, :n_col_spheres_valid]
+            
+
+            # express in world frame:
+            for key in plan['task_space'].keys():
+                
+                
+                if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys():
+                    
+                    self_transform = self.base_pose # [*list(self.p_R), *list(self.q_R)]
+                    pKey = plan['task_space'][key]['p']
+                    if 'q' in plan['task_space'][key].keys():
+                        qKey = plan['task_space'][key]['q']
+                    else:
+                        qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
+                        qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
+                    
+                    # OPTIMIZED VERSION: Use ultra-fast specialized function
+                    X_world = transform_poses_batched_optimized_for_spheres(torch.cat([pKey, qKey], dim=-1), self_transform)
+                    pKey = X_world[...,:3]
+                    qKey = X_world[...,3:]
+                    plan['task_space'][key]['p'] = pKey
+                    plan['task_space'][key]['q'] = qKey
+
+         
+                
+            
+            # take only the first n_steps
+            if not n_steps == -1:        
+                plan = map_nested_tensors(plan, lambda x: x[:n_steps])
+    
+        return plan 
+        
+    def _filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients:FilterCoeff):
+        """ Reducing the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
+        
+        # NOTE! Similar to integrate_acc, this is a cloned version of another function from original curobo code.
+        As in integrate_acc, the logic of the function is the same as in the original function, and it was cloned to avoid changing the internal attributes and cause unexpected side effects.
+
+        The original function is: filter_joint_state at curobo/src/curobo/util/state_filter.py (row 60)
+        The original function is used by the mpc solver to reduce the sharpness of changes between following joint states, to simulate a smoother and more realistic robot movement () .
+        Its invoking the blend() function at curobo/src/curobo/types/state.py row 170 
+        The goal of the original function is to reduce the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
+        (If there is no previous state, it just returns the new state as the weighted sum is 100% of the new state)
+
+        Motivation of implementing this function and not using the original one:
+        Since there they save the previous state in the object itself, we had to clone the function to avoid changing the internal attributes and cause unexpected side effects.
+        The original function is used with the coefficients of the FilterCoeff class, taken from "self.filter_coeff" in the JointState object (see call atrow 68 curobo/src/curobo/util/state_filter.py).
+        (Similar to the motivation of implementing integrate_acc and not using the original one)
+        Args:
+            js_state_prev (JointState): the previous joint state (position, velocity, acceleration, jerk). (Jerk is not used though)
+            js_state_new (JointState): the new joint state (position, velocity, acceleration, jerk). (Jerk is not used though)
+            filter_coefficients (FilterCoeff): the filter coefficients. Replacing curobo/src/curobo/util/state_filter.py row 68 self.filter_coeff passed argument. For stable computations, 
+            use the original coefficients, which are saved in js_state_prev.filter_coeff. See example in get_estimated_plan() of the mpc autonomous franka example.
+
+        Returns:
+            JointState: A re-weighted joint state (blending the previous and new states).
+        """
+        if js_state_prev is None:
+            return js_state_new
+        
+        # re-weighting the new state to be closer to the previous state
+        js_state_new.position[:] = filter_coefficients.position * js_state_new.position + (1.0 - filter_coefficients.position) * js_state_prev.position
+        js_state_new.velocity[:] = filter_coefficients.velocity * js_state_new.velocity + (1.0 - filter_coefficients.velocity) * js_state_prev.velocity
+        js_state_new.acceleration[:] = filter_coefficients.acceleration * js_state_new.acceleration + (1.0 - filter_coefficients.acceleration) * js_state_prev.acceleration
+        js_state_new.jerk[:] = filter_coefficients.jerk * js_state_new.jerk + (1.0 - filter_coefficients.jerk) * js_state_prev.jerk
+        return js_state_new
+    
+    def _integrate_acc(self, acceleration: T_DOF,cmd_joint_state: JointState, dt_planning: float) -> JointState:
+        """
+        This function integrates the acceleration to get the velocity and position of the joint state.
+        Given a joint state and an acceleration, it returns the next joint state after integrating the acceleration.
+        
+        NOTE! This function is a cloned version with no significant changes of the function "integrate_acc" in curobo/src/curobo/util/state_filter.py.
+        The reason for cloning this is because when calling the original function, it changes internal attributes of the kinematics_model object and this is not something we wanted.
+        All the changes we made here compared to the original function are just to avoid changing the internal attributes of the kinematics_model object.
+        The logic of the function is the same as in the original function,
+        The original function is called during the MPC solver step, in order to compute how the acceleration (which is the mpc policy action) in a given input joint state will affect the state and change the joints velocity and position, 
+        explained in more detail in the  "how it works" section below.
+
+
+        
+        
+        
+        How it works?
+        First, the integration causes the next joint state's velocity to be the current velocity plus the acceleration times the time step. 
+        That means that we just change our cosntant velocity at previous state to a new constant velocity which is the previous velocity plus the acceleration times the duration of the step (dt_planning).
+        Then, we compute the new joint position as the previous position plus the velocity times the duration of the step (dt_planning).
+        
+        Example:
+            In:
+                acceleration = [0.1, -0.2, -0.4, 0.5, 0.0, 0.4, 0.8] # the input command -(7 dof). rad/sec^2
+                current_joint_state: # start state
+                    .acceleration = [WE DONT CARE] (because we override it in the new state)
+                    .velocity = [2.0, 0.4, 0.2, -0.4, -0.4, 1.5, 0.1] # the velocity of the joints at the start state (rad/sec)            
+                    .position = [-0.5, 0.0, 0.2, 0.0, -0.3, 0.2, 0.0] # the position of the joints at the start state (rad)
+                    
+                dt_planning = 0.1 # normally less, 0.5 only for the example
+            Out:
+                new_joint_state.acceleration # the acceleration of the joints at the beginning of the next step:  [0.1, -0.2, -0.4, 0.5, 0.0, 0.4, 0.8] # copied from the input command
+                new_joint_state.velocity # the velocity of the joints at the beginning of the next step: [2.01, 0.38, 0.16, -0.35, -0.4, 1.54, 0.18] (Way of computing: [2.0 + 0.1*0.1, 0.4 + -0.2*0.1, 0.2 + -0.4*0.1, -0.4 + 0.5*0.1, -0.4 + 0.0*0.1, 1.5 + 0.4*0.1, 0.1 + 0.8*0.1])
+                new_joint_state.position # the position of the joints at the beginning of the next step: [-0.299,  0.038,  0.216, -0.035, -0.34 ,  0.354,  0.018] (Way of computing: [for i in range(len(current_joint_state.position)): current_joint_state.position[i] + new_joint_state.velocity[i]*0.1])
+                
+            
+        Args:
+            acceleration (T_DOF): A tensor of shape (num of dogs,) representing the acceleration action (command) to apply to the joint state.
+            cmd_joint_state (JointState): some joint state of the robot to apply the acceleration to (contains it's current position, velocity, acceleration, jerk).
+            dt_planning (float): the duration (in seconds) of the step to integrate the acceleration over. Necessary to determine the new state's position (after the acceleration to the joints was applied, and therefore the velocity is changed).
+            Normally, set this to the the time you assume that elapses between each two consecutive steps in the control loop (for example in the MPC case btw, this is also the time that the planner considers between each two consecutive steps in the horizon, passed by step_dt in the MpcSolverConfig).
+
+
+        Returns:
+            JointState: The new joint state (the state at the beginning of the next step (at the end of the current step),
+            after integrating the new acceleration for the duration of dt_planning).
+        """
+        next_joint_state = cmd_joint_state.clone() # next joint state after integrating the acceleration
+        next_joint_state.acceleration[:] = acceleration # set the acceleration at the new state to the input command acceleration
+        next_joint_state.velocity[:] = cmd_joint_state.velocity + next_joint_state.acceleration * dt_planning # compute the new velocity given the current velocity, the acceleration and the dt which means for how long the acceleration is applied
+        next_joint_state.position[:] = cmd_joint_state.position + next_joint_state.velocity * dt_planning # compute the new position given the current position and the new velocity
+        if cmd_joint_state.jerk is None:
+            next_joint_state.jerk = acceleration * 0.0 # it's not used for computations, but it has to be initiated to avoid exceptions
+        return next_joint_state
+    
+
+    def _get_solver(self) -> MpcSolver:
+        return self.solver
+
+    def _get_wrap_mpc(self) -> WrapMpc:
+        return self._get_solver().solver
+    
+    def _get_safety_rollout(self) -> ArmReacher:
+        return self._get_wrap_mpc().safety_rollout
+    
+    def _get_wrap_mpc_optimizer(self) -> ParallelMPPI:
+        return self._get_wrap_mpc().optimizers[0]
+
+    def _get_custom_arm_base_costs(self) -> dict:
+        return self._get_wrap_mpc_optimizer().rollout_fn._custom_arm_base_costs
+    
+    def _get_custom_arm_reacher_costs(self) -> dict:
+        return self._get_wrap_mpc_optimizer().rollout_fn._custom_arm_reacher_costs
+    
+    def get_col_pred(self)->Optional[DynamicObsCollPredictor]:
+        for instance in self._get_custom_arm_base_costs().values():
+            if isinstance(instance, DynamicObsCost):
+                return instance.col_pred
+        raise ValueError("No col_pred found in the rollout_fn")
+
+
+    def update_col_pred(self, plans_board, t, idx, col_pred_with):
+        
+        col_pred = self.get_col_pred()
+        if col_pred is None:
+            return
+
+        if t == 0:
+            # Initialize collision predictor on first iteration
+            # Set radii for each robot that this robot collides with
+            for j in col_pred_with:
+                if plans_board[j] is None:
+                    continue
+                rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0].to(self.solver.tensor_args)
+                col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
+            
+            # Set own robot radii 
+            col_pred.set_own_rads(plans_board[idx]['task_space']['spheres']['r'][0].to(self.solver.tensor_args))
+        else:
+            # Update positions for each robot that this robot collides with
+            for j in col_pred_with:
+                if plans_board[j] is None:
+                    continue
+                H = self.particle_cfg_dict['model']['horizon']
+                plan_robot_j = plans_board[j]['task_space']['spheres'] 
+                plan_robot_j_horizon = plan_robot_j['p'][:H].to(self.solver.tensor_args)
+                col_pred.update_robot_spheres(j, plan_robot_j_horizon)
 class CumotionPlanner(CuPlanner):
                 
     def __init__(self,
@@ -458,7 +713,11 @@ class CumotionPlanner(CuPlanner):
             action = deepcopy(self.solver.get_full_js(action))
         
         return action
-        
+    
+
+    def get_estimated_plan(self):
+        return None # TODO
+
 
 class SimRobot:
     def __init__(self, robot, path:str):
@@ -467,20 +726,127 @@ class SimRobot:
         self.articulation_controller = self.robot.get_articulation_controller()
         self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
         self.target_path_to_target_prim = {} 
-        
+        self._cur_js = None
     
+    def get_js(self, sync_new=True) -> isaac_JointsState:
+        if sync_new:
+            js = self.robot.get_joints_state() # from simulation. TODO: change "robot" to sim_robot and add a real_robot attribute
+            self._cur_js = js # update the last synced state
+        else:
+            js = self._cur_js # return the last synced state
+        return js
+
+# class PlanPublisher:
+#     def __init__(self,planner:Union[MpcPlanner, CumotionPlanner], crm:CudaRobotModel, dof_names:list[str], tensor_args:TensorDeviceType, n_col_spheres:int, n_col_spheres_valid:int):
+#         self.planner = planner
+#         self.crm = crm # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+#         self.dof_names = dof_names
+#         self.tensor_args = tensor_args
+#         self.n_col_spheres = n_col_spheres
+#         self.n_col_spheres_valid = n_col_spheres_valid
+
+    
+#     @abstractmethod
+#     def publish_to_board(self, **kwargs):
+#         """
+#         publishing plans to plan board (env topics)
+#         """
+#         pass
+
+# class MpcPlanPublisher(PlanPublisher):
+#     def __init__(self, planner:MpcPlanner, crm:CudaRobotModel, dof_names:list[str], tensor_args:TensorDeviceType, n_col_spheres:int, n_col_spheres_valid:int):
+#         super().__init__(planner, crm, dof_names, tensor_args, n_col_spheres, n_col_spheres_valid)
+        
+#     def publish_to_board(self, robot_idx:int, plans_board, plans_lock:Lock, joints_state:isaac_JointsState):
+#         with plans_lock:
+#             plans_board[robot_idx] = self.get_estimated_plan(valid_spheres_only=False,joints_state=joints_state)
+    
+
+
+# class CumotionPlanPublisher(PlanPublisher):
+#     pass
+
+def publish_robot_context(robot_idx:int, robot_context:dict,robot_pose:list, n_obstacle_spheres:int, robot_sphere_count:int, mpc_cfg:dict, col_pred_with_robot:List[int], mpc_config_paths:List[str], robot_config_paths:List[str], robot_sphere_counts_split:List[Tuple[int, int]]):
+    """
+    Publish robot context ("topics") to the environment topics.
+    TODO: Re-design this whole approach, give better names to the variables ()
+    """
+
+    # Populate robot context directly in env_topics[i]
+    robot_context["env_id"] = 0
+    robot_context["robot_id"] = robot_idx
+    robot_context["robot_pose"] = robot_pose
+    robot_context["n_obstacle_spheres"] = n_obstacle_spheres
+    
+    robot_context["n_own_spheres"] = robot_sphere_count
+    robot_context["horizon"] = mpc_cfg["model"]["horizon"]
+    robot_context["n_rollouts"] = mpc_cfg["mppi"]["num_particles"]
+    robot_context["col_pred_with"] = col_pred_with_robot
+    
+    # Add new fields for sparse sphere functionality
+    robot_context["mpc_config_paths"] = mpc_config_paths
+    robot_context["robot_config_paths"] = robot_config_paths
+    robot_context["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
+
+def calculate_robot_sphere_count(robot_cfg):
+    """
+    Calculate the number of collision spheres for a robot from its configuration.
+    
+    Args:
+        robot_cfg: Robot configuration dictionary
+        
+    Returns:
+        int: Total number of collision spheres (base + extra)
+    """
+    robots_collision_spheres_configs_parent_dir = "curobo/src/curobo/content/configs/robot"
+
+    # Get collision spheres configuration
+    collision_spheres = robot_cfg["kinematics"]["collision_spheres"]
+    
+    # Handle two cases:
+    # 1. collision_spheres is a string path to external file (e.g., Franka)
+    # 2. collision_spheres is inline dictionary (e.g., UR5e)
+    if isinstance(collision_spheres, str):
+        # External file case  
+        collision_spheres_cfg = load_yaml(os.path.join(robots_collision_spheres_configs_parent_dir, collision_spheres))
+        collision_spheres_dict = collision_spheres_cfg["collision_spheres"]
+    else:
+        # Inline dictionary case
+        collision_spheres_dict = collision_spheres
+    
+    # Count spheres by counting entries in each link's sphere list
+    sphere_count = 0
+    for link_name, spheres in collision_spheres_dict.items():
+        if isinstance(spheres, list):
+            sphere_count += len(spheres)
+    
+    # Add extra collision spheres
+    extra_spheres = robot_cfg["kinematics"].get("extra_collision_spheres", {})
+    extra_sphere_count = 0
+    for obj_name, count in extra_spheres.items():
+        extra_sphere_count += count
+        
+    return sphere_count, extra_sphere_count
 class CuAgent:
     def __init__(self, 
+                idx:int,
                 planner:CuPlanner,
                 cu_world_wrapper_cfg:dict,
+                robot_cfg_path:str,
                 robot_cfg:dict,
                 sim_robot:Optional[SimRobot]=None,
+                col_pred_with:List[int]=[]
                 ):
         
+        self.idx = idx
         self.planner = planner        
         self.base_pose = planner.base_pose
         self.sim_robot = sim_robot
+        self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
+        self.col_pred_with = col_pred_with
+        self.n_spheres_valid, self.n_spheres_extra = calculate_robot_sphere_count(robot_cfg)
+        self.n_spheres_total = self.n_spheres_valid + self.n_spheres_extra
 
 
         # See wrapper's docstring to understand the motivation for the wrapper.
@@ -578,7 +944,13 @@ class CuAgent:
         print("WorldModelWrapper reset finished successfully!")
         print(f"Known prims in collision world: {self.cu_world_wrapper.get_known_prims()}")        
 
+ 
 
+    def update_col_pred(self, plans_board, t):
+        self.planner.update_col_pred(plans_board, t, self.idx, self.col_pred_with)
+    
+    
+        
 
 def main(meta_cfg_path):
     
@@ -598,6 +970,9 @@ def main(meta_cfg_path):
     meta_cfg = load_yaml(meta_cfg_path)
     agent_list = meta_cfg["cu_agents"]
     cu_agents:List[CuAgent] = []
+    
+    
+    
     for agent_idx, agent_cfg in enumerate(agent_list):
         planner_type = agent_cfg["planner"]
         if len(agent_list) > 1:
@@ -628,21 +1003,22 @@ def main(meta_cfg_path):
             planner = CumotionPlanner(base_pose, _motion_gen_config, _plan_config, _warmup_config)
         
         elif planner_type == 'mpc':
-            _mpc_config = MpcSolverConfig.load_from_robot_config(
-                robot_cfg,
-                world_cfg,
-                **agent_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in agent_cfg and "mpc_solver_cfg" in agent_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"],
-            )
-            planner = MpcPlanner(base_pose, _mpc_config)
+            mpc_solver_cfg_dict = agent_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in agent_cfg and "mpc_solver_cfg" in agent_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]
+            particle_file_path = mpc_solver_cfg_dict["override_particle_file"] if "override_particle_file" in mpc_solver_cfg_dict else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]
+            planner = MpcPlanner(base_pose, mpc_solver_cfg_dict, robot_cfg, world_cfg, particle_file_path)
         else:
             raise ValueError(f"Invalid planner type: {planner_type}")
         
         cu_world_wrapper_cfg = agent_cfg["cu_world_wrapper"] if "cu_world_wrapper" in agent_cfg else meta_cfg["default"]["cu_world_wrapper"]
+        
         a = CuAgent(
+            agent_idx,
             planner, 
             cu_world_wrapper_cfg=cu_world_wrapper_cfg,
+            robot_cfg_path=robot_cfg_path,
             robot_cfg=robot_cfg,
-            sim_robot=sim_robot,
+            sim_robot=sim_robot, # optional, when using simulation
+            col_pred_with=agent_cfg["col_pred_with"] if "col_pred_with" in agent_cfg else [],
             # **agent_cfg["cu_agent_cfg"] if "cu_agent_cfg" in agent_cfg else meta_cfg["default"]["cu_agent_cfg"],
         )
         cu_agents.append(a)
@@ -694,10 +1070,36 @@ def main(meta_cfg_path):
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
+    # init runtime topics and get robot sphere counts
+    init_runtime_topics(n_envs=1, robots_per_env=len(agent_list)) 
+    runtime_topics = get_topics()
+    env_topics:List[dict] = runtime_topics.get_default_env() if runtime_topics is not None else []
+    # robot_sphere_counts_split:List[Tuple[int, int]] = [calculate_robot_sphere_count(cu_agent.robot_cfg) for cu_agent in cu_agents] # split[0] = 'valid' (base, no extra), split[1] = extra
+    # robot_sphere_counts:List[int] = [split[0] + split[1] for split in robot_sphere_counts_split] # total (base + extra) sphere count (base + extra)
+    # robot_sphere_counts_no_extra:List[int] = [split[0] for split in robot_sphere_counts_split] # valid (base only) sphere count (base only)
+    
+    mpc_cfg_paths = [cu_agent.planner.particle_file_path for cu_agent in cu_agents if isinstance(cu_agent.planner, MpcPlanner)]
+    robot_cfg_paths = [cu_agent.robot_cfg_path for cu_agent in cu_agents]
+    robot_sphere_counts_split = [(cu_agent.n_spheres_valid, cu_agent.n_spheres_extra) for cu_agent in cu_agents]
+    for agent_idx in range(len(cu_agents)):
+        if isinstance(cu_agents[agent_idx].planner, MpcPlanner):
+            # if cu_agents[agent_idx].planner.dyn_obs_cost_in_cfg:
+            n_obstacle_spheres = sum(cu_agents[other_idx].n_spheres_total for other_idx in cu_agents[agent_idx].col_pred_with)
+            publish_robot_context(agent_idx, env_topics[agent_idx], cu_agents[agent_idx].base_pose, n_obstacle_spheres, cu_agents[agent_idx].n_spheres_total, cu_agents[agent_idx].planner.particle_cfg_dict, cu_agents[agent_idx].col_pred_with, mpc_cfg_paths, robot_cfg_paths, robot_sphere_counts_split)
+            
+
     my_world.reset()
     my_world.play()
     i = 0
+    
+    # debug setup
+    vis_spheres = meta_cfg["default"]["debug"]["visualize_spheres"]["is_on"]
+    viz_spheres_delta = meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0
     spheres = None
+    
+    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_list))]
+    plans_lock = Lock()
+    t = 0
     while simulation_app.is_running():
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -718,37 +1120,74 @@ def main(meta_cfg_path):
                     a.sim_robot.robot._articulation_view.set_max_efforts(
                         values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
                     )
-        
+                
         if step_index < 20:
             continue
         
-        # update collision model for all agents
+        
         for a in cu_agents:
+            
+            planner = a.planner
             if a.sim_robot is not None:
+                ctrl_dof_names = a.sim_robot.robot.dof_names
+                ctrl_dof_indices = a.sim_robot.robot.get_dof_index
+                
+                
+                
+                # publish
+                js = a.sim_robot.get_js(sync_new=False)
+                if js is not None:    
+                    if isinstance(planner, MpcPlanner):
+                        
+                        plan = planner.get_estimated_plan(ctrl_dof_names, a.n_spheres_valid, js, valid_spheres_only=False)
+                        with plans_lock:
+                            plans_board[a.idx] = plan
+                            
+                # sense
+                # sense obstacles
                 a.update_col_model_from_isaac_sim(
                     a.sim_robot.path, 
                     usd_help, 
                     ignore_list=a.cu_world_wrapper_update_policy["never_add"]+a.cu_world_wrapper_update_policy["never_update"], 
                     paths_to_search_obs_under=["/World"]
                 )
-                robot = a.sim_robot.robot
-                planner = a.planner
-                sim_js = robot.get_joints_state()
-                if sim_js is None:
+                
+                # sense joints
+                js = a.sim_robot.get_js(sync_new=True) 
+                if js is None:
                     print("sim_js is None")
                     continue
-                sim_js_names = robot.dof_names
-                cu_js = JointState(
-                    position=tensor_args.to_device(sim_js.positions),
-                    velocity=tensor_args.to_device(sim_js.velocities), # * 0.0? 
-                    acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
-                    jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
-                    joint_names=sim_js_names,
-                ).get_ordered_joint_state(planner.ordered_j_names)
+                z = tensor_args.to_device(js.positions) * 0.0
+                cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), z, ctrl_dof_names,z).get_ordered_joint_state(planner.ordered_j_names)
                 if isinstance(planner, MpcPlanner):
                     planner.update_state(cu_js)
-
-                if meta_cfg["default"]["debug"]["visualize_spheres"]["is_on"] and step_index % meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0:
+                
+                # sense goals
+                goals = {}
+                for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
+                    target_prim = a.sim_robot.target_path_to_target_prim[target_path]
+                    p_target, q_target = target_prim.get_world_pose()
+                    goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
+                
+                # sense plans
+                with plans_lock:
+                    a.update_col_pred(plans_board, t)
+                
+                # plan
+                if isinstance(planner, CumotionPlanner):
+                    action = planner.yield_action(goals, cu_js, js.velocities)
+                elif isinstance(planner, MpcPlanner):
+                    action = planner.yield_action(goals)
+                else:
+                    raise ValueError(f"Invalid planner type: {planner_type}")
+                
+                # act
+                if action is not None:
+                    isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
+                    a.sim_robot.articulation_controller.apply_action(isaac_action)
+                
+                # debug
+                if vis_spheres and step_index % viz_spheres_delta == 0:
                     sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
 
                     if spheres is None:
@@ -768,27 +1207,8 @@ def main(meta_cfg_path):
                             spheres[si].set_world_pose(position=np.ravel(s.position))
                             spheres[si].set_radius(float(s.radius))
                 
-
-                goals = {}
-                for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
-                    target_prim = a.sim_robot.target_path_to_target_prim[target_path]
-                    p_target, q_target = target_prim.get_world_pose()
-                    goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
-                
-                # yield action from the planner:
-                if isinstance(planner, CumotionPlanner):
-                    action = planner.yield_action(goals, cu_js, sim_js.velocities)
-                elif isinstance(planner, MpcPlanner):
-                    action = planner.yield_action(goals)
-                else:
-                    raise ValueError(f"Invalid planner type: {planner_type}")
-                
-                if action is not None:
-                    isaac_action = planner.convert_action_to_isaac(action, sim_js_names, robot.get_dof_index)
-                    a.sim_robot.articulation_controller.apply_action(isaac_action)
-                
-                
-
+              
+        t += 1
                 
     simulation_app.close()
 

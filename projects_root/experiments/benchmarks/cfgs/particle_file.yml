@@ -70,6 +70,24 @@ cost:
     weight: 100.0 #50.0
     max_nlimit: 0.25 #0.2
 
+  custom:  
+    published_info:
+      spheres_to_exclude_in_sparse_mode: []  # User will fill this later
+
+    arm_base:
+      dynamic_obs_cost:
+        module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
+        class_name: "DynamicObsCost"
+        config_class_name: "DynamicObsCostConfig"
+        weight: 100.0  
+        terminal: False
+        sparse_steps:
+          use: True
+          ratio: 0.2
+        
+        sparse_spheres:
+          use: True
+
 
 
 mppi:
