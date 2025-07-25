@@ -43,12 +43,14 @@ from collections.abc import Callable
 from copy import copy, deepcopy
 import dataclasses
 import os
-from threading import Lock
+from time import time, sleep
+from threading import Lock, Event, Thread
 from typing import Optional, Tuple, Dict, Union, Callable
 from curobo.types.tensor import T_DOF
 from typing_extensions import List
 from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 import torch
+import random
 import carb
 import numpy as np
 from omni.isaac.core import World
@@ -896,7 +898,7 @@ class CuAgent:
                 robot_cfg_path:str,
                 robot_cfg:dict,
                 sim_robot:Optional[SimRobot]=None,
-                col_pred_with:List[int]=[]
+                pub_sub_cfg:dict={}
                 ):
         
         self.idx = idx
@@ -905,7 +907,9 @@ class CuAgent:
         self.sim_robot = sim_robot
         self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
-        self.col_pred_with = col_pred_with
+        self.col_pred_with = pub_sub_cfg["sub"]["to"]
+
+        self.pub_sub_cfg = pub_sub_cfg
         # self.n_spheres_valid, self.n_spheres_extra = calculate_robot_sphere_count(robot_cfg)
         # self.n_spheres_total = self.n_spheres_valid + self.n_spheres_extra
 
@@ -1008,11 +1012,71 @@ class CuAgent:
  
 
     def update_col_pred(self, plans_board, t):
-        self.planner.update_col_pred(plans_board, t, self.idx, self.col_pred_with)
+        self.planner.update_col_pred(plans_board, t, self.idx, self.pub_sub_cfg["sub"]["to"])
     
     
-        
+    def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, stop_event, plans_board, get_t):
+        while not stop_event.is_set():
 
+            # wait for new time step
+            with t_lock:
+                cur_step = get_t()
+            if cur_step == last_step:
+                sleep(1e-7)
+                continue
+            last_step = cur_step
+
+            # publish 
+            if OBS_PREDICTION:
+                sim_js = None
+                real_js = None
+                if SIMULATING:
+                    sim_js = r.get_sim_joint_state(sync_new=False) # synced at sense()
+                if REAL:
+                    pass # real_js = # TODO: r.get_real_joint_state()
+                r.publish(plans, plans_lock,sim_js,real_js)
+        
+            
+                
+            # sense
+            if SIMULATING:
+                update_obs_callback = (r.update_obs_from_sim, {'usd_help':usd_help, 'ignore_list':cu_world_never_add + cu_world_never_update})
+                update_target_callback = (r.update_target_from_sim, {})
+                update_joint_state_callback = (r.update_cu_js_from_sim, {})
+                
+                if r.use_col_pred:
+                    r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, physx_lock, plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+                else:
+                    r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, physx_lock)
+
+            if REAL:
+                update_obs_callback = (r.update_obs_in_real, {})
+                update_target_callback = (lambda x: print(f"TODO: Implement update_target_callback in real world"), {})
+                update_joint_state_callback = (lambda x: print(f"TODO: Implement update_joint_state_callback in real world"), {})
+                # TODO:
+                # if r.use_col_pred:
+                #     r.sense(update_obs_callback, update_target_callback, update_joint_state_callback,, plans, col_pred_with[robot_idx], cur_step, tensor_args, robot_idx,plans_lock)
+                # else:
+                #     r.sense(update_obs_callback, update_target_callback, update_joint_state_callback, physx_lock=None)
+            
+            # plan (our modified mpc planning, (torch-heavy, no PhysX))
+            action = r.plan(max_attempts=2)
+            
+            # command 
+            r.command(action, num_times=1, physx_lock=physx_lock)
+
+    def should_publish_plan(self, t:int)->bool:
+        def bernoulli():
+            return random.random() <= self.pub_sub_cfg["pub"]["pr"]
+        if self.pub_sub_cfg["pub"]["is_on"]:
+            if self.pub_sub_cfg["pub"]["is_dt_in_sec"]:
+                if not hasattr(self, "_last_pub_time"):
+                    self._last_pub_time = time()
+                return time() - self._last_pub_time >= self.pub_sub_cfg["pub"]["dt"] and bernoulli()
+            else:
+                return t % self.pub_sub_cfg["pub"]["dt"] == 0 and bernoulli()
+        return False
+    
 def main(meta_cfg_path):
     
     # assuming obstacles are in objects_path:
@@ -1049,15 +1113,35 @@ def main(meta_cfg_path):
     sphere_counts_total = [-1 for _ in range(len(agent_cfgs))]
     col_pred_with = [[] for _ in range(len(agent_cfgs))]
     base_pose = [[] for _ in range(len(agent_cfgs))]
+    pub_sub_cfgs = [{} for _ in range(len(agent_cfgs))]
     
     for a_idx, a_cfg in enumerate(agent_cfgs):
+        # print(f'a_idx: {a_idx}')   
+        # sleep(2)
         robot_cfgs_paths[a_idx] = a_cfg["robot"]
         robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
         planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
         sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
         sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
         base_pose[a_idx] = a_cfg["base_pose"]
-        col_pred_with[a_idx] = a_cfg["col_pred_with"] if "col_pred_with" in a_cfg else []
+        
+        if "plan_pub_sub" in a_cfg and "sub" in a_cfg["plan_pub_sub"]:
+            pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
+        else:
+            pub_sub_cfgs[a_idx]["sub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["sub"])
+        
+        if pub_sub_cfgs[a_idx]["sub"]["to"] == "all":
+            col_pred_with[a_idx] = [i for i in range(len(agent_cfgs)) if i != a_idx] # subscribe to plans from all robots (except itself)    
+        else:
+            col_pred_with[a_idx] = pub_sub_cfgs[a_idx]["sub"]["to"]
+        pub_sub_cfgs[a_idx]["sub"]["to"] = col_pred_with[a_idx]
+        # print(f'col_pred_with: {col_pred_with[a_idx]}')
+        # sleep(2)
+        if "plan_pub_sub" in a_cfg and "pub" in a_cfg["plan_pub_sub"] and a_cfg["plan_pub_sub"]["pub"]:
+            pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
+        else:
+            pub_sub_cfgs[a_idx]["pub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["pub"])
+        
 
         if planner_type[a_idx] == 'mpc':
             solver_cfgs[a_idx] = a_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in a_cfg and "mpc_solver_cfg" in a_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]
@@ -1110,7 +1194,7 @@ def main(meta_cfg_path):
             robot_cfg_path=robot_cfgs_paths[a_idx],
             robot_cfg=robot_cfgs[a_idx],
             sim_robot=sim_robot, # optional, when using simulation
-            col_pred_with=col_pred_with[a_idx],
+            pub_sub_cfg=pub_sub_cfgs[a_idx],
         )
 
         cu_agents.append(a)
@@ -1167,120 +1251,151 @@ def main(meta_cfg_path):
     my_world.reset()
     my_world.play()
     i = 0
+    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))] # plans will be stored here
     
-    # debug setup
-    # vis_spheres = meta_cfg["default"]["debug"]["visualize_spheres"]["is_on"]
-    # viz_spheres_delta = meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0
-    spheres = None
-    
-    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))]
-    plans_lock = Lock()
-    t = 0
-    
-    while simulation_app.is_running():
-        
-        my_world.step(render=True)
-        if not my_world.is_playing():
-            if i % 100 == 0:
-                print("**** Click Play to start simulation *****")
-            i += 1
-            continue
 
-        step_index = my_world.current_time_step_index
-        if step_index <= 10:
-            # my_world.reset()
+    t = 0        
+    sync = True
+    if sync:
+        while simulation_app.is_running():
+            
+            my_world.step(render=True)
+            if not my_world.is_playing():
+                if i % 100 == 0:
+                    print("**** Click Play to start simulation *****")
+                i += 1
+                continue
+            
+            step_index = my_world.current_time_step_index
+            if step_index <= 10:
+                # my_world.reset()
+                for a in cu_agents:
+                    if a.sim_robot is not None:
+                        a.sim_robot.robot._articulation_view.initialize()
+                        idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
+                        a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"]  , idx_list)
+                        a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
+                        a.sim_robot.robot._articulation_view.set_max_efforts(
+                            values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
+                        )
+                        a.sim_robot.get_js(sync_new=True) 
+            if step_index < 20:
+                continue
+            
+            
+            pts_debug = []
             for a in cu_agents:
+                planner = a.planner
                 if a.sim_robot is not None:
-                    a.sim_robot.robot._articulation_view.initialize()
-                    idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
-                    a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"]  , idx_list)
-                    a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
-                    a.sim_robot.robot._articulation_view.set_max_efforts(
-                        values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
-                    )
-                    a.sim_robot.get_js(sync_new=True) 
-                
-        if step_index < 20:
-            continue
-        
-        
-        for a in cu_agents:
-            pts_debug = []    
-            planner = a.planner
-            if a.sim_robot is not None:
-                ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
-                ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
-                
-                
-                
-                # publish
-                js = a.sim_robot.get_js(sync_new=False)
-                if js is not None:
-                    n_spheres_valid = sphere_counts_splits[a.idx][0]                            
-                    plan = planner.get_estimated_plan(ctrl_dof_names, n_spheres_valid, js, valid_spheres_only=False)
-                    if plan is not None: # currently available in mpc only
-                        with plans_lock:
+                    
+                    ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
+                    ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
+                    
+                    # publish
+
+                    js = a.sim_robot.get_js(sync_new=False)
+                    if js is not None and a.should_publish_plan(t):
+                        n_spheres_valid = sphere_counts_splits[a.idx][0]                            
+                        plan = planner.get_estimated_plan(ctrl_dof_names, n_spheres_valid, js, valid_spheres_only=False)
+                        if plan is not None: # currently available in mpc only
                             plans_board[a.idx] = plan
-                            if a.sim_robot.visualize_plan["is_on"] and step_index % a.sim_robot.visualize_plan["ts_delta"] == 0:
+                            if a.sim_robot.visualize_plan["is_on"] and t % a.sim_robot.visualize_plan["ts_delta"] == 0:
                                 pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.visualize_plan["color"]})
                 
-                # sense
-                
-                # sense obstacles 
-                a.update_col_model_from_isaac_sim(
-                    a.sim_robot.path, 
-                    usd_help, 
-                    ignore_list=a.cu_world_wrapper_update_policy["never_add"]+a.cu_world_wrapper_update_policy["never_update"], 
-                    paths_to_search_obs_under=["/World"]
-                )
-                
-                # sense joints
-                js = a.sim_robot.get_js(sync_new=True) 
-                if js is None:
-                    print("sim_js is None")
-                    continue
-                z = tensor_args.to_device(js.positions) * 0.0
-                cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), z, ctrl_dof_names,z).get_ordered_joint_state(planner.ordered_j_names)
-                if isinstance(planner, MpcPlanner):
-                    planner.update_state(cu_js)
-                
-                # sense goals
-                goals = {}
-                for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
-                    target_prim = a.sim_robot.target_path_to_target_prim[target_path]
-                    p_target, q_target = target_prim.get_world_pose()
-                    goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
-                
-                # sense plans
-                with plans_lock:
-                    a.update_col_pred(plans_board, t)
-                
-                # plan
-                if isinstance(planner, CumotionPlanner):
-                    action = planner.yield_action(goals, cu_js, js.velocities)
-                elif isinstance(planner, MpcPlanner):
-                    action = planner.yield_action(goals)
-                    if a.sim_robot.visualize_mpc_ee_rollouts["is_on"] and step_index % a.sim_robot.visualize_mpc_ee_rollouts["ts_delta"] == 0:
-                        pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.visualize_mpc_ee_rollouts["color"]})
+                    # sense
+                    
+                    # sense obstacles 
+                    a.update_col_model_from_isaac_sim(
+                        a.sim_robot.path, 
+                        usd_help, 
+                        ignore_list=a.cu_world_wrapper_update_policy["never_add"]+a.cu_world_wrapper_update_policy["never_update"], 
+                        paths_to_search_obs_under=["/World"]
+                    )
+                    
+                    # sense joints
+                    js = a.sim_robot.get_js(sync_new=True) 
+                    if js is None:
+                        print("sim_js is None")
+                        continue
+                    z = tensor_args.to_device(js.positions) * 0.0
+                    cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), z, ctrl_dof_names,z).get_ordered_joint_state(planner.ordered_j_names)
+                    if isinstance(planner, MpcPlanner):
+                        planner.update_state(cu_js)
+                    
+                    # sense goals
+                    goals = {}
+                    for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
+                        target_prim = a.sim_robot.target_path_to_target_prim[target_path]
+                        p_target, q_target = target_prim.get_world_pose()
+                        goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
+                    
+                    # sense plans
+                    if a.pub_sub_cfg["sub"]["is_on"]:
+                        a.update_col_pred(plans_board, t)
+                    
+                    # plan
 
-                else:
-                    raise ValueError(f"Invalid planner type: {planner_type}")
-                
-                # act
-                if action is not None:
-                    isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
-                    a.sim_robot.articulation_controller.apply_action(isaac_action)
-                
-                # debug
-                if a.sim_robot.visualize_col_spheres["is_on"] and step_index % a.sim_robot.visualize_col_spheres["ts_delta"] == 0:
-                    a.sim_robot.visualize_robot_as_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
-            
+                    if isinstance(planner, CumotionPlanner):
+                        action = planner.yield_action(goals, cu_js, js.velocities)
+                    elif isinstance(planner, MpcPlanner):
+                        action = planner.yield_action(goals)
+                        if a.sim_robot.visualize_mpc_ee_rollouts["is_on"] and t % a.sim_robot.visualize_mpc_ee_rollouts["ts_delta"] == 0:
+                            pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.visualize_mpc_ee_rollouts["color"]})
+
+                    else:
+                        raise ValueError(f"Invalid planner type: {planner_type}")
+                    
+                    # act
+
+                    if action is not None:
+                        isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
+                        a.sim_robot.articulation_controller.apply_action(isaac_action)
+                    
+                    # debug
+                    if a.sim_robot.visualize_col_spheres["is_on"] and t % a.sim_robot.visualize_col_spheres["ts_delta"] == 0:
+                        a.sim_robot.visualize_robot_as_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
                 if len(pts_debug):
                     draw_points(pts_debug)
-        t += 1
-                
-    simulation_app.close()
+            t += 1
+                    
+        simulation_app.close()
+    
+    else:
+        plans_lock = Lock() # locking plans board
+        sim_lock = Lock() # locking simulator 
+        t_lock = Lock() # locking time step index
+        stop_event = Event()  
+        a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock, stop_event, plans_board, lambda: t), daemon=True) for a in cu_agents] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
+        for th in a_threads:
+            th.start()
 
+        while simulation_app.is_running():
+            
+            my_world.step(render=True)
+            if not my_world.is_playing():
+                if i % 100 == 0:
+                    print("**** Click Play to start simulation *****")
+                i += 1
+                continue
+            
+            step_index = my_world.current_time_step_index
+            if step_index <= 10:
+                # my_world.reset()
+                for a in cu_agents:
+                    if a.sim_robot is not None:
+                        a.sim_robot.robot._articulation_view.initialize()
+                        idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
+                        a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"]  , idx_list)
+                        a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
+                        a.sim_robot.robot._articulation_view.set_max_efforts(
+                            values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
+                        )
+                        a.sim_robot.get_js(sync_new=True) 
+            if step_index < 20:
+                continue
+            
+            
+            pts_debug = []
 
 if __name__ == "__main__":
     main(meta_cfg_path='projects_root/experiments/benchmarks/cfgs/meta_cfg.yml')

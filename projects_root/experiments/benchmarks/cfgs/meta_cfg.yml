@@ -1,9 +1,11 @@
-default: # default values to fallback to if not specified in the agent cfg
-  cu_world_wrapper:
-        verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
-        never_add: []
-        never_update: [] 
-  cumotion:
+default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
+  cu_world_wrapper: # curoboworld collision wrapper
+    verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
+    never_add: [] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
+    never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
+
+  
+  cumotion: # cumotion related default values (if not specified by the agent)
     motion_gen_cfg:
       use_cuda_graph: True 
       self_collision_check: True
@@ -25,7 +27,8 @@ default: # default values to fallback to if not specified in the agent cfg
       enable_graph: True
       warmup_js_trajopt: False
     
-  mpc:
+  
+  mpc: # mpc related default values (if not specified in the agent)
     mpc_solver_cfg:
       override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
       use_cuda_graph: False 
@@ -38,79 +41,77 @@ default: # default values to fallback to if not specified in the agent cfg
       use_lbfgs: False
       plot_costs: False # for debugging
 
-  sim_robot_cfg:
-    visualize_col_spheres: # visualize collision spheres of the robot
+  
+  sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
+    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
       is_on: false 
       ts_delta: 2 # int
       color: 'green'
 
-    visualize_obj_bound_spheres: # show sphres bounding curobo obstacles
+    visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
       is_on: false
       ts_delta: 2 # int
 
-    visualize_plan:
+    visualize_plan: # visualize the planned trajectory of the robot (for debugging)
       is_on: True
       color: 'red'
-      ts_delta: 2 # int
+      ts_delta: 10 # int
     
-    visualize_mpc_ee_rollouts:
+    visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
       is_on: True
       color: 'green'
-      ts_delta: 2 # int
+      ts_delta: 10 # int
 
-
+  plan_pub_sub: # default values for publishing and subscribing to plans (if not specified by the agent)
+    pub:
+      is_on: True # meaning agent is publishing plans (so they can be used by other agents)
+      dt: 1 # agent will publish plans every pub_dt steps or seconds
+      is_dt_in_sec: False # if True, dt is in seconds, if False, pub_dt is in steps
+      pr: 1.0 # probability of publishing the plans (0.0 to 1.0) *when* dt is reached.
+      
+    sub:
+      is_on: True # meaning agent is subscribing to plans from other robots
+      to: 'all' # meaning agent will subscribe to plans from all robots (except itself). 'to' can be a list of robot indices or 'all'. When agent is subscribed to plans, it will use the plans to plan its own steps (to make collision free steps).
+      
+  # default values for debugging (if not specified by the agent)
   debug:    
-    
     world_cu_wrapper: # world collision wrapper
       verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
     
+# default (and only) values for environments (sim/real) 
+env:
+  simulation:
+    is_on: True
+    physics_dt: 0.03
+    render_dt: 0.03
+    enable_gpu_dynamics: True
+    init_app_settings:
+      headless: null # set 'true' to run in headless mode
     
-
-  env:
-    simulation:
-      is_on: True
-      physics_dt: 0.03
-      render_dt: 0.03
-      enable_gpu_dynamics: True
-      init_app_settings:
-        headless: null # set 'true' to run in headless mode
-      
-    real:
-      is_on: False
-    
+  real:
+    is_on: False
   
-cu_agents:  
+
+  
+cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion
-    cu_world_wrapper:
-        verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
-        never_add: []
-        never_update: [] 
     base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    col_pred_with: [1] # indics of all robots that the current robot should predict collisions with. Will be used only if override_particle_file of the robot will have the custom cost for dynamic obs and if collision prediction of the planner is supproted (currently only mpc supports it)
+    #col_pred_with: [1,2] # indics of all robots that the current robot should predict collisions with. Will be used only if override_particle_file of the robot will have the custom cost for dynamic obs and if collision prediction of the planner is supproted (currently only mpc supports it)
     
 
-    # mpc:
-    #   mpc_solver_cfg:
-    #     override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
-    #     use_cuda_graph: False 
-    #     step_dt: 0.03
-    #     use_cuda_graph_metrics: True
-    #     self_collision_check: True
-    #     collision_checker_type: MESH
-    #     collision_cache: {"obb": 15, "mesh": 15}
-    #     use_mppi: True
-    #     use_lbfgs: False
-    #     plot_costs: True # for debugging
-
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion
-    cu_world_wrapper:
-        verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
-        never_add: []
-        never_update: [] 
     base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    col_pred_with: [0]
+    # col_pred_with: [0,2]
+
+
+  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion
+    base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+    # col_pred_with: [0,1]
+
+  
     
 
       
