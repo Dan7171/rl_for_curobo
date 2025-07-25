@@ -1012,17 +1012,17 @@ def main(meta_cfg_path):
             cumotion_plan_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in a_cfg and "motion_gen_plan_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"]
             cumotion_warmup_cfgs[a_idx] = a_cfg["cumotion"]["warmup_cfg"] if "cumotion" in a_cfg and "warmup_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"]
 
+
+    for a_idx, a_cfg in enumerate(agent_cfgs):
+        if a_cfg["planner"] == 'mpc':
+            n_obstacle_spheres = sum(sphere_counts_total[other_idx] for other_idx in col_pred_with[a_idx])
+            publish_robot_context(a_idx, env_topics[a_idx], base_pose[a_idx], n_obstacle_spheres, sphere_counts_total[a_idx], mpc_particle_cfgs[a_idx], col_pred_with[a_idx], mpc_particle_file_paths, robot_cfgs_paths, sphere_counts_splits)
+
     cu_agents:List[CuAgent] = []
     for a_idx, a_cfg in enumerate(agent_cfgs):
-        if a_cfg["planner"] != 'mpc':
-            continue
-        n_obstacle_spheres = sum(sphere_counts_total[other_idx] for other_idx in col_pred_with[a_idx])
-        publish_robot_context(a_idx, env_topics[a_idx], base_pose[a_idx], n_obstacle_spheres, sphere_counts_total[a_idx], mpc_particle_cfgs[a_idx], col_pred_with[a_idx], mpc_particle_file_paths, robot_cfgs_paths, sphere_counts_splits)
-    
-    
+            
         usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
-        
         sim_robot = SimRobot(robot, robot_prim_path)
         world_cfg = WorldConfig()
     
@@ -1130,6 +1130,7 @@ def main(meta_cfg_path):
     plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))]
     plans_lock = Lock()
     t = 0
+    
     while simulation_app.is_running():
         my_world.step(render=True)
         if not my_world.is_playing():
