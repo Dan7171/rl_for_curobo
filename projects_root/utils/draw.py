@@ -29,26 +29,23 @@ def draw_points(points_dicts: List[dict], color='green'):
         b, h, _ = cpu_rollouts.shape
         point_list = []
         colors = []
+        sizes = [10.0 for _ in range(b * h)]
         for i in range(b):
             # get list of points:
             point_list += [
                 (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
             ]
-            if type(color) == str:
-                if color == 'green':
-                    colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
-                elif color == 'black':
-                    colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
+            if color == 'green':
+                colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
+            elif color == 'black':
+                colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
+            elif color == 'red':
+                colors += [(1.0, 0.0, 0.0, 0.1) for _ in range(h)]
+            elif color == 'blue':
+                colors += [(0.0, 0.0, 1.0, 0.1) for _ in range(h)]
+            elif color == 'yellow':
+                colors += [(1.0, 1.0, 0.0, 0.1) for _ in range(h)]
             
-            elif type(color) == np.ndarray:
-                color = list(color) # rgb
-                for step_idx in range(h):
-                    color_copy = color.copy()
-                    color_copy.append(1 - (0.5 * step_idx/h)) # decay alpha (decay transparency)
-                    colors.append(color_copy)
-
-        sizes = [10.0 for _ in range(b * h)]
-
         for p in point_list:
             unified_points.append(p)
         for c in colors:

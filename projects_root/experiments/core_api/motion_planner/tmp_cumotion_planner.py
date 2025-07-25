@@ -59,7 +59,7 @@ from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 # CuRobo
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
 from curobo.geom.sdf.world import CollisionCheckerType
-from curobo.geom.types import WorldConfig
+from curobo.geom.types import WorldConfig, Sphere
 from curobo.rollout.rollout_base import Goal
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
@@ -79,7 +79,10 @@ from curobo.wrap.wrap_mpc import WrapMpc
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
 from projects_root.utils.world_model_wrapper import WorldModelWrapper
 from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
-from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres
+from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres, transform_poses_batched
+from projects_root.utils.draw import draw_points
+from projects_root.utils.colors import npColors
+
 class Plan:
     def __init__(self, cmd_idx=0, cmd_plan:Optional[JointState]=None):
         self.cmd_idx = cmd_idx
@@ -221,6 +224,7 @@ class MpcPlanner(CuPlanner):
 
     def __init__(self, base_pose:list[float], solver_config_dict: dict, robot_cfg:dict, world_cfg:WorldConfig, particle_file_path:str):
                 
+        self.solver:MpcSolver # declaring for linter
         _solver_cfg = MpcSolverConfig.load_from_robot_config(
             robot_cfg,
             world_cfg,
@@ -603,7 +607,21 @@ class MpcPlanner(CuPlanner):
                 # plan_robot_j_horizon = plan_robot_j['p'][:H].to(self.solver.tensor_args)
                 plan_robot_j_horizon = plan_robot_j['p'][:H]
                 col_pred.update_robot_spheres(j, plan_robot_j_horizon)
-                
+    
+    def get_rollouts_in_world_frame(self):
+        """
+        Get visual rollouts transformed to world frame for visualization.
+        
+        Returns:
+            torch.Tensor: Visual rollouts with poses in world frame
+        """
+        p_visual_rollouts_robotframe = self.solver.get_visual_rollouts()
+        q_visual_rollouts_robotframe = torch.empty(p_visual_rollouts_robotframe.shape[:-1] + torch.Size([4]), device=p_visual_rollouts_robotframe.device)
+        q_visual_rollouts_robotframe[...,:] = torch.tensor([1,0,0,0], device=p_visual_rollouts_robotframe.device, dtype=p_visual_rollouts_robotframe.dtype) 
+        visual_rollouts = torch.cat([p_visual_rollouts_robotframe, q_visual_rollouts_robotframe], dim=-1)                
+        visual_rollouts = transform_poses_batched(visual_rollouts, self.base_pose)
+        return visual_rollouts
+    
 class CumotionPlanner(CuPlanner):
                 
     def __init__(self,
@@ -725,14 +743,20 @@ class CumotionPlanner(CuPlanner):
 
 
 class SimRobot:
-    def __init__(self, robot, path:str):
+    def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict):
         self.robot = robot
         self.path = path # prim path of the robot in isaac sim
         self.articulation_controller = self.robot.get_articulation_controller()
         self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
         self.target_path_to_target_prim = {} 
         self._cur_js = None
-    
+        
+        # debugging variables
+        self.visualize_col_spheres = visualize_col_spheres
+        self.visualize_obj_bound_spheres = visualize_obj_bound_spheres
+        self.visualize_plan = visualize_plan
+        self.visualize_mpc_ee_rollouts = visualize_mpc_ee_rollouts
+        
     def get_js(self, sync_new=True) -> isaac_JointsState:
         if sync_new:
             js = self.robot.get_joints_state() # from simulation. TODO: change "robot" to sim_robot and add a real_robot attribute
@@ -740,6 +764,38 @@ class SimRobot:
         else:
             js = self._cur_js # return the last synced state
         return js
+    
+ 
+        
+    
+    def visualize_robot_as_spheres(self, a_idx, cu_js, base_pose, solver:Union[MpcSolver, MotionGen],in_world_frame=True):
+        if cu_js is None:
+            return
+        
+        spheres = solver.kinematics.get_robot_as_spheres(cu_js.position)[0]
+        p = base_pose[:3]
+        if in_world_frame:
+            for sph in spheres:
+                sph.position = sph.position + p # express the spheres in the world frame
+                sph.pose[:3] = sph.pose[:3] + p
+        
+        if not hasattr(self, "_vis_spheres"): # init visualization spheres
+            self._vis_spheres = []
+            for si, s in enumerate(spheres):
+                sp = sphere.VisualSphere(
+                            prim_path=f"/curobo/robot_{a_idx}_sphere_" + str(si),
+                            position=np.ravel(s.position),
+                            radius=float(s.radius),
+                            color=np.array([0, 0.8, 0.2]),
+                        )
+                self._vis_spheres.append(sp)
+
+        else: # update visualization spheres
+            for si, s in enumerate(spheres):
+                if not np.isnan(s.position[0]):
+                    self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
+                    self._vis_spheres[si].set_radius(float(s.radius))
+
 
 # class PlanPublisher:
 #     def __init__(self,planner:Union[MpcPlanner, CumotionPlanner], crm:CudaRobotModel, dof_names:list[str], tensor_args:TensorDeviceType, n_col_spheres:int, n_col_spheres_valid:int):
@@ -1023,7 +1079,9 @@ def main(meta_cfg_path):
             
         usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
-        sim_robot = SimRobot(robot, robot_prim_path)
+        sim_robot_cfg = a_cfg["sim_robot_cfg"] if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
+        
+        sim_robot = SimRobot(robot, robot_prim_path,**sim_robot_cfg)
         world_cfg = WorldConfig()
     
         if planner_type[a_idx] == 'cumotion':
@@ -1044,19 +1102,18 @@ def main(meta_cfg_path):
         else:
             raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
-        cu_world_wrapper_cfg = a_cfg["cu_world_wrapper"] if "cu_world_wrapper" in a_cfg else meta_cfg["default"]["cu_world_wrapper"]
         
         a = CuAgent(
             a_idx,
             planner, 
-            cu_world_wrapper_cfg=cu_world_wrapper_cfg,
+            cu_world_wrapper_cfg=a_cfg["cu_world_wrapper"] if "cu_world_wrapper" in a_cfg else meta_cfg["default"]["cu_world_wrapper"],
             robot_cfg_path=robot_cfgs_paths[a_idx],
             robot_cfg=robot_cfgs[a_idx],
             sim_robot=sim_robot, # optional, when using simulation
             col_pred_with=col_pred_with[a_idx],
         )
+
         cu_agents.append(a)
-   
         if a.sim_robot is not None: # if using simulation
             # set ee target prims:
             ee_target_prim_path = f"/World/agent{a_idx}link{planner.ee_link_name}target"
@@ -1105,26 +1162,15 @@ def main(meta_cfg_path):
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
     
-    # robot_sphere_counts_split:List[Tuple[int, int]] = [calculate_robot_sphere_count(cu_agent.robot_cfg) for cu_agent in cu_agents] # split[0] = 'valid' (base, no extra), split[1] = extra
-    # robot_sphere_counts:List[int] = [split[0] + split[1] for split in robot_sphere_counts_split] # total (base + extra) sphere count (base + extra)
-    # robot_sphere_counts_no_extra:List[int] = [split[0] for split in robot_sphere_counts_split] # valid (base only) sphere count (base only)
-    
-    # mpc_cfg_paths = [cu_agent.planner.particle_file_path for cu_agent in cu_agents if isinstance(cu_agent.planner, MpcPlanner)]
-    # robot_cfg_paths = [cu_agent.robot_cfg_path for cu_agent in cu_agents]
-    # robot_sphere_counts_split = [(cu_agent.n_spheres_valid, cu_agent.n_spheres_extra) for cu_agent in cu_agents]
-    # for agent_idx in range(len(cu_agents)):
-    #     if isinstance(cu_agents[agent_idx].planner, MpcPlanner):
-    #         n_obstacle_spheres = sum(cu_agents[other_idx].n_spheres_total for other_idx in cu_agents[agent_idx].col_pred_with)
-    #         publish_robot_context(agent_idx, env_topics[agent_idx], cu_agents[agent_idx].base_pose, n_obstacle_spheres, cu_agents[agent_idx].n_spheres_total, cu_agents[agent_idx].planner.particle_cfg_dict, cu_agents[agent_idx].col_pred_with, mpc_cfg_paths, robot_cfg_paths, robot_sphere_counts_split)
-            
+
 
     my_world.reset()
     my_world.play()
     i = 0
     
     # debug setup
-    vis_spheres = meta_cfg["default"]["debug"]["visualize_spheres"]["is_on"]
-    viz_spheres_delta = meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0
+    # vis_spheres = meta_cfg["default"]["debug"]["visualize_spheres"]["is_on"]
+    # viz_spheres_delta = meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0
     spheres = None
     
     plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))]
@@ -1132,6 +1178,7 @@ def main(meta_cfg_path):
     t = 0
     
     while simulation_app.is_running():
+        
         my_world.step(render=True)
         if not my_world.is_playing():
             if i % 100 == 0:
@@ -1158,7 +1205,7 @@ def main(meta_cfg_path):
         
         
         for a in cu_agents:
-            
+            pts_debug = []    
             planner = a.planner
             if a.sim_robot is not None:
                 ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
@@ -1174,7 +1221,8 @@ def main(meta_cfg_path):
                     if plan is not None: # currently available in mpc only
                         with plans_lock:
                             plans_board[a.idx] = plan
-                            print(f"debug: agent {a.idx} updated plan")
+                            if a.sim_robot.visualize_plan["is_on"] and step_index % a.sim_robot.visualize_plan["ts_delta"] == 0:
+                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.visualize_plan["color"]})
                 
                 # sense
                 
@@ -1212,6 +1260,9 @@ def main(meta_cfg_path):
                     action = planner.yield_action(goals, cu_js, js.velocities)
                 elif isinstance(planner, MpcPlanner):
                     action = planner.yield_action(goals)
+                    if a.sim_robot.visualize_mpc_ee_rollouts["is_on"] and step_index % a.sim_robot.visualize_mpc_ee_rollouts["ts_delta"] == 0:
+                        pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.visualize_mpc_ee_rollouts["color"]})
+
                 else:
                     raise ValueError(f"Invalid planner type: {planner_type}")
                 
@@ -1221,27 +1272,11 @@ def main(meta_cfg_path):
                     a.sim_robot.articulation_controller.apply_action(isaac_action)
                 
                 # debug
-                if vis_spheres and step_index % viz_spheres_delta == 0:
-                    sph_list = planner.solver.kinematics.get_robot_as_spheres(cu_js.position)
-
-                    if spheres is None:
-                        spheres = []
-                        # create spheres:
-
-                        for si, s in enumerate(sph_list[0]):
-                            sp = sphere.VisualSphere(
-                                prim_path="/curobo/robot_sphere_" + str(si),
-                                position=np.ravel(s.position),
-                                radius=float(s.radius),
-                                color=np.array([0, 0.8, 0.2]),
-                            )
-                            spheres.append(sp)
-                    else:
-                        for si, s in enumerate(sph_list[0]):
-                            spheres[si].set_world_pose(position=np.ravel(s.position))
-                            spheres[si].set_radius(float(s.radius))
-                
-              
+                if a.sim_robot.visualize_col_spheres["is_on"] and step_index % a.sim_robot.visualize_col_spheres["ts_delta"] == 0:
+                    a.sim_robot.visualize_robot_as_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
+            
+                if len(pts_debug):
+                    draw_points(pts_debug)
         t += 1
                 
     simulation_app.close()
