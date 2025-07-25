@@ -204,9 +204,9 @@ class CuPlanner:
             goals_W[link_name] = Pose(position=self.solver.tensor_args.to_device(torch.from_numpy(p_goal_W)), quaternion=self.solver.tensor_args.to_device(torch.from_numpy(q_goal_W)))
         return goals_W
 
-    @abstractmethod
-    def get_estimated_plan(self, **kwargs):
-        pass
+    
+    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True):
+        return None # TODO
 
     
     def get_col_pred(self,**kwargs)->Optional[DynamicObsCollPredictor]:
@@ -267,7 +267,6 @@ class MpcPlanner(CuPlanner):
         self.particle_file_path = particle_file_path
         self.solver_cfg_dict = solver_config_dict        
         self.dyn_obs_cost_in_cfg = "cost" in self.particle_cfg_dict and "custom" in self.particle_cfg_dict["cost"] and "arm_base" in self.particle_cfg_dict["cost"]["custom"] and "dynamic_obs_cost" in self.particle_cfg_dict["cost"]["custom"]["arm_base"]
-
         
     def yield_action(self, goals:dict[str, Pose]):
 
@@ -578,27 +577,33 @@ class MpcPlanner(CuPlanner):
         col_pred = self.get_col_pred()
         if col_pred is None:
             return
-
         if t == 0:
             # Initialize collision predictor on first iteration
             # Set radii for each robot that this robot collides with
-            for j in col_pred_with:
-                if plans_board[j] is None:
-                    continue
-                rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0].to(self.solver.tensor_args)
-                col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
+            # for j in col_pred_with:
+            #     if plans_board[j] is None:
+            #         continue
+            #     # rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0].to(self.solver.tensor_args)
+            #     # col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
             
             # Set own robot radii 
-            col_pred.set_own_rads(plans_board[idx]['task_space']['spheres']['r'][0].to(self.solver.tensor_args))
+            # col_pred.set_own_rads(plans_board[idx]['task_space']['spheres']['r'][0].to(self.solver.tensor_args))
+            rad_spheres_own = plans_board[idx]['task_space']['spheres']['r'][0]
+            col_pred.set_own_rads(rad_spheres_own)
         else:
             # Update positions for each robot that this robot collides with
             for j in col_pred_with:
                 if plans_board[j] is None:
                     continue
+                # rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0].to(self.solver.tensor_args)
+                rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0]
+                col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
                 H = self.particle_cfg_dict['model']['horizon']
                 plan_robot_j = plans_board[j]['task_space']['spheres'] 
-                plan_robot_j_horizon = plan_robot_j['p'][:H].to(self.solver.tensor_args)
+                # plan_robot_j_horizon = plan_robot_j['p'][:H].to(self.solver.tensor_args)
+                plan_robot_j_horizon = plan_robot_j['p'][:H]
                 col_pred.update_robot_spheres(j, plan_robot_j_horizon)
+                
 class CumotionPlanner(CuPlanner):
                 
     def __init__(self,
@@ -715,7 +720,7 @@ class CumotionPlanner(CuPlanner):
         return action
     
 
-    def get_estimated_plan(self):
+    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True):
         return None # TODO
 
 
@@ -845,8 +850,8 @@ class CuAgent:
         self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
         self.col_pred_with = col_pred_with
-        self.n_spheres_valid, self.n_spheres_extra = calculate_robot_sphere_count(robot_cfg)
-        self.n_spheres_total = self.n_spheres_valid + self.n_spheres_extra
+        # self.n_spheres_valid, self.n_spheres_extra = calculate_robot_sphere_count(robot_cfg)
+        # self.n_spheres_total = self.n_spheres_valid + self.n_spheres_extra
 
 
         # See wrapper's docstring to understand the motivation for the wrapper.
@@ -968,64 +973,93 @@ def main(meta_cfg_path):
     
     
     meta_cfg = load_yaml(meta_cfg_path)
-    agent_list = meta_cfg["cu_agents"]
-    cu_agents:List[CuAgent] = []
+    agent_cfgs = meta_cfg["cu_agents"]
     
+    # init runtime topics (must be done before solvers are initialized (so that dynamic obs cost will be initialized properly))
+    init_runtime_topics(n_envs=1, robots_per_env=len(agent_cfgs)) 
+    runtime_topics = get_topics()
+    env_topics:List[dict] = runtime_topics.get_default_env() if runtime_topics is not None else []
+
+
+    robot_cfgs_paths = ['' for _ in range(len(agent_cfgs))]
+    robot_cfgs = [{} for _ in range(len(agent_cfgs))]
+    solver_cfgs = [{} for _ in range(len(agent_cfgs))]
+    planner_type = ['' for _ in range(len(agent_cfgs))]
+    mpc_particle_file_paths = ['' for _ in range(len(agent_cfgs))]
+    mpc_particle_cfgs = [{} for _ in range(len(agent_cfgs))]
+    cumotion_plan_cfgs = [{} for _ in range(len(agent_cfgs))]
+    cumotion_warmup_cfgs = [{} for _ in range(len(agent_cfgs))]
+    sphere_counts_splits = [(-1,-1) for _ in range(len(agent_cfgs))]
+    sphere_counts_total = [-1 for _ in range(len(agent_cfgs))]
+    col_pred_with = [[] for _ in range(len(agent_cfgs))]
+    base_pose = [[] for _ in range(len(agent_cfgs))]
     
-    
-    for agent_idx, agent_cfg in enumerate(agent_list):
-        planner_type = agent_cfg["planner"]
-        if len(agent_list) > 1:
-            robot_cfg_path = agent_cfg["robot"]
+    for a_idx, a_cfg in enumerate(agent_cfgs):
+        robot_cfgs_paths[a_idx] = a_cfg["robot"]
+        robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
+        planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
+        sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
+        sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
+        base_pose[a_idx] = a_cfg["base_pose"]
+        col_pred_with[a_idx] = a_cfg["col_pred_with"] if "col_pred_with" in a_cfg else []
+
+        if planner_type[a_idx] == 'mpc':
+            solver_cfgs[a_idx] = a_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in a_cfg and "mpc_solver_cfg" in a_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]
+            mpc_particle_file_paths[a_idx] = solver_cfgs[a_idx]["override_particle_file"] if "override_particle_file" in solver_cfgs[a_idx] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]    
+            mpc_particle_cfgs[a_idx] = load_yaml(mpc_particle_file_paths[a_idx])   
         else:
-            robot_cfg_path = agent_cfg["robot"] if "robot" in agent_cfg else join_path(get_robot_configs_path(), args.robot)
-        robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
-        base_pose = agent_cfg["base_pose"]
-        
+            solver_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_cfg"] if "cumotion" in a_cfg and "motion_gen_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_cfg"]
+            cumotion_plan_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in a_cfg and "motion_gen_plan_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"]
+            cumotion_warmup_cfgs[a_idx] = a_cfg["cumotion"]["warmup_cfg"] if "cumotion" in a_cfg and "warmup_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"]
+
+    cu_agents:List[CuAgent] = []
+    for a_idx, a_cfg in enumerate(agent_cfgs):
+        if a_cfg["planner"] != 'mpc':
+            continue
+        n_obstacle_spheres = sum(sphere_counts_total[other_idx] for other_idx in col_pred_with[a_idx])
+        publish_robot_context(a_idx, env_topics[a_idx], base_pose[a_idx], n_obstacle_spheres, sphere_counts_total[a_idx], mpc_particle_cfgs[a_idx], col_pred_with[a_idx], mpc_particle_file_paths, robot_cfgs_paths, sphere_counts_splits)
     
-        usd_help.add_subroot('/World', f'/World/robot_{agent_idx}', Pose.from_list(base_pose))
-        robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, subroot=f'/World/robot_{agent_idx}', robot_name=f'robot_{agent_idx}', position=base_pose[:3], orientation=base_pose[3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
+    
+        usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
+        robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         
         sim_robot = SimRobot(robot, robot_prim_path)
         world_cfg = WorldConfig()
     
-        if planner_type == 'cumotion':
+        if planner_type[a_idx] == 'cumotion':
             _motion_gen_config = MotionGenConfig.load_from_robot_config(
-                robot_cfg,
+                robot_cfgs[a_idx],
                 world_cfg,
                 tensor_args,
-                **agent_cfg["cumotion"]["motion_gen_cfg"] if "cumotion" in agent_cfg and "motion_gen_cfg" in agent_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_cfg"],
+                **solver_cfgs[a_idx],
             )
             _plan_config = MotionGenPlanConfig(
-                **agent_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in agent_cfg and "motion_gen_plan_cfg" in agent_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"],
+                **cumotion_plan_cfgs[a_idx],
             )
-            _warmup_config = dict(agent_cfg["cumotion"]["warmup_cfg"] if "cumotion" in agent_cfg and "warmup_cfg" in agent_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"])            
-            planner = CumotionPlanner(base_pose, _motion_gen_config, _plan_config, _warmup_config)
+            _warmup_config = dict(cumotion_warmup_cfgs[a_idx])            
+            planner = CumotionPlanner(base_pose[a_idx], _motion_gen_config, _plan_config, _warmup_config)
         
-        elif planner_type == 'mpc':
-            mpc_solver_cfg_dict = agent_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in agent_cfg and "mpc_solver_cfg" in agent_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]
-            particle_file_path = mpc_solver_cfg_dict["override_particle_file"] if "override_particle_file" in mpc_solver_cfg_dict else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]
-            planner = MpcPlanner(base_pose, mpc_solver_cfg_dict, robot_cfg, world_cfg, particle_file_path)
+        elif planner_type[a_idx] == 'mpc':
+            planner = MpcPlanner(base_pose[a_idx], solver_cfgs[a_idx], robot_cfgs[a_idx], world_cfg, mpc_particle_file_paths[a_idx])
         else:
-            raise ValueError(f"Invalid planner type: {planner_type}")
+            raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
-        cu_world_wrapper_cfg = agent_cfg["cu_world_wrapper"] if "cu_world_wrapper" in agent_cfg else meta_cfg["default"]["cu_world_wrapper"]
+        cu_world_wrapper_cfg = a_cfg["cu_world_wrapper"] if "cu_world_wrapper" in a_cfg else meta_cfg["default"]["cu_world_wrapper"]
         
         a = CuAgent(
-            agent_idx,
+            a_idx,
             planner, 
             cu_world_wrapper_cfg=cu_world_wrapper_cfg,
-            robot_cfg_path=robot_cfg_path,
-            robot_cfg=robot_cfg,
+            robot_cfg_path=robot_cfgs_paths[a_idx],
+            robot_cfg=robot_cfgs[a_idx],
             sim_robot=sim_robot, # optional, when using simulation
-            col_pred_with=agent_cfg["col_pred_with"] if "col_pred_with" in agent_cfg else [],
-            # **agent_cfg["cu_agent_cfg"] if "cu_agent_cfg" in agent_cfg else meta_cfg["default"]["cu_agent_cfg"],
+            col_pred_with=col_pred_with[a_idx],
         )
         cu_agents.append(a)
    
         if a.sim_robot is not None: # if using simulation
             # set ee target prims:
-            ee_target_prim_path = f"/World/agent{agent_idx}link{planner.ee_link_name}target"
+            ee_target_prim_path = f"/World/agent{a_idx}link{planner.ee_link_name}target"
             ee_retract_pose = planner.plan_goals[planner.ee_link_name]
             _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
             ee_target = cuboid.VisualCuboid(
@@ -1040,7 +1074,7 @@ def main(meta_cfg_path):
 
             for link_name in planner.constrained_links_names:
                 if link_name != planner.ee_link_name:
-                    target_path = f"/World/agent{agent_idx}link{link_name}target" 
+                    target_path = f"/World/agent{a_idx}link{link_name}target" 
                     constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
                     _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
                     
@@ -1070,22 +1104,18 @@ def main(meta_cfg_path):
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
-    # init runtime topics and get robot sphere counts
-    init_runtime_topics(n_envs=1, robots_per_env=len(agent_list)) 
-    runtime_topics = get_topics()
-    env_topics:List[dict] = runtime_topics.get_default_env() if runtime_topics is not None else []
+    
     # robot_sphere_counts_split:List[Tuple[int, int]] = [calculate_robot_sphere_count(cu_agent.robot_cfg) for cu_agent in cu_agents] # split[0] = 'valid' (base, no extra), split[1] = extra
     # robot_sphere_counts:List[int] = [split[0] + split[1] for split in robot_sphere_counts_split] # total (base + extra) sphere count (base + extra)
     # robot_sphere_counts_no_extra:List[int] = [split[0] for split in robot_sphere_counts_split] # valid (base only) sphere count (base only)
     
-    mpc_cfg_paths = [cu_agent.planner.particle_file_path for cu_agent in cu_agents if isinstance(cu_agent.planner, MpcPlanner)]
-    robot_cfg_paths = [cu_agent.robot_cfg_path for cu_agent in cu_agents]
-    robot_sphere_counts_split = [(cu_agent.n_spheres_valid, cu_agent.n_spheres_extra) for cu_agent in cu_agents]
-    for agent_idx in range(len(cu_agents)):
-        if isinstance(cu_agents[agent_idx].planner, MpcPlanner):
-            # if cu_agents[agent_idx].planner.dyn_obs_cost_in_cfg:
-            n_obstacle_spheres = sum(cu_agents[other_idx].n_spheres_total for other_idx in cu_agents[agent_idx].col_pred_with)
-            publish_robot_context(agent_idx, env_topics[agent_idx], cu_agents[agent_idx].base_pose, n_obstacle_spheres, cu_agents[agent_idx].n_spheres_total, cu_agents[agent_idx].planner.particle_cfg_dict, cu_agents[agent_idx].col_pred_with, mpc_cfg_paths, robot_cfg_paths, robot_sphere_counts_split)
+    # mpc_cfg_paths = [cu_agent.planner.particle_file_path for cu_agent in cu_agents if isinstance(cu_agent.planner, MpcPlanner)]
+    # robot_cfg_paths = [cu_agent.robot_cfg_path for cu_agent in cu_agents]
+    # robot_sphere_counts_split = [(cu_agent.n_spheres_valid, cu_agent.n_spheres_extra) for cu_agent in cu_agents]
+    # for agent_idx in range(len(cu_agents)):
+    #     if isinstance(cu_agents[agent_idx].planner, MpcPlanner):
+    #         n_obstacle_spheres = sum(cu_agents[other_idx].n_spheres_total for other_idx in cu_agents[agent_idx].col_pred_with)
+    #         publish_robot_context(agent_idx, env_topics[agent_idx], cu_agents[agent_idx].base_pose, n_obstacle_spheres, cu_agents[agent_idx].n_spheres_total, cu_agents[agent_idx].planner.particle_cfg_dict, cu_agents[agent_idx].col_pred_with, mpc_cfg_paths, robot_cfg_paths, robot_sphere_counts_split)
             
 
     my_world.reset()
@@ -1097,7 +1127,7 @@ def main(meta_cfg_path):
     viz_spheres_delta = meta_cfg["default"]["debug"]["visualize_spheres"]["ts_delta"] == 0
     spheres = None
     
-    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_list))]
+    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))]
     plans_lock = Lock()
     t = 0
     while simulation_app.is_running():
@@ -1120,6 +1150,7 @@ def main(meta_cfg_path):
                     a.sim_robot.robot._articulation_view.set_max_efforts(
                         values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
                     )
+                    a.sim_robot.get_js(sync_new=True) 
                 
         if step_index < 20:
             continue
@@ -1129,22 +1160,24 @@ def main(meta_cfg_path):
             
             planner = a.planner
             if a.sim_robot is not None:
-                ctrl_dof_names = a.sim_robot.robot.dof_names
-                ctrl_dof_indices = a.sim_robot.robot.get_dof_index
+                ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
+                ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
                 
                 
                 
                 # publish
                 js = a.sim_robot.get_js(sync_new=False)
-                if js is not None:    
-                    if isinstance(planner, MpcPlanner):
-                        
-                        plan = planner.get_estimated_plan(ctrl_dof_names, a.n_spheres_valid, js, valid_spheres_only=False)
+                if js is not None:
+                    n_spheres_valid = sphere_counts_splits[a.idx][0]                            
+                    plan = planner.get_estimated_plan(ctrl_dof_names, n_spheres_valid, js, valid_spheres_only=False)
+                    if plan is not None: # currently available in mpc only
                         with plans_lock:
                             plans_board[a.idx] = plan
-                            
+                            print(f"debug: agent {a.idx} updated plan")
+                
                 # sense
-                # sense obstacles
+                
+                # sense obstacles 
                 a.update_col_model_from_isaac_sim(
                     a.sim_robot.path, 
                     usd_help, 
