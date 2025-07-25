@@ -73,14 +73,14 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       is_on: True # meaning agent is subscribing to plans from other robots
       to: 'all' # meaning agent will subscribe to plans from all robots (except itself). 'to' can be a list of robot indices or 'all'. When agent is subscribed to plans, it will use the plans to plan its own steps (to make collision free steps).
       
-  # default values for debugging (if not specified by the agent)
-  debug:    
-    world_cu_wrapper: # world collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
+  # # default values for debugging (if not specified by the agent)
+  # debug:    
+  #   world_cu_wrapper: # world collision wrapper
+  #     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
     
 # default (and only) values for environments (sim/real) 
 env:
-  simulation:
+  simulation: # todo
     is_on: True
     physics_dt: 0.03
     render_dt: 0.03
@@ -88,28 +88,25 @@ env:
     init_app_settings:
       headless: null # set 'true' to run in headless mode
     
-  real:
+  real: # todo
     is_on: False
   
 
   
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    #col_pred_with: [1,2] # indics of all robots that the current robot should predict collisions with. Will be used only if override_particle_file of the robot will have the custom cost for dynamic obs and if collision prediction of the planner is supproted (currently only mpc supports it)
     
 
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    # col_pred_with: [0,2]
 
 
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    # col_pred_with: [0,1]
 
   
     

@@ -1,23 +1,10 @@
  
-
-
- 
-# Standard Library
-import argparse
-
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument(
-    "--headless_mode",
-    type=str,
-    default=None,
-    help="To run headless, use one of [native, websocket], webrtc might not work.",
-)
-parser.add_argument(
-    "--robot", type=str, default="dual_ur10e.yml", help="robot configuration to load"
-)
-args = parser.parse_args()
+# import argparse
+# parser = argparse.ArgumentParser()
+# args = parser.parse_args()
+meta_cfg_path='projects_root/experiments/benchmarks/cfgs/meta_cfg.yml'
+from curobo.util_file import load_yaml
+meta_cfg = load_yaml(meta_cfg_path)
 
 try:
     # Third Party
@@ -27,16 +14,17 @@ except ImportError:
 
 # Isaac Sim
 from omni.isaac.kit import SimulationApp
+headless = meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]
 simulation_app = SimulationApp(
     {
-        "headless": args.headless_mode is not None,
+        "headless": headless is not None,
         "width": "1920",
         "height": "1080",
     }
 )
 
 from projects_root.examples.helper import add_extensions
-add_extensions(simulation_app, args.headless_mode)
+add_extensions(simulation_app, headless)
 
 from abc import abstractmethod
 from collections.abc import Callable
@@ -584,16 +572,6 @@ class MpcPlanner(CuPlanner):
         if col_pred is None:
             return
         if t == 0:
-            # Initialize collision predictor on first iteration
-            # Set radii for each robot that this robot collides with
-            # for j in col_pred_with:
-            #     if plans_board[j] is None:
-            #         continue
-            #     # rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0].to(self.solver.tensor_args)
-            #     # col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
-            
-            # Set own robot radii 
-            # col_pred.set_own_rads(plans_board[idx]['task_space']['spheres']['r'][0].to(self.solver.tensor_args))
             rad_spheres_own = plans_board[idx]['task_space']['spheres']['r'][0]
             col_pred.set_own_rads(rad_spheres_own)
         else:
@@ -601,12 +579,10 @@ class MpcPlanner(CuPlanner):
             for j in col_pred_with:
                 if plans_board[j] is None:
                     continue
-                # rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0].to(self.solver.tensor_args)
                 rad_spheres_robotj = plans_board[j]['task_space']['spheres']['r'][0]
-                col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj)
+                col_pred.set_obs_rads_for_robot(j, rad_spheres_robotj) # assuming that they can be changed...
                 H = self.particle_cfg_dict['model']['horizon']
                 plan_robot_j = plans_board[j]['task_space']['spheres'] 
-                # plan_robot_j_horizon = plan_robot_j['p'][:H].to(self.solver.tensor_args)
                 plan_robot_j_horizon = plan_robot_j['p'][:H]
                 col_pred.update_robot_spheres(j, plan_robot_j_horizon)
     
@@ -1077,7 +1053,7 @@ class CuAgent:
                 return t % self.pub_sub_cfg["pub"]["dt"] == 0 and bernoulli()
         return False
     
-def main(meta_cfg_path):
+def main():
     
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
@@ -1397,5 +1373,4 @@ def main(meta_cfg_path):
             
             pts_debug = []
 
-if __name__ == "__main__":
-    main(meta_cfg_path='projects_root/experiments/benchmarks/cfgs/meta_cfg.yml')
+main()
