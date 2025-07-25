@@ -87,6 +87,7 @@ env:
     enable_gpu_dynamics: True
     init_app_settings:
       headless: null # set 'true' to run in headless mode
+    async: True
     
   real: # todo
     is_on: False

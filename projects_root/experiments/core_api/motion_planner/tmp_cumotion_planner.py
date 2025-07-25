@@ -93,7 +93,30 @@ class Plan:
             
 
 
+class PlanPubSub:
+    def __init__(self,
+        pub_cfg:dict,
+        sub_cfg:dict,
+        valid_spheres:int,
+        total_spheres:int
+        ):
+        self.pub_cfg = pub_cfg
+        self.sub_cfg = sub_cfg
+        self.valid_spheres = valid_spheres
+        self.total_spheres = total_spheres
 
+    def should_pub_now(self, t:int)->bool:
+        def bernoulli():
+            return random.random() <= self.pub_cfg["pr"]
+        if self.pub_cfg["is_on"]:
+            if self.pub_cfg["is_dt_in_sec"]:
+                if not hasattr(self, "_last_pub_time"):
+                    self._last_pub_time = time()
+                return time() - self._last_pub_time >= self.pub_cfg["dt"] and bernoulli()
+            else:
+                return t % self.pub_cfg["dt"] == 0 and bernoulli()
+        return False
+        
 
 class CuPlanner:
     def __init__(self,
@@ -775,31 +798,7 @@ class SimRobot:
                     self._vis_spheres[si].set_radius(float(s.radius))
 
 
-# class PlanPublisher:
-#     def __init__(self,planner:Union[MpcPlanner, CumotionPlanner], crm:CudaRobotModel, dof_names:list[str], tensor_args:TensorDeviceType, n_col_spheres:int, n_col_spheres_valid:int):
-#         self.planner = planner
-#         self.crm = crm # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
-#         self.dof_names = dof_names
-#         self.tensor_args = tensor_args
-#         self.n_col_spheres = n_col_spheres
-#         self.n_col_spheres_valid = n_col_spheres_valid
 
-    
-#     @abstractmethod
-#     def publish_to_board(self, **kwargs):
-#         """
-#         publishing plans to plan board (env topics)
-#         """
-#         pass
-
-# class MpcPlanPublisher(PlanPublisher):
-#     def __init__(self, planner:MpcPlanner, crm:CudaRobotModel, dof_names:list[str], tensor_args:TensorDeviceType, n_col_spheres:int, n_col_spheres_valid:int):
-#         super().__init__(planner, crm, dof_names, tensor_args, n_col_spheres, n_col_spheres_valid)
-        
-#     def publish_to_board(self, robot_idx:int, plans_board, plans_lock:Lock, joints_state:isaac_JointsState):
-#         with plans_lock:
-#             plans_board[robot_idx] = self.get_estimated_plan(valid_spheres_only=False,joints_state=joints_state)
-    
 
 
 # class CumotionPlanPublisher(PlanPublisher):
@@ -874,7 +873,7 @@ class CuAgent:
                 robot_cfg_path:str,
                 robot_cfg:dict,
                 sim_robot:Optional[SimRobot]=None,
-                pub_sub_cfg:dict={}
+                plan_pub_sub:Optional[PlanPubSub]=None,
                 ):
         
         self.idx = idx
@@ -883,9 +882,8 @@ class CuAgent:
         self.sim_robot = sim_robot
         self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
-        self.col_pred_with = pub_sub_cfg["sub"]["to"]
-
-        self.pub_sub_cfg = pub_sub_cfg
+        # self.col_pred_with = pub_sub_cfg["sub"]["to"]
+        self.plan_pub_sub = plan_pub_sub
         # self.n_spheres_valid, self.n_spheres_extra = calculate_robot_sphere_count(robot_cfg)
         # self.n_spheres_total = self.n_spheres_valid + self.n_spheres_extra
 
@@ -991,7 +989,7 @@ class CuAgent:
         self.planner.update_col_pred(plans_board, t, self.idx, self.pub_sub_cfg["sub"]["to"])
     
     
-    def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, stop_event, plans_board, get_t):
+    def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, get_t, pts_debug):
         while not stop_event.is_set():
 
             # wait for new time step
@@ -1002,16 +1000,22 @@ class CuAgent:
                 continue
             last_step = cur_step
 
-            # publish 
-            if OBS_PREDICTION:
-                sim_js = None
-                real_js = None
-                if SIMULATING:
-                    sim_js = r.get_sim_joint_state(sync_new=False) # synced at sense()
-                if REAL:
-                    pass # real_js = # TODO: r.get_real_joint_state()
-                r.publish(plans, plans_lock,sim_js,real_js)
-        
+            planner = self.planner
+            if self.sim_robot is not None:
+                
+                ctrl_dof_names = self.sim_robot.robot.dof_names # or from real
+                ctrl_dof_indices = self.sim_robot.robot.get_dof_index # or from real
+                
+                # publish
+
+                js = self.sim_robot.get_js(sync_new=False)
+                if js is not None and self.is_plan_publisher() and self.plan_pub_sub.should_pub_now(cur_step):
+                    plan = planner.get_estimated_plan(ctrl_dof_names, self.plan_pub_sub.valid_spheres, js, valid_spheres_only=False)
+                    if plan is not None: # currently available in mpc only
+                        plans_board[self.idx] = plan
+                        if self.sim_robot.visualize_plan["is_on"] and cur_step % self.sim_robot.visualize_plan["ts_delta"] == 0:
+                            pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': self.sim_robot.visualize_plan["color"]})
+            
             
                 
             # sense
@@ -1053,6 +1057,12 @@ class CuAgent:
                 return t % self.pub_sub_cfg["pub"]["dt"] == 0 and bernoulli()
         return False
     
+    def is_plan_subscriber(self)->bool:
+        return self.plan_pub_sub is not None and self.plan_pub_sub.sub_cfg["is_on"]
+
+    def is_plan_publisher(self):
+        return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
+
 def main():
     
     # assuming obstacles are in objects_path:
@@ -1170,7 +1180,7 @@ def main():
             robot_cfg_path=robot_cfgs_paths[a_idx],
             robot_cfg=robot_cfgs[a_idx],
             sim_robot=sim_robot, # optional, when using simulation
-            pub_sub_cfg=pub_sub_cfgs[a_idx],
+            plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
         )
 
         cu_agents.append(a)
@@ -1231,8 +1241,8 @@ def main():
     
 
     t = 0        
-    sync = True
-    if sync:
+
+    if not meta_cfg["env"]["simulation"]["async"]: # sync mode
         while simulation_app.is_running():
             
             my_world.step(render=True)
@@ -1293,8 +1303,8 @@ def main():
                     if js is None:
                         print("sim_js is None")
                         continue
-                    z = tensor_args.to_device(js.positions) * 0.0
-                    cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), z, ctrl_dof_names,z).get_ordered_joint_state(planner.ordered_j_names)
+                    _0 = tensor_args.to_device(js.positions) * 0.0
+                    cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
                     
@@ -1306,7 +1316,7 @@ def main():
                         goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
                     
                     # sense plans
-                    if a.pub_sub_cfg["sub"]["is_on"]:
+                    if a.is_plan_subscriber():
                         a.update_col_pred(plans_board, t)
                     
                     # plan
@@ -1336,24 +1346,20 @@ def main():
                     
         simulation_app.close()
     
-    else:
+    else: # async mode
         plans_lock = Lock() # locking plans board
         sim_lock = Lock() # locking simulator 
         t_lock = Lock() # locking time step index
         stop_event = Event()  
-        a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock, stop_event, plans_board, lambda: t), daemon=True) for a in cu_agents] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
-        for th in a_threads:
-            th.start()
-
-        while simulation_app.is_running():
-            
+        debug_lock = Lock()
+        
+        while simulation_app.is_running():    
             my_world.step(render=True)
             if not my_world.is_playing():
                 if i % 100 == 0:
                     print("**** Click Play to start simulation *****")
                 i += 1
                 continue
-            
             step_index = my_world.current_time_step_index
             if step_index <= 10:
                 # my_world.reset()
@@ -1371,6 +1377,22 @@ def main():
                 continue
             
             
-            pts_debug = []
+            
+        a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock, stop_event, plans_board, lambda: t), daemon=True) for a in cu_agents] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
+        for th in a_threads:
+            th.start()    
+        
+        
+        while simulation_app.is_running():
+            with debug_lock:
+                pts_debug = []
+            with sim_lock: 
+                my_world.step(render=True)                                   
+                with t_lock:
+                    t += 1
+                with debug_lock:
+                    if len(pts_debug):
+                        draw_points(pts_debug)
+        simulation_app.close() 
 
 main()
