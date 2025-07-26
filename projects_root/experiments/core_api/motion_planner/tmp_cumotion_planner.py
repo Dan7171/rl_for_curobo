@@ -45,6 +45,7 @@ from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.utils.types import JointsState as isaac_JointsState
+from isaacsim.core.utils.xforms import get_world_pose
 
 # CuRobo
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
@@ -72,6 +73,8 @@ from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_p
 from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres, transform_poses_batched
 from projects_root.utils.draw import draw_points
 from projects_root.utils.colors import npColors
+
+
 
 class Plan:
     def __init__(self, cmd_idx=0, cmd_plan:Optional[JointState]=None):
@@ -758,6 +761,7 @@ class CumotionPlanner(CuPlanner):
         return None # TODO
 
 
+
 class SimRobot:
     def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict):
         self.robot = robot
@@ -767,12 +771,14 @@ class SimRobot:
         self.target_path_to_target_prim = {} 
         self._cur_js = None
         
+        
         # debugging variables
         self.visualize_col_spheres = visualize_col_spheres
         self.visualize_obj_bound_spheres = visualize_obj_bound_spheres
         self.visualize_plan = visualize_plan
         self.visualize_mpc_ee_rollouts = visualize_mpc_ee_rollouts
-        
+   
+    
     def get_js(self, sync_new=True) -> isaac_JointsState:
         if sync_new:
             js = self.robot.get_joints_state() # from simulation. TODO: change "robot" to sim_robot and add a real_robot attribute
@@ -890,6 +896,7 @@ class CuAgent:
                 robot_cfg:dict,
                 sim_robot:Optional[SimRobot]=None,
                 plan_pub_sub:Optional[PlanPubSub]=None,
+                viz_color:str='orange',
                 ):
         
         self.idx = idx
@@ -899,11 +906,9 @@ class CuAgent:
         self.sim_robot = sim_robot
         self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
-        # self.col_pred_with = pub_sub_cfg["sub"]["to"]
         self.plan_pub_sub = plan_pub_sub
-        # self.n_spheres_valid, self.n_spheres_extra = calculate_robot_sphere_count(robot_cfg)
-        # self.n_spheres_total = self.n_spheres_valid + self.n_spheres_extra
-
+        self.viz_color = self._parse_viz_color(viz_color)
+        
 
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
@@ -1019,8 +1024,7 @@ class CuAgent:
     def update_col_pred(self, plans_board, t, plans_lock:Optional[Lock]=None):
         self.planner.update_col_pred(plans_board, t, self.idx, self.plan_pub_sub.sub_cfg["to"], plans_lock)
     
-    def _debug(self):
-        pass
+
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:Optional[UsdHelper]=None):
         self._last_t = -1
         viz_plans, viz_plans_dt = self.sim_robot.visualize_plan["is_on"], self.sim_robot.visualize_plan["ts_delta"]
@@ -1133,6 +1137,146 @@ class CuAgent:
     def is_plan_publisher(self):
         return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
 
+         
+    def _parse_viz_color(self, color:str):
+        match color:
+            case 'green':
+                return [0, 1, 0]
+            case 'red':
+                return [1, 0, 0]
+            case 'blue':
+                return [0, 0, 1]
+            case 'yellow':
+                return [1, 1, 0]
+            case 'purple':
+                return [1, 0, 1]
+            case 'orange':
+                return [1, 0.5, 0]
+class SimTask:
+    def __init__(self, 
+        agent_task_cfgs:list[dict],
+        world:World, 
+        usd_help:UsdHelper,        
+        tensor_args:TensorDeviceType,
+        ):
+        
+        self.agent_task_cfgs = agent_task_cfgs
+        self.world = world
+        self.usd_help = usd_help
+        self.tensor_args = tensor_args
+        
+        self.link_name_to_path = [{} for _ in range(len(agent_task_cfgs))]
+        self.link_path_to_prim = [{} for _ in range(len(agent_task_cfgs))]
+        self.name_link_to_target = [{} for _ in range(len(agent_task_cfgs))]
+        self.name_target_to_link = [{} for _ in range(len(agent_task_cfgs))]
+        self.target_name_to_path = [{} for _ in range(len(agent_task_cfgs))]
+        self.target_path_to_prim = [{} for _ in range(len(agent_task_cfgs))]
+        self.goal_errors = [{} for _ in range(len(agent_task_cfgs))]
+
+        
+        for a_idx, a_cfg in enumerate(agent_task_cfgs):
+            for link_name in a_cfg.keys():
+                l_path, l_prim, l_target_color, l_retract_pose = a_cfg[link_name]
+                l_pose =  l_retract_pose # get_world_pose(l_path) # world.stage.GetPrimAtPath(l_path).GetWorldPose() # l_prim.get_world_pose()
+                target_name = f"target_{a_idx}_{link_name}"
+                target_path = f"/World/{target_name}"
+                l_pose = np.ravel(l_pose.to_list())
+                target_prim = cuboid.VisualCuboid(target_path, position=np.array(l_pose[:3]), orientation=np.array(l_pose[3:]), color=np.array(l_target_color), size=0.05)
+                
+                self.link_name_to_path[a_idx][link_name] = l_path
+                self.link_path_to_prim[a_idx][l_path] = l_prim
+                self.name_link_to_target[a_idx][link_name] = target_name
+                self.name_target_to_link[a_idx][target_name] = link_name
+                self.target_name_to_path[a_idx][target_name] = target_path
+                self.target_path_to_prim[a_idx][target_path] = target_prim
+
+                self.goal_errors[a_idx][link_name] = []
+                
+
+    
+   
+    
+    def _update_err_log(self, link_name_to_error):
+        now = time()
+        for a_idx in range(len(self.agent_task_cfgs)):
+            for link_name, error in link_name_to_error[a_idx].items():
+                self.goal_errors[a_idx][link_name].append((error, now))
+                
+
+
+
+    def _get_link_errors(self) -> list[dict[str,float]]:
+        link_name_to_error = [{}] * len(self.agent_task_cfgs)
+        for a_idx in range(len(self.agent_task_cfgs)):                
+            for link_name, link_path in self.link_name_to_path[a_idx].items():
+                p_link, q_link = get_world_pose(link_path)
+
+                target_name = self.name_link_to_target[a_idx][link_name]
+                target_path = self.target_name_to_path[a_idx][target_name]
+                target_prim = self.target_path_to_prim[a_idx][target_path]
+                p_target, q_target = target_prim.get_world_pose()
+                err = np.linalg.norm(p_target - p_link[:3]), np.linalg.norm(q_target - q_link[3:])
+                link_name_to_error[a_idx][link_name] = err
+        return link_name_to_error
+        
+        
+    @abstractmethod
+    def update_targets(self,**kwargs) -> list[dict[str,Pose]]:
+        """
+        update poses of some/all targets according to task's logic... 
+        return dict of link name -> updated target pose (after updating in simulator) for every agent
+        """
+        
+                    
+
+class StatGoalsTask(SimTask):
+    def __init__(self, agents_task_cfgs:list[dict], world:World, usd_help:UsdHelper, tensor_args:TensorDeviceType, timeout:float=3.0):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
+        self.timeout = timeout
+        self._last_update_time = 0.0
+        
+    def update_targets(self) -> list[dict[str,Pose]]:
+        errors = self._get_link_errors()
+        self._update_err_log(errors)
+        n_agents = len(self.link_name_to_path)
+        new_target_poses = [{}] * n_agents
+        now = time()
+        prev = self._last_update_time
+        if now - prev > self.timeout:
+            for a_idx in range(n_agents):
+                for link_name in self.link_name_to_path[a_idx].keys():
+                    target_name = self.name_link_to_target[a_idx][link_name]
+                    target_path = self.target_name_to_path[a_idx][target_name]
+                    target_prim = self.target_path_to_prim[a_idx][target_path]                    
+                    p_target, q_target = target_prim.get_world_pose() # get_world_pose(target_path)
+                    p_target_new, q_target_new = p_target + np.array([0.0, 0.0, 0.05]), q_target
+                    target_next_pose = Pose(position=self.tensor_args.to_device(p_target_new), quaternion=self.tensor_args.to_device(q_target_new))
+                    new_target_poses[a_idx][link_name] = target_next_pose
+                    target_prim.set_world_pose(position=p_target_new, orientation=q_target_new)
+            self._last_update_time = time()
+            print(f"debug: updated after {now - prev} seconds")
+
+
+        return new_target_poses
+
+
+
+            
+            
+            
+            
+            
+            
+            
+                
+
+def get_saftey_scores(self, robots_spheres, robots_obj_dists, robots_self_cols):
+    pass
+    
+def update_jerk_scores(self, jerk_data):
+    pass
+
+
 def main():
     
     # assuming obstacles are in objects_path:
@@ -1221,7 +1365,7 @@ def main():
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         sim_robot_cfg = a_cfg["sim_robot_cfg"] if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
         
-        sim_robot = SimRobot(robot, robot_prim_path,**sim_robot_cfg)
+        sim_robot = SimRobot(robot, robot_prim_path, **sim_robot_cfg)
         world_cfg = WorldConfig()
     
         if planner_type[a_idx] == 'cumotion':
@@ -1243,6 +1387,7 @@ def main():
             raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
         
+        
         a = CuAgent(
             a_idx,
             tensor_args,
@@ -1255,42 +1400,42 @@ def main():
         )
 
         cu_agents.append(a)
-        if a.sim_robot is not None: # if using simulation
-            # set ee target prims:
-            ee_target_prim_path = f"/World/agent{a_idx}link{planner.ee_link_name}target"
-            ee_retract_pose = planner.plan_goals[planner.ee_link_name]
-            _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
-            ee_target = cuboid.VisualCuboid(
-                ee_target_prim_path,
-                position=_initial_ee_target_pose[:3],
-                orientation=_initial_ee_target_pose[3:],
-                color=np.array([1.0, 0, 0]),
-                size=0.05,
-            )
-            a.sim_robot.link_name_to_target_path[planner.ee_link_name] = ee_target_prim_path
-            a.sim_robot.target_path_to_target_prim[ee_target_prim_path] = ee_target
+        # if a.sim_robot is not None: # if using simulation
+        #     # set ee target prims:
+        #     ee_target_prim_path = f"/World/agent{a_idx}link{planner.ee_link_name}target"
+        #     ee_retract_pose = planner.plan_goals[planner.ee_link_name]
+        #     _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
+        #     ee_target = cuboid.VisualCuboid(
+        #         ee_target_prim_path,
+        #         position=_initial_ee_target_pose[:3],
+        #         orientation=_initial_ee_target_pose[3:],
+        #         color=np.array([1.0, 0, 0]),
+        #         size=0.05,
+        #     )
+        #     a.sim_robot.link_name_to_target_path[planner.ee_link_name] = ee_target_prim_path
+        #     a.sim_robot.target_path_to_target_prim[ee_target_prim_path] = ee_target
 
-            for link_name in planner.constrained_links_names:
-                if link_name != planner.ee_link_name:
-                    target_path = f"/World/agent{a_idx}link{link_name}target" 
-                    constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
-                    _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
+        #     for link_name in planner.constrained_links_names:
+        #         if link_name != planner.ee_link_name:
+        #             target_path = f"/World/agent{a_idx}link{link_name}target" 
+        #             constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
+        #             _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
                     
-                    color = np.random.randn(3) * 0.2
-                    color[0] += 0.5
-                    color[1] = 0.5
-                    color[2] = 0.0
-                    #constr_link_name_to_target_prim[link_name]
-                    target_prim = cuboid.VisualCuboid(
-                        target_path,
-                        position=np.array(_initial_constrained_link_target_pose[:3]),
-                        orientation=np.array(_initial_constrained_link_target_pose[3:]),
-                        color=color,
-                        size=0.05,
-                    )
-                    # constr_links_targets_prims_paths.append(target_path)
-                    a.sim_robot.link_name_to_target_path[link_name] = target_path    
-                    a.sim_robot.target_path_to_target_prim[target_path] = target_prim 
+        #             color = np.random.randn(3) * 0.2
+        #             color[0] += 0.5
+        #             color[1] = 0.5
+        #             color[2] = 0.0
+        #             #constr_link_name_to_target_prim[link_name]
+        #             target_prim = cuboid.VisualCuboid(
+        #                 target_path,
+        #                 position=np.array(_initial_constrained_link_target_pose[:3]),
+        #                 orientation=np.array(_initial_constrained_link_target_pose[3:]),
+        #                 color=color,
+        #                 size=0.05,
+        #             )
+        #             # constr_links_targets_prims_paths.append(target_path)
+        #             a.sim_robot.link_name_to_target_path[link_name] = target_path    
+        #             a.sim_robot.target_path_to_target_prim[target_path] = target_prim 
     
     # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
     for a in cu_agents:
@@ -1303,18 +1448,36 @@ def main():
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
     
+    
+    agents_task_cfgs = []
+    for a in cu_agents:
+        if a.sim_robot is not None:
+            cfg = {}
+            links_with_target = [a.planner.ee_link_name, *[link_name for link_name in a.planner.constrained_links_names]]
+            for link_name in links_with_target:
+                link_path = a.sim_robot.path + "/"  + link_name
+                link_prim = my_world.stage.GetPrimAtPath(link_path)
+                link_target_color = a.viz_color
+                link_retract_pose = a.planner.plan_goals[link_name]
+                cfg[link_name] = [link_path, link_prim, link_target_color, link_retract_pose]
+            agents_task_cfgs.append(cfg)
 
+    if len(agents_task_cfgs) > 0:
+        if meta_cfg["sim_task"]["task_type"] == 'stat_goals':
+            sim_task = StatGoalsTask(agents_task_cfgs, my_world, usd_help, tensor_args, **meta_cfg["sim_task"]["cfg"])
+        
 
     my_world.reset()
     my_world.play()
     i = 0
-    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))] # plans will be stored here
     t = 0        
+    plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))] # plans will be stored here
+
 
 
     if not meta_cfg["async"]: # sync mode
         while simulation_app.is_running():
-        
+            
             my_world.step(render=True)
             if not my_world.is_playing():
                 if i % 100 == 0:
@@ -1340,6 +1503,7 @@ def main():
             
             
             pts_debug = []
+            task_goals = sim_task.update_targets()
             for a in cu_agents:
                 planner = a.planner
                 viz_plans, viz_plans_dt = a.sim_robot.visualize_plan["is_on"], a.sim_robot.visualize_plan["ts_delta"]
@@ -1382,12 +1546,12 @@ def main():
                         planner.update_state(cu_js)
                     
                     # sense goals
-                    goals = {}
-                    for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
-                        target_prim = a.sim_robot.target_path_to_target_prim[target_path]
-                        p_target, q_target = target_prim.get_world_pose()
-                        goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
-                    
+                    # goals = {}
+                    # for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
+                    #     target_prim = a.sim_robot.target_path_to_target_prim[target_path]
+                    #     p_target, q_target = target_prim.get_world_pose()
+                    #     goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
+                    goals = task_goals[a.idx]
                     # sense plans
                     if a.is_plan_subscriber():
                         a.update_col_pred(plans_board, t)
@@ -1398,7 +1562,7 @@ def main():
                         action = planner.yield_action(goals, cu_js, js.velocities)
                     elif isinstance(planner, MpcPlanner):
                         action = planner.yield_action(goals)
-                        if a.sim_robot.visualize_mpc_ee_rollouts["is_on"] and t % a.sim_robot.visualize_mpc_ee_rollouts["ts_delta"] == 0:
+                        if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
                             pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.visualize_mpc_ee_rollouts["color"]})
 
                     else:
@@ -1411,7 +1575,7 @@ def main():
                         a.sim_robot.articulation_controller.apply_action(isaac_action)
                     
                     # debug
-                    if a.sim_robot.visualize_col_spheres["is_on"] and t % a.sim_robot.visualize_col_spheres["ts_delta"] == 0:
+                    if viz_col_spheres and t % viz_col_spheres_dt == 0:
                         a.sim_robot.visualize_robot_as_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
                 if len(pts_debug):
                     draw_points(pts_debug)
