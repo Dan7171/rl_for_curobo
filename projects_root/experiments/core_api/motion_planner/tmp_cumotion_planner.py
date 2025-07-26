@@ -1203,7 +1203,7 @@ class SimTask:
                 self.goal_errors[a_idx][link_name].append((error, now))
                 
 
-    def _get_link_errors(self) -> list[dict[str,float]]:
+    def _get_link_errors(self) -> list[dict[str,tuple[float,float]]]:
         n_agents = len(self.agent_task_cfgs)
         link_name_to_error = [{} for _ in range(n_agents)]
         for a_idx in range(len(self.agent_task_cfgs)):                
@@ -1214,54 +1214,132 @@ class SimTask:
                 target_path = self.target_name_to_path[a_idx][target_name]
                 target_prim = self.target_path_to_prim[a_idx][target_path]
                 p_target, q_target = target_prim.get_world_pose()
-                err = np.linalg.norm(p_target - p_link[:3]), np.linalg.norm(q_target - q_link[3:])
+                err = (np.linalg.norm(p_target - p_link[:3]), np.linalg.norm(q_target - q_link[3:]))
                 link_name_to_error[a_idx][link_name] = err
         return link_name_to_error
         
         
-    @abstractmethod
-    def update_targets(self,**kwargs) -> list[dict[str,Pose]]:
-        """
-        update poses of some/all targets according to task's logic... 
-        return dict of link name -> updated target pose (after updating in simulator) for every agent
-        """
+
+    def get_goals(self)->list[dict[str,Pose]]:
         
+        errors = self._get_link_errors()
+        self._update_err_log(errors)
+        
+        if self._last_update_time == 0.0 or self.should_update():
+
+            # get current target poses
+            target_name_to_cur_pose =  self.get_all_target_poses()
+            
+            # pick new target poses according to task logic
+            link_name_to_next_target_pose_np = self.get_new_poses(target_name_to_cur_pose, errors)
+            
+            # update simulation with new target poses
+            self.set_poses_in_sim(link_name_to_next_target_pose_np)
+            
+            # parse new targets from np to Pose
+            link_name_to_next_target_pose = [{} for _ in range(len(link_name_to_next_target_pose_np))]
+            for a_idx in range(len(link_name_to_next_target_pose_np)):
+                for link_name in link_name_to_next_target_pose_np[a_idx].keys():
+                    p_target_new_np, q_target_new_np = link_name_to_next_target_pose_np[a_idx][link_name]
+                    new_target_as_pose = Pose(
+                        position=self.tensor_args.to_device(p_target_new_np), 
+                        quaternion=self.tensor_args.to_device(q_target_new_np)
+                    )
+                    link_name_to_next_target_pose[a_idx][link_name] = new_target_as_pose
+            
+            
+            self._last_update_time = time()
+            self._last_update = link_name_to_next_target_pose
+        
+        return self._last_update
                     
+    @abstractmethod
+    def should_update(self)->bool:
+        pass
+    
+    @abstractmethod
+    def get_new_poses(self, 
+                        all_target_poses: list[dict[str,tuple[np.ndarray, np.ndarray]]], 
+                        errors:list[dict[str,tuple[float,float]]]
+                        ) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+        pass
+    
+    def get_all_target_poses(self) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+        n_agents = len(self.link_name_to_path)
+        all_target_poses = [{} for _ in range(n_agents)]
+        for a_idx in range(n_agents):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                target_name = self.name_link_to_target[a_idx][link_name]
+                target_path = self.target_name_to_path[a_idx][target_name]
+                target_prim = self.target_path_to_prim[a_idx][target_path]                    
+                p_target, q_target = target_prim.get_world_pose() # get_world_pose(target_path)
+                all_target_poses[a_idx][target_name] = (p_target, q_target)
+        return all_target_poses
+
+    def set_poses_in_sim(self, new_target_poses:list[dict[str,tuple[np.ndarray, np.ndarray]]]):
+        n_agents = len(self.link_name_to_path)
+        for a_idx in range(n_agents):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                target_name = self.name_link_to_target[a_idx][link_name]
+                target_path = self.target_name_to_path[a_idx][target_name]
+                target_prim = self.target_path_to_prim[a_idx][target_path]
+                p_target, q_target = new_target_poses[a_idx][link_name]
+                target_prim.set_world_pose(position=p_target, orientation=q_target)
+
+
+
+
 
 class StatGoalsTask(SimTask):
-    def __init__(self, agents_task_cfgs:list[dict], world:World, usd_help:UsdHelper, tensor_args:TensorDeviceType, timeout:float=3.0):
+    def __init__(self, 
+                 agents_task_cfgs:list[dict], 
+                 world:World, usd_help:UsdHelper, 
+                 tensor_args:TensorDeviceType, 
+                 timeout:float=3.0,
+                 seed:int=0):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
         self.timeout = timeout
         self._last_update_time = 0.0
         
-    def update_targets(self) -> list[dict[str,Pose]]:
-        errors = self._get_link_errors()
-        self._update_err_log(errors)
-        n_agents = len(self.link_name_to_path)
+        target_pos_options = [[0,0,0.5], [1,0,0.5], [0,1,0.5], [1,1,0.5]]
+        target_quat_options = [[0,0,0,1], [1,0,0,0]]
+        all_combs = []
+        for pos in target_pos_options:
+            for quat in target_quat_options:
+                all_combs.append((pos, quat))
+
+        n_agents = len(self.agent_task_cfgs)
+        self._link_name_to_target_ordering = [{} for _ in range(n_agents)]
+        self._link_name_to_next_target_idx = [{} for _ in range(n_agents)]
+        local_rng = random.Random(seed)
+        for a_idx in range(len(self.agent_task_cfgs)):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                local_rng.shuffle(all_combs) # inplace shuffle all combinations 
+                self._link_name_to_target_ordering[a_idx][link_name] = deepcopy(all_combs) # set target ordering for this link
+                print(f"debug: target ordering for {link_name}: {self._link_name_to_target_ordering[a_idx][link_name]}")
+                self._link_name_to_next_target_idx[a_idx][link_name] = 0
+        
+    def should_update(self)->bool:
+        return time() - self._last_update_time > self.timeout
+    
+    def get_new_poses(self, 
+                              all_target_poses: list[dict[str,tuple[np.ndarray, np.ndarray]]], 
+                              errors:list[dict[str,tuple[float,float]]]
+                              ) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+        
+        n_agents = len(self.agent_task_cfgs)
         new_target_poses = [{} for _ in range(n_agents)]
-        now = time()
-        prev = self._last_update_time
-        if now - prev > self.timeout:
-            for a_idx in range(n_agents):
-                for link_name in self.link_name_to_path[a_idx].keys():
-                    target_name = self.name_link_to_target[a_idx][link_name]
-                    target_path = self.target_name_to_path[a_idx][target_name]
-                    target_prim = self.target_path_to_prim[a_idx][target_path]                    
-                    p_target, q_target = target_prim.get_world_pose() # get_world_pose(target_path)
-                    p_target_new, q_target_new = p_target + np.array([0.0, 0.0, 0.05]), q_target
-                    target_next_pose = Pose(position=self.tensor_args.to_device(p_target_new), quaternion=self.tensor_args.to_device(q_target_new))
-                    new_target_poses[a_idx][link_name] = target_next_pose
-                    target_prim.set_world_pose(position=p_target_new, orientation=q_target_new)
-            self._last_update_time = time()
-            print(f"debug: updated after {now - prev} seconds")
 
-
+        for a_idx in range(n_agents):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                link_ordering = self._link_name_to_target_ordering[a_idx][link_name]
+                next_target_idx = self._link_name_to_next_target_idx[a_idx][link_name]
+                
+                new_target_poses[a_idx][link_name] = link_ordering[next_target_idx]
+                self._link_name_to_next_target_idx[a_idx][link_name] = (next_target_idx + 1) % len(link_ordering)
         return new_target_poses
+                
 
-
-
-            
-            
             
             
             
@@ -1502,7 +1580,7 @@ def main():
             
             
             pts_debug = []
-            task_goals = sim_task.update_targets()
+            link_name_to_target_pose = sim_task.get_goals() # update targets in sim and return new target poses
             for a in cu_agents:
                 planner = a.planner
                 viz_plans, viz_plans_dt = a.sim_robot.visualize_plan["is_on"], a.sim_robot.visualize_plan["ts_delta"]
@@ -1544,19 +1622,21 @@ def main():
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
                     
-                    # sense goals
                     # goals = {}
                     # for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
                     #     target_prim = a.sim_robot.target_path_to_target_prim[target_path]
                     #     p_target, q_target = target_prim.get_world_pose()
                     #     goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
-                    goals = task_goals[a.idx]
+                    
                     # sense plans
                     if a.is_plan_subscriber():
                         a.update_col_pred(plans_board, t)
                     
+                    # sense goals
+                    
+                    goals = link_name_to_target_pose[a.idx]
+    
                     # plan
-
                     if isinstance(planner, CumotionPlanner):
                         action = planner.yield_action(goals, cu_js, js.velocities)
                     elif isinstance(planner, MpcPlanner):
