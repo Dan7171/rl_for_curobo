@@ -1301,7 +1301,7 @@ class StatGoalsTask(SimTask):
         self.timeout = timeout
         self._last_update_time = 0.0
         
-        target_pos_options = [[0,0,0.5], [1,0,0.5], [0,1,0.5], [1,1,0.5]]
+        target_pos_options = [[0.2,0,0.2], [0.4,0,0.8], [0.2,0,0.2], [0.4,0,0.8], [0.3,0.2,0.2], [0.3,0.2,0.8], [0.3,-0.2,0.2], [0.3,-0.2,0.8]]
         target_quat_options = [[0,0,0,1], [1,0,0,0]]
         all_combs = []
         for pos in target_pos_options:

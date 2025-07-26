@@ -97,7 +97,7 @@ async: False
 sim_task:
   task_type: 'stat_goals' # stat_goals or drift_goals
   cfg:
-    timeout: 3.0
+    timeout: 10.0
 
   
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
@@ -109,12 +109,12 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion
     base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    viz_color: 'blue'
+    viz_color: 'orange'
 
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion
     base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    viz_color: 'orange'
+    viz_color: 'blue'
   
     
 
