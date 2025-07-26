@@ -82,31 +82,32 @@ default: # default values to fallback to if not specified in the agent cfg. Note
 env:
   simulation: # todo
     is_on: True
-    physics_dt: 0.03
-    render_dt: 0.03
-    enable_gpu_dynamics: True
+    # physics_dt: 0.03
+    # render_dt: 0.03
+    # enable_gpu_dynamics: True
     init_app_settings:
       headless: null # set 'true' to run in headless mode
-    async: True
     
   real: # todo
     is_on: False
+  
+async: True
   
 
   
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'cumotion' # mpc or cumotion
+    planner: 'mpc' # mpc or cumotion
     base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
     
 
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'cumotion' # mpc or cumotion
+    planner: 'mpc' # mpc or cumotion
     base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
 
 
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'cumotion' # mpc or cumotion
+    planner: 'mpc' # mpc or cumotion
     base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
 
   

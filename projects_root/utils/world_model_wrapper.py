@@ -168,15 +168,15 @@ class WorldModelWrapper:
         # re-bind our `self.collision_world` to that very instance so every
         # change becomes visible without any extra copying or syncing.
         try:
-            print("collision_checker attributes:")
-            print(dir(self.collision_checker))
-            print("")
-            print("collision_checker id:")
-            print(id(self.collision_checker))
+            # print("collision_checker attributes:")
+            # print(dir(self.collision_checker))
+            # print("")
+            # print("collision_checker id:")
+            # print(id(self.collision_checker))
             if getattr(self.collision_checker, "world_model", None) is not None:
                 assert id(self.collision_checker.world_model)==id(self.collision_world), "Collision checker world model and self.collision_world must be the same object"
                 self.collision_world = self.collision_checker.world_model
-                print("assetion done:")
+                #print("assetion done:")
         except Exception:
             # Fallback – leave previous reference in place
             raise Exception("Failed to set collision checker reference")
