@@ -35,16 +35,26 @@ def draw_points(points_dicts: List[dict], color='green'):
             point_list += [
                 (cpu_rollouts[i, j, 0], cpu_rollouts[i, j, 1], cpu_rollouts[i, j, 2]) for j in range(h)
             ]
-            if color == 'green':
-                colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
-            elif color == 'black':
-                colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
-            elif color == 'red':
-                colors += [(1.0, 0.0, 0.0, 0.1) for _ in range(h)]
-            elif color == 'blue':
-                colors += [(0.0, 0.0, 1.0, 0.1) for _ in range(h)]
-            elif color == 'yellow':
-                colors += [(1.0, 1.0, 0.0, 0.1) for _ in range(h)]
+            if type(color) == str:
+
+                if color == 'green':
+                    colors += [(1.0 - (i + 1.0 / b), 0.3 * (i + 1.0 / b), 0.0, 0.1) for _ in range(h)]
+                elif color == 'black':
+                    colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
+                elif color == 'red':
+                    colors += [(1.0, 0.0, 0.0, 0.1) for _ in range(h)]
+                elif color == 'blue':
+                    colors += [(0.0, 0.0, 1.0, 0.1) for _ in range(h)]
+                elif color == 'yellow':
+                    colors += [(1.0, 1.0, 0.0, 0.1) for _ in range(h)]
+                elif color == 'purple':
+                    colors += [(1.0, 0.0, 1.0, 0.1) for _ in range(h)]
+                elif color == 'orange':
+                    colors += [(1.0, 0.5, 0.0, 0.1) for _ in range(h)]
+                elif color == 'white':
+                    colors += [(1.0, 1.0, 1.0, 0.1) for _ in range(h)]
+            elif type(color) == list:
+                colors += [(*color, 0.1) for _ in range(h)]
             
         for p in point_list:
             unified_points.append(p)

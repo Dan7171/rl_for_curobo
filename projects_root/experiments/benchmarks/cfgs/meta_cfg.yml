@@ -51,6 +51,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
       is_on: false
       ts_delta: 2 # int
+      
 
     visualize_plan: # visualize the planned trajectory of the robot (for debugging)
       is_on: True

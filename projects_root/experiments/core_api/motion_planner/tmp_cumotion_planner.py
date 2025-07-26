@@ -763,20 +763,35 @@ class CumotionPlanner(CuPlanner):
 
 
 class SimRobot:
-    def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict):
+    def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict,viz_color:str):
         self.robot = robot
         self.path = path # prim path of the robot in isaac sim
         self.articulation_controller = self.robot.get_articulation_controller()
         self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
         self.target_path_to_target_prim = {} 
         self._cur_js = None
-        
+        self.viz_color = viz_color
         
         # debugging variables
-        self.visualize_col_spheres = visualize_col_spheres
-        self.visualize_obj_bound_spheres = visualize_obj_bound_spheres
-        self.visualize_plan = visualize_plan
-        self.visualize_mpc_ee_rollouts = visualize_mpc_ee_rollouts
+        self.viz_col_spheres_on = visualize_col_spheres['is_on']
+        self.viz_col_spheres_dt = visualize_col_spheres['ts_delta']
+        self.viz_col_spheres_color = self.viz_color # self.visualize_col_spheres['color']
+
+        self.viz_obj_bound_spheres_on = visualize_obj_bound_spheres['is_on']
+        self.viz_obj_bound_spheres_dt = visualize_obj_bound_spheres['ts_delta']
+
+        self.viz_plan_on = visualize_plan['is_on']
+        self.viz_plan_dt = visualize_plan['ts_delta']
+        self.viz_plan_color = self.viz_color # self.visualize_plan['color']
+        
+        self.viz_mpc_ee_rollouts_on = visualize_mpc_ee_rollouts['is_on']
+        self.viz_mpc_ee_rollouts_dt = visualize_mpc_ee_rollouts['ts_delta']
+        self.viz_mpc_ee_rollouts_color =  visualize_mpc_ee_rollouts['color']
+        
+        # self.visualize_obj_bound_spheres = visualize_obj_bound_spheres
+        # self.visualize_plan = visualize_plan
+        # self.visualize_mpc_ee_rollouts = visualize_mpc_ee_rollouts
+        
    
     
     def get_js(self, sync_new=True) -> isaac_JointsState:
@@ -819,7 +834,22 @@ class SimRobot:
                     self._vis_spheres[si].set_radius(float(s.radius))
 
 
-
+    def parse_viz_color(self, color:str)->list[float]:
+        match color:
+            case 'green':
+                return [0, 1, 0]
+            case 'red':
+                return [1, 0, 0]
+            case 'blue':
+                return [0, 0, 1]
+            case 'yellow':
+                return [1, 1, 0]
+            case 'purple':
+                return [1, 0, 1]
+            case 'orange':
+                return [1, 0.5, 0]
+            case _:
+                raise ValueError(f"Invalid color: {color}")
 
 
 # class CumotionPlanPublisher(PlanPublisher):
@@ -907,7 +937,7 @@ class CuAgent:
         self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
-        self.viz_color = self._parse_viz_color(viz_color)
+        self.viz_color = self.sim_robot.parse_viz_color(viz_color)
         
 
         # See wrapper's docstring to understand the motivation for the wrapper.
@@ -1027,9 +1057,9 @@ class CuAgent:
 
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:Optional[UsdHelper]=None):
         self._last_t = -1
-        viz_plans, viz_plans_dt = self.sim_robot.visualize_plan["is_on"], self.sim_robot.visualize_plan["ts_delta"]
-        viz_col_spheres, viz_col_spheres_dt = self.sim_robot.visualize_col_spheres["is_on"], self.sim_robot.visualize_col_spheres["ts_delta"]
-        viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = self.sim_robot.visualize_mpc_ee_rollouts["is_on"], self.sim_robot.visualize_mpc_ee_rollouts["ts_delta"]
+        viz_plans, viz_plans_dt = self.sim_robot.viz_plan_on, self.sim_robot.viz_plan_dt
+        viz_col_spheres, viz_col_spheres_dt = self.sim_robot.viz_col_spheres_on, self.sim_robot.viz_col_spheres_dt
+        viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = self.sim_robot.viz_mpc_ee_rollouts_on, self.sim_robot.viz_mpc_ee_rollouts_dt
 
         while not stop_event.is_set():
 
@@ -1058,7 +1088,7 @@ class CuAgent:
                             plans_board[idx] = plan
                         if viz_plans and t % viz_plans_dt == 0:
                             with debug_lock:
-                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': self.sim_robot.visualize_plan["color"]})
+                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': self.sim_robot.viz_plan_color})
             
                 # sense 
 
@@ -1102,7 +1132,7 @@ class CuAgent:
                 elif isinstance(planner, MpcPlanner):
                     action = planner.yield_action(goals)
                     if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
-                        pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': self.sim_robot.visualize_mpc_ee_rollouts["color"]})
+                        pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': self.sim_robot.viz_mpc_ee_rollouts_color})
                 else:
                     raise ValueError(f"Invalid planner type: {planner}")
                 
@@ -1138,20 +1168,20 @@ class CuAgent:
         return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
 
          
-    def _parse_viz_color(self, color:str):
-        match color:
-            case 'green':
-                return [0, 1, 0]
-            case 'red':
-                return [1, 0, 0]
-            case 'blue':
-                return [0, 0, 1]
-            case 'yellow':
-                return [1, 1, 0]
-            case 'purple':
-                return [1, 0, 1]
-            case 'orange':
-                return [1, 0.5, 0]
+    # def _parse_viz_color(self, color:str):
+    #     match color:
+    #         case 'green':
+    #             return [0, 1, 0]
+    #         case 'red':
+    #             return [1, 0, 0]
+    #         case 'blue':
+    #             return [0, 0, 1]
+    #         case 'yellow':
+    #             return [1, 1, 0]
+    #         case 'purple':
+    #             return [1, 0, 1]
+    #         case 'orange':
+    #             return [1, 0.5, 0]
 class SimTask:
     def __init__(self, 
         agent_task_cfgs:list[dict],
@@ -1441,8 +1471,8 @@ def main():
         usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         sim_robot_cfg = a_cfg["sim_robot_cfg"] if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
-        
-        sim_robot = SimRobot(robot, robot_prim_path, **sim_robot_cfg)
+        viz_color = a_cfg["viz_color"] if "viz_color" in a_cfg else meta_cfg["default"]["viz_color"]
+        sim_robot = SimRobot(robot, robot_prim_path, **sim_robot_cfg, viz_color=viz_color)
         world_cfg = WorldConfig()
     
         if planner_type[a_idx] == 'cumotion':
@@ -1474,45 +1504,11 @@ def main():
             robot_cfg=robot_cfgs[a_idx],
             sim_robot=sim_robot, # optional, when using simulation
             plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
+            viz_color=viz_color,
         )
 
         cu_agents.append(a)
-        # if a.sim_robot is not None: # if using simulation
-        #     # set ee target prims:
-        #     ee_target_prim_path = f"/World/agent{a_idx}link{planner.ee_link_name}target"
-        #     ee_retract_pose = planner.plan_goals[planner.ee_link_name]
-        #     _initial_ee_target_pose = np.ravel(ee_retract_pose.to_list()) # set initial ee target pose to the current ee pose
-        #     ee_target = cuboid.VisualCuboid(
-        #         ee_target_prim_path,
-        #         position=_initial_ee_target_pose[:3],
-        #         orientation=_initial_ee_target_pose[3:],
-        #         color=np.array([1.0, 0, 0]),
-        #         size=0.05,
-        #     )
-        #     a.sim_robot.link_name_to_target_path[planner.ee_link_name] = ee_target_prim_path
-        #     a.sim_robot.target_path_to_target_prim[ee_target_prim_path] = ee_target
 
-        #     for link_name in planner.constrained_links_names:
-        #         if link_name != planner.ee_link_name:
-        #             target_path = f"/World/agent{a_idx}link{link_name}target" 
-        #             constrained_link_retract_pose = np.ravel(planner.plan_goals[link_name].to_list())
-        #             _initial_constrained_link_target_pose = constrained_link_retract_pose # set initial constrained link target pose to the current link pose
-                    
-        #             color = np.random.randn(3) * 0.2
-        #             color[0] += 0.5
-        #             color[1] = 0.5
-        #             color[2] = 0.0
-        #             #constr_link_name_to_target_prim[link_name]
-        #             target_prim = cuboid.VisualCuboid(
-        #                 target_path,
-        #                 position=np.array(_initial_constrained_link_target_pose[:3]),
-        #                 orientation=np.array(_initial_constrained_link_target_pose[3:]),
-        #                 color=color,
-        #                 size=0.05,
-        #             )
-        #             # constr_links_targets_prims_paths.append(target_path)
-        #             a.sim_robot.link_name_to_target_path[link_name] = target_path    
-        #             a.sim_robot.target_path_to_target_prim[target_path] = target_prim 
     
     # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
     for a in cu_agents:
@@ -1583,9 +1579,9 @@ def main():
             link_name_to_target_pose = sim_task.get_goals() # update targets in sim and return new target poses
             for a in cu_agents:
                 planner = a.planner
-                viz_plans, viz_plans_dt = a.sim_robot.visualize_plan["is_on"], a.sim_robot.visualize_plan["ts_delta"]
-                viz_col_spheres, viz_col_spheres_dt = a.sim_robot.visualize_col_spheres["is_on"], a.sim_robot.visualize_col_spheres["ts_delta"]
-                viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.visualize_mpc_ee_rollouts["is_on"], a.sim_robot.visualize_mpc_ee_rollouts["ts_delta"]
+                viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt
+                viz_col_spheres, viz_col_spheres_dt = a.sim_robot.viz_col_spheres_on, a.sim_robot.viz_col_spheres_dt
+                viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.viz_mpc_ee_rollouts_on, a.sim_robot.viz_mpc_ee_rollouts_dt
 
                 if a.sim_robot is not None:
                     
@@ -1600,7 +1596,7 @@ def main():
                         if plan is not None: # currently available in mpc only
                             plans_board[a.idx] = plan
                             if viz_plans and t % viz_plans_dt == 0:
-                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.visualize_plan["color"]})
+                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
                 
                     # sense
                     
@@ -1642,7 +1638,7 @@ def main():
                     elif isinstance(planner, MpcPlanner):
                         action = planner.yield_action(goals)
                         if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
-                            pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.visualize_mpc_ee_rollouts["color"]})
+                            pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.viz_mpc_ee_rollouts_color})
 
                     else:
                         raise ValueError(f"Invalid planner type: {planner_type}")
