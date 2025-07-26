@@ -1203,10 +1203,9 @@ class SimTask:
                 self.goal_errors[a_idx][link_name].append((error, now))
                 
 
-
-
     def _get_link_errors(self) -> list[dict[str,float]]:
-        link_name_to_error = [{}] * len(self.agent_task_cfgs)
+        n_agents = len(self.agent_task_cfgs)
+        link_name_to_error = [{} for _ in range(n_agents)]
         for a_idx in range(len(self.agent_task_cfgs)):                
             for link_name, link_path in self.link_name_to_path[a_idx].items():
                 p_link, q_link = get_world_pose(link_path)
@@ -1239,7 +1238,7 @@ class StatGoalsTask(SimTask):
         errors = self._get_link_errors()
         self._update_err_log(errors)
         n_agents = len(self.link_name_to_path)
-        new_target_poses = [{}] * n_agents
+        new_target_poses = [{} for _ in range(n_agents)]
         now = time()
         prev = self._last_update_time
         if now - prev > self.timeout:
