@@ -55,7 +55,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     visualize_plan: # visualize the planned trajectory of the robot (for debugging)
       is_on: True
       color: 'red'
-      ts_delta: 10 # int
+      ts_delta: 1 # int
     
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
       is_on: True
@@ -91,7 +91,7 @@ env:
   real: # todo
     is_on: False
   
-async: True
+async: False
   
 
   

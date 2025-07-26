@@ -938,7 +938,7 @@ class CuAgent:
         """
         Sensing obs from simulation and updating the world model
         """
-        def get_pose_dict_from_sim():
+        def _get_pose_dict_from_sim():
             pose_dict = get_stage_poses(
             usd_helper=usd_help,
             only_paths=paths_to_search_obs_under,
@@ -946,13 +946,21 @@ class CuAgent:
             ignore_substring=ignore_list,
         )
             return pose_dict
+        
+        def _get_world_cfg_from_stage():
+            new_world_cfg:WorldConfig = usd_help.get_obstacles_from_stage(
+                only_paths=list(new_paths),
+                reference_prim_path=robot_prim_path,
+                ignore_substring=ignore_list,
+            )
+            return new_world_cfg
             
         # get poses of all obstacles in the world (in world frame)
         if sim_lock is not None:
             with sim_lock:
-                pose_dict = get_pose_dict_from_sim()
+                pose_dict = _get_pose_dict_from_sim()
         else:
-            pose_dict = get_pose_dict_from_sim()
+            pose_dict = _get_pose_dict_from_sim()
         
         # Fast pose update (only pose updates, no world-model re-initialization as before)
         self.cu_world_wrapper.update_from_pose_dict(pose_dict)
@@ -964,14 +972,12 @@ class CuAgent:
         
         if new_paths: # Here we are being LAZY! we call expensive get_obstacled_from_stage() only if there are new obstacles!
             # print(f"[NEW OBSTACLES] {new_paths}")
+            if sim_lock is not None:
+                with sim_lock:
+                    new_world_cfg = _get_world_cfg_from_stage()
+            else:
+                new_world_cfg = _get_world_cfg_from_stage()
             
-            # Get basic (non-collision check) WorldConfig from stage
-            new_world_cfg:WorldConfig = usd_help.get_obstacles_from_stage(
-                only_paths=list(new_paths),
-                reference_prim_path=robot_prim_path,
-                ignore_substring=ignore_list,
-            )
-
             # Convert to collision check world
             new_world_cfg = new_world_cfg.get_collision_check_world()
 
@@ -1013,7 +1019,8 @@ class CuAgent:
     def update_col_pred(self, plans_board, t, plans_lock:Optional[Lock]=None):
         self.planner.update_col_pred(plans_board, t, self.idx, self.plan_pub_sub.sub_cfg["to"], plans_lock)
     
-    
+    def _debug(self):
+        pass
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:Optional[UsdHelper]=None):
         self._last_t = -1
         viz_plans, viz_plans_dt = self.sim_robot.visualize_plan["is_on"], self.sim_robot.visualize_plan["ts_delta"]
@@ -1036,7 +1043,6 @@ class CuAgent:
                 if t == self._last_t:
                     sleep(1e-7)
                     continue
-                print(f"t: {t}")
                 
                 # publish
                 
@@ -1336,6 +1342,10 @@ def main():
             pts_debug = []
             for a in cu_agents:
                 planner = a.planner
+                viz_plans, viz_plans_dt = a.sim_robot.visualize_plan["is_on"], a.sim_robot.visualize_plan["ts_delta"]
+                viz_col_spheres, viz_col_spheres_dt = a.sim_robot.visualize_col_spheres["is_on"], a.sim_robot.visualize_col_spheres["ts_delta"]
+                viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.visualize_mpc_ee_rollouts["is_on"], a.sim_robot.visualize_mpc_ee_rollouts["ts_delta"]
+
                 if a.sim_robot is not None:
                     
                     ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
@@ -1344,12 +1354,11 @@ def main():
                     # publish
 
                     js = a.sim_robot.get_js(sync_new=False)
-                    if js is not None and a.should_publish_plan(t):
-                        n_spheres_valid = sphere_counts_splits[a.idx][0]                            
-                        plan = planner.get_estimated_plan(ctrl_dof_names, n_spheres_valid, js, valid_spheres_only=False)
+                    if js is not None and a.is_plan_publisher() and a.plan_pub_sub.should_pub_now(t):
+                        plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False)
                         if plan is not None: # currently available in mpc only
                             plans_board[a.idx] = plan
-                            if a.sim_robot.visualize_plan["is_on"] and t % a.sim_robot.visualize_plan["ts_delta"] == 0:
+                            if viz_plans and t % viz_plans_dt == 0:
                                 pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.visualize_plan["color"]})
                 
                     # sense
@@ -1442,13 +1451,14 @@ def main():
             
             
         pts_debug = []
-        a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, lambda: t, pts_debug,usd_help), daemon=True) for a in cu_agents] # TODO: This is a hack to pass plans to the robot threads, but it is not the best approach so it'd be better to use ros topics or pass it as an argument when can, but it is the only one that works for now
+        a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, lambda: t, pts_debug,usd_help), daemon=True) for a in cu_agents]
         for th in a_threads:
             th.start()
             print(f"thread {th.name} started")
             
         
         while simulation_app.is_running():
+            print(f"t: {t}")
             with debug_lock:
                 pts_debug = []
             with sim_lock: 
