@@ -47,6 +47,7 @@ from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 from isaacsim.core.utils.xforms import get_world_pose
 import omni
 from pxr import UsdGeom, Gf, Sdf, UsdPhysics
+from omni.isaac.core.objects import DynamicCuboid, VisualCuboid, VisualSphere, DynamicSphere, FixedCuboid, FixedSphere
 
 
 
@@ -112,7 +113,8 @@ class SimEnv:
     
 class PrimsEnv(SimEnv):
     def __init__(self,
-        stage, 
+    
+        world,
         n_obs,
         obj_shape='cube',
         seed=0,
@@ -121,7 +123,8 @@ class PrimsEnv(SimEnv):
         volume_center_pos=[0,0,1],
         volume_shape='sphere',
         volume_dim=1,
-        obj_vel=[0,0,0],
+        obj_lin_vel=[0,0,0],
+        obj_rigid_body_enabled=False,
         ):
         """
         static obstacles.
@@ -138,7 +141,8 @@ class PrimsEnv(SimEnv):
         
         """
     
-        super().__init__(stage)
+        super().__init__(world.stage)
+        self.world:World = world
         self.n_obs = n_obs
         self.obj_shape = obj_shape
         self.obj_volume_center_pos = volume_center_pos
@@ -147,76 +151,154 @@ class PrimsEnv(SimEnv):
         self.max_dim = max_dim
         self.min_dim = min_dim
         self._local_rng = random.Random(seed)
-        self._prim_paths = []
-        self._prim_sdf_paths = []
-        self._prims = []
-        self._prim_objs = [] # probably differnt from _prims
-        
-        self._xformables_prim_paths = []
-        self._xformable_apis = []
-        self.obj_vel = obj_vel
-        
+        self.obj_lin_vel = obj_lin_vel
+        self.obj_rigid_body_enabled = obj_rigid_body_enabled
+        if obj_shape == "cube":
+            if obj_lin_vel != [0,0,0]:
+                if obj_rigid_body_enabled:
+                    self._prim_class = DynamicCuboid
+                else:
+                    self._prim_class = VisualCuboid
+            else:
+                self._prim_class = FixedCuboid
+        elif obj_shape == "sphere":
+            if obj_lin_vel != [0,0,0]:
+                if obj_rigid_body_enabled:
+                    self._prim_class = DynamicSphere
+                else:
+                    self._prim_class = VisualSphere
+            else:
+                self._prim_class = FixedSphere
+
+        self._objs = []
         
         for i in range(n_obs):
+            kwargs = {}
+            obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
+
+            if self._prim_class in [DynamicCuboid, DynamicSphere]:
+                kwargs["linear_velocity"] = np.array(self.obj_lin_vel)
+            
+            if self._prim_class in [VisualSphere, DynamicSphere, FixedSphere]:
+                kwargs["radius"] = obj_dim_size_m / 2.0
+            if self._prim_class in [VisualCuboid, DynamicCuboid, FixedCuboid]:
+                kwargs["size"] = obj_dim_size_m
+
             obj_name = "Cube" if obj_shape == "cube" else "Sphere"
-            obj_path = f"{self.scope_path}/{obj_name}_{i}"             
+            obj_path = f"{self.scope_path}/{obj_name}_{i}"
             
             obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
-            obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
-            _prim_sdf_path = Sdf.Path(obj_path)
-            # Create cube
-            if obj_shape == "cube":
-                _prim = UsdGeom.Cube.Define(stage, _prim_sdf_path)
-                _prim.CreateSizeAttr(1.0)  # Set base size to 1.0
-                scale_size = obj_dim_size_m # side length for cube
-            else:
-                _prim.CreateRadiusAttr(1.0)  # Set base radius to 1.0
-                scale_size = obj_dim_size_m / 2.0 # radius for sphere
-                
-            
-            _xform_api = UsdGeom.XformCommonAPI(_prim)
-            _xform_api.SetTranslate(obj_pos)
-            _xform_api.SetScale(Gf.Vec3f(scale_size, scale_size, scale_size))
+            obj = self._prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
+            self._objs.append(obj)
 
-            if obj_vel != [0,0,0]:
-                _prim_obj = stage.GetPrimAtPath(obj_path)
+        
+    def update(self,**kwargs):
+        if self._prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
+            for obj in self._objs:
+                p, q = get_world_pose(obj.prim_path)
+                obj.set_world_pose(p+np.array(self.obj_lin_vel) * self.world.get_physics_dt(), q)
 
-                # apply rigid body api (enables physics, velocity, mass...)
-                _rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(_prim_obj)
-                # Enable kinematic mode (disables mass/gravity but allows movement)
-                _rigid_body_api.CreateKinematicEnabledAttr(True)
-                
-                _prim_obj.CreateAttribute("physics:velocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))  # Linear
-                _prim_obj.CreateAttribute("physics:angularVelocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(0.0, 0.0, 1.0))  # Angular
+        # self._prim_paths = []
+        # self._prim_sdf_paths = []
+        # self._prims = []
+        # self._prim_objs = [] # probably differnt from _prims
+        
+        # self._xformables_prim_paths = []
+        # self._xformable_apis = []
+        # self.obj_vel = obj_vel
+        # self._dynamic_cuboids = []
+        # self._prim_paths = []
+        # if obj_shape == "cube":
+        #     if obj_vel != [0,0,0]:
+        #         if self._rigid_body_enabled:
+        #             self._prim_class = DynamicCuboid
+        #         else:
+        #             self._prim_class = VisualCuboid
+        #     else:
+        #         self._prim_class = FixedCuboid
+        # elif obj_shape == "sphere":
+        #     self._prim_class = DynamicSphere
+        
+        # for i in range(n_obs):
+        #     obj_name = "Cube" if obj_shape == "cube" else "Sphere"
+        #     obj_path = f"{self.scope_path}/{obj_name}_{i}"             
+            
+        #     # obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
+        #     obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
 
-                # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
-                # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
-                # # Enable physics (rigid body)
-                # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
-                # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
+
+        #     # Setup world
+        #     # cube = DynamicCuboid(  # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#objects
+        #     #         prim_path=obj_path,
+        #     #         name=obj_path, # naming after the path to prevent name conflicts
+        #     #         size=obj_dim_size_m, # side length for cube
+        #     #         position=self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim),
+        #     #         color=np.array([1.0, 0.0, 0.0]),
+        #     #         linear_velocity=np.array(obj_vel)
+        #     #     ) 
             
-                # # _prim_obj.CreateAttribute("physics:collisionEnabled", Sdf.ValueTypeNames.Bool, custom=False)
-                # # _prim_obj.GetAttribute("physics:collisionEnabled").Set(False)
+            # self._dynamic_cuboids.append(cube)
+        
+        # for i in range(n_obs):
+        #     obj_name = "Cube" if obj_shape == "cube" else "Sphere"
+        #     obj_path = f"{self.scope_path}/{obj_name}_{i}"             
+            
+        #     obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
+        #     obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
+        #     _prim_sdf_path = Sdf.Path(obj_path)
+        #     # Create cube
+        #     if obj_shape == "cube":
+        #         _prim = UsdGeom.Cube.Define(stage, _prim_sdf_path)
+        #         _prim.CreateSizeAttr(1.0)  # Set base size to 1.0
+        #         scale_size = obj_dim_size_m # side length for cube
+        #     else:
+        #         _prim.CreateRadiusAttr(1.0)  # Set base radius to 1.0
+        #         scale_size = obj_dim_size_m / 2.0 # radius for sphere
+                
+            
+        #     _xform_api = UsdGeom.XformCommonAPI(_prim)
+        #     _xform_api.SetTranslate(obj_pos)
+        #     _xform_api.SetScale(Gf.Vec3f(scale_size, scale_size, scale_size))
+
+        #     if obj_vel != [0,0,0]:
+        #         _prim_obj = stage.GetPrimAtPath(obj_path)
+
+        #         # apply rigid body api (enables physics, velocity, mass...)
+        #         _rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(_prim_obj)
+        #         # Enable kinematic mode (disables mass/gravity but allows movement)
+        #         _rigid_body_api.CreateKinematicEnabledAttr(True)
+
+        #         _prim_obj.CreateAttribute("physics:velocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))  # Linear
+        #         _prim_obj.CreateAttribute("physics:angularVelocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(0.0, 0.0, 1.0))  # Angular
+
+        #         # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
+        #         # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
+        #         # # Enable physics (rigid body)
+        #         # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
+        #         # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
+            
+        #         # # _prim_obj.CreateAttribute("physics:collisionEnabled", Sdf.ValueTypeNames.Bool, custom=False)
+        #         # # _prim_obj.GetAttribute("physics:collisionEnabled").Set(False)
             
                 
-                # # # Set mass (important for physics)
-                # # _prim_obj.CreateAttribute("physics:mass", Sdf.ValueTypeNames.Float, custom=False)
-                # # _prim_obj.GetAttribute("physics:mass").Set(0.0)
+        #         # # # Set mass (important for physics)
+        #         # # _prim_obj.CreateAttribute("physics:mass", Sdf.ValueTypeNames.Float, custom=False)
+        #         # # _prim_obj.GetAttribute("physics:mass").Set(0.0)
             
-                # # Set initial velocity
-                # _prim_obj.CreateAttribute("physics:velocity", Sdf.ValueTypeNames.Vector3f, custom=False)
-                # _prim_obj.GetAttribute("physics:velocity").Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))
+        #         # # Set initial velocity
+        #         # _prim_obj.CreateAttribute("physics:velocity", Sdf.ValueTypeNames.Vector3f, custom=False)
+        #         # _prim_obj.GetAttribute("physics:velocity").Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))
                 
-                # # Set angular velocity to zero (optional, you can also set this to a non-zero value)
-                # _prim_obj.CreateAttribute("physics:angularVelocity", Sdf.ValueTypeNames.Vector3f, custom=False)
-                # _prim_obj.GetAttribute("physics:angularVelocity").Set(Gf.Vec3f(0.0, 0.0, 0.0))
+        #         # # Set angular velocity to zero (optional, you can also set this to a non-zero value)
+        #         # _prim_obj.CreateAttribute("physics:angularVelocity", Sdf.ValueTypeNames.Vector3f, custom=False)
+        #         # _prim_obj.GetAttribute("physics:angularVelocity").Set(Gf.Vec3f(0.0, 0.0, 0.0))
             
-                self._prim_objs.append(_prim_obj)    
+        #         self._prim_objs.append(_prim_obj)    
                 
             
-            self._prim_paths.append(obj_path)
-            self._prim_sdf_paths.append(_prim_sdf_path)
-            self._xformable_apis.append(_xform_api)
+        #     self._prim_paths.append(obj_path)
+        #     self._prim_sdf_paths.append(_prim_sdf_path)
+        #     self._xformable_apis.append(_xform_api)
 
 
     def sample_pos_in_volume(self, volume_center_pos:list[float],volume_dim:float)->list[float]:     
@@ -239,7 +321,6 @@ class PrimsEnv(SimEnv):
 
         
     
-        
         
 class PlanPubSub:
     def __init__(self,
@@ -1669,7 +1750,7 @@ def main():
     
     
         
-    sim_env = PrimsEnv(stage, **meta_cfg["sim_env"]["cfg"])
+    sim_env = PrimsEnv(my_world, **meta_cfg["sim_env"]["cfg"])
     
     my_world.reset()
     my_world.play()
@@ -1708,6 +1789,7 @@ def main():
             
             pts_debug = []
             link_name_to_target_pose = sim_task.update_targets() # set new targets in sim and return new target poses
+            sim_env.update()
             for a in cu_agents:
                 planner = a.planner
                 viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt

@@ -1,6 +1,6 @@
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
   cu_world_wrapper: # curoboworld collision wrapper
-    verbosity: 0 # 0 to 4 (0 is no output, 4 is max output) 
+    verbosity: 3 # 0 to 4 (0 is no output, 4 is max output) 
     never_add: [] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
 
@@ -100,35 +100,36 @@ sim_task:
 
 sim_env:
   cfg:
-    n_obs: 10
-    obj_shape: 'cube' # type of the obstacle ('cube' or 'sphere')
+    n_obs: 3
+    obj_shape: 'sphere' # type of the obstacle ('cube' or 'sphere')
     seed: 0 # seed to sample the obstacle poses
     max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere
-    volume_center_pos: [0,0,0.5] # center position of the obstacle volume (xyz in world frame)
-    volume_shape: 'cube' # shape of the obstacle volume ('sphere' or 'box')
+    volume_center_pos: [0, 0,0.5] # center position of the obstacle volume (xyz in world frame)
+    volume_shape: 'sphere' # shape of the obstacle volume ('sphere' or 'box')
     volume_dim: 1 # dimension of the obstacle volume (radius for sphere, side length for box)
-    obj_vel: [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
-
+    obj_lin_vel: [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
+    obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
+    
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
     viz_color: 'purple'
 
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
     viz_color: 'orange'
 
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
+    planner: 'cumotion' # mpc or cumotion
     base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
     viz_color: 'blue'
   
     
 
-  # - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/dual_ur10e.yml # dual_ur10e.yml
+  # - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/dual_ur10e.yml # dual_ur10e.yml
   #   planner: 'mpc' # mpc or cumotion
   #   base_pose: [0, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
   #   viz_color: 'purple'
