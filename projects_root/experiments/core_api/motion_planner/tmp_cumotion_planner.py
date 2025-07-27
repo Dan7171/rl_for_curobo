@@ -1,4 +1,3 @@
- 
 # import argparse
 # parser = argparse.ArgumentParser()
 # args = parser.parse_args()
@@ -46,6 +45,10 @@ from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 from isaacsim.core.utils.xforms import get_world_pose
+import omni
+from pxr import UsdGeom, Gf, Sdf
+
+
 
 # CuRobo
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
@@ -94,8 +97,102 @@ class Plan:
             self.cmd_idx += 1
             return cmd
             
+class SimEnv:
+    def __init__(self,stage):
+        self.stage = stage
+        self.scope_path = "/World/SpawnedObs"
+        UsdGeom.Scope.Define(stage, Sdf.Path(self.scope_path))
 
+    
+    def update(self,**kwargs):
+        pass
 
+    
+class StaticEnv(SimEnv):
+    def __init__(self,
+        stage, 
+        n_obs,
+        obj_shape='cube',
+        seed=0,
+        max_dim=0.5,
+        min_dim=0.1,
+        volume_center_pos=[0,0,1],
+        volume_shape='sphere',
+        volume_dim=1
+        ):
+        """
+        static obstacles.
+        Args:
+            stage (Usd.Stage): stage to spawn the obstacles
+            obj_shape (int): number of obstacles
+            type (str): type of obstacle ('cube' or 'sphere')
+            seed (int): seed for random number generator
+            max_dim (float): maximum dimension of the obstacle (in meters): side length for cube, diameter for sphere
+            min_dim (float): minimum dimension of the obstacle (in meters): side length for cube, diameter for sphere
+            volume_center_pos (list): center of the obstacle volume (xyz in world frame)
+            volume_shape (str): shape of the obstacle volume ('sphere' or 'box')
+            volume_dim (float): dimension of the obstacle volume (radius for sphere, side length for box)
+        """
+    
+        super().__init__(stage)
+        self.n_obs = n_obs
+        self.obj_shape = obj_shape
+        self.obj_volume_center_pos = volume_center_pos
+        self.obj_volume_shape = volume_shape
+        self.obj_volume_dim = volume_dim
+        self.max_dim = max_dim
+        self.min_dim = min_dim
+        self._local_rng = random.Random(seed)
+        self.xformables = []
+        for i in range(n_obs):
+            obj_name = "Cube" if obj_shape == "cube" else "Sphere"
+            obj_path = f"{self.scope_path}/{obj_name}_{i}"             
+            obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
+            obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
+            
+            # Create cube
+            if obj_shape == "cube":
+                prim = UsdGeom.Cube.Define(stage, Sdf.Path(obj_path))
+                prim.CreateSizeAttr(1.0)  # Set base size to 1.0
+                
+                # Set transform with proper scale
+                xform_api = UsdGeom.XformCommonAPI(prim)
+                xform_api.SetTranslate(obj_pos)
+                xform_api.SetScale(Gf.Vec3f(obj_dim_size_m, obj_dim_size_m, obj_dim_size_m))
+                
+            elif obj_shape == "sphere":
+                prim = UsdGeom.Sphere.Define(stage, Sdf.Path(obj_path))
+                prim.CreateRadiusAttr(1.0)  # Set base radius to 1.0
+                
+                # Set transform with proper scale
+                xform_api = UsdGeom.XformCommonAPI(prim)
+                xform_api.SetTranslate(obj_pos)
+                # For spheres, scale by radius (obj_dim_size_m is diameter, so radius is half)
+                radius_scale = obj_dim_size_m / 2.0
+                xform_api.SetScale(Gf.Vec3f(radius_scale, radius_scale, radius_scale))
+
+            self.xformables.append(prim)
+
+    
+
+    def sample_pos_in_volume(self, volume_center_pos:list[float],volume_dim:float)->list[float]:     
+        """
+        Sample a position around the center position of a volume (sphere or box).
+        Volume is defined by its center position and dimension.
+        Args:
+            volume_center_pos (list[float]): center position of the volume (xyz in world frame)
+            volume_dim (float): dimension of the volume (diameter for sphere, side length for box)
+        Returns:
+            list[float]: sampled position (xyz in world frame)
+        """
+        ans = []
+        for dim in range(3):
+            delta = volume_dim / 2 # diam/2 (radius) for sphere, (side length)/2 for box
+            dim_translation = (self._local_rng.uniform(-delta, delta))
+            ans.append(volume_center_pos[dim] + dim_translation)
+        return ans
+        
+            
 class PlanPubSub:
     def __init__(self,
         pub_cfg:dict,
@@ -1052,7 +1149,8 @@ class CuAgent:
  
 
     def update_col_pred(self, plans_board, t, plans_lock:Optional[Lock]=None):
-        self.planner.update_col_pred(plans_board, t, self.idx, self.plan_pub_sub.sub_cfg["to"], plans_lock)
+        sub_to = self.plan_pub_sub.sub_cfg["to"] if isinstance(self.planner, MpcPlanner) else []
+        self.planner.update_col_pred(plans_board, t, self.idx, sub_to)
     
 
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:Optional[UsdHelper]=None):
@@ -1168,20 +1266,7 @@ class CuAgent:
         return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
 
          
-    # def _parse_viz_color(self, color:str):
-    #     match color:
-    #         case 'green':
-    #             return [0, 1, 0]
-    #         case 'red':
-    #             return [1, 0, 0]
-    #         case 'blue':
-    #             return [0, 0, 1]
-    #         case 'yellow':
-    #             return [1, 1, 0]
-    #         case 'purple':
-    #             return [1, 0, 1]
-    #         case 'orange':
-    #             return [1, 0.5, 0]
+
 class SimTask:
     def __init__(self, 
         agent_task_cfgs:list[dict],
@@ -1202,8 +1287,9 @@ class SimTask:
         self.target_name_to_path = [{} for _ in range(len(agent_task_cfgs))]
         self.target_path_to_prim = [{} for _ in range(len(agent_task_cfgs))]
         self.goal_errors = [{} for _ in range(len(agent_task_cfgs))]
+        self._last_update = [{} for _ in range(len(agent_task_cfgs))] # last updated goal poses in sim
 
-        
+        # set targets to retract poses
         for a_idx, a_cfg in enumerate(agent_task_cfgs):
             for link_name in a_cfg.keys():
                 l_path, l_prim, l_target_color, l_retract_pose = a_cfg[link_name]
@@ -1221,7 +1307,8 @@ class SimTask:
                 self.target_path_to_prim[a_idx][target_path] = target_prim
 
                 self.goal_errors[a_idx][link_name] = []
-                
+        
+                self._last_update[a_idx][link_name] = l_retract_pose
 
     
    
@@ -1248,53 +1335,36 @@ class SimTask:
                 link_name_to_error[a_idx][link_name] = err
         return link_name_to_error
         
-        
+    def _parse_np_to_pose(self, link_name_to_next_target_pose_np:list[dict[str,tuple[np.ndarray, np.ndarray]]])->list[dict[str,Pose]]:
+        # parse new targets from np to Pose
+        link_name_to_next_target_pose = [{} for _ in range(len(link_name_to_next_target_pose_np))]
+        for a_idx in range(len(link_name_to_next_target_pose_np)):
+            for link_name in link_name_to_next_target_pose_np[a_idx].keys():
+                p_target_new_np, q_target_new_np = link_name_to_next_target_pose_np[a_idx][link_name]
+                new_target_as_pose = Pose(
+                    position=self.tensor_args.to_device(p_target_new_np), 
+                    quaternion=self.tensor_args.to_device(q_target_new_np)
+                )
+                link_name_to_next_target_pose[a_idx][link_name] = new_target_as_pose
+        return link_name_to_next_target_pose
 
-    def get_goals(self)->list[dict[str,Pose]]:
+    def update_targets(self)->list[dict[str,Pose]]:
         
         errors = self._get_link_errors()
         self._update_err_log(errors)
-        
-        if self._last_update_time == 0.0 or self.should_update():
-
-            # get current target poses
-            target_name_to_cur_pose =  self.get_all_target_poses()
-            
-            # pick new target poses according to task logic
-            link_name_to_next_target_pose_np = self.get_new_poses(target_name_to_cur_pose, errors)
-            
-            # update simulation with new target poses
-            self.set_poses_in_sim(link_name_to_next_target_pose_np)
-            
-            # parse new targets from np to Pose
-            link_name_to_next_target_pose = [{} for _ in range(len(link_name_to_next_target_pose_np))]
-            for a_idx in range(len(link_name_to_next_target_pose_np)):
-                for link_name in link_name_to_next_target_pose_np[a_idx].keys():
-                    p_target_new_np, q_target_new_np = link_name_to_next_target_pose_np[a_idx][link_name]
-                    new_target_as_pose = Pose(
-                        position=self.tensor_args.to_device(p_target_new_np), 
-                        quaternion=self.tensor_args.to_device(q_target_new_np)
-                    )
-                    link_name_to_next_target_pose[a_idx][link_name] = new_target_as_pose
-            
-            
-            self._last_update_time = time()
+        link_name_to_next_target_pose_np = self._update_sim_targets(errors)
+        if link_name_to_next_target_pose_np is not None:
+            link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_next_target_pose_np)
             self._last_update = link_name_to_next_target_pose
-        
         return self._last_update
                     
-    @abstractmethod
-    def should_update(self)->bool:
-        pass
     
     @abstractmethod
-    def get_new_poses(self, 
-                        all_target_poses: list[dict[str,tuple[np.ndarray, np.ndarray]]], 
-                        errors:list[dict[str,tuple[float,float]]]
-                        ) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+    def _update_sim_targets(self,errors)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        # return None if no new targets are needed else update the targts in sim and return the new target poses as np tuples
         pass
     
-    def get_all_target_poses(self) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+    def _get_targets_world_pose(self) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
         n_agents = len(self.link_name_to_path)
         all_target_poses = [{} for _ in range(n_agents)]
         for a_idx in range(n_agents):
@@ -1306,7 +1376,7 @@ class SimTask:
                 all_target_poses[a_idx][target_name] = (p_target, q_target)
         return all_target_poses
 
-    def set_poses_in_sim(self, new_target_poses:list[dict[str,tuple[np.ndarray, np.ndarray]]]):
+    def _set_targets_world_pose(self, new_target_poses:list[dict[str,tuple[np.ndarray, np.ndarray]]]):
         n_agents = len(self.link_name_to_path)
         for a_idx in range(n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
@@ -1323,14 +1393,15 @@ class SimTask:
 class StatGoalsTask(SimTask):
     def __init__(self, 
                  agents_task_cfgs:list[dict], 
-                 world:World, usd_help:UsdHelper, 
+                 world:World, 
+                 usd_help:UsdHelper, 
                  tensor_args:TensorDeviceType, 
                  timeout:float=3.0,
                  seed:int=0):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
         self.timeout = timeout
         self._last_update_time = 0.0
-        
+
         target_pos_options = [[0.2,0,0.2], [0.4,0,0.8], [0.2,0,0.2], [0.4,0,0.8], [0.3,0.2,0.2], [0.3,0.2,0.8], [0.3,-0.2,0.2], [0.3,-0.2,0.8]]
         target_quat_options = [[0,0,0,1], [1,0,0,0]]
         all_combs = []
@@ -1348,15 +1419,8 @@ class StatGoalsTask(SimTask):
                 self._link_name_to_target_ordering[a_idx][link_name] = deepcopy(all_combs) # set target ordering for this link
                 print(f"debug: target ordering for {link_name}: {self._link_name_to_target_ordering[a_idx][link_name]}")
                 self._link_name_to_next_target_idx[a_idx][link_name] = 0
-        
-    def should_update(self)->bool:
-        return time() - self._last_update_time > self.timeout
-    
-    def get_new_poses(self, 
-                              all_target_poses: list[dict[str,tuple[np.ndarray, np.ndarray]]], 
-                              errors:list[dict[str,tuple[float,float]]]
-                              ) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
-        
+ 
+    def _pick_next_targets_world_pose(self)->list[dict[str,tuple[np.ndarray, np.ndarray]]]:
         n_agents = len(self.agent_task_cfgs)
         new_target_poses = [{} for _ in range(n_agents)]
 
@@ -1370,10 +1434,69 @@ class StatGoalsTask(SimTask):
         return new_target_poses
                 
 
-            
-            
-            
-            
+    def _update_sim_targets(self)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        if time() - self._last_update_time > self.timeout:
+            link_name_to_next_target_pose_np = self._pick_next_targets_world_pose() 
+            self._set_targets_world_pose(link_name_to_next_target_pose_np)
+            return link_name_to_next_target_pose_np
+        
+class ManualTask(SimTask):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
+    
+    def _update_sim_targets(self,errors)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        for a_idx in range(len(errors)):
+            for link_name in errors[a_idx].keys():
+                p_err, q_err = errors[a_idx][link_name]
+                if p_err > 0.01 or q_err > 0.01:
+                    target_name = self.name_link_to_target[a_idx][link_name]
+                    target_path = self.target_name_to_path[a_idx][target_name]
+                    target_prim = self.target_path_to_prim[a_idx][target_path]   
+                    p_target, q_target = target_prim.get_world_pose()
+                    self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
+                    
+                # prev_p, prev_q = self._last_update[a_idx][link_name].position.cpu().numpy().flatten(), self._last_update[a_idx][link_name].quaternion.cpu().numpy().flatten()
+                # cur_p, cur_q = self._get_targets_world_pose()[a_idx][t_name][0], self._get_targets_world_pose()[a_idx][t_name][1]
+                # if np.linalg.norm(cur_p - prev_p) > 0.01 or np.linalg.norm(cur_q - prev_q) > 0.01:
+                #     return True
+        # l_name_to_t_pose_last = self._last_update
+
+        # t_name_to_pose_cur = self._get_targets_world_pose()
+
+        # # checking if one of the targets has moved
+        # for a_idx in range(len(self.agent_task_cfgs)):
+        #     for link_name in self.link_name_to_path[a_idx].keys():
+        #         t_name = self.name_link_to_target[a_idx][link_name]
+        #         prev_p, prev_q = l_name_to_t_pose_last[a_idx][link_name].position.cpu().numpy().flatten(), l_name_to_t_pose_last[a_idx][link_name].quaternion.cpu().numpy().flatten()
+        #         cur_p, cur_q = t_name_to_pose_cur[a_idx][t_name][0], t_name_to_pose_cur[a_idx][t_name][1]
+        #         if np.linalg.norm(cur_p - prev_p) > 0.01 or np.linalg.norm(cur_q - prev_q) > 0.01:
+                    
+        # return False
+        # return None
+    # def _should_pick_new_targets(self)->bool:
+    #     return False
+    
+    # def _pick_next_targets_world_pose(self,
+    #                   all_target_poses: list[dict[str,tuple[np.ndarray, np.ndarray]]], 
+    #                   errors:list[dict[str,tuple[float,float]]]) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+    
+    #     l_name_to_t_pose_last = self._last_update
+    #     t_name_to_pose_cur = self._get_targets_world_pose()
+
+    #     # checking if one of the targets has moved
+    #     for a_idx in range(len(self.agent_task_cfgs)):
+    #         for link_name in self.link_name_to_path[a_idx].keys():
+    #             t_name = self.name_link_to_target[a_idx][link_name]
+    #             prev_p, prev_q = l_name_to_t_pose_last[a_idx][link_name].position.cpu().numpy().flatten(), l_name_to_t_pose_last[a_idx][link_name].quaternion.cpu().numpy().flatten()
+    #             cur_p, cur_q = t_name_to_pose_cur[a_idx][t_name][0], t_name_to_pose_cur[a_idx][t_name][1]
+    #             if np.linalg.norm(cur_p - prev_p) > 0.01 or np.linalg.norm(cur_q - prev_q) > 0.01:
+    #                 return True
+    #     return False
+    
+    # def _get_targets_world_pose(self) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+    #     return self._last_update
+        
+        
             
                 
 
@@ -1534,11 +1657,16 @@ def main():
                 link_retract_pose = a.planner.plan_goals[link_name]
                 cfg[link_name] = [link_path, link_prim, link_target_color, link_retract_pose]
             agents_task_cfgs.append(cfg)
-
     if len(agents_task_cfgs) > 0:
-        if meta_cfg["sim_task"]["task_type"] == 'stat_goals':
+        sim_task_type = meta_cfg["sim_task"]["task_type"]
+        if sim_task_type == 'stat_goals':
             sim_task = StatGoalsTask(agents_task_cfgs, my_world, usd_help, tensor_args, **meta_cfg["sim_task"]["cfg"])
+        elif sim_task_type == 'manual':
+            sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args)
         
+    if meta_cfg["sim_env"]["type"] == 'static':
+        sim_env = StaticEnv(stage, **meta_cfg["sim_env"]["cfg"])
+
 
     my_world.reset()
     my_world.play()
@@ -1576,7 +1704,7 @@ def main():
             
             
             pts_debug = []
-            link_name_to_target_pose = sim_task.get_goals() # update targets in sim and return new target poses
+            link_name_to_target_pose = sim_task.update_targets() # update targets in sim and return new target poses
             for a in cu_agents:
                 planner = a.planner
                 viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt
