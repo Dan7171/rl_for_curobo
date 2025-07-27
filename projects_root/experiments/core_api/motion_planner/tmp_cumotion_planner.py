@@ -864,8 +864,8 @@ class SimRobot:
         self.robot = robot
         self.path = path # prim path of the robot in isaac sim
         self.articulation_controller = self.robot.get_articulation_controller()
-        self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
-        self.target_path_to_target_prim = {} 
+        # self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
+        # self.target_path_to_target_prim = {} 
         self._cur_js = None
         self.viz_color = viz_color
         
@@ -1389,7 +1389,6 @@ class SimTask:
 
 
 
-
 class StatGoalsTask(SimTask):
     def __init__(self, 
                  agents_task_cfgs:list[dict], 
@@ -1434,10 +1433,11 @@ class StatGoalsTask(SimTask):
         return new_target_poses
                 
 
-    def _update_sim_targets(self)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+    def _update_sim_targets(self,errors)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         if time() - self._last_update_time > self.timeout:
             link_name_to_next_target_pose_np = self._pick_next_targets_world_pose() 
             self._set_targets_world_pose(link_name_to_next_target_pose_np)
+            self._last_update_time = time()
             return link_name_to_next_target_pose_np
         
 class ManualTask(SimTask):
@@ -1454,48 +1454,7 @@ class ManualTask(SimTask):
                     target_prim = self.target_path_to_prim[a_idx][target_path]   
                     p_target, q_target = target_prim.get_world_pose()
                     self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
-                    
-                # prev_p, prev_q = self._last_update[a_idx][link_name].position.cpu().numpy().flatten(), self._last_update[a_idx][link_name].quaternion.cpu().numpy().flatten()
-                # cur_p, cur_q = self._get_targets_world_pose()[a_idx][t_name][0], self._get_targets_world_pose()[a_idx][t_name][1]
-                # if np.linalg.norm(cur_p - prev_p) > 0.01 or np.linalg.norm(cur_q - prev_q) > 0.01:
-                #     return True
-        # l_name_to_t_pose_last = self._last_update
-
-        # t_name_to_pose_cur = self._get_targets_world_pose()
-
-        # # checking if one of the targets has moved
-        # for a_idx in range(len(self.agent_task_cfgs)):
-        #     for link_name in self.link_name_to_path[a_idx].keys():
-        #         t_name = self.name_link_to_target[a_idx][link_name]
-        #         prev_p, prev_q = l_name_to_t_pose_last[a_idx][link_name].position.cpu().numpy().flatten(), l_name_to_t_pose_last[a_idx][link_name].quaternion.cpu().numpy().flatten()
-        #         cur_p, cur_q = t_name_to_pose_cur[a_idx][t_name][0], t_name_to_pose_cur[a_idx][t_name][1]
-        #         if np.linalg.norm(cur_p - prev_p) > 0.01 or np.linalg.norm(cur_q - prev_q) > 0.01:
-                    
-        # return False
-        # return None
-    # def _should_pick_new_targets(self)->bool:
-    #     return False
     
-    # def _pick_next_targets_world_pose(self,
-    #                   all_target_poses: list[dict[str,tuple[np.ndarray, np.ndarray]]], 
-    #                   errors:list[dict[str,tuple[float,float]]]) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
-    
-    #     l_name_to_t_pose_last = self._last_update
-    #     t_name_to_pose_cur = self._get_targets_world_pose()
-
-    #     # checking if one of the targets has moved
-    #     for a_idx in range(len(self.agent_task_cfgs)):
-    #         for link_name in self.link_name_to_path[a_idx].keys():
-    #             t_name = self.name_link_to_target[a_idx][link_name]
-    #             prev_p, prev_q = l_name_to_t_pose_last[a_idx][link_name].position.cpu().numpy().flatten(), l_name_to_t_pose_last[a_idx][link_name].quaternion.cpu().numpy().flatten()
-    #             cur_p, cur_q = t_name_to_pose_cur[a_idx][t_name][0], t_name_to_pose_cur[a_idx][t_name][1]
-    #             if np.linalg.norm(cur_p - prev_p) > 0.01 or np.linalg.norm(cur_q - prev_q) > 0.01:
-    #                 return True
-    #     return False
-    
-    # def _get_targets_world_pose(self) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
-    #     return self._last_update
-        
         
             
                 
@@ -1632,19 +1591,6 @@ def main():
 
         cu_agents.append(a)
 
-    
-    # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
-    for a in cu_agents:
-        if a.sim_robot is not None: # if in simulation
-            never_add = [a.sim_robot.path, *list(a.sim_robot.link_name_to_target_path.values()), "/curobo"]
-            for other in cu_agents:
-                if other.sim_robot is not None:
-                    never_add += list(other.sim_robot.link_name_to_target_path.values())
-            a.cu_world_wrapper_update_policy["never_add"] += never_add
-            a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
-    
-    
-    
     agents_task_cfgs = []
     for a in cu_agents:
         if a.sim_robot is not None:
@@ -1663,6 +1609,40 @@ def main():
             sim_task = StatGoalsTask(agents_task_cfgs, my_world, usd_help, tensor_args, **meta_cfg["sim_task"]["cfg"])
         elif sim_task_type == 'manual':
             sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args)
+
+    all_target_paths = [list(sim_task.target_path_to_prim[i].keys())[j] for i in range(len(cu_agents)) for j in range(len(sim_task.target_path_to_prim[i]))
+                    ]
+    # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
+    for a in cu_agents:
+        if a.sim_robot is not None: # if in simulation
+            never_add = [a.sim_robot.path, *all_target_paths, "/curobo"]
+            # never_add = [a.sim_robot.path, *list(a.sim_robot.link_name_to_target_path.values()), "/curobo"]
+            # for other in cu_agents:
+            #     if other.sim_robot is not None:
+            #         never_add += list(other.sim_robot.link_name_to_target_path.values())
+            a.cu_world_wrapper_update_policy["never_add"] += never_add
+            a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
+    
+    
+    
+    # agents_task_cfgs = []
+    # for a in cu_agents:
+    #     if a.sim_robot is not None:
+    #         cfg = {}
+    #         links_with_target = [a.planner.ee_link_name, *[link_name for link_name in a.planner.constrained_links_names]]
+    #         for link_name in links_with_target:
+    #             link_path = a.sim_robot.path + "/"  + link_name
+    #             link_prim = my_world.stage.GetPrimAtPath(link_path)
+    #             link_target_color = a.viz_color
+    #             link_retract_pose = a.planner.plan_goals[link_name]
+    #             cfg[link_name] = [link_path, link_prim, link_target_color, link_retract_pose]
+    #         agents_task_cfgs.append(cfg)
+    # if len(agents_task_cfgs) > 0:
+    #     sim_task_type = meta_cfg["sim_task"]["task_type"]
+    #     if sim_task_type == 'stat_goals':
+    #         sim_task = StatGoalsTask(agents_task_cfgs, my_world, usd_help, tensor_args, **meta_cfg["sim_task"]["cfg"])
+    #     elif sim_task_type == 'manual':
+    #         sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args)
         
     if meta_cfg["sim_env"]["type"] == 'static':
         sim_env = StaticEnv(stage, **meta_cfg["sim_env"]["cfg"])
@@ -1704,7 +1684,7 @@ def main():
             
             
             pts_debug = []
-            link_name_to_target_pose = sim_task.update_targets() # update targets in sim and return new target poses
+            link_name_to_target_pose = sim_task.update_targets() # set new targets in sim and return new target poses
             for a in cu_agents:
                 planner = a.planner
                 viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt
@@ -1732,7 +1712,7 @@ def main():
                     a.update_col_model_from_isaac_sim(
                         a.sim_robot.path, 
                         usd_help, 
-                        ignore_list=a.cu_world_wrapper_update_policy["never_add"]+a.cu_world_wrapper_update_policy["never_update"], 
+                        ignore_list=a.cu_world_wrapper_update_policy["never_add"] + a.cu_world_wrapper_update_policy["never_update"], 
                         paths_to_search_obs_under=["/World"]
                     )
                     

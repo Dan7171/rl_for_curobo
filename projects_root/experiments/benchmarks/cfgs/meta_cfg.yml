@@ -39,7 +39,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: False # for debugging
+      plot_costs: True # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
@@ -96,9 +96,10 @@ env:
 async: False
 
 sim_task:
-  task_type: 'manual' # stat_goals or drift_goals
-  # cfg:
-  #   timeout: 10.0
+  task_type: 'stat_goals' # stat_goals or manual (for debugging) or drift_goals
+  cfg:
+    timeout: 10.0
+    seed: 0
 
 sim_env:
   type: 'static' # static or dynamic
@@ -130,8 +131,8 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
     
 
-  - robot:  curobo/src/curobo/content/configs/robot/dual_ur10e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'cumotion' # mpc or cumotion
+  - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/dual_ur10e.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion
     base_pose: [0, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
     viz_color: 'purple'
     
