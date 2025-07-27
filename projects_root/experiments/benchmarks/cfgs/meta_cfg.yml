@@ -39,7 +39,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: True # for debugging
+      plot_costs: False # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
@@ -74,10 +74,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       is_on: True # meaning agent is subscribing to plans from other robots
       to: 'all' # meaning agent will subscribe to plans from all robots (except itself). 'to' can be a list of robot indices or 'all'. When agent is subscribed to plans, it will use the plans to plan its own steps (to make collision free steps).
       
-  # # default values for debugging (if not specified by the agent)
-  # debug:    
-  #   world_cu_wrapper: # world collision wrapper
-  #     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output)
+
     
 # default (and only) values for environments (sim/real) 
 env:
@@ -102,38 +99,38 @@ sim_task:
     seed: 0
 
 sim_env:
-  type: 'static' # static or dynamic
   cfg:
     n_obs: 3
     obj_shape: 'cube' # type of the obstacle ('cube' or 'sphere')
     seed: 0 # seed to sample the obstacle poses
-    max_dim: 0.2 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
+    max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere
-    volume_center_pos: [0,0,1] # center position of the obstacle volume (xyz in world frame)
+    volume_center_pos: [0,0,0.5] # center position of the obstacle volume (xyz in world frame)
     volume_shape: 'cube' # shape of the obstacle volume ('sphere' or 'box')
     volume_dim: 1 # dimension of the obstacle volume (radius for sphere, side length for box)
-    
+    obj_vel: [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
+
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
-  # - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-  #   planner: 'mpc' # mpc or cumotion
-  #   base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-  #   viz_color: 'purple'
+  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion
+    base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+    viz_color: 'purple'
 
-  # - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-  #   planner: 'mpc' # mpc or cumotion
-  #   base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-  #   viz_color: 'orange'
+  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion
+    base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+    viz_color: 'orange'
 
-  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-  #   planner: 'mpc' # mpc or cumotion
-  #   base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-  #   viz_color: 'blue'
+  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion
+    base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+    viz_color: 'blue'
   
     
 
-  - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/dual_ur10e.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
-    base_pose: [0, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    viz_color: 'purple'
+  # - robot:  curobo/src/curobo/content/configs/robot/franka.yml # curobo/src/curobo/content/configs/robot/dual_ur10e.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion
+  #   base_pose: [0, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+  #   viz_color: 'purple'
     
 

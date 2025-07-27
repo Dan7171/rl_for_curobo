@@ -46,7 +46,7 @@ from omni.isaac.core.utils.types import ArticulationAction
 from omni.isaac.core.utils.types import JointsState as isaac_JointsState
 from isaacsim.core.utils.xforms import get_world_pose
 import omni
-from pxr import UsdGeom, Gf, Sdf
+from pxr import UsdGeom, Gf, Sdf, UsdPhysics
 
 
 
@@ -107,8 +107,10 @@ class SimEnv:
     def update(self,**kwargs):
         pass
 
+
+
     
-class StaticEnv(SimEnv):
+class PrimsEnv(SimEnv):
     def __init__(self,
         stage, 
         n_obs,
@@ -118,7 +120,8 @@ class StaticEnv(SimEnv):
         min_dim=0.1,
         volume_center_pos=[0,0,1],
         volume_shape='sphere',
-        volume_dim=1
+        volume_dim=1,
+        obj_vel=[0,0,0],
         ):
         """
         static obstacles.
@@ -132,6 +135,7 @@ class StaticEnv(SimEnv):
             volume_center_pos (list): center of the obstacle volume (xyz in world frame)
             volume_shape (str): shape of the obstacle volume ('sphere' or 'box')
             volume_dim (float): dimension of the obstacle volume (radius for sphere, side length for box)
+        
         """
     
         super().__init__(stage)
@@ -143,37 +147,72 @@ class StaticEnv(SimEnv):
         self.max_dim = max_dim
         self.min_dim = min_dim
         self._local_rng = random.Random(seed)
-        self.xformables = []
+        self._prim_paths = []
+        self._prim_sdf_paths = []
+        self._prims = []
+        self._prim_objs = [] # probably differnt from _prims
+        
+        self._xformables_prim_paths = []
+        self._xformable_apis = []
+        self.obj_vel = obj_vel
+        
+        
         for i in range(n_obs):
             obj_name = "Cube" if obj_shape == "cube" else "Sphere"
             obj_path = f"{self.scope_path}/{obj_name}_{i}"             
+            
             obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
             obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
-            
+            _prim_sdf_path = Sdf.Path(obj_path)
             # Create cube
             if obj_shape == "cube":
-                prim = UsdGeom.Cube.Define(stage, Sdf.Path(obj_path))
-                prim.CreateSizeAttr(1.0)  # Set base size to 1.0
+                _prim = UsdGeom.Cube.Define(stage, _prim_sdf_path)
+                _prim.CreateSizeAttr(1.0)  # Set base size to 1.0
+                scale_size = obj_dim_size_m # side length for cube
+            else:
+                _prim.CreateRadiusAttr(1.0)  # Set base radius to 1.0
+                scale_size = obj_dim_size_m / 2.0 # radius for sphere
                 
-                # Set transform with proper scale
-                xform_api = UsdGeom.XformCommonAPI(prim)
-                xform_api.SetTranslate(obj_pos)
-                xform_api.SetScale(Gf.Vec3f(obj_dim_size_m, obj_dim_size_m, obj_dim_size_m))
-                
-            elif obj_shape == "sphere":
-                prim = UsdGeom.Sphere.Define(stage, Sdf.Path(obj_path))
-                prim.CreateRadiusAttr(1.0)  # Set base radius to 1.0
-                
-                # Set transform with proper scale
-                xform_api = UsdGeom.XformCommonAPI(prim)
-                xform_api.SetTranslate(obj_pos)
-                # For spheres, scale by radius (obj_dim_size_m is diameter, so radius is half)
-                radius_scale = obj_dim_size_m / 2.0
-                xform_api.SetScale(Gf.Vec3f(radius_scale, radius_scale, radius_scale))
+            
+            _xform_api = UsdGeom.XformCommonAPI(_prim)
+            _xform_api.SetTranslate(obj_pos)
+            _xform_api.SetScale(Gf.Vec3f(scale_size, scale_size, scale_size))
 
-            self.xformables.append(prim)
+            if obj_vel != [0,0,0]:
+                _prim_obj = stage.GetPrimAtPath(obj_path)
+                UsdPhysics.RigidBodyAPI.Apply(_prim_obj)
+                _prim_obj.CreateAttribute("physics:velocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))  # Linear
+                _prim_obj.CreateAttribute("physics:angularVelocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(0.0, 0.0, 1.0))  # Angular
 
-    
+                # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
+                # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
+                # # Enable physics (rigid body)
+                # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
+                # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
+            
+                # # _prim_obj.CreateAttribute("physics:collisionEnabled", Sdf.ValueTypeNames.Bool, custom=False)
+                # # _prim_obj.GetAttribute("physics:collisionEnabled").Set(False)
+            
+                
+                # # # Set mass (important for physics)
+                # # _prim_obj.CreateAttribute("physics:mass", Sdf.ValueTypeNames.Float, custom=False)
+                # # _prim_obj.GetAttribute("physics:mass").Set(0.0)
+            
+                # # Set initial velocity
+                # _prim_obj.CreateAttribute("physics:velocity", Sdf.ValueTypeNames.Vector3f, custom=False)
+                # _prim_obj.GetAttribute("physics:velocity").Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))
+                
+                # # Set angular velocity to zero (optional, you can also set this to a non-zero value)
+                # _prim_obj.CreateAttribute("physics:angularVelocity", Sdf.ValueTypeNames.Vector3f, custom=False)
+                # _prim_obj.GetAttribute("physics:angularVelocity").Set(Gf.Vec3f(0.0, 0.0, 0.0))
+            
+                self._prim_objs.append(_prim_obj)    
+                
+            
+            self._prim_paths.append(obj_path)
+            self._prim_sdf_paths.append(_prim_sdf_path)
+            self._xformable_apis.append(_xform_api)
+
 
     def sample_pos_in_volume(self, volume_center_pos:list[float],volume_dim:float)->list[float]:     
         """
@@ -191,8 +230,12 @@ class StaticEnv(SimEnv):
             dim_translation = (self._local_rng.uniform(-delta, delta))
             ans.append(volume_center_pos[dim] + dim_translation)
         return ans
+
+
         
-            
+    
+        
+        
 class PlanPubSub:
     def __init__(self,
         pub_cfg:dict,
@@ -1616,38 +1659,13 @@ def main():
     for a in cu_agents:
         if a.sim_robot is not None: # if in simulation
             never_add = [a.sim_robot.path, *all_target_paths, "/curobo"]
-            # never_add = [a.sim_robot.path, *list(a.sim_robot.link_name_to_target_path.values()), "/curobo"]
-            # for other in cu_agents:
-            #     if other.sim_robot is not None:
-            #         never_add += list(other.sim_robot.link_name_to_target_path.values())
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
     
-    
-    # agents_task_cfgs = []
-    # for a in cu_agents:
-    #     if a.sim_robot is not None:
-    #         cfg = {}
-    #         links_with_target = [a.planner.ee_link_name, *[link_name for link_name in a.planner.constrained_links_names]]
-    #         for link_name in links_with_target:
-    #             link_path = a.sim_robot.path + "/"  + link_name
-    #             link_prim = my_world.stage.GetPrimAtPath(link_path)
-    #             link_target_color = a.viz_color
-    #             link_retract_pose = a.planner.plan_goals[link_name]
-    #             cfg[link_name] = [link_path, link_prim, link_target_color, link_retract_pose]
-    #         agents_task_cfgs.append(cfg)
-    # if len(agents_task_cfgs) > 0:
-    #     sim_task_type = meta_cfg["sim_task"]["task_type"]
-    #     if sim_task_type == 'stat_goals':
-    #         sim_task = StatGoalsTask(agents_task_cfgs, my_world, usd_help, tensor_args, **meta_cfg["sim_task"]["cfg"])
-    #     elif sim_task_type == 'manual':
-    #         sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args)
         
-    if meta_cfg["sim_env"]["type"] == 'static':
-        sim_env = StaticEnv(stage, **meta_cfg["sim_env"]["cfg"])
-
-
+    sim_env = PrimsEnv(stage, **meta_cfg["sim_env"]["cfg"])
+    
     my_world.reset()
     my_world.play()
     i = 0
