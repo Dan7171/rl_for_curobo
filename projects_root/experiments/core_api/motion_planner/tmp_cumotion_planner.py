@@ -180,7 +180,12 @@ class PrimsEnv(SimEnv):
 
             if obj_vel != [0,0,0]:
                 _prim_obj = stage.GetPrimAtPath(obj_path)
-                UsdPhysics.RigidBodyAPI.Apply(_prim_obj)
+
+                # apply rigid body api (enables physics, velocity, mass...)
+                _rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(_prim_obj)
+                # Enable kinematic mode (disables mass/gravity but allows movement)
+                _rigid_body_api.CreateKinematicEnabledAttr(True)
+                
                 _prim_obj.CreateAttribute("physics:velocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))  # Linear
                 _prim_obj.CreateAttribute("physics:angularVelocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(0.0, 0.0, 1.0))  # Angular
 
