@@ -79,6 +79,50 @@ from projects_root.utils.draw import draw_points
 from projects_root.utils.colors import npColors
 
 
+class PoseUtils:
+    def __init__(self, seed:Optional[int]=None):
+        self.seed = seed
+        if seed is not None:
+            self._local_rng = random.Random(seed)
+        else:
+            self._local_rng = random.Random()
+
+    def sample_pos_in_box(self, box_center:list[float],box_dim:float,)->list[float]:     
+        """
+        sample a position inside an (imaginary) box.
+        Args:
+            box_center (list[float]): center position of the box (xyz in world frame)
+            box_dim (float): dimension of the volume (side length for box)
+        Returns:
+            list[float]: sampled position (xyz in world frame)
+        """
+        
+        ans = []
+        for dim in range(3):
+            delta = box_dim / 2 # diam/2 (radius) for sphere, (side length)/2 for box
+            dim_translation = (self._local_rng.uniform(-delta, delta))
+            ans.append(box_center[dim] + dim_translation)
+        return ans
+    
+    def sample_pos_in_sphere(self, sphere_center:list[float], radius:float)->list[float]:     
+        """
+        sample a position inside an (imaginary) sphere.
+        Args:
+            volume_center_pos (list[float]): center position of the sphere (xyz in world frame)
+            volume_dim (float): dimension of the sphere (diameter)
+
+        Returns:
+            list[float]: sampled position (xyz in world frame)
+        """
+        ans = []
+        x_delta = self._local_rng.uniform(-radius, radius)
+        y_delta = self._local_rng.uniform(-radius, radius)
+        z_delta_abs = np.sqrt(radius**2 - x_delta**2 + y_delta**2)
+        z_delta = self._local_rng.choice([-z_delta_abs, z_delta_abs])
+        ans.append(sphere_center[0] + x_delta)
+        ans.append(sphere_center[1] + y_delta)
+        ans.append(sphere_center[2] + z_delta)
+        return ans
 
 class Plan:
     def __init__(self, cmd_idx=0, cmd_plan:Optional[JointState]=None):
@@ -105,7 +149,7 @@ class SimEnv:
         UsdGeom.Scope.Define(stage, Sdf.Path(self.scope_path))
 
     
-    def update(self,**kwargs):
+    def step(self,**kwargs):
         pass
 
 
@@ -113,11 +157,10 @@ class SimEnv:
     
 class PrimsEnv(SimEnv):
     def __init__(self,
-    
         world,
+        pose_utils,
         n_obs,
         obj_shape='cube',
-        seed=0,
         max_dim=0.5,
         min_dim=0.1,
         volume_center_pos=[0,0,1],
@@ -140,7 +183,8 @@ class PrimsEnv(SimEnv):
             volume_dim (float): dimension of the obstacle volume (radius for sphere, side length for box)
         
         """
-    
+        # relevant prim docs: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#objects
+
         super().__init__(world.stage)
         self.world:World = world
         self.n_obs = n_obs
@@ -150,9 +194,11 @@ class PrimsEnv(SimEnv):
         self.obj_volume_dim = volume_dim
         self.max_dim = max_dim
         self.min_dim = min_dim
-        self._local_rng = random.Random(seed)
+        self._pose_utils = pose_utils
+        self._local_rng = random.Random(self._pose_utils.seed)
         self.obj_lin_vel = obj_lin_vel
         self.obj_rigid_body_enabled = obj_rigid_body_enabled
+        
         if obj_shape == "cube":
             if obj_lin_vel != [0,0,0]:
                 if obj_rigid_body_enabled:
@@ -187,136 +233,24 @@ class PrimsEnv(SimEnv):
             obj_name = "Cube" if obj_shape == "cube" else "Sphere"
             obj_path = f"{self.scope_path}/{obj_name}_{i}"
             
-            obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
+            # sample position in volume
+            if self.obj_volume_shape == "sphere":
+                obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2))
+            elif self.obj_volume_shape == "box":
+                obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim))
+            else:
+                raise ValueError(f"Invalid volume shape: {self.obj_volume_shape}")
+            
             obj = self._prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
             self._objs.append(obj)
 
         
-    def update(self,**kwargs):
+    def step(self,**kwargs):
         if self._prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
             for obj in self._objs:
                 p, q = get_world_pose(obj.prim_path)
                 obj.set_world_pose(p+np.array(self.obj_lin_vel) * self.world.get_physics_dt(), q)
-
-        # self._prim_paths = []
-        # self._prim_sdf_paths = []
-        # self._prims = []
-        # self._prim_objs = [] # probably differnt from _prims
-        
-        # self._xformables_prim_paths = []
-        # self._xformable_apis = []
-        # self.obj_vel = obj_vel
-        # self._dynamic_cuboids = []
-        # self._prim_paths = []
-        # if obj_shape == "cube":
-        #     if obj_vel != [0,0,0]:
-        #         if self._rigid_body_enabled:
-        #             self._prim_class = DynamicCuboid
-        #         else:
-        #             self._prim_class = VisualCuboid
-        #     else:
-        #         self._prim_class = FixedCuboid
-        # elif obj_shape == "sphere":
-        #     self._prim_class = DynamicSphere
-        
-        # for i in range(n_obs):
-        #     obj_name = "Cube" if obj_shape == "cube" else "Sphere"
-        #     obj_path = f"{self.scope_path}/{obj_name}_{i}"             
-            
-        #     # obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
-        #     obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
-
-
-        #     # Setup world
-        #     # cube = DynamicCuboid(  # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#objects
-        #     #         prim_path=obj_path,
-        #     #         name=obj_path, # naming after the path to prevent name conflicts
-        #     #         size=obj_dim_size_m, # side length for cube
-        #     #         position=self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim),
-        #     #         color=np.array([1.0, 0.0, 0.0]),
-        #     #         linear_velocity=np.array(obj_vel)
-        #     #     ) 
-            
-            # self._dynamic_cuboids.append(cube)
-        
-        # for i in range(n_obs):
-        #     obj_name = "Cube" if obj_shape == "cube" else "Sphere"
-        #     obj_path = f"{self.scope_path}/{obj_name}_{i}"             
-            
-        #     obj_pos = Gf.Vec3d(self.sample_pos_in_volume(self.obj_volume_center_pos, self.obj_volume_dim))
-        #     obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
-        #     _prim_sdf_path = Sdf.Path(obj_path)
-        #     # Create cube
-        #     if obj_shape == "cube":
-        #         _prim = UsdGeom.Cube.Define(stage, _prim_sdf_path)
-        #         _prim.CreateSizeAttr(1.0)  # Set base size to 1.0
-        #         scale_size = obj_dim_size_m # side length for cube
-        #     else:
-        #         _prim.CreateRadiusAttr(1.0)  # Set base radius to 1.0
-        #         scale_size = obj_dim_size_m / 2.0 # radius for sphere
-                
-            
-        #     _xform_api = UsdGeom.XformCommonAPI(_prim)
-        #     _xform_api.SetTranslate(obj_pos)
-        #     _xform_api.SetScale(Gf.Vec3f(scale_size, scale_size, scale_size))
-
-        #     if obj_vel != [0,0,0]:
-        #         _prim_obj = stage.GetPrimAtPath(obj_path)
-
-        #         # apply rigid body api (enables physics, velocity, mass...)
-        #         _rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(_prim_obj)
-        #         # Enable kinematic mode (disables mass/gravity but allows movement)
-        #         _rigid_body_api.CreateKinematicEnabledAttr(True)
-
-        #         _prim_obj.CreateAttribute("physics:velocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))  # Linear
-        #         _prim_obj.CreateAttribute("physics:angularVelocity",  Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(0.0, 0.0, 1.0))  # Angular
-
-        #         # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
-        #         # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
-        #         # # Enable physics (rigid body)
-        #         # _prim_obj.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool, custom=False)
-        #         # _prim_obj.GetAttribute("physics:rigidBodyEnabled").Set(True)
-            
-        #         # # _prim_obj.CreateAttribute("physics:collisionEnabled", Sdf.ValueTypeNames.Bool, custom=False)
-        #         # # _prim_obj.GetAttribute("physics:collisionEnabled").Set(False)
-            
-                
-        #         # # # Set mass (important for physics)
-        #         # # _prim_obj.CreateAttribute("physics:mass", Sdf.ValueTypeNames.Float, custom=False)
-        #         # # _prim_obj.GetAttribute("physics:mass").Set(0.0)
-            
-        #         # # Set initial velocity
-        #         # _prim_obj.CreateAttribute("physics:velocity", Sdf.ValueTypeNames.Vector3f, custom=False)
-        #         # _prim_obj.GetAttribute("physics:velocity").Set(Gf.Vec3f(obj_vel[0], obj_vel[1], obj_vel[2]))
-                
-        #         # # Set angular velocity to zero (optional, you can also set this to a non-zero value)
-        #         # _prim_obj.CreateAttribute("physics:angularVelocity", Sdf.ValueTypeNames.Vector3f, custom=False)
-        #         # _prim_obj.GetAttribute("physics:angularVelocity").Set(Gf.Vec3f(0.0, 0.0, 0.0))
-            
-        #         self._prim_objs.append(_prim_obj)    
-                
-            
-        #     self._prim_paths.append(obj_path)
-        #     self._prim_sdf_paths.append(_prim_sdf_path)
-        #     self._xformable_apis.append(_xform_api)
-
-
-    def sample_pos_in_volume(self, volume_center_pos:list[float],volume_dim:float)->list[float]:     
-        """
-        Sample a position around the center position of a volume (sphere or box).
-        Volume is defined by its center position and dimension.
-        Args:
-            volume_center_pos (list[float]): center position of the volume (xyz in world frame)
-            volume_dim (float): dimension of the volume (diameter for sphere, side length for box)
-        Returns:
-            list[float]: sampled position (xyz in world frame)
-        """
-        ans = []
-        for dim in range(3):
-            delta = volume_dim / 2 # diam/2 (radius) for sphere, (side length)/2 for box
-            dim_translation = (self._local_rng.uniform(-delta, delta))
-            ans.append(volume_center_pos[dim] + dim_translation)
-        return ans
+ 
 
 
         
@@ -1449,20 +1383,23 @@ class SimTask:
                 self.goal_errors[a_idx][link_name].append((error, now))
                 
 
-    def _get_link_errors(self) -> list[dict[str,tuple[float,float]]]:
+    def _get_link_errors(self) -> tuple[list[dict[str,tuple[float,float]]], list[dict[str,tuple[np.ndarray, np.ndarray]]], list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         n_agents = len(self.agent_task_cfgs)
         link_name_to_error = [{} for _ in range(n_agents)]
+        target_name_to_pose = [{} for _ in range(n_agents)]
+        link_name_to_pose = [{} for _ in range(n_agents)]
         for a_idx in range(len(self.agent_task_cfgs)):                
             for link_name, link_path in self.link_name_to_path[a_idx].items():
                 p_link, q_link = get_world_pose(link_path)
-
+                link_name_to_pose[a_idx][link_name] = (p_link, q_link)
                 target_name = self.name_link_to_target[a_idx][link_name]
                 target_path = self.target_name_to_path[a_idx][target_name]
                 target_prim = self.target_path_to_prim[a_idx][target_path]
                 p_target, q_target = target_prim.get_world_pose()
+                target_name_to_pose[a_idx][target_name] = (p_target, q_target)
                 err = (np.linalg.norm(p_target - p_link[:3]), np.linalg.norm(q_target - q_link[3:]))
                 link_name_to_error[a_idx][link_name] = err
-        return link_name_to_error
+        return link_name_to_error, target_name_to_pose, link_name_to_pose
         
     def _parse_np_to_pose(self, link_name_to_next_target_pose_np:list[dict[str,tuple[np.ndarray, np.ndarray]]])->list[dict[str,Pose]]:
         # parse new targets from np to Pose
@@ -1477,11 +1414,11 @@ class SimTask:
                 link_name_to_next_target_pose[a_idx][link_name] = new_target_as_pose
         return link_name_to_next_target_pose
 
-    def update_targets(self)->list[dict[str,Pose]]:
+    def step(self)->list[dict[str,Pose]]:
         
-        errors = self._get_link_errors()
+        errors, target_name_to_pose, link_name_to_pose  = self._get_link_errors()
         self._update_err_log(errors)
-        link_name_to_next_target_pose_np = self._update_sim_targets(errors)
+        link_name_to_next_target_pose_np = self._update_sim_targets(errors, target_name_to_pose, link_name_to_pose)
         if link_name_to_next_target_pose_np is not None:
             link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_next_target_pose_np)
             self._last_update = link_name_to_next_target_pose
@@ -1489,7 +1426,7 @@ class SimTask:
                     
     
     @abstractmethod
-    def _update_sim_targets(self,errors)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+    def _update_sim_targets(self,errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         # return None if no new targets are needed else update the targts in sim and return the new target poses as np tuples
         pass
     
@@ -1518,18 +1455,24 @@ class SimTask:
 
 
 
-class StatGoalsTask(SimTask):
+class FollowTask(SimTask):
     def __init__(self, 
                  agents_task_cfgs:list[dict], 
                  world:World, 
                  usd_help:UsdHelper, 
                  tensor_args:TensorDeviceType, 
+                 pose_utils:PoseUtils,
                  timeout:float=3.0,
-                 seed:int=0):
+                 max_abs_axis_vel:float=0.1,
+                 ):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
         self.timeout = timeout
         self._last_update_time = 0.0
+        self._pose_utils = pose_utils
 
+        self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
+        self.max_abs_axis_vel = max_abs_axis_vel
+        
         target_pos_options = [[0.2,0,0.2], [0.4,0,0.8], [0.2,0,0.2], [0.4,0,0.8], [0.3,0.2,0.2], [0.3,0.2,0.8], [0.3,-0.2,0.2], [0.3,-0.2,0.8]]
         target_quat_options = [[0,0,0,1], [1,0,0,0]]
         all_combs = []
@@ -1540,14 +1483,17 @@ class StatGoalsTask(SimTask):
         n_agents = len(self.agent_task_cfgs)
         self._link_name_to_target_ordering = [{} for _ in range(n_agents)]
         self._link_name_to_next_target_idx = [{} for _ in range(n_agents)]
-        local_rng = random.Random(seed)
+        local_rng = random.Random(pose_utils.seed)
         for a_idx in range(len(self.agent_task_cfgs)):
             for link_name in self.link_name_to_path[a_idx].keys():
                 local_rng.shuffle(all_combs) # inplace shuffle all combinations 
                 self._link_name_to_target_ordering[a_idx][link_name] = deepcopy(all_combs) # set target ordering for this link
                 print(f"debug: target ordering for {link_name}: {self._link_name_to_target_ordering[a_idx][link_name]}")
                 self._link_name_to_next_target_idx[a_idx][link_name] = 0
- 
+        
+        if self.max_abs_axis_vel > 0:
+            self._select_targets_vel()
+        
     def _pick_next_targets_world_pose(self)->list[dict[str,tuple[np.ndarray, np.ndarray]]]:
         n_agents = len(self.agent_task_cfgs)
         new_target_poses = [{} for _ in range(n_agents)]
@@ -1562,38 +1508,57 @@ class StatGoalsTask(SimTask):
         return new_target_poses
                 
 
-    def _update_sim_targets(self,errors)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+ 
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose) -> List[Dict[str, Tuple[np.ndarray]]] | None:
         if time() - self._last_update_time > self.timeout:
             link_name_to_next_target_pose_np = self._pick_next_targets_world_pose() 
             self._set_targets_world_pose(link_name_to_next_target_pose_np)
+            if self.max_abs_axis_vel > 0:
+                self._select_targets_vel()
             self._last_update_time = time()
             return link_name_to_next_target_pose_np
         
+        else:
+            # update target pose in sim according to target lin vel
+            if self.max_abs_axis_vel > 0:
+                for a_idx in range(len(self.target_name_to_target_lin_vel)):
+                    for target_name in self.target_name_to_path[a_idx].keys():
+                        p_target, q_target = target_name_to_pose[a_idx][target_name]
+                        target_lin_vel = self.target_name_to_target_lin_vel[a_idx][target_name]
+                        p_target_new = p_target + self.world.get_physics_dt() * np.array(target_lin_vel)
+                        target_path = self.target_name_to_path[a_idx][target_name]
+                        target_prim = self.target_path_to_prim[a_idx][target_path]
+                        target_prim.set_world_pose(position=p_target_new, orientation=q_target)
+
+    def _select_targets_vel(self):
+        """
+        sample new target lin vel from a cubic volume around 0,0,0 for each target and stores it in dict.
+        """
+        for a_idx in range(len(self.target_name_to_path)):
+            for target_name in self.target_name_to_path[a_idx].keys():
+                new_target_lin_vel = self._pose_utils.sample_pos_in_box([0,0,0], self.max_abs_axis_vel)
+                self.target_name_to_target_lin_vel[a_idx][target_name] = new_target_lin_vel
+                
 class ManualTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
-    
-    def _update_sim_targets(self,errors)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         for a_idx in range(len(errors)):
             for link_name in errors[a_idx].keys():
                 p_err, q_err = errors[a_idx][link_name]
                 if p_err > 0.01 or q_err > 0.01:
                     target_name = self.name_link_to_target[a_idx][link_name]
-                    target_path = self.target_name_to_path[a_idx][target_name]
-                    target_prim = self.target_path_to_prim[a_idx][target_path]   
-                    p_target, q_target = target_prim.get_world_pose()
+                    # target_path = self.target_name_to_path[a_idx][target_name]
+                    # target_prim = self.target_path_to_prim[a_idx][target_path]   
+                    p_target, q_target = target_name_to_pose[a_idx][target_name]
                     self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
     
         
             
-                
-
-def get_saftey_scores(self, robots_spheres, robots_obj_dists, robots_self_cols):
-    pass
-    
-def update_jerk_scores(self, jerk_data):
-    pass
-
+class ReachTask(FollowTask):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, pose_utils, timeout, 0.0)
 
 def main():
     
@@ -1685,7 +1650,7 @@ def main():
         viz_color = a_cfg["viz_color"] if "viz_color" in a_cfg else meta_cfg["default"]["viz_color"]
         sim_robot = SimRobot(robot, robot_prim_path, **sim_robot_cfg, viz_color=viz_color)
         world_cfg = WorldConfig()
-    
+        pose_utils = PoseUtils(meta_cfg["pose_utils"]["seed"])
         if planner_type[a_idx] == 'cumotion':
             _motion_gen_config = MotionGenConfig.load_from_robot_config(
                 robot_cfgs[a_idx],
@@ -1734,13 +1699,16 @@ def main():
             agents_task_cfgs.append(cfg)
     if len(agents_task_cfgs) > 0:
         sim_task_type = meta_cfg["sim_task"]["task_type"]
-        if sim_task_type == 'stat_goals':
-            sim_task = StatGoalsTask(agents_task_cfgs, my_world, usd_help, tensor_args, **meta_cfg["sim_task"]["cfg"])
+        if sim_task_type == 'reach':
+            sim_task = ReachTask(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils, **meta_cfg["sim_task"]["cfg"])
         elif sim_task_type == 'manual':
             sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args)
-
-    all_target_paths = [list(sim_task.target_path_to_prim[i].keys())[j] for i in range(len(cu_agents)) for j in range(len(sim_task.target_path_to_prim[i]))
-                    ]
+        elif sim_task_type == 'follow':
+            sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils, **meta_cfg["sim_task"]["cfg"])
+        else:
+            raise ValueError(f"Invalid task type: {sim_task_type}")
+        
+    all_target_paths = [list(sim_task.target_path_to_prim[i].keys())[j] for i in range(len(cu_agents)) for j in range(len(sim_task.target_path_to_prim[i]))]
     # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
     for a in cu_agents:
         if a.sim_robot is not None: # if in simulation
@@ -1750,7 +1718,7 @@ def main():
     
     
         
-    sim_env = PrimsEnv(my_world, **meta_cfg["sim_env"]["cfg"])
+    sim_env = PrimsEnv(my_world,pose_utils, **meta_cfg["sim_env"]["cfg"])
     
     my_world.reset()
     my_world.play()
@@ -1788,8 +1756,13 @@ def main():
             
             
             pts_debug = []
-            link_name_to_target_pose = sim_task.update_targets() # set new targets in sim and return new target poses
-            sim_env.update()
+
+            # Updating targets. Updating targets in sim and return new target poses so planners can react
+            link_name_to_target_pose = sim_task.step() 
+            
+            # Updating obstacles. Updating obstacles in sim so they can be sensed by robots
+            sim_env.step()
+
             for a in cu_agents:
                 planner = a.planner
                 viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt
@@ -1830,12 +1803,7 @@ def main():
                     cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
-                    
-                    # goals = {}
-                    # for link_name, target_path in a.sim_robot.link_name_to_target_path.items():
-                    #     target_prim = a.sim_robot.target_path_to_target_prim[target_path]
-                    #     p_target, q_target = target_prim.get_world_pose()
-                    #     goals[link_name] = Pose(position=tensor_args.to_device(p_target),quaternion=tensor_args.to_device(q_target))
+  
                     
                     # sense plans
                     if a.is_plan_subscriber():
