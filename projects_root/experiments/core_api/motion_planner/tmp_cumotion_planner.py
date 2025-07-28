@@ -33,11 +33,10 @@ import os
 from time import time, sleep
 from threading import Lock, Event, Thread
 from typing import Optional, Tuple, Dict, Union, Callable
-from curobo.types.tensor import T_DOF
 from typing_extensions import List
-from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 import torch
 import random
+from scipy.spatial.transform import Rotation as R
 import carb
 import numpy as np
 from omni.isaac.core import World
@@ -52,6 +51,8 @@ from omni.isaac.core.objects import DynamicCuboid, VisualCuboid, VisualSphere, D
 
 
 # CuRobo
+from curobo.types.tensor import T_DOF
+from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
 from curobo.geom.sdf.world import CollisionCheckerType
 from curobo.geom.types import WorldConfig, Sphere
@@ -327,9 +328,24 @@ class CuPlanner:
         check if the current plan goals are outdated
         """
         for link_name, goal in goals.items():
-            if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
-                print(f"plan goals are outdated for link {link_name}")
+            # if link_name not in self.plan_goals or torch.norm(self.plan_goals[link_name].position - goal.position) > 1e-3 or torch.norm(self.plan_goals[link_name].quaternion - goal.quaternion) > 1e-3:
+
+            updated_goal_pos = goal.position.flatten().cpu().numpy()
+            updated_goal_quat = goal.quaternion.flatten().cpu().numpy()
+
+            current_solver_goal_pos = self.plan_goals[link_name].position.flatten().cpu().numpy()
+            current_solver_goal_quat = self.plan_goals[link_name].quaternion.flatten().cpu().numpy()
+            
+            pos_changed = np.linalg.norm(current_solver_goal_pos - updated_goal_pos) > 1e-9
+            rot_changed = np.linalg.norm(get_per_axis_euler_error(list(current_solver_goal_quat), list(updated_goal_quat))) > 1e-9
+            if pos_changed or rot_changed:
                 return True
+            # if pos_changed:
+
+            # if link_name not in self.plan_goals or pos_changed or rot_changed:
+            #     print(f"plan goals are outdated for link {link_name}")
+            #     return True
+            
         return False
     
     def convert_action_to_isaac(
@@ -448,17 +464,17 @@ class MpcPlanner(CuPlanner):
         
     def yield_action(self, goals:dict[str, Pose]):
 
-        if self._outdated_plan_goals(goals):
-            # save the new goals for tracking in future if goals changed
-            self.plan_goals = goals
+        # if self._outdated_plan_goals(goals):
+        # save the new goals for tracking in future if goals changed
+        self.plan_goals = goals
 
-            # update the solver goal buffer with the new goals (in robot frame)
-            goals_R = self.goals_dict_W_to_R(self.base_pose, goals)
-            self.solver_goal_buf_R.goal_pose.copy_(goals_R[self.ee_link_name]) # ee link goal
-            for link_name in self.constrained_links_names: # extra links goals
-                if link_name in goals_R:
-                    self.solver_goal_buf_R.links_goal_pose[link_name] = goals_R[link_name]
-            self.solver.update_goal(self.solver_goal_buf_R)
+        # update the solver goal buffer with the new goals (in robot frame)
+        goals_R = self.goals_dict_W_to_R(self.base_pose, goals)
+        self.solver_goal_buf_R.goal_pose.copy_(goals_R[self.ee_link_name]) # ee link goal
+        for link_name in self.constrained_links_names: # extra links goals
+            if link_name in goals_R:
+                self.solver_goal_buf_R.links_goal_pose[link_name] = goals_R[link_name]
+        self.solver.update_goal(self.solver_goal_buf_R)
 
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
         action = mpc_result.js_action
@@ -1020,6 +1036,20 @@ class SimRobot:
 # class CumotionPlanPublisher(PlanPublisher):
 #     pass
 
+def get_per_axis_euler_error(q1:list[float], q2:list[float])->float:
+    """
+    Calculate the rotation error between two quaternions (each wxyz).
+    """
+    euler1 = R.from_quat(q1).as_euler('xyz', degrees=True)
+    euler2 = R.from_quat(q2).as_euler('xyz', degrees=True)
+    euler_error = euler2 - euler1
+    # Normalize angle to [-180, 180]
+    euler_error = (euler_error + 180) % 360 - 180
+    print("Euler error (deg):", euler_error)
+    return euler_error
+
+
+
 def publish_robot_context(robot_idx:int, robot_context:dict,robot_pose:list, n_obstacle_spheres:int, robot_sphere_count:int, mpc_cfg:dict, col_pred_with_robot:List[int], mpc_config_paths:List[str], robot_config_paths:List[str], robot_sphere_counts_split:List[Tuple[int, int]]):
     """
     Publish robot context ("topics") to the environment topics.
@@ -1395,6 +1425,7 @@ class SimTask:
         link_name_to_error = [{} for _ in range(n_agents)]
         target_name_to_pose = [{} for _ in range(n_agents)]
         link_name_to_pose = [{} for _ in range(n_agents)]
+        
         for a_idx in range(len(self.agent_task_cfgs)):                
             for link_name, link_path in self.link_name_to_path[a_idx].items():
                 p_link, q_link = get_world_pose(link_path)
@@ -1404,7 +1435,9 @@ class SimTask:
                 target_prim = self.target_path_to_prim[a_idx][target_path]
                 p_target, q_target = target_prim.get_world_pose()
                 target_name_to_pose[a_idx][target_name] = (p_target, q_target)
-                err = (np.linalg.norm(p_target - p_link[:3]), np.linalg.norm(q_target - q_link[3:]))
+                pos_err = np.linalg.norm(p_target - p_link[:3])
+                rot_err = np.linalg.norm(get_per_axis_euler_error(q_link, q_target))
+                err = (pos_err, rot_err)
                 link_name_to_error[a_idx][link_name] = err
         return link_name_to_error, target_name_to_pose, link_name_to_pose
         
@@ -1554,13 +1587,11 @@ class ManualTask(SimTask):
         for a_idx in range(len(errors)):
             for link_name in errors[a_idx].keys():
                 p_err, q_err = errors[a_idx][link_name]
-                if p_err > 0.01 or q_err > 0.01:
-                    target_name = self.name_link_to_target[a_idx][link_name]
-                    # target_path = self.target_name_to_path[a_idx][target_name]
-                    # target_prim = self.target_path_to_prim[a_idx][target_path]   
-                    p_target, q_target = target_name_to_pose[a_idx][target_name]
-                    self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
-    
+                target_name = self.name_link_to_target[a_idx][link_name]
+                p_target, q_target = target_name_to_pose[a_idx][target_name]
+                self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
+                print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
+                print(f'p_target: {p_target}, q_target: {q_target}')
         
             
 class ReachTask(FollowTask):
@@ -1826,7 +1857,6 @@ def main():
                         a.update_col_pred(plans_board, t)
                     
                     # sense goals
-                    
                     goals = link_name_to_target_pose[a.idx]
     
                     # plan

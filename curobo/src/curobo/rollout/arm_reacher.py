@@ -398,6 +398,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 
                 # # cost_list.append(goal_cost)
                 cost_dict["goal"] = goal_cost
+                modified_dyn_obs_cost = False
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
                     if self._custom_arm_base_costs['dynamic_obs_cost'].prioritization_rule == 'pose_cost':
                         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
@@ -406,7 +407,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         new_dyn_obs_cost = old_dyn_obs_cost + p_rule_weight * goal_cost_normalized
                         # new_dyn_obs_cost = new_dyn_obs_cost.clamp(min=0)
                         cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost
-                
+                        modified_dyn_obs_cost = True
                   
 
 
@@ -488,10 +489,17 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         #     log_error(f"Error computing custom arm_reacher cost {cost_name}: {e}")
         
         # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
-        cost_list = list(cost_dict.values())
         if getattr(self, '_enable_live_plotting', False):
-            self._update_live_plot(cost_dict)
+            dict_to_plot = {'total': cat_sum_reacher(list(cost_dict.values()))}
+            if modified_dyn_obs_cost:
+                dict_to_plot['debug_dynamic_obs_cost_before(debug)'] = old_dyn_obs_cost
+            for k, v in cost_dict.items():
+                if k not in dict_to_plot:
+                    dict_to_plot[k] = v
+            self._update_live_plot(dict_to_plot)
+
         
+        cost_list = list(cost_dict.values())
         with profiler.record_function("cat_sum"):
             if self.sum_horizon:
                 cost = cat_sum_horizon_reacher(cost_list)

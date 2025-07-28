@@ -93,7 +93,7 @@ pose_utils:
   seed: 0 # seed to sample the obstacle poses
 
 sim_task:
-  task_type: 'follow' # reach/follow/manual (for debugging)
+  task_type: 'manual' # reach/follow/manual (for debugging)
   cfg:
     timeout: 10.0
     max_abs_axis_vel: 0.1
@@ -135,10 +135,10 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
     base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
     viz_color: 'orange'
 
-  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
-    base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    viz_color: 'blue'
+  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion
+  #   base_pose: [0.56, 0.0, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+  #   viz_color: 'blue'
   
     
 
