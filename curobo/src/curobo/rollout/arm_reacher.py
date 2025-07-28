@@ -432,15 +432,25 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                 n_links = len(robot_context['link_name_to_pose'].keys())
                                 if n_links != 0:
                                     pos_err = pos_err / n_links # euclidean distance (link to target)
-                                    rot_err = rot_err / n_links # mean angular error per axis (roll pitch yaw)                                    
-                                    
-                                    pos_w = dyn_cost.prior_pos_to_rot_ratio
-                                    pos_w = pos_w * int(pos_err < dyn_cost.prior_p_err_affection_rad)
-                                    rot_w = (1 - pos_w) * int(rot_err < dyn_cost.prior_rot_err_affection_angle)
 
-                                    m = pos_w * pos_err + rot_w * rot_err 
-                                    m_bounded = max(m, dyn_cost.prior_keep_lower_bound) # keep lower bound <= m new <= 1 
-                                    new_dyn_obs_cost = m_bounded * old_dyn_obs_cost 
+                                    pos_err_norm = pos_err / dyn_cost.prior_p_err_affection_rad # normalized to [0,1]
+                                    pos_err_norm_clipped = min(1, pos_err_norm) 
+
+                                    rot_err = rot_err / n_links # mean angular error per axis (roll pitch yaw)                                    
+                                    rot_err_norm = rot_err / dyn_cost.prior_rot_err_affection_angle
+                                    rot_err_norm_clipped = min(1, rot_err_norm) # normalize to [0,1]
+                                    
+                                    pose_err_norm = dyn_cost.prior_pos_to_rot_ratio * pos_err_norm_clipped + (1 - dyn_cost.prior_pos_to_rot_ratio) * rot_err_norm_clipped # 0 <= pose_err_norm <= 1
+                                    
+                                   
+                                    p = 0.3 # hp
+                                    w = 1 - (1-pose_err_norm) ** p
+                                    # w = max((pose_err_norm ** power), dyn_cost.prior_keep_lower_bound)
+                                    w = max(w, dyn_cost.prior_keep_lower_bound)
+                                    assert w >= 0 and w <= 1
+                                    new_dyn_obs_cost = w * old_dyn_obs_cost
+
+                                    
                                     cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost        
                                     modified_dyn_obs_cost = True
                       
@@ -527,7 +537,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             dict_to_plot = {'total': cat_sum_reacher(list(cost_dict.values()))}
             if modified_dyn_obs_cost:
                 dict_to_plot['debug_dynamic_obs_cost_before(debug)'] = old_dyn_obs_cost
-                dict_to_plot['dynamic obs diff'] = new_dyn_obs_cost - old_dyn_obs_cost
+                # dict_to_plot['dynamic obs diff'] = new_dyn_obs_cost - old_dyn_obs_cost
             for k, v in cost_dict.items():
                 if k not in dict_to_plot:
                     dict_to_plot[k] = v
