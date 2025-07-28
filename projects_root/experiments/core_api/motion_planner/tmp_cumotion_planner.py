@@ -381,9 +381,9 @@ class CuPlanner:
             goals_W[link_name] = Pose(position=self.solver.tensor_args.to_device(torch.from_numpy(p_goal_W)), quaternion=self.solver.tensor_args.to_device(torch.from_numpy(q_goal_W)))
         return goals_W
 
-    
+    @abstractmethod
     def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True, naive:bool=False):
-        return None # TODO
+        pass
 
     
     def get_col_pred(self,**kwargs)->Optional[DynamicObsCollPredictor]:
@@ -1330,9 +1330,12 @@ class CuAgent:
     def is_plan_subscriber(self)->bool:
         return self.plan_pub_sub is not None and self.plan_pub_sub.sub_cfg["is_on"]
 
-    def is_plan_publisher(self):
-        return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
+    # def is_plan_publisher(self):
+    #     return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
 
+
+    def is_plan_publisher(self):
+        return self.plan_pub_sub.pub_cfg["is_on"]
          
 
 class SimTask:
@@ -1787,17 +1790,15 @@ def main():
                     # publish
 
                     js = a.sim_robot.get_js(sync_new=False)
-                    if js is not None and a.is_plan_publisher() and a.plan_pub_sub.should_pub_now(t):
-                            plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=a.plan_pub_sub.pub_cfg["naive"])
-                            if plan is not None: # currently available in mpc only
-                                plans_board[a.idx] = plan
-                                if viz_plans and t % viz_plans_dt == 0:
-                                    pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
-
-                            
-                        # else:
-                        #     if a.cu_js is not None:
-                        #         a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, a.cu_js, planner.solver, base_pose[a.idx])
+                    plan = None
+                    if js is not None and a.plan_pub_sub.should_pub_now(t):
+                        naive = not a.is_plan_publisher() # naive means broadcase state as plan over horizon
+                        plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=naive)
+                                    
+                    if plan is not None: # currently available in mpc only
+                        plans_board[a.idx] = plan
+                        if viz_plans and t % viz_plans_dt == 0:
+                            pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
                     # sense
                     
                     # sense obstacles 
