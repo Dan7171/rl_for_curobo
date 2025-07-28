@@ -1103,7 +1103,7 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
-        self.cu_js:Optional[JointState] = None # 
+        # self.cu_js:Optional[JointState] = None # 
 
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
@@ -1816,10 +1816,10 @@ def main():
                         continue
                     
                     _0 = tensor_args.to_device(js.positions) * 0.0
-                    a.cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
+                    cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                     
                     if isinstance(planner, MpcPlanner):
-                        planner.update_state(a.cu_js)
+                        planner.update_state(cu_js)
   
                     
                     # sense plans
@@ -1832,7 +1832,7 @@ def main():
     
                     # plan
                     if isinstance(planner, CumotionPlanner):
-                        action = planner.yield_action(goals, a.cu_js, js.velocities)
+                        action = planner.yield_action(goals, cu_js, js.velocities)
                     elif isinstance(planner, MpcPlanner):
                         action = planner.yield_action(goals)
                         if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
@@ -1849,7 +1849,7 @@ def main():
                     
                     # debug
                     if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                        a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, a.cu_js, planner.solver, base_pose[a.idx])
+                        a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, cu_js, planner.solver, base_pose[a.idx])
                 if len(pts_debug):
                     draw_points(pts_debug)
             t += 1
