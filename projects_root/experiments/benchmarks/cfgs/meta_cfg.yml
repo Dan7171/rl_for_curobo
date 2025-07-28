@@ -1,6 +1,6 @@
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
   cu_world_wrapper: # curoboworld collision wrapper
-    verbosity: 3 # 0 to 4 (0 is no output, 4 is max output) 
+    verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
     never_add: [] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
 
@@ -65,13 +65,13 @@ default: # default values to fallback to if not specified in the agent cfg. Note
 
   plan_pub_sub: # default values for publishing and subscribing to plans (if not specified by the agent)
     pub:
-      is_on: False # meaning agent is publishing plans (so they can be used by other agents)
+      is_on: True # meaning agent is publishing plans (so they can be used by other agents)
       dt: 1 # agent will publish plans every pub_dt steps or seconds
       is_dt_in_sec: False # if True, dt is in seconds, if False, pub_dt is in steps
       pr: 1.0 # probability of publishing the plans (0.0 to 1.0) *when* dt is reached.
-      
+      naive: True # if True, agent will publish the current state of the robot as the plan (and not the predicted plan)
     sub:
-      is_on: False # meaning agent is subscribing to plans from other robots
+      is_on: True # meaning agent is subscribing to plans from other robots
       to: 'all' # meaning agent will subscribe to plans from all robots (except itself). 'to' can be a list of robot indices or 'all'. When agent is subscribed to plans, it will use the plans to plan its own steps (to make collision free steps).
       
 

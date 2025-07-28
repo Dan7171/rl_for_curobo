@@ -271,15 +271,13 @@ class PlanPubSub:
     def should_pub_now(self, t:int)->bool:
         def bernoulli():
             return random.random() <= self.pub_cfg["pr"]
-        if self.pub_cfg["is_on"]:
-            if self.pub_cfg["is_dt_in_sec"]:
-                if not hasattr(self, "_last_pub_time"):
-                    self._last_pub_time = time()
-                return time() - self._last_pub_time >= self.pub_cfg["dt"] and bernoulli()
-            else:
-                return t % self.pub_cfg["dt"] == 0 and bernoulli()
-        return False
-        
+        if self.pub_cfg["is_dt_in_sec"]:
+            if not hasattr(self, "_last_pub_time"):
+                self._last_pub_time = time()
+            return time() - self._last_pub_time >= self.pub_cfg["dt"] and bernoulli()
+        else:
+            return t % self.pub_cfg["dt"] == 0 and bernoulli()
+    
 
 class CuPlanner:
     def __init__(self,
@@ -384,7 +382,7 @@ class CuPlanner:
         return goals_W
 
     
-    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True):
+    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True, naive:bool=False):
         return None # TODO
 
     
@@ -515,7 +513,7 @@ class MpcPlanner(CuPlanner):
         """
         return self.solver.solver.optimizers[0].mean_action.squeeze(0)
     
-    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True) -> Optional[dict]:
+    def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True, naive:bool=False) -> Optional[dict]:
         """
         Get the H steps "estimated plan" for the robot of the mpc agent. 
         By "estimated" we mean that mpc doesent really have a plan, so instead we use the mean of the mpc policy to estimate the plan, 
@@ -539,6 +537,11 @@ class MpcPlanner(CuPlanner):
         Returns:
             torch.Tensor: the H steps plan.
         """
+        def _broadcast_first_step_over_horizon(plan:torch.Tensor) -> torch.Tensor:
+            """Broadcast a tensor to a given shape."""
+            old_shape = plan.shape
+            first_step = plan[0]
+            return first_step.expand(old_shape) # make the first step repeat over the horizon
         
         def map_nested_tensors(d: dict, fn: Callable[[torch.Tensor], torch.Tensor]) -> dict:
             """Recursively apply fn to all tensor leaves in a nested dict."""
@@ -633,7 +636,8 @@ class MpcPlanner(CuPlanner):
             # take only the first n_steps
             if not n_steps == -1:        
                 plan = map_nested_tensors(plan, lambda x: x[:n_steps])
-    
+        if naive:
+            plan = map_nested_tensors(plan, _broadcast_first_step_over_horizon)
         return plan 
         
     def _filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients:FilterCoeff):
@@ -1783,17 +1787,17 @@ def main():
                     # publish
 
                     js = a.sim_robot.get_js(sync_new=False)
-                    if js is not None:
-                        if a.is_plan_publisher():
-                            if a.plan_pub_sub.should_pub_now(t):
-                                plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False)
-                                if plan is not None: # currently available in mpc only
-                                    plans_board[a.idx] = plan
-                                    if viz_plans and t % viz_plans_dt == 0:
-                                        pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
-                        else:
-                            if a.cu_js is not None:
-                                a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, a.cu_js, planner.solver, base_pose[a.idx])
+                    if js is not None and a.is_plan_publisher() and a.plan_pub_sub.should_pub_now(t):
+                            plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=a.plan_pub_sub.pub_cfg["naive"])
+                            if plan is not None: # currently available in mpc only
+                                plans_board[a.idx] = plan
+                                if viz_plans and t % viz_plans_dt == 0:
+                                    pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
+
+                            
+                        # else:
+                        #     if a.cu_js is not None:
+                        #         a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, a.cu_js, planner.solver, base_pose[a.idx])
                     # sense
                     
                     # sense obstacles 
