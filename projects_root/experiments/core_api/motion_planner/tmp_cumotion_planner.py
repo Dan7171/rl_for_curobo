@@ -965,23 +965,23 @@ class SimRobot:
  
         
     
-    def update_robot_sim_spheres(self, subroot:str, visible:bool, a_idx:int, cu_js:JointState, base_pose:list[float], solver:Union[MpcSolver, MotionGen],in_world_frame=True):
+    def update_robot_sim_spheres(self, subroot:str, visible:bool, a_idx:int, cu_js:JointState,solver:Union[MpcSolver, MotionGen], base_pose:list[float]=[0,0,0,1,0,0,0]):
         if cu_js is None:
             return
         
         spheres = solver.kinematics.get_robot_as_spheres(cu_js.position)[0]
-        p = base_pose[:3]
-        if in_world_frame:
-            for sph in spheres:
-                sph.position = sph.position + p # express the spheres in the world frame
-                sph.pose[:3] = sph.pose[:3] + p
+        # p = base_pose[:3]
+        # if in_world_frame:
+        #     for sph in spheres:
+        #         sph.position = sph.position + p # express the spheres in the world frame
+        #         sph.pose[:3] = sph.pose[:3] + p
         
         if not hasattr(self, "_vis_spheres"): # init visualization spheres
             self._vis_spheres = []
             for si, s in enumerate(spheres):
                 sp = sphere.VisualSphere(
                     prim_path=f"{subroot}/R{a_idx}S{si}",
-                    position=np.ravel(s.position),
+                    position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]),
                     radius=float(s.radius),
                     color=np.array([0, 0.8, 0.2]),
                 )
@@ -992,7 +992,7 @@ class SimRobot:
         else: # update visualization spheres
             for si, s in enumerate(spheres):
                 if not np.isnan(s.position[0]):
-                    self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
+                    self._vis_spheres[si].set_world_pose(position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]))
                     self._vis_spheres[si].set_radius(float(s.radius))
 
     def parse_viz_color(self, color:str)->list[float]:
@@ -1099,7 +1099,7 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
-        
+        self.cu_js:Optional[JointState] = None # 
 
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
@@ -1307,7 +1307,7 @@ class CuAgent:
                 
                 # debug
                 if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                    self.sim_robot.update_robot_sim_spheres("/curobo", idx, cu_js, self.base_pose[idx], planner.solver)
+                    self.sim_robot.update_robot_sim_spheres("/curobo", True, idx, cu_js, planner.solver, self.base_pose[idx])
             
             
 
@@ -1792,8 +1792,8 @@ def main():
                                     if viz_plans and t % viz_plans_dt == 0:
                                         pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
                         else:
-                            if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                                a.sim_robot.update_robot_sim_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
+                            if a.cu_js is not None:
+                                a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, a.cu_js, planner.solver, base_pose[a.idx])
                     # sense
                     
                     # sense obstacles 
@@ -1809,10 +1809,12 @@ def main():
                     if js is None:
                         print("sim_js is None")
                         continue
+                    
                     _0 = tensor_args.to_device(js.positions) * 0.0
-                    cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
+                    a.cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
+                    
                     if isinstance(planner, MpcPlanner):
-                        planner.update_state(cu_js)
+                        planner.update_state(a.cu_js)
   
                     
                     # sense plans
@@ -1825,7 +1827,7 @@ def main():
     
                     # plan
                     if isinstance(planner, CumotionPlanner):
-                        action = planner.yield_action(goals, cu_js, js.velocities)
+                        action = planner.yield_action(goals, a.cu_js, js.velocities)
                     elif isinstance(planner, MpcPlanner):
                         action = planner.yield_action(goals)
                         if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
@@ -1842,7 +1844,7 @@ def main():
                     
                     # debug
                     if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                        a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, cu_js, base_pose[a.idx], planner.solver)
+                        a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, a.cu_js, planner.solver, base_pose[a.idx])
                 if len(pts_debug):
                     draw_points(pts_debug)
             t += 1
