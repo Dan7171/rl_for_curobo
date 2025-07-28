@@ -398,14 +398,15 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 
                 # # cost_list.append(goal_cost)
                 cost_dict["goal"] = goal_cost
-                # if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
-                #     if self._custom_arm_base_costs['dynamic_obs_cost'].prioritization_rule == 'pose_cost':
-                #         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
-                #         p_rule_weight = self._custom_arm_base_costs['dynamic_obs_cost'].p_rule_weight
-                #         goal_cost_normalized = (goal_cost - goal_cost.mean()) / goal_cost.std()
-                #         new_dyn_obs_cost = old_dyn_obs_cost + p_rule_weight * goal_cost_normalized
-                #         # new_dyn_obs_cost = new_dyn_obs_cost.clamp(min=0)
-                #         cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost
+                if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
+                    if self._custom_arm_base_costs['dynamic_obs_cost'].prioritization_rule == 'pose_cost':
+                        old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
+                        p_rule_weight = self._custom_arm_base_costs['dynamic_obs_cost'].p_rule_weight
+                        goal_cost_normalized = (goal_cost - goal_cost.mean()) / goal_cost.std()
+                        new_dyn_obs_cost = old_dyn_obs_cost + p_rule_weight * goal_cost_normalized
+                        # new_dyn_obs_cost = new_dyn_obs_cost.clamp(min=0)
+                        cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost
+                
                   
 
 
@@ -489,7 +490,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
         cost_list = list(cost_dict.values())
         if getattr(self, '_enable_live_plotting', False):
-            self._update_live_plot_reacher(cost_dict)
+            self._update_live_plot(cost_dict)
         
         with profiler.record_function("cat_sum"):
             if self.sum_horizon:
@@ -753,8 +754,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
     def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
         return self._dynamic_obs_coll_predictor
 
-    def _update_live_plot_reacher(self, cost_dict:dict[str, torch.Tensor]):
-        """Update live plot of cost values in real-time with comprehensive ArmReacher labeling"""
+    def _update_live_plot(self, cost_dict:dict[str, torch.Tensor]):
+        """Update live plot of cost values in real-time"""
         
         
         # Initialize plotting components if not already done
@@ -785,97 +786,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         if self._plot_counter % self._plot_every_k != 0:
             return  # Skip this iteration
         
-        # Debug: Print cost information on first few iterations
-        # if self._plot_counter <= self._plot_every_k * 3:  # First 3 plot updates
-        #     print(f"\n=== Iteration {self._plot_counter} Cost Debug ===")
-        #     print(f"Total cost components: {len(cost_dict)}")
-        #     for i, cost_tensor in enumerate(cost_dict.values()):
-        #         if cost_tensor is not None:
-        #             cost_mean = torch.mean(cost_tensor).cpu().numpy().item()
-        #             cost_max = torch.max(cost_tensor).cpu().numpy().item()
-        #             cost_min = torch.min(cost_tensor).cpu().numpy().item()
-        #             print(f"Cost {i}: mean={cost_mean:.6f}, min={cost_min:.6f}, max={cost_max:.6f}, shape={cost_tensor.shape}")
-        #         else:
-        #             print(f"Cost {i}: None")
-        
-        # # Dynamic cost labeling based on what's actually enabled
-        # cost_labels_dynamic = []
-        
-        # Check which base costs are enabled and create appropriate labels
-        # base_cost_count = 0
-        # for k, v in cost_dict.items():
-        #     if v is not None:
-        #         cost_labels_dynamic.append(k)
-        #         base_cost_count += 1
-        
-        # if hasattr(self, 'bound_cost') and self.bound_cost.enabled:
-        #     cost_labels_dynamic.append('Bound Cost')
-        #     base_cost_count += 1
-        # if hasattr(self, 'stop_cost') and self.stop_cost.enabled:
-        #     cost_labels_dynamic.append('Stop Cost')
-        #     base_cost_count += 1
-        # if hasattr(self, 'robot_self_collision_cost') and self.robot_self_collision_cost.enabled:
-        #     cost_labels_dynamic.append('Self Collision')
-        #     base_cost_count += 1
-        # if hasattr(self, 'primitive_collision_cost') and self.primitive_collision_cost.enabled:
-        #     cost_labels_dynamic.append('Primitive Collision')
-        #     base_cost_count += 1
-        
-        # # Add custom arm_base costs with their class names
-        # if hasattr(self, '_custom_arm_base_costs'):
-        #     for cost_name, cost_instance in self._custom_arm_base_costs.items():
-        #         if cost_instance.enabled:
-        #             # Extract class name from the cost instance
-        #             class_name = cost_instance.__class__.__name__
-        #             cost_labels_dynamic.append(f'Custom Base: {class_name}')
-        #             base_cost_count += 1
-        
-        # # Check for dynamic obstacles (added after custom arm_base costs)
-        # if hasattr(self, '_dynamic_obs_coll_predictor') and self._dynamic_obs_coll_predictor is not None:
-        #     cost_labels_dynamic.append('Dynamic Obstacles')
-        #     base_cost_count += 1
-        # if hasattr(self, 'manipulability_cost') and self.manipulability_cost.enabled:
-        #     cost_labels_dynamic.append('Manipulability')
-        #     base_cost_count += 1
-            
-        # # Add ArmReacher specific costs
-        # if hasattr(self, 'goal_cost') and self.goal_cost.enabled:
-        #     cost_labels_dynamic.append('Goal/Pose Cost')
-        # if hasattr(self, '_link_pose_costs'):
-        #     for link_name in self._link_pose_costs:
-        #         if self._link_pose_costs[link_name].enabled:
-        #             cost_labels_dynamic.append(f'Link Pose ({link_name})')
-        # if hasattr(self, 'dist_cost') and self.dist_cost.enabled:
-        #     cost_labels_dynamic.append('CSpace Cost')
-        # if hasattr(self, 'straight_line_cost') and self.straight_line_cost.enabled:
-        #     cost_labels_dynamic.append('Straight Line Cost')
-        # if hasattr(self, 'zero_acc_cost') and self.zero_acc_cost.enabled:
-        #     cost_labels_dynamic.append('Zero Acceleration')
-        # if hasattr(self, 'zero_jerk_cost') and self.zero_jerk_cost.enabled:
-        #     cost_labels_dynamic.append('Zero Jerk')
-        # if hasattr(self, 'zero_vel_cost') and self.zero_vel_cost.enabled:
-        #     cost_labels_dynamic.append('Zero Velocity')
-        
-        # Add custom arm_reacher costs with their class names
-        # if hasattr(self, '_custom_arm_reacher_costs'):
-        #     for cost_name, cost_instance in self._custom_arm_reacher_costs.items():
-        #         if cost_instance.enabled:
-        #             # Extract class name from the cost instance
-        #             class_name = cost_instance.__class__.__name__
-        #             cost_labels_dynamic.append(f'Custom Reacher: {class_name}')
-        
+    
         # Colors for plotting
         colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta', 'yellow', 'black', 'darkred', 'darkgreen', 'darkblue']
         
         # Process each cost component
         active_costs = []
-        # for i, cost_tensor in enumerate(cost_list):
-        #     if cost_tensor is not None:
-        #         # Get cost label
-        #         if i < len(cost_labels_dynamic):
-        #             label = cost_labels_dynamic[i]
-        #         else:
-        #             label = f'Unknown_Cost_{i}'
         for i,label in enumerate(cost_dict.keys()):        
                 # Calculate mean of this cost component
                 cost_mean = torch.mean(cost_dict[label]).cpu().numpy().item()
@@ -908,15 +824,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 # Add current value to history
                 self._cost_histories[label].append(cost_mean)
         
-        # Print active costs for debugging (first few times)
-        # if self._plot_counter <= self._plot_every_k * 2:  # First 2 plot updates
-        #     print(f"Active cost components: {[(label, f'{val:.6f}') for label, val, _ in active_costs]}")
-        #     custom_costs = [label for label, _, _ in active_costs if 'Custom' in label]
-        #     if custom_costs:
-        #         print(f"Custom costs detected: {custom_costs}")
-        #     goal_costs = [label for label, _, _ in active_costs if 'Goal' in label or 'Pose' in label]
-        #     print(f"Goal/Pose related costs: {goal_costs}")
-        
+      
         # Update all plot lines
         for label, history in self._cost_histories.items():
             if len(history) > 0:
