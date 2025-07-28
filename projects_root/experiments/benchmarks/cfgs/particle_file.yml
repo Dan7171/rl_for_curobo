@@ -81,8 +81,11 @@ cost:
         config_class_name: "DynamicObsCostConfig"
         weight: 500.0  # 100  
         terminal: False
-        prioritization_rule: "pose_cost" # or random or none
-        p_rule_weight: 100.0
+        prior_rule: pose # rotation or pose or random
+        prior_p_err_affection_rad: 0.5 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
+        prior_rot_err_affection_angle: 30 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost
+        prior_keep_lower_bound: 0.0 # between 0 and 1.A lower bound on how much we keep from the origianl dynamic obs cost. 0 means no lower bound. 1 means keep all.
+        prior_pos_to_rot_ratio: 0.9 # If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.
         sparse_steps:
           use: False
           ratio: 0.2

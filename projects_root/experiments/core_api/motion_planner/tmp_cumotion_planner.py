@@ -529,6 +529,8 @@ class MpcPlanner(CuPlanner):
         """
         return self.solver.solver.optimizers[0].mean_action.squeeze(0)
     
+
+    
     def get_estimated_plan(self, dof_names:list[str], n_col_spheres_valid:int, joints_state:isaac_JointsState, include_task_space:bool=True, n_steps:int=-1 , valid_spheres_only = True, naive:bool=False) -> Optional[dict]:
         """
         Get the H steps "estimated plan" for the robot of the mpc agent. 
@@ -821,6 +823,33 @@ class MpcPlanner(CuPlanner):
         visual_rollouts = transform_poses_batched(visual_rollouts, self.base_pose)
         return visual_rollouts
     
+
+        
+
+
+
+        # retract_cfg = self.solver.rollout_fn.dynamics_model.get_retract_config().clone().unsqueeze(0)
+        # joint_names = self.solver.rollout_fn.joint_names
+        # state = self.solver.rollout_fn.compute_kinematics(
+        #     JointState.from_position(retract_cfg, joint_names=joint_names)
+        # )
+        # self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
+        
+        
+        # # _initial_ee_target_pose = Pose(state.ee_pos_seq, quaternion=state.ee_quat_seq)
+        # # _initial_constrained_links_target_poses = {name: state.link_poses[name] for name in self.constrained_links_names}
+        
+        # initial_goals_R = {self.ee_link_name: Pose(position=state.ee_pos_seq, quaternion=state.ee_quat_seq)}
+        # for link_name in self.constrained_links_names:
+        #     initial_goals_R[link_name] = state.link_poses[link_name]
+        
+        # initial_goals_W = self.goals_dict_R_to_W(self.base_pose, initial_goals_R)
+        # robot_context["cur_ee_link_pose"] = self.solver.kinematics.get_link_pose(self.ee_link_name)
+        # for link_name in self.constrained_links_names:
+        #     robot_context["link_name_to_pose"][link_name] = self.solver.kinematics.get_link_pose(link_name)
+        #     robot_context["name_link_to_target"][link_name] = self.solver.kinematics.get_link_target(link_name)
+        #     robot_context["target_name_to_pose"][link_name] = self.solver.kinematics.get_link_target(link_name)
+
 class CumotionPlanner(CuPlanner):
                 
     def __init__(self,
@@ -1045,7 +1074,7 @@ def get_per_axis_euler_error(q1:list[float], q2:list[float])->float:
     euler_error = euler2 - euler1
     # Normalize angle to [-180, 180]
     euler_error = (euler_error + 180) % 360 - 180
-    print("Euler error (deg):", euler_error)
+    # print("Euler error (deg):", euler_error)
     return euler_error
 
 
@@ -1071,7 +1100,10 @@ def publish_robot_context(robot_idx:int, robot_context:dict,robot_pose:list, n_o
     robot_context["mpc_config_paths"] = mpc_config_paths
     robot_context["robot_config_paths"] = robot_config_paths
     robot_context["robot_sphere_counts"] = robot_sphere_counts_split  # [(base, extra), ...]
-
+    robot_context["link_name_to_pose"] = {}
+    robot_context["name_link_to_target"] = {}
+    robot_context["target_name_to_pose"] = {}
+    
 def calculate_robot_sphere_count(robot_cfg):
     """
     Calculate the number of collision spheres for a robot from its configuration.
@@ -1386,6 +1418,9 @@ class SimTask:
         self.name_target_to_link = [{} for _ in range(len(agent_task_cfgs))]
         self.target_name_to_path = [{} for _ in range(len(agent_task_cfgs))]
         self.target_path_to_prim = [{} for _ in range(len(agent_task_cfgs))]
+
+        self._link_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
+        self._target_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self.goal_errors = [{} for _ in range(len(agent_task_cfgs))]
         self._last_update = [{} for _ in range(len(agent_task_cfgs))] # last updated goal poses in sim
 
@@ -1412,6 +1447,11 @@ class SimTask:
 
     
    
+    def get_link_name_to_pose(self)->list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+        return self._link_name_to_pose
+    
+    def get_target_name_to_pose(self)->list[dict[str,tuple[np.ndarray, np.ndarray]]]:
+        return self._target_name_to_pose
     
     def _update_err_log(self, link_name_to_error):
         now = time()
@@ -1457,6 +1497,8 @@ class SimTask:
     def step(self)->list[dict[str,Pose]]:
         
         errors, target_name_to_pose, link_name_to_pose  = self._get_link_errors()
+        self._link_name_to_pose = link_name_to_pose
+        self._target_name_to_pose = target_name_to_pose
         self._update_err_log(errors)
         link_name_to_next_target_pose_np = self._update_sim_targets(errors, target_name_to_pose, link_name_to_pose)
         if link_name_to_next_target_pose_np is not None:
@@ -1590,8 +1632,8 @@ class ManualTask(SimTask):
                 target_name = self.name_link_to_target[a_idx][link_name]
                 p_target, q_target = target_name_to_pose[a_idx][target_name]
                 self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
-                print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
-                print(f'p_target: {p_target}, q_target: {q_target}')
+                # print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
+                # print(f'p_target: {p_target}, q_target: {q_target}')
         
             
 class ReachTask(FollowTask):
@@ -1850,16 +1892,25 @@ def main():
                     
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
-  
+                    
                     
                     # sense plans
                     if a.is_plan_subscriber():
                         a.update_col_pred(plans_board, t)
-                    
+                                    
                     # sense goals
                     goals = link_name_to_target_pose[a.idx]
     
                     # plan
+                    
+                    # update robot context with current poses and target poses (for dynamic obs cost)
+                    if a.is_plan_subscriber(): 
+                        robot_context = get_topics().get_default_env()[a.idx]
+                        robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
+                        robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
+                        robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
+                    
+                    # yield action
                     if isinstance(planner, CumotionPlanner):
                         action = planner.yield_action(goals, cu_js, js.velocities)
                     elif isinstance(planner, MpcPlanner):

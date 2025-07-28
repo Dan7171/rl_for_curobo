@@ -38,11 +38,12 @@ from curobo.util.helpers import list_idx_if_not_none
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import cat_max
 from curobo.util.torch_utils import get_torch_jit_decorator
-
+from projects_root.projects.dynamic_obs.dynamic_obs_predictor.runtime_topics import get_topics
 from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_checker import DynamicObsCollPredictor
 
 # Local Folder
 from .arm_base import ArmBase, ArmBaseConfig, ArmCostConfig
+from scipy.spatial.transform import Rotation as R
 
 
 @dataclass
@@ -398,17 +399,51 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 
                 # # cost_list.append(goal_cost)
                 cost_dict["goal"] = goal_cost
+
                 modified_dyn_obs_cost = False
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
-                    if self._custom_arm_base_costs['dynamic_obs_cost'].prioritization_rule == 'pose_cost':
+                    if self._custom_arm_base_costs['dynamic_obs_cost'].prior_rule != 'none':
+                        dyn_cost = self._custom_arm_base_costs['dynamic_obs_cost']
                         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
-                        p_rule_weight = self._custom_arm_base_costs['dynamic_obs_cost'].p_rule_weight
-                        goal_cost_normalized = (goal_cost - goal_cost.mean()) / goal_cost.std()
-                        new_dyn_obs_cost = old_dyn_obs_cost + p_rule_weight * goal_cost_normalized
-                        # new_dyn_obs_cost = new_dyn_obs_cost.clamp(min=0)
-                        cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost
-                        modified_dyn_obs_cost = True
-                  
+                        robot_id = dyn_cost.robot_id
+                        robot_context = get_topics().get_default_env()[robot_id]
+                        if dyn_cost.prior_rule == 'random':
+                            raise NotImplementedError("Random prioritization rule not implemented")
+                        else:
+                            if dyn_cost.prior_rule == 'pose':    
+                                pos_err = 0
+                                rot_err = 0
+                                
+                                for link_name in robot_context['link_name_to_pose'].keys():
+                                    link_pose = robot_context['link_name_to_pose'][link_name]
+                                    target_name = robot_context['name_link_to_target'][link_name]
+                                    target_pose = robot_context['target_name_to_pose'][target_name]
+                                    if dyn_cost.prior_pos_to_rot_ratio > 0:
+                                        link_pos_err = np.linalg.norm(link_pose[0] - target_pose[0])
+                                        pos_err += link_pos_err
+                                    if dyn_cost.prior_pos_to_rot_ratio < 1:
+                                        rot_link = R.from_quat(link_pose[1]).as_euler('xyz', degrees=True)
+                                        rot_target = R.from_quat(target_pose[1]).as_euler('xyz', degrees=True)
+                                        rot_diff = rot_target - rot_link
+                                        rot_diff_scaled = (rot_diff + 180) % 360 - 180 # err in range [-180, 180]                                
+                                        rot_err += sum(np.abs(rot_diff_scaled)) / 3 # absolute error mean over roll pitch yaw (3 axis)
+                                
+                                
+                                n_links = len(robot_context['link_name_to_pose'].keys())
+                                if n_links != 0:
+                                    pos_err = pos_err / n_links # euclidean distance (link to target)
+                                    rot_err = rot_err / n_links # mean angular error per axis (roll pitch yaw)                                    
+                                    
+                                    pos_w = dyn_cost.prior_pos_to_rot_ratio
+                                    pos_w = pos_w * int(pos_err < dyn_cost.prior_p_err_affection_rad)
+                                    rot_w = (1 - pos_w) * int(rot_err < dyn_cost.prior_rot_err_affection_angle)
+
+                                    m = pos_w * pos_err + rot_w * rot_err 
+                                    m_bounded = max(m, dyn_cost.prior_keep_lower_bound) # keep lower bound <= m new <= 1 
+                                    new_dyn_obs_cost = m_bounded * old_dyn_obs_cost 
+                                    cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost        
+                                    modified_dyn_obs_cost = True
+                      
 
 
         with profiler.record_function("cost/link_poses"):
@@ -439,8 +474,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 state_batch.position,
                 self._goal_buffer.batch_goal_state_idx,
             )
-            # cost_list.append(joint_cost)
-            cost_dict["joint_cost"] = joint_cost
+            # cost_list.append(joint_cost)            cost_dict["joint_cost"] = joint_cost
         if self.cost_cfg.straight_line_cfg is not None and self.straight_line_cost.enabled:
             st_cost = self.straight_line_cost.forward(ee_pos_batch)
             # cost_list.append(st_cost)
@@ -493,6 +527,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             dict_to_plot = {'total': cat_sum_reacher(list(cost_dict.values()))}
             if modified_dyn_obs_cost:
                 dict_to_plot['debug_dynamic_obs_cost_before(debug)'] = old_dyn_obs_cost
+                dict_to_plot['dynamic obs diff'] = new_dyn_obs_cost - old_dyn_obs_cost
             for k, v in cost_dict.items():
                 if k not in dict_to_plot:
                     dict_to_plot[k] = v
