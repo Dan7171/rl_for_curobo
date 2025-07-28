@@ -965,7 +965,7 @@ class SimRobot:
  
         
     
-    def visualize_robot_as_spheres(self, a_idx, cu_js, base_pose, solver:Union[MpcSolver, MotionGen],in_world_frame=True):
+    def update_robot_sim_spheres(self, subroot:str, visible:bool, a_idx:int, cu_js:JointState, base_pose:list[float], solver:Union[MpcSolver, MotionGen],in_world_frame=True):
         if cu_js is None:
             return
         
@@ -980,19 +980,20 @@ class SimRobot:
             self._vis_spheres = []
             for si, s in enumerate(spheres):
                 sp = sphere.VisualSphere(
-                            prim_path=f"/curobo/robot_{a_idx}_sphere_" + str(si),
-                            position=np.ravel(s.position),
-                            radius=float(s.radius),
-                            color=np.array([0, 0.8, 0.2]),
-                        )
+                    prim_path=f"{subroot}/R{a_idx}S{si}",
+                    position=np.ravel(s.position),
+                    radius=float(s.radius),
+                    color=np.array([0, 0.8, 0.2]),
+                )
                 self._vis_spheres.append(sp)
+                if not visible:
+                    sp.set_visibility(False)
 
         else: # update visualization spheres
             for si, s in enumerate(spheres):
                 if not np.isnan(s.position[0]):
                     self._vis_spheres[si].set_world_pose(position=np.ravel(s.position))
                     self._vis_spheres[si].set_radius(float(s.radius))
-
 
     def parse_viz_color(self, color:str)->list[float]:
         match color:
@@ -1306,7 +1307,7 @@ class CuAgent:
                 
                 # debug
                 if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                    self.sim_robot.visualize_robot_as_spheres(idx, cu_js, self.base_pose[idx], planner.solver)
+                    self.sim_robot.update_robot_sim_spheres("/curobo", idx, cu_js, self.base_pose[idx], planner.solver)
             
             
 
@@ -1697,6 +1698,7 @@ def main():
                 link_retract_pose = a.planner.plan_goals[link_name]
                 cfg[link_name] = [link_path, link_prim, link_target_color, link_retract_pose]
             agents_task_cfgs.append(cfg)
+
     if len(agents_task_cfgs) > 0:
         sim_task_type = meta_cfg["sim_task"]["task_type"]
         if sim_task_type == 'reach':
@@ -1707,18 +1709,22 @@ def main():
             sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils, **meta_cfg["sim_task"]["cfg"])
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
-        
+
+    sim_env = PrimsEnv(my_world, pose_utils, **meta_cfg["sim_env"]["cfg"])
+
+
     all_target_paths = [list(sim_task.target_path_to_prim[i].keys())[j] for i in range(len(cu_agents)) for j in range(len(sim_task.target_path_to_prim[i]))]
     # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
     for a in cu_agents:
         if a.sim_robot is not None: # if in simulation
-            never_add = [a.sim_robot.path, *all_target_paths, "/curobo"]
+            _agent_sim_spheres_root = f'{sim_env.scope_path}/R{a.idx}'
+            never_add = [a.sim_robot.path, *all_target_paths, "/curobo" , _agent_sim_spheres_root]
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
     
         
-    sim_env = PrimsEnv(my_world,pose_utils, **meta_cfg["sim_env"]["cfg"])
+    # sim_env = PrimsEnv(my_world,pose_utils, **meta_cfg["sim_env"]["cfg"])
     
     my_world.reset()
     my_world.play()
@@ -1777,13 +1783,17 @@ def main():
                     # publish
 
                     js = a.sim_robot.get_js(sync_new=False)
-                    if js is not None and a.is_plan_publisher() and a.plan_pub_sub.should_pub_now(t):
-                        plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False)
-                        if plan is not None: # currently available in mpc only
-                            plans_board[a.idx] = plan
-                            if viz_plans and t % viz_plans_dt == 0:
-                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
-                
+                    if js is not None:
+                        if a.is_plan_publisher():
+                            if a.plan_pub_sub.should_pub_now(t):
+                                plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False)
+                                if plan is not None: # currently available in mpc only
+                                    plans_board[a.idx] = plan
+                                    if viz_plans and t % viz_plans_dt == 0:
+                                        pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
+                        else:
+                            if viz_col_spheres and t % viz_col_spheres_dt == 0:
+                                a.sim_robot.update_robot_sim_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
                     # sense
                     
                     # sense obstacles 
@@ -1832,7 +1842,7 @@ def main():
                     
                     # debug
                     if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                        a.sim_robot.visualize_robot_as_spheres(a.idx, cu_js, base_pose[a.idx], planner.solver)
+                        a.sim_robot.update_robot_sim_spheres(sim_env.scope_path, False, a.idx, cu_js, base_pose[a.idx], planner.solver)
                 if len(pts_debug):
                     draw_points(pts_debug)
             t += 1
