@@ -1103,7 +1103,6 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
-        # self.cu_js:Optional[JointState] = None # 
 
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model

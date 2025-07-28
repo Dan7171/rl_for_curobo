@@ -582,11 +582,11 @@ class ArmBase(RolloutBase, ArmBaseConfig):
         self.update_cost_dt(self.dynamics_model.dt_traj_params.base_dt)
         return RolloutBase._init_after_config_load(self)
 
-    def cost_fn(self, state: KinematicModelState, action_batch=None, return_list=False):
+    def cost_fn(self, state: KinematicModelState, action_batch=None, return_dict=False)->dict[str, torch.Tensor]:
         # ee_pos_batch, ee_rot_batch = state_dict["ee_pos_seq"], state_dict["ee_rot_seq"]
         state_batch = state.state_seq
-        cost_list = []
-
+        # cost_list = []
+        cost_dict = {}
         # compute state bound  cost:
         if self.bound_cost.enabled:
             with profiler.record_function("cost/bound"):
@@ -595,17 +595,20 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                     self._goal_buffer.retract_state,
                     self._goal_buffer.batch_retract_state_idx,
                 )
-                cost_list.append(c)
+                # cost_list.append(c)
+                cost_dict["bound"] = c
         if self.cost_cfg.manipulability_cfg is not None and self.manipulability_cost.enabled:
             raise NotImplementedError("Manipulability Cost is not implemented")
         if self.cost_cfg.stop_cfg is not None and self.stop_cost.enabled:
             st_cost = self.stop_cost.forward(state_batch.velocity)
-            cost_list.append(st_cost)
+            # cost_list.append(st_cost)
+            cost_dict["stop"] = st_cost
         if self.cost_cfg.self_collision_cfg is not None and self.robot_self_collision_cost.enabled:
             with profiler.record_function("cost/self_collision"):
                 coll_cost = self.robot_self_collision_cost.forward(state.robot_spheres)
                 # cost += coll_cost
-                cost_list.append(coll_cost)
+                # cost_list.append(coll_cost)
+                cost_dict["primitive_collision"] = coll_cost
         if (
             self.cost_cfg.primitive_collision_cfg is not None
             and self.primitive_collision_cost.enabled
@@ -615,7 +618,8 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                     state.robot_spheres,
                     env_query_idx=self._goal_buffer.batch_world_idx,
                 )
-                cost_list.append(coll_cost)
+                # cost_list.append(coll_cost)
+                cost_dict["primitive_collision"] = coll_cost
         
         # Execute custom arm_base costs
         if hasattr(self, '_custom_arm_base_costs'):
@@ -623,17 +627,18 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 if cost_instance.enabled:
                     with profiler.record_function(f"cost/custom_arm_base/{cost_name}"):
                         custom_cost = cost_instance.forward(state)
-                        cost_list.append(custom_cost)
+                        # cost_list.append(custom_cost)
+                        cost_dict[cost_name] = custom_cost
      
 
         # Note: Live plotting is handled by child classes (e.g., ArmReacher) to avoid duplicate plots
        
-        if return_list:
-            return cost_list
+        if return_dict:
+            return cost_dict
         if self.sum_horizon:
-            cost = cat_sum_horizon(cost_list)
+            cost = cat_sum_horizon(list(cost_dict.values()))
         else:
-            cost = cat_sum(cost_list)
+            cost = cat_sum(list(cost_dict.values()))
         return cost
 
     def constraint_fn(

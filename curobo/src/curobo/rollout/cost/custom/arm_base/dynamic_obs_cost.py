@@ -18,6 +18,8 @@ class DynamicObsCostConfig(CostConfig):
     weight: float = 100.0    
     sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
     sparse_spheres: dict = field(default_factory=lambda: {'use': False})
+    prioritization_rule: str = "none"
+    p_rule_weight: float = 1 # prioratization rule weight
     
     def __post_init__(self):
         return super().__post_init__()
@@ -161,14 +163,9 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 current_idx += n_valid_other
         
         self.col_pred = DynamicObsCollPredictor(
-            self.tensor_args,
-                                                            horizon,
-                                                            n_rollouts,
-                                                            n_own_spheres,
-            n_obstacle_spheres,
-                                                            weight_value,
-            X,
-                                                            self.sparse_steps,
+            self.tensor_args, horizon, n_rollouts, n_own_spheres,
+            n_obstacle_spheres, weight_value,
+            X, self.sparse_steps,
             {
                 'use': use_sparse_spheres,
                 'exclude_self': spheres_to_exclude_self,
