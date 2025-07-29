@@ -1418,10 +1418,9 @@ class SimTask:
         self.name_target_to_link = [{} for _ in range(len(agent_task_cfgs))]
         self.target_name_to_path = [{} for _ in range(len(agent_task_cfgs))]
         self.target_path_to_prim = [{} for _ in range(len(agent_task_cfgs))]
-
+        self.goal_errors = [{} for _ in range(len(agent_task_cfgs))]
         self._link_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self._target_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
-        self.goal_errors = [{} for _ in range(len(agent_task_cfgs))]
         self._last_update = [{} for _ in range(len(agent_task_cfgs))] # last updated goal poses in sim
 
         # set targets to retract poses

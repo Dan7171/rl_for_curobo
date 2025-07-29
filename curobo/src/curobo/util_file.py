@@ -337,7 +337,7 @@ def get_motion_gen_robot_list() -> List[str]:
         "kinova_gen3.yml",
         "iiwa.yml",
         "iiwa_allegro.yml",
-        # "franka_mobile.yml",
+        "franka_mobile.yml",
     ]
     return robot_list
 

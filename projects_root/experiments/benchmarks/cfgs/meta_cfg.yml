@@ -111,10 +111,10 @@ sim_env:
     obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
     
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
-  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
-    base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    viz_color: 'purple'
+  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion
+  #   base_pose: [0, 0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+  #   viz_color: 'purple'
     
     # mpc:
     #   mpc_solver_cfg:
@@ -130,10 +130,10 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
     #     plot_costs: True # for debugging
 
 
-  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion
-    base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
-    viz_color: 'orange'
+  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion
+  #   base_pose: [0, -0.4, 0.0, 1, 0, 0, 0] # q values: [0, 0, 0, 1] = 180 deg rotation around z axis
+  #   viz_color: 'orange'
 
   # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
   #   planner: 'mpc' # mpc or cumotion
@@ -148,3 +148,19 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   #   viz_color: 'purple'
     
 
+  - robot:  curobo/src/curobo/content/configs/robot/simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion 
+    base_pose: [0, 0.0, 0.0, 1, 0, 0, 0]
+    viz_color: 'purple'
+
+    # mpc_solver_cfg:
+    override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
+    use_cuda_graph: False 
+    step_dt: 0.03
+    use_cuda_graph_metrics: True
+    self_collision_check: False
+    collision_checker_type: MESH
+    collision_cache: {"obb": 15, "mesh": 15}
+    use_mppi: True
+    use_lbfgs: False
+    plot_costs: True # for debugging
