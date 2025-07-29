@@ -433,18 +433,19 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                 if n_links != 0:
                                     pos_err = pos_err / n_links # euclidean distance (link to target)
 
-                                    pos_err_norm = pos_err / dyn_cost.prior_p_err_affection_rad # normalized to [0,1]
+                                    pos_err_norm = pos_err / dyn_cost.prior_p_err_impact_rad # normalized to [0,1]
                                     pos_err_norm_clipped = min(1, pos_err_norm) 
 
                                     rot_err = rot_err / n_links # mean angular error per axis (roll pitch yaw)                                    
-                                    rot_err_norm = rot_err / dyn_cost.prior_rot_err_affection_angle
+                                    rot_err_norm = rot_err / dyn_cost.prior_rot_err_impact_angle
                                     rot_err_norm_clipped = min(1, rot_err_norm) # normalize to [0,1]
                                     
                                     pose_err_norm = dyn_cost.prior_pos_to_rot_ratio * pos_err_norm_clipped + (1 - dyn_cost.prior_pos_to_rot_ratio) * rot_err_norm_clipped # 0 <= pose_err_norm <= 1
                                     
                                    
-                                    p = 0.3 # hp
-                                    w = 1 - (1-pose_err_norm) ** p
+                                    b = 0.5 
+                                    w = 1 - (1-pose_err_norm) ** b
+                                    #w = pose_err_norm # ** 0.2
                                     # w = max((pose_err_norm ** power), dyn_cost.prior_keep_lower_bound)
                                     w = max(w, dyn_cost.prior_keep_lower_bound)
                                     assert w >= 0 and w <= 1

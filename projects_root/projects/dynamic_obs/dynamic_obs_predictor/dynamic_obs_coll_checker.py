@@ -66,10 +66,29 @@ class DynamicObsCollPredictor:
 
         # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
+        self._window_ranges = [] 
         if self.sparse_steps['use']:
             assert self.sparse_steps['ratio'] > 0 and self.sparse_steps['ratio'] <= 1, "Error: The ratio must be between 0 and 1"
+
+            # making n non-overlapping windows:            
+            # num of windows = num of sampling steps
             self.n_sampling_steps = int(self.H * self.sparse_steps['ratio']) # number of timesteps to sample for collision
-            self.sampling_timesteps = np.linspace(0, self.H-1, self.n_sampling_steps, dtype=int) # evenly spaced timesteps in the horizon
+            # self.sampling_timesteps = np.linspace(0, self.H-1, self.n_sampling_steps, dtype=int) # evenly spaced timesteps in the horizon
+            _sampling_time_steps = []
+            _window_size = self.H // self.n_sampling_steps
+            _window_start_idx = 0
+            for window_idx in range(self.n_sampling_steps):
+                if window_idx == self.n_sampling_steps - 1:
+                    _window_end_idx = self.H - 1 # last window might  be bigger than the other windows
+                else:
+                    _window_end_idx = _window_start_idx + _window_size - 1
+
+                _window_mid_idx = (_window_start_idx +_window_end_idx) // 2
+                _sampling_time_steps.append(_window_mid_idx)
+                self._window_ranges.append([_window_start_idx, _window_end_idx])
+                _window_start_idx = _window_end_idx + 1
+            self.sampling_timesteps = np.array(_sampling_time_steps)
+            
         else:
             self.n_sampling_steps = self.H
             self.sampling_timesteps = np.arange(self.H)
@@ -134,14 +153,14 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf = torch.zeros(n_rollouts, H, device=self.tensor_args.device) # [n_rollouts x H] 
         self.tmp_cost_mat_buf_sparse = torch.zeros(n_rollouts, self.n_sampling_steps, device=self.tensor_args.device)
         
-        # Pre-compute projection parameters for sparse-to-full horizon mapping
-        if self.sparse_steps['use']:
-            self.base_repeat = self.H // self.n_sampling_steps
-            self.remainder = self.H % self.n_sampling_steps
-            if self.remainder != 0:
-                # Pre-compute repeat counts to avoid recreation each time
-                self.repeat_counts = torch.full((self.n_sampling_steps,), self.base_repeat, dtype=torch.long, device=self.tensor_args.device)
-                self.repeat_counts[:self.remainder] += 1
+        # # Pre-compute projection parameters for sparse-to-full horizon mapping
+        # if self.sparse_steps['use']:
+        #     self.base_repeat = self.H // self.n_sampling_steps
+        #     self.remainder = self.H % self.n_sampling_steps
+        #     if self.remainder != 0:
+        #         # Pre-compute repeat counts to avoid recreation each time
+        #         self.repeat_counts = torch.full((self.n_sampling_steps,), self.base_repeat, dtype=torch.long, device=self.tensor_args.device)
+        #         self.repeat_counts[:self.remainder] += 1
         
         # flags
         self.init_rad_buffs = torch.tensor([0], device=self.tensor_args.device) # [1] If 1, the rad_obs_buffs are initialized (obstacles which should be set only once).
@@ -156,14 +175,19 @@ class DynamicObsCollPredictor:
         Optimized version with pre-computed parameters.
         """
         if self.sparse_steps['use']:
-            if self.remainder == 0:
-                # Simple case: all columns repeated equally
-                full_matrix.copy_(sparse_matrix.repeat_interleave(self.base_repeat, dim=1))
-            else:
-                # Complex case: use pre-computed repeat counts
-                full_matrix.copy_(sparse_matrix.repeat_interleave(self.repeat_counts, dim=1))
+            # project the value at the middle of the window to the whole window
+            for window_idx, window_range in enumerate(self._window_ranges):
+                win_start, win_end = window_range
+                full_matrix[:, win_start:win_end+1] = sparse_matrix[:, window_idx].unsqueeze(1)
+            
+            # if self.remainder == 0:
+            #     # Simple case: all columns repeated equally
+            #     full_matrix.copy_(sparse_matrix.repeat_interleave(self.base_repeat, dim=1))
+            # else:
+            #     # Complex case: use pre-computed repeat counts
+            #     full_matrix.copy_(sparse_matrix.repeat_interleave(self.repeat_counts, dim=1))
         else:
-            # If not using sparse steps, just copy directly
+            # If not using sparse steps, just copy directly (sparse_matrix is already full horizon)
             full_matrix.copy_(sparse_matrix)
         
     def set_obs_rads(self, rad_obs:torch.Tensor):
