@@ -95,14 +95,13 @@ pose_utils:
   seed: 0 # seed to sample the obstacle poses
 
 sim_task:
-  task_type: 'manual' # reach/follow/manual (for debugging)
-  cfg:
-    timeout: 10.0
-    max_abs_axis_vel: 0.1
-
+  # task_type: 'manual' # reach/follow/manual (for debugging)
+  task_type: 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  # cfg:
+    
 sim_env:
   cfg:
-    n_obs: 3
+    n_obs: 0
     obj_shape: 'sphere' # type of the obstacle ('cube' or 'sphere')
     max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere
@@ -218,3 +217,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
     # use_mppi: True
     # use_lbfgs: False
     # plot_costs: True # for debugging
+  
+batch:
+  n: [4] # at index i set number of instances from agent_cfgs[i]
+  # base_poses: [] # list of poses for the agents

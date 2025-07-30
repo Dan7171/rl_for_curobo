@@ -1655,6 +1655,67 @@ class ReachTask(FollowTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, pose_utils, timeout, 0.0)
 
+
+class CbsMp1Task(ReachTask):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, pose_utils, start_poses):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, pose_utils,timeout=1000.0, max_abs_axis_vel=0.0)
+    
+        n_agents = len(self.agent_task_cfgs)
+        link_name_to_target_pose_np = [{} for _ in range(n_agents)]
+
+        # set goal positions for each agent (half along x, half along y)
+        goal_positions = self.get_agents_goal_positions([start_poses[a_idx] for a_idx in range(n_agents)])
+
+        # set full goal poses from the goal positions (keep rotation from start)
+        for a_idx in range(n_agents):
+            assert len(self.link_name_to_path[a_idx]) == 1, "only one link per agent is supported for this task"
+            ee_link_name = list(self.link_name_to_path[a_idx].keys())[0]
+            link_name_to_target_pose_np[a_idx][ee_link_name] = (np.array(goal_positions[a_idx]), np.array(start_poses[a_idx][3:]))
+        
+        # set goal poses in sim
+        self._set_targets_world_pose(link_name_to_target_pose_np)
+        
+        # parse goal poses to Pose
+        link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_target_pose_np)
+        self._last_update = link_name_to_next_target_pose
+        
+
+
+
+    @staticmethod
+    def get_agents_start_positions(n_agents, space_meters=1):
+        """
+        half of the robots start at along x axis, and half along y"""
+        s = []         
+        for a_idx in range(n_agents):
+            d = (a_idx+1) * space_meters
+            if a_idx <= n_agents // 2:
+                s.append([d,0,0])
+            else:
+                s.append([0,d,0])
+        return s
+    @staticmethod
+    def get_agents_goal_positions(start_positions):
+        """
+        half of the robots start with qw=1, and half with qw=0
+        """
+        grid_step_size = start_positions[0][0]
+        grid_dim_len = np.ceil(len(start_positions)/2)
+        target_dist = grid_step_size * (grid_dim_len+1)
+        g = []
+        
+        for sp in start_positions:
+            start_x = sp[0]
+            start_y = sp[1]
+            if start_y == 0:
+                g.append([start_x, target_dist,0])
+            else:
+                g.append([target_dist, start_y, 0])
+        return g
+    
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        return None # no need to update targets in sim, targets are fixed in this task
+    
 def main():
     
     # assuming obstacles are in objects_path:
@@ -1672,7 +1733,28 @@ def main():
     
     meta_cfg = load_yaml(meta_cfg_path)
     agent_cfgs = meta_cfg["cu_agents"]
+    if 'batch' in meta_cfg: # if batch is defined, then we need to create a batch of agents
+        _agent_cfgs_batch = []
+        for a_type in range(len(meta_cfg["batch"]["n"])): # for each agent type
+            agents_from_type = [deepcopy(agent_cfgs[a_type]) for _ in range(meta_cfg["batch"]["n"][a_type])]
+            _agent_cfgs_batch.extend(agents_from_type)
+
+        # if meta_cfg["batch"]["base_poses"] is not None:
+        #     for a_idx in range(len(_agent_cfgs_batch)):
+        #         _agent_cfgs_batch[a_idx]["base_pose"] = meta_cfg["batch"]["base_poses"][a_idx]
+        agent_cfgs = _agent_cfgs_batch
     
+    if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
+        start_positions = CbsMp1Task.get_agents_start_positions(len(agent_cfgs))
+        for a_idx, p in enumerate(start_positions):
+            pose = p + [1,0,0,0]
+            agent_cfgs[a_idx]["base_pose"] = pose
+            
+            
+    
+        
+        
+        
     # init runtime topics (must be done before solvers are initialized (so that dynamic obs cost will be initialized properly))
     init_runtime_topics(n_envs=1, robots_per_env=len(agent_cfgs)) 
     runtime_topics = get_topics()
@@ -1738,7 +1820,6 @@ def main():
 
     cu_agents:List[CuAgent] = []
     for a_idx, a_cfg in enumerate(agent_cfgs):
-            
         usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
         sim_robot_cfg = a_cfg["sim_robot_cfg"] if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
@@ -1803,6 +1884,8 @@ def main():
             sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args)
         elif sim_task_type == 'follow':
             sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils, **meta_cfg["sim_task"]["cfg"])
+        elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
+            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils,base_pose)
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 
