@@ -1,4 +1,6 @@
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
+  is_mobile: False
+  mobile_base_link_subpath: ''
   cu_world_wrapper: # curoboworld collision wrapper
     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
     never_add: [] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
@@ -148,10 +150,19 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   #   viz_color: 'purple'
     
 
-  - robot:  curobo/src/curobo/content/configs/robot/simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  - robot:  curobo/src/curobo/content/configs/robot/franka_mobile.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
     base_pose: [0, 0.0, 0.0, 1, 0, 0, 0]
     viz_color: 'purple'
+    is_mobile: True
+    mobile_base_link_subpath: "/panda_link0"
+
+  # - robot:  curobo/src/curobo/content/configs/robot/simple_disk.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion 
+  #   base_pose: [1, 0.0, 0.0, 1, 0, 0, 0]
+  #   viz_color: 'purple'
+  #   mobile: True
+  #   mobile_base_link_path: "/base_link"
 
     # # mpc_solver_cfg:
     # override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml

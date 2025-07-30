@@ -8,7 +8,7 @@ robot_cfg:
     urdf_path: "robot/simple_disk_description/simple_disk.urdf"
     asset_root_path: "robot/simple_disk_description"
     base_link: "base_link"
-    ee_link: "disk_base"
+    ee_link: "ee_link"
     collision_link_names: null
     collision_spheres: spheres/simple_disk.yml
     collision_sphere_buffer: 0.02
@@ -17,13 +17,14 @@ robot_cfg:
     self_collision_buffer: null
     mesh_link_names:
       [
-        "disk_base",
+        "base_link",
+        "ee_link",
       ]
     lock_joints: {}
     cspace:
-      joint_names: ["base_x", "base_y", "base_theta"]
-      retract_config: [0.0, 0.0, 0.0]
-      null_space_weight: [1, 1, 1]
-      cspace_distance_weight: [1, 1, 1]
+      joint_names: ["base_x", "base_y"]
+      retract_config: [0.0, 0.0]
+      null_space_weight: [1, 1]
+      cspace_distance_weight: [1, 1]
       max_acceleration: 5.0
       max_jerk: 50.0 

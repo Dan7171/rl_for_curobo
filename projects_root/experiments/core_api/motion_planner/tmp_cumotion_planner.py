@@ -1155,6 +1155,8 @@ class CuAgent:
                 sim_robot:Optional[SimRobot]=None,
                 plan_pub_sub:Optional[PlanPubSub]=None,
                 viz_color:str='orange',
+                is_mobile:bool=False,
+                mobile_base_link_subpath:str='',
                 ):
         
         self.idx = idx
@@ -1166,6 +1168,8 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
+        self.is_mobile = is_mobile
+        self.mobile_base_link_subpath = mobile_base_link_subpath
 
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
@@ -1882,9 +1886,10 @@ def main():
                     # sense
 
                     # sense base pose
-                    p_base, q_base = get_world_pose(a.sim_robot.path)
-                    base_pose = np.concatenate([p_base, q_base]).tolist()
-                    a.update_base(base_pose)
+                    if a.is_mobile:
+                        p_base, q_base = get_world_pose(a.sim_robot.path + a.mobile_base_link_subpath)
+                        base_pose = np.concatenate([p_base, q_base]).tolist()
+                        a.update_base(base_pose)
                     
                     # sense obstacles 
                     a.update_col_model_from_isaac_sim(

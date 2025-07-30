@@ -1,62 +1,25 @@
 <?xml version="1.0" ?>
 <robot name="simple_disk" xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <!-- Base links for mobile base -->
+  <!-- Virtual world reference -->
+  <link name="world">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+
+  <!-- Intermediate link for Y movement -->
+  <link name="mobile_base">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+  
+  <!-- Single movable disk robot link -->
   <link name="base_link">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.001"/>
-      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
-    </inertial>
-  </link>
-  
-  <link name="base_link_x">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.001"/>
-      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
-    </inertial>
-  </link>
-  
-  <link name="base_link_y">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.001"/>
-      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
-    </inertial>
-  </link>
-
-  <!-- X-axis translation joint -->
-  <joint name="base_x" type="prismatic">
-    <origin rpy="0 0 0.0" xyz="0 0 0.0"/>
-    <parent link="base_link"/>
-    <child link="base_link_x"/>
-    <axis xyz="1 0 0"/>
-    <dynamics damping="1.0"/>
-    <limit effort="100" lower="-10.0" upper="10.0" velocity="2.0"/>
-  </joint>
-
-  <!-- Y-axis translation joint -->
-  <joint name="base_y" type="prismatic">
-    <origin rpy="0 0 0.0" xyz="0 0 0.0"/>
-    <parent link="base_link_x"/>
-    <child link="base_link_y"/>
-    <axis xyz="0 1 0"/>
-    <dynamics damping="1.0"/>
-    <limit effort="100" lower="-10.0" upper="10.0" velocity="2.0"/>
-  </joint>
-
-  <!-- Rotation joint (theta) -->
-  <joint name="base_theta" type="revolute">
-    <origin rpy="0 0 0.0" xyz="0 0 0.0"/>
-    <parent link="base_link_y"/>
-    <child link="disk_base"/>
-    <axis xyz="0 0 1"/>
-    <dynamics damping="1.0"/>
-    <limit effort="50" lower="-6.28318" upper="6.28318" velocity="3.14159"/>
-  </joint>
-
-  <!-- Disk robot link -->
-  <link name="disk_base">
     <visual>
       <origin xyz="0 0 0.05" rpy="0 0 0"/>
       <geometry>
@@ -78,5 +41,41 @@
       <inertia ixx="0.015" ixy="0" ixz="0" iyy="0.015" iyz="0" izz="0.0225"/>
     </inertial>
   </link>
+
+  <!-- X-axis movement -->
+  <joint name="base_x" type="prismatic">
+    <origin rpy="0 0 0.0" xyz="0 0 0.0"/>
+    <parent link="world"/>
+    <child link="mobile_base"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="1.0"/>
+    <limit effort="100" lower="-10.0" upper="10.0" velocity="2.0"/>
+  </joint>
+
+  <!-- Y-axis movement -->
+  <joint name="base_y" type="prismatic">
+    <origin rpy="0 0 0.0" xyz="0 0 0.0"/>
+    <parent link="mobile_base"/>
+    <child link="base_link"/>
+    <axis xyz="0 1 0"/>
+    <dynamics damping="1.0"/>
+    <limit effort="100" lower="-10.0" upper="10.0" velocity="2.0"/>
+  </joint>
+
+  <!-- End-effector link -->
+  <link name="ee_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+
+  <!-- Fixed joint to end-effector -->
+  <joint name="base_to_ee" type="fixed">
+    <origin rpy="0 0 0.0" xyz="0 0 0.0"/>
+    <parent link="base_link"/>
+    <child link="ee_link"/>
+  </joint>
 
 </robot> 
