@@ -41,6 +41,7 @@ class DynamicObsCollPredictor:
                  sparse_steps:dict={'use': False, 'ratio': 0.5},
                  sparse_spheres:dict={'exclude_self': [], 'exclude_others': []}, # list of ints, each int is the index of the sphere to exclude from the collision check.
                  col_with_idx_map=None, # mapping from robot IDs to their index ranges in concatenated tensor
+                 safety_margin=0.1,
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -60,7 +61,7 @@ class DynamicObsCollPredictor:
         self.X = X # the pose (x y z qw qx qy qz) of the robot in the world frame
         self.tensor_args = tensor_args 
         self.H = H
-        
+        self.safety_margin = safety_margin
         self.n_rollouts = n_rollouts
         self.n_own_spheres = n_own_spheres
 
@@ -264,12 +265,8 @@ class DynamicObsCollPredictor:
         )
         self.transform_matrix_dirty = False
 
-    def cost_fn(self, prad_own_R: torch.Tensor, safety_margin=0.1):
+    def cost_fn(self, prad_own_R: torch.Tensor):
         """Ultra-optimized collision cost computation."""
-        # if len(base_pose) > 0:
-        #     self.transform_matrix_dirty = True
-        #     self.X = base_pose
-        #     # print(f"debug base pose changed: {self.X}")
         
         # Update transformation matrix if needed
         if self.transform_matrix_dirty or self.rotation_matrix is None:
@@ -307,7 +304,7 @@ class DynamicObsCollPredictor:
         
         # Check collision condition and count violations
         # Using lt_ for in-place comparison, then sum to count violations
-        collision_mask = self.pairwise_surface_dist_buf.lt_(safety_margin)
+        collision_mask = self.pairwise_surface_dist_buf.lt_(self.safety_margin)
         torch.sum(collision_mask, dim=[2, 3, 4], out=self.tmp_cost_mat_buf_sparse)
         
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
