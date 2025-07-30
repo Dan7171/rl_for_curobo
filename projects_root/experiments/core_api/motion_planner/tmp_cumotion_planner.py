@@ -1377,9 +1377,15 @@ class CuAgent:
             
             
     def update_base(self, base_pose:list[float]):
+        """
+        Update the base pose of the robot in all relevant places.
+        Args:
+            base_pose: list[float] of [x, y, z, qw, qx, qy, qz]
+        """
         self.base_pose = base_pose
-        self.cu_world_wrapper.base_frame = np.array(self.base_pose)
-        self.planner.base_pose = self.base_pose
+        self.cu_world_wrapper.base_frame = np.array(self.base_pose) # in coll checker wrapper (with environment obstacles)
+        self.planner.base_pose = self.base_pose # in planner (for task space planning)
+        
         
     def should_publish_plan(self, t:int)->bool:
         def bernoulli():
