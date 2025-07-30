@@ -79,10 +79,10 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 500.0  # 100  
+        weight: 50000.0  # 100  
         terminal: False
         prior_rule: pose # rule of prioratization: none/pose/random
-        prior_p_err_impact_rad: 0.1 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
+        prior_p_err_impact_rad: 0.5 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_rot_err_impact_angle: 180 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_keep_lower_bound: 0.0 # between 0 and 1.A lower bound on how much we keep from the origianl dynamic obs cost. 0 means no lower bound. 1 means keep all.
         prior_pos_to_rot_ratio: 0.9 # If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.

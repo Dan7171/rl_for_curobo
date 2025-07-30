@@ -264,8 +264,12 @@ class DynamicObsCollPredictor:
         )
         self.transform_matrix_dirty = False
 
-    def cost_fn(self, prad_own_R: torch.Tensor, safety_margin=0.1):
+    def cost_fn(self, prad_own_R: torch.Tensor, safety_margin=0.1, base_pose:list[float]=[]):
         """Ultra-optimized collision cost computation."""
+        if len(base_pose) > 0:
+            self.transform_matrix_dirty = True
+            self.X = base_pose
+            # print(f"debug base pose changed: {self.X}")
         
         # Update transformation matrix if needed
         if self.transform_matrix_dirty or self.rotation_matrix is None:

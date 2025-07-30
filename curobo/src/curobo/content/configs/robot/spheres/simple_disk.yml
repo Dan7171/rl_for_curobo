@@ -5,7 +5,7 @@
 collision_spheres:
     base_link:
         - "center": [0.0, 0.0, 0.05]
-          "radius": 0.18
+          "radius": 0.1
     ee_link:
         - "center": [0.0, 0.0, 0.0]
           "radius": 0.01 

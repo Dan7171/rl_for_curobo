@@ -563,7 +563,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                             robot_context['env_id'],
                             robot_context['robot_id'], 
                             robot_context['robot_pose'],
-                            robot_context['n_obstacle_spheres']
+                            robot_context['n_obstacle_spheres'],
                         )
                 
                 cost_instance = cost_class(cost_config)

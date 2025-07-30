@@ -1099,6 +1099,9 @@ def publish_robot_context(robot_idx:int, robot_context:dict,robot_pose:list, n_o
     robot_context["link_name_to_pose"] = {}
     robot_context["name_link_to_target"] = {}
     robot_context["target_name_to_pose"] = {}
+
+def publish_to_context(robot_context:dict, key:str, value):
+    robot_context[key] = value
     
 def calculate_robot_sphere_count(robot_cfg):
     """
@@ -1384,8 +1387,10 @@ class CuAgent:
         """
         self.base_pose = base_pose
         self.cu_world_wrapper.base_frame = np.array(self.base_pose) # in coll checker wrapper (with environment obstacles)
-        self.planner.base_pose = self.base_pose # in planner (for task space planning)
-        
+        # self.planner.base_pose = self.base_pose # in planner (for task space planning)
+        robot_context = get_topics().get_default_env()[self.idx]
+        publish_to_context(robot_context, "robot_pose", self.base_pose) # in dynamic obs predictor or other costs
+        # publish_to_context(robot_context, "is_base_dirty",True) # in arm_base
         
     def should_publish_plan(self, t:int)->bool:
         def bernoulli():
@@ -1725,7 +1730,7 @@ def main():
             cumotion_plan_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in a_cfg and "motion_gen_plan_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"]
             cumotion_warmup_cfgs[a_idx] = a_cfg["cumotion"]["warmup_cfg"] if "cumotion" in a_cfg and "warmup_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"]
 
-
+        
     for a_idx, a_cfg in enumerate(agent_cfgs):
         if a_cfg["planner"] == 'mpc':
             n_obstacle_spheres = sum(sphere_counts_total[other_idx] for other_idx in col_pred_with[a_idx])
@@ -1771,6 +1776,8 @@ def main():
             sim_robot=sim_robot, # optional, when using simulation
             plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
             viz_color=viz_color,
+            is_mobile=a_cfg["is_mobile"] if "is_mobile" in a_cfg else meta_cfg["default"]["is_mobile"],
+            mobile_base_link_subpath=a_cfg["mobile_base_link_subpath"] if "mobile_base_link_subpath" in a_cfg else meta_cfg["default"]["mobile_base_link_subpath"],
         )
 
         cu_agents.append(a)
@@ -1889,8 +1896,8 @@ def main():
                     # sense base pose
                     if a.is_mobile:
                         p_base, q_base = get_world_pose(a.sim_robot.path + a.mobile_base_link_subpath)
-                        base_pose = np.concatenate([p_base, q_base]).tolist()
-                        a.update_base(base_pose)
+                        a_base_pose = np.concatenate([p_base, q_base]).tolist()
+                        a.update_base(a_base_pose)
                     
                     # sense obstacles 
                     a.update_col_model_from_isaac_sim(
@@ -1949,7 +1956,7 @@ def main():
                     
                     # debug
                     if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                        a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, cu_js, planner.solver, base_pose[a.idx])
+                        a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, cu_js, planner.solver, a.base_pose)
                 if len(pts_debug):
                     draw_points(pts_debug)
             t += 1
