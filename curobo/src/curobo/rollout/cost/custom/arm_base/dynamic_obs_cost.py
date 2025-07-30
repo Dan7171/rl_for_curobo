@@ -206,9 +206,10 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             raise RuntimeError("Robot spheres not available in state")
         
         # check if the base pose is dirty
-        new_base = []
-        robot_context = get_topics().get_default_env()[self.robot_id]
-        if 'robot_pose' in robot_context:
-            new_base = robot_context['robot_pose']
+        # new_base = []
+        # robot_context = get_topics().get_default_env()[self.robot_id]
+        # if 'robot_pose' in robot_context:
+        #     new_base = robot_context['robot_pose']
                 
-        return self.col_pred.cost_fn(state.robot_spheres, base_pose=new_base)
+        # return self.col_pred.cost_fn(state.robot_spheres, base_pose=new_base)
+        return self.col_pred.cost_fn(state.robot_spheres)

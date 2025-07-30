@@ -1166,8 +1166,8 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
-        self.is_mobile = is_mobile
-        self.mobile_base_link_subpath = mobile_base_link_subpath
+        # self.is_mobile = is_mobile
+        # self.mobile_base_link_subpath = mobile_base_link_subpath
 
         # See wrapper's docstring to understand the motivation for the wrapper.
         _solver_wm = self.planner.solver.world_coll_checker.world_model
@@ -1385,11 +1385,11 @@ class CuAgent:
         Args:
             base_pose: list[float] of [x, y, z, qw, qx, qy, qz]
         """
-        self.base_pose = base_pose
-        self.cu_world_wrapper.base_frame = np.array(self.base_pose) # in coll checker wrapper (with environment obstacles)
+        # self.base_pose = base_pose
+        # self.cu_world_wrapper.base_frame = np.array(self.base_pose) # in coll checker wrapper (with environment obstacles)
         # self.planner.base_pose = self.base_pose # in planner (for task space planning)
         robot_context = get_topics().get_default_env()[self.idx]
-        publish_to_context(robot_context, "robot_pose", self.base_pose) # in dynamic obs predictor or other costs
+        publish_to_context(robot_context, "robot_pose", base_pose) # in dynamic obs predictor or other costs
         # publish_to_context(robot_context, "is_base_dirty",True) # in arm_base
         
     def should_publish_plan(self, t:int)->bool:
@@ -1776,8 +1776,8 @@ def main():
             sim_robot=sim_robot, # optional, when using simulation
             plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
             viz_color=viz_color,
-            is_mobile=a_cfg["is_mobile"] if "is_mobile" in a_cfg else meta_cfg["default"]["is_mobile"],
-            mobile_base_link_subpath=a_cfg["mobile_base_link_subpath"] if "mobile_base_link_subpath" in a_cfg else meta_cfg["default"]["mobile_base_link_subpath"],
+            # is_mobile=a_cfg["is_mobile"] if "is_mobile" in a_cfg else meta_cfg["default"]["is_mobile"],
+            # mobile_base_link_subpath=a_cfg["mobile_base_link_subpath"] if "mobile_base_link_subpath" in a_cfg else meta_cfg["default"]["mobile_base_link_subpath"],
         )
 
         cu_agents.append(a)
@@ -1891,14 +1891,7 @@ def main():
                         if viz_plans and t % viz_plans_dt == 0:
                             pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
                     
-                    # sense
-
-                    # sense base pose
-                    if a.is_mobile:
-                        p_base, q_base = get_world_pose(a.sim_robot.path + a.mobile_base_link_subpath)
-                        a_base_pose = np.concatenate([p_base, q_base]).tolist()
-                        a.update_base(a_base_pose)
-                    
+         
                     # sense obstacles 
                     a.update_col_model_from_isaac_sim(
                         a.sim_robot.path, 

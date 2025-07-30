@@ -203,7 +203,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         collision_cache: {"obb": 15, "mesh": 15}
         use_mppi: True
         use_lbfgs: False
-        plot_costs: False # for debugging
+        plot_costs: True # for debugging
     
     
 
