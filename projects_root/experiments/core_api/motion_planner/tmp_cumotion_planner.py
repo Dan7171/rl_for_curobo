@@ -1019,12 +1019,7 @@ class SimRobot:
             return
         
         spheres = solver.kinematics.get_robot_as_spheres(cu_js.position)[0]
-        # p = base_pose[:3]
-        # if in_world_frame:
-        #     for sph in spheres:
-        #         sph.position = sph.position + p # express the spheres in the world frame
-        #         sph.pose[:3] = sph.pose[:3] + p
-        
+
         if not hasattr(self, "_vis_spheres"): # init visualization spheres
             self._vis_spheres = []
             for si, s in enumerate(spheres):
