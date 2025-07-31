@@ -111,6 +111,7 @@ sim_task:
     spacing: 0.15
     noise: False
     robot_base_radius: 0.025
+    add_walls: True
   # cfg:
     
 sim_env:
@@ -225,7 +226,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         collision_cache: {"obb": 15, "mesh": 15}
         use_mppi: True
         use_lbfgs: False
-        plot_costs: True # for debugging
+        plot_costs: False # for debugging
     
   - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
@@ -253,5 +254,5 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
 batch:
   # n: [1,31] # at index i set number of instances from agent_cfgs[i]
-  n: [1,7]
+  n: [0,16]
   # base_poses: [] # list of poses for the agents

@@ -1671,7 +1671,7 @@ class ReachTask(FollowTask):
 
 
 class CbsMp1Task(ManualTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
 
         self._is_initialized = False
@@ -1692,6 +1692,13 @@ class CbsMp1Task(ManualTask):
                 # d_current += d_start
             g.extend(deepcopy(self.start_poses[i][3:]))
             self.goal_poses.append(g)
+
+        if add_walls: # add walls to the world
+            # add wall parallel to y  axis
+            wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.1 ,d_final/2,0]),scale=np.array([0.1,d_final,d_final]))
+            # add wall parallel to x axis
+            wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2,d_final + 0.1,0]),scale=np.array([d_final,0.1,d_final]))
+            
         # for s in self.start_poses:    
         #     if s[0] == 0:
         #         g = [d-0.2,s[1]+0.1,0] 
@@ -1740,7 +1747,7 @@ class CbsMp1Task(ManualTask):
         return None
 
     @staticmethod
-    def get_agents_start_positions(n_agents, spacing=1.0,noise=False,robot_base_radius=0.025):
+    def get_agents_start_positions(n_agents, spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
         """
         half of the robots start at along x axis, and half along y"""
         s = []
