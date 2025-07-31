@@ -47,7 +47,7 @@ from isaacsim.core.utils.xforms import get_world_pose
 import omni
 from pxr import UsdGeom, Gf, Sdf, UsdPhysics
 from omni.isaac.core.objects import DynamicCuboid, VisualCuboid, VisualSphere, DynamicSphere, FixedCuboid, FixedSphere
-
+from omni.isaac.core.utils.viewports import set_camera_view
 
 
 # CuRobo
@@ -1706,25 +1706,9 @@ class CbsMp1Task(ManualTask):
             wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.2 ,d_final/2 + 0.2,0]),scale=np.array([0.05,1.5*d_final,d_final]))
             # add wall parallel to x axis
             wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2 + 0.2,d_final + 0.2,0]),scale=np.array([1.5*d_final,0.05,d_final]))
-        
 
-            # import omni.kit.viewport.utility as viewport_utility
-            # from pxr import Gf
-
-            # # Get the default viewport window
-            # # viewport = omni.kit.viewport.get_viewport_interface()
-            # # window = viewport.get_default_viewport_window()
-
-            # # Get the default viewport window (usually "Viewport")
-            # window = viewport_utility.get_active_viewport()
-            # # Set the camera position and target
-            # camera_position = Gf.Vec3d(1.0, 1.0, 1.0)  # Position in positive X-Y quadrant, above
-            # camera_target = Gf.Vec3d(0.0, 0.0, 0.0)    # Look at origin
-            # camera_up = Gf.Vec3d(0.0, 0.0, 1.0)        # Up is Z
-            # # Normalize direction if needed, but this setup gives 45 deg between X/Y downward
-
-            # # Apply the camera transform
-            # window.set_camera_view(camera_position, camera_target, camera_up)
+            # set camera view to look at the center of the grid
+            set_camera_view(eye=[0, 0, d_final], target=[d_final/2, d_final/2, 0], camera_prim_path="/OmniverseKit_Persp") # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#omni.isaac.core.utils.viewports.set_camera_view
 
       
 
