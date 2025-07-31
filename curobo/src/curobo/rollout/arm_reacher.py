@@ -396,9 +396,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     goal_cost = self.goal_cost.forward(
                         ee_pos_for_cost, ee_quat_for_cost, self._goal_buffer
                     )
-                
+                # if goal_cost is not None:
+                #     goal_cost.clip_(max=1000)
                 # # cost_list.append(goal_cost)
                 cost_dict["goal"] = goal_cost
+                
+                
 
                 modified_dyn_obs_cost = False
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
@@ -533,14 +536,41 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         #     log_error(f"Error computing custom arm_reacher cost {cost_name}: {e}")
         
         # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
+
+
+        # spectral_concentration_score = 0.0
+        # entropy_score = 0.0
+        # # if not hasattr(self, 'last_total_costs'):
+        # #     self.last_total_costs = [cat_sum_reacher(list(cost_dict.values()))]
+        # # else:
+        #     # self.last_total_costs.append(cat_sum_reacher(list(cost_dict.values())))
+        #     # if len(self.last_total_costs) > 100:
+        #     #     self.last_total_costs.pop(0)
+        
+        #     #     last_total_cost = cat_sum_reacher(self.last_total_costs)
+        #     #     X = np.fft.fft(last_total_cost.cpu().numpy())
+        #     #     power_spectrum = np.abs(X)**2
+        #     #     power_spectrum[0] = 0 # remove DC component
+        #     #     power_spectrum /= np.sum(power_spectrum) # normalize
+        #     #     spectral_concentration_score = np.max(power_spectrum)
+
+        #     #     entropy = -np.sum(power_spectrum * np.log2(power_spectrum + 1e-12))  # Avoid log(0)
+        #     #     max_entropy = np.log2(len(power_spectrum))
+        #     #     entropy_score = 1 - (entropy / max_entropy)
+                
+
         if getattr(self, '_enable_live_plotting', False):
-            dict_to_plot = {'total': cat_sum_reacher(list(cost_dict.values()))}
+            dict_to_plot =  {'total': cat_sum_reacher(list(cost_dict.values()))}
+            # dict_to_plot['spectral_concentration_score'] = torch.tensor(spectral_concentration_score)
+            # dict_to_plot['entropy_score'] = torch.tensor(entropy_score)
+            
             if modified_dyn_obs_cost:
                 dict_to_plot['debug_dynamic_obs_cost_before(debug)'] = old_dyn_obs_cost
                 # dict_to_plot['dynamic obs diff'] = new_dyn_obs_cost - old_dyn_obs_cost
             for k, v in cost_dict.items():
                 if k not in dict_to_plot:
                     dict_to_plot[k] = v
+            
             self._update_live_plot(dict_to_plot)
 
         

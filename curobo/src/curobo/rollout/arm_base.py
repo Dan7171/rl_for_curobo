@@ -441,19 +441,19 @@ class ArmBase(RolloutBase, ArmBaseConfig):
     def get_dynamic_obs_coll_predictor(self) -> Optional[Any]:
         return self._dynamic_obs_coll_predictor
     
-    def set_robot_context(self, env_id: int, robot_id: int, robot_pose: list, col_pred_with: list):
-        """Set robot context for dynamic cost computation."""
-        # Compute total obstacle spheres from col_pred_with
-        # This assumes each robot has the same number of spheres (can be improved)
-        n_obstacle_spheres = len(col_pred_with) * 65  # TODO: get actual sphere count per robot
+    # def set_robot_context(self, env_id: int, robot_id: int, robot_pose: list, col_pred_with: list):
+    #     """Set robot context for dynamic cost computation."""
+    #     # Compute total obstacle spheres from col_pred_with
+    #     # This assumes each robot has the same number of spheres (can be improved)
+    #     n_obstacle_spheres = len(col_pred_with) * 65  # TODO: get actual sphere count per robot
         
-        self._robot_context = {
-            'env_id': env_id,
-            'robot_id': robot_id,
-            'robot_pose': robot_pose,
-            'n_obstacle_spheres': n_obstacle_spheres,
-            'col_pred_with': col_pred_with
-        }
+    #     self._robot_context = {
+    #         'env_id': env_id,
+    #         'robot_id': robot_id,
+    #         'robot_pose': robot_pose,
+    #         'n_obstacle_spheres': n_obstacle_spheres,
+    #         'col_pred_with': col_pred_with
+    #     }
     
     @profiler.record_function("arm_base/init_after_config_load")
     def _init_after_config_load(self):

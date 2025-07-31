@@ -1,0 +1,11 @@
+##
+## Simple disk robot collision spheres
+##
+
+collision_spheres:
+    base_link:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.025
+    ee_link:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.0001

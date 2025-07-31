@@ -1,5 +1,7 @@
 from typing import List
 from isaacsim.util.debug_draw import _debug_draw # isaac 4.5
+import torch
+
 def draw_points(points_dicts: List[dict], color='green'):
     """
     Visualize points in the simulation.
@@ -24,8 +26,10 @@ def draw_points(points_dicts: List[dict], color='green'):
         
         draw = _debug_draw.acquire_debug_draw_interface()
         draw.clear_points()
-        
-        cpu_rollouts = rollouts.cpu().numpy()
+        if isinstance(rollouts, torch.Tensor):
+            cpu_rollouts = rollouts.cpu().numpy()
+        else:
+            cpu_rollouts = rollouts
         b, h, _ = cpu_rollouts.shape
         point_list = []
         colors = []
@@ -42,17 +46,17 @@ def draw_points(points_dicts: List[dict], color='green'):
                 elif color == 'black':
                     colors += [(0.0, (1.0 - (i + 1.0 / b)), 0.3 * (i + 1.0 / b), 0.5) for _ in range(h)]
                 elif color == 'red':
-                    colors += [(1.0, 0.0, 0.0, 0.1) for _ in range(h)]
+                    colors += [(1.0, 0.0, 0.0, 0.8) for _ in range(h)]
                 elif color == 'blue':
-                    colors += [(0.0, 0.0, 1.0, 0.1) for _ in range(h)]
+                    colors += [(0.0, 0.0, 1.0, 0.8) for _ in range(h)]
                 elif color == 'yellow':
-                    colors += [(1.0, 1.0, 0.0, 0.1) for _ in range(h)]
+                    colors += [(1.0, 1.0, 0.0, 0.8) for _ in range(h)]
                 elif color == 'purple':
-                    colors += [(1.0, 0.0, 1.0, 0.1) for _ in range(h)]
+                    colors += [(1.0, 0.0, 1.0, 0.8) for _ in range(h)]
                 elif color == 'orange':
-                    colors += [(1.0, 0.5, 0.0, 0.1) for _ in range(h)]
+                    colors += [(1.0, 0.5, 0.0, 0.8) for _ in range(h)]
                 elif color == 'white':
-                    colors += [(1.0, 1.0, 1.0, 0.1) for _ in range(h)]
+                    colors += [(1.0, 1.0, 1.0, 0.8) for _ in range(h)]
             elif type(color) == list:
                 colors += [(*color, 0.1) for _ in range(h)]
             

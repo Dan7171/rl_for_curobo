@@ -180,7 +180,8 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 'exclude_self': spheres_to_exclude_self,
                 'exclude_others': []  # Not used anymore - handled by col_with_idx_map
             },
-            col_with_idx_map
+            col_with_idx_map,
+            self.safety_margin
         )
         print(f"DynamicObsCost successfully initialized for robot {self.robot_id} with {n_obstacle_spheres} obstacle spheres")
     

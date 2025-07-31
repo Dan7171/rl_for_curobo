@@ -409,7 +409,9 @@ class CuPlanner:
     def update_col_pred(self, plans_board, t, idx, col_pred_with):
         pass
     
-
+    def get_col_pred_debug(self)->Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+        return None
+    
 class MpcPlanner(CuPlanner):
 
     def __init__(self, base_pose:list[float], solver_config_dict: dict, robot_cfg:dict, world_cfg:WorldConfig, particle_file_path:str):
@@ -657,6 +659,16 @@ class MpcPlanner(CuPlanner):
         if naive:
             plan = map_nested_tensors(plan, _broadcast_first_step_over_horizon)
         return plan 
+    
+    def get_col_pred_debug(self):
+        col_pred = self.get_col_pred()
+        debug = col_pred._debug
+        p_obs = debug['p_obs']
+        p_own = debug['p_own']
+        r_obs = debug['r_obs']
+        r_own = debug['r_own']
+        return p_obs, p_own, r_obs, r_own
+
         
     def _filter_joint_state(self, js_state_prev:Union[JointState,None], js_state_new:JointState, filter_coefficients:FilterCoeff):
         """ Reducing the new state by a weighted sum of the previous state and the new state (like a step size to prevent sharp changes).
@@ -972,36 +984,38 @@ class CumotionPlanner(CuPlanner):
 
 
 class SimRobot:
-    def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict,viz_color:str):
+    def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict,visualize_col_pred:dict,viz_color:str):
         self.robot = robot
         self.path = path # prim path of the robot in isaac sim
         self.articulation_controller = self.robot.get_articulation_controller()
-        # self.link_name_to_target_path = {} # all links (ee and optional constrained) targets in isaac sim
-        # self.target_path_to_target_prim = {} 
+   
         self._cur_js = None
         self.viz_color = viz_color
         
         # debugging variables
         self.viz_col_spheres_on = visualize_col_spheres['is_on']
         self.viz_col_spheres_dt = visualize_col_spheres['ts_delta']
-        self.viz_col_spheres_color = self.viz_color # self.visualize_col_spheres['color']
+        self.viz_col_spheres_color = self.viz_color if visualize_col_spheres['color'] == 'viz_color' else visualize_col_spheres['color']
 
         self.viz_obj_bound_spheres_on = visualize_obj_bound_spheres['is_on']
         self.viz_obj_bound_spheres_dt = visualize_obj_bound_spheres['ts_delta']
 
         self.viz_plan_on = visualize_plan['is_on']
         self.viz_plan_dt = visualize_plan['ts_delta']
-        self.viz_plan_color = self.viz_color # self.visualize_plan['color']
+        self.viz_plan_color = self.viz_color if visualize_plan['color'] == 'viz_color' else visualize_plan['color']
         
         self.viz_mpc_ee_rollouts_on = visualize_mpc_ee_rollouts['is_on']
         self.viz_mpc_ee_rollouts_dt = visualize_mpc_ee_rollouts['ts_delta']
         self.viz_mpc_ee_rollouts_color =  visualize_mpc_ee_rollouts['color']
         
-        # self.visualize_obj_bound_spheres = visualize_obj_bound_spheres
-        # self.visualize_plan = visualize_plan
-        # self.visualize_mpc_ee_rollouts = visualize_mpc_ee_rollouts
+        self.viz_col_pred_dt = visualize_col_pred['ts_delta']
+        self.viz_col_pred_own_on = visualize_col_pred['own']
+        self.viz_col_pred_own_mean_only = visualize_col_pred['own_mean_only']
+        self.viz_col_pred_own_color = visualize_col_pred['own_color']
+        self.viz_col_pred_obs_on = visualize_col_pred['obs']
+        self.viz_col_pred_obs_color = visualize_col_pred['obs_color']
         
-   
+
     
     def get_js(self, sync_new=True) -> isaac_JointsState:
         if sync_new:
@@ -1656,65 +1670,128 @@ class ReachTask(FollowTask):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, pose_utils, timeout, 0.0)
 
 
-class CbsMp1Task(ReachTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, pose_utils, start_poses):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, pose_utils,timeout=1000.0, max_abs_axis_vel=0.0)
+class CbsMp1Task(ManualTask):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args)
+
+        self._is_initialized = False
+        self.start_poses = base_pose
+        self.goal_poses = []
+        
+        # set goals:
+        # grid_dim = (len(self.start_poses)//2 +1 ) * d
+        d_start = self.start_poses[0][0]
+#        d_current = d_start
+        d_final = d_start * (len(self.start_poses)//2 +1)
+        for i in range(len(self.start_poses)):
+            xyz = self.start_poses[i][:3]
+            if i % 2 == 0:
+                g = [xyz[0],d_final,0] 
+            else:
+                g = [d_final,xyz[1],0]
+                # d_current += d_start
+            g.extend(deepcopy(self.start_poses[i][3:]))
+            self.goal_poses.append(g)
+        # for s in self.start_poses:    
+        #     if s[0] == 0:
+        #         g = [d-0.2,s[1]+0.1,0] 
+        #     else:
+        #         g = [s[0],d+0.2,0]
     
-        n_agents = len(self.agent_task_cfgs)
-        link_name_to_target_pose_np = [{} for _ in range(n_agents)]
-
-        # set goal positions for each agent (half along x, half along y)
-        goal_positions = self.get_agents_goal_positions([start_poses[a_idx] for a_idx in range(n_agents)])
-
-        # set full goal poses from the goal positions (keep rotation from start)
-        for a_idx in range(n_agents):
-            assert len(self.link_name_to_path[a_idx]) == 1, "only one link per agent is supported for this task"
-            ee_link_name = list(self.link_name_to_path[a_idx].keys())[0]
-            link_name_to_target_pose_np[a_idx][ee_link_name] = (np.array(goal_positions[a_idx]), np.array(start_poses[a_idx][3:]))
         
-        # set goal poses in sim
-        self._set_targets_world_pose(link_name_to_target_pose_np)
+        # self.goal_poses = [Pose.from_list(p) for p in self.goal_poses]
         
-        # parse goal poses to Pose
-        link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_target_pose_np)
-        self._last_update = link_name_to_next_target_pose
+             
+        # n_agents = len(self.agent_task_cfgs)
+        # link_name_to_target_pose_np = [{} for _ in range(n_agents)]
+
+        # # set goal positions for each agent (half along x, half along y)
+        # goal_positions = self.get_agents_goal_positions([start_poses[a_idx][:3] for a_idx in range(n_agents)],grid_step_size=1)
+
+        # # set full goal poses from the goal positions (keep rotation from start)
+        # for a_idx in range(n_agents):
+        #     assert len(self.link_name_to_path[a_idx]) == 1, "only one link per agent is supported for this task"
+        #     ee_link_name = list(self.link_name_to_path[a_idx].keys())[0]
+        #     link_name_to_target_pose_np[a_idx][ee_link_name] = (np.array(goal_positions[a_idx]), np.array(start_poses[a_idx][3:]))
+        
+        # # set goal poses in sim
+        # self._set_targets_world_pose(link_name_to_target_pose_np)
+        
+        # # parse goal poses to Pose
+        # link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_target_pose_np)
+        # self._last_update = link_name_to_next_target_pose
         
 
-
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        if not self._is_initialized:
+            self._is_initialized = True
+            _link_name_to_target_pose = [{} for _ in range(len(self.goal_poses))]
+            for a_idx in range(len(errors)):
+                for link_name in errors[a_idx].keys():
+                    # p_err, q_err = errors[a_idx][link_name]
+                    # target_name = self.name_link_to_target[a_idx][link_name]
+                    # p_target, q_target = [(a_idx + 1), 0, 0], [1,0,0,0]
+                    p_target, q_target = self.goal_poses[a_idx][:3], self.goal_poses[a_idx][3:]
+                    _link_name_to_target_pose[a_idx][link_name] = (np.array(p_target), np.array(q_target))
+                    self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
+                    # print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
+                    # print(f'p_target: {p_target}, q_target: {q_target}')
+            self._set_targets_world_pose(_link_name_to_target_pose)
+        return None
 
     @staticmethod
-    def get_agents_start_positions(n_agents, space_meters=1):
+    def get_agents_start_positions(n_agents, spacing=1.0,noise=False,robot_base_radius=0.025):
         """
         half of the robots start at along x axis, and half along y"""
-        s = []         
+        s = []
+        d = spacing + 2*robot_base_radius # distance from origin         
         for a_idx in range(n_agents):
-            d = (a_idx+1) * space_meters
-            if a_idx <= n_agents // 2:
-                s.append([d,0,0])
+            if noise:
+                d += random.uniform(-d/10, d/10)
+            if a_idx % 2 == 0:
+                start_pos = [d,0,0]
             else:
-                s.append([0,d,0])
+                start_pos = [0,d,0] 
+                d += spacing
+            
+            s.append(start_pos)
         return s
+        # for a_idx in range(n_agents):
+        #     d = (a_idx+1) * space_meters
+        #     if a_idx <= n_agents // 2:
+        #         s.append([d,0,0])
+        #     else:
+        #         s.append([0,d,0])
+        # return s
     @staticmethod
-    def get_agents_goal_positions(start_positions):
+    def get_agents_goal_positions(start_positions,grid_step_size=1):
         """
         half of the robots start with qw=1, and half with qw=0
         """
-        grid_step_size = start_positions[0][0]
-        grid_dim_len = np.ceil(len(start_positions)/2)
-        target_dist = grid_step_size * (grid_dim_len+1)
+        grid_edge = max(start_positions[-1][0], start_positions[-1][1]) # that last agent is the farthest, so we use its x or y as the grid edge (we dont know if agent is on x or y axis so we take the max)
+        d_final = grid_edge + grid_step_size # target distance from origin 
         g = []
-        
         for sp in start_positions:
-            start_x = sp[0]
-            start_y = sp[1]
-            if start_y == 0:
-                g.append([start_x, target_dist,0])
-            else:
-                g.append([target_dist, start_y, 0])
+            if sp[1] == 0: # y = 0
+                g.append([sp[0],d_final, 0]) # goind from y = 0 to y = d_final
+            else: # x = 0
+                g.append([d_final, sp[1], 0]) # going from x = 0 to x = d_final
         return g
+        # grid_dim_len = np.ceil(len(start_positions)/2)
+        # target_dist = grid_step_size * (grid_dim_len+1)
+        # g = []
+        
+        # for sp in start_positions:
+        #     start_x = sp[0]
+        #     start_y = sp[1]
+        #     if start_y == 0:
+        #         g.append([start_x, target_dist,0])
+        #     else:
+        #         g.append([target_dist, start_y, 0])
+        # return g
     
-    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
-        return None # no need to update targets in sim, targets are fixed in this task
+    # def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+    #     return None # no need to update targets in sim, targets are fixed in this task
     
 def main():
     
@@ -1745,13 +1822,10 @@ def main():
         agent_cfgs = _agent_cfgs_batch
     
     if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
-        start_positions = CbsMp1Task.get_agents_start_positions(len(agent_cfgs))
+        start_positions = CbsMp1Task.get_agents_start_positions(len(agent_cfgs),**meta_cfg["sim_task"]["cfg"])
         for a_idx, p in enumerate(start_positions):
-            pose = p + [1,0,0,0]
-            agent_cfgs[a_idx]["base_pose"] = pose
-            
-            
-    
+            agent_cfgs[a_idx]["base_pose"][:3] = p
+        
         
         
         
@@ -1885,7 +1959,7 @@ def main():
         elif sim_task_type == 'follow':
             sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils, **meta_cfg["sim_task"]["cfg"])
         elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
-            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,pose_utils,base_pose)
+            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,base_pose,**meta_cfg["sim_task"]["cfg"])
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 
@@ -1948,7 +2022,7 @@ def main():
             # Updating obstacles. Updating obstacles in sim so they can be sensed by robots
             sim_env.step()
 
-            for a in cu_agents:
+            for a_idx, a in enumerate(cu_agents):
                 planner = a.planner
 
 
@@ -1957,6 +2031,11 @@ def main():
                     viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt # debug
                     viz_col_spheres, viz_col_spheres_dt = a.sim_robot.viz_col_spheres_on, a.sim_robot.viz_col_spheres_dt # debug
                     viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.viz_mpc_ee_rollouts_on, a.sim_robot.viz_mpc_ee_rollouts_dt 
+                    
+                    viz_cpred_dt = a.sim_robot.viz_col_pred_dt
+                    viz_cpred_own = a.sim_robot.viz_col_pred_own_on
+                    viz_cpred_obs = a.sim_robot.viz_col_pred_obs_on
+
                     ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
                     ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
                     
@@ -1973,6 +2052,9 @@ def main():
                         plans_board[a.idx] = plan
                         if viz_plans and t % viz_plans_dt == 0:
                             pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
+                        
+
+                            
                     
          
                     # sense obstacles 
@@ -2002,7 +2084,7 @@ def main():
                                     
                     # sense goals
                     goals = link_name_to_target_pose[a.idx]
-    
+
                     # plan
                     
                     # update robot context with current poses and target poses (for dynamic obs cost)
@@ -2011,7 +2093,8 @@ def main():
                         robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
                         robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
                         robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
-                        robot_context["robot_pose"] = a.base_pose
+                        # robot_context["robot_pose"] = a.base_pose
+
                     
                     # yield action
                     if isinstance(planner, CumotionPlanner):
@@ -2033,6 +2116,17 @@ def main():
                     # debug
                     if viz_col_spheres and t % viz_col_spheres_dt == 0:
                         a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, cu_js, planner.solver, a.base_pose)
+
+                    if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
+                        debug_data = a.planner.get_col_pred_debug()
+                        if debug_data is not None:
+                            p_obs, p_own, r_obs, r_own = debug_data
+                            if a.sim_robot.viz_col_pred_own_mean_only:
+                                p_own = p_own.mean(axis=0)
+                            if viz_cpred_own:
+                                pts_debug.append({'points': p_own, 'color': a.sim_robot.viz_col_pred_own_color})
+                            if viz_cpred_obs:
+                                pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
                 if len(pts_debug):
                     draw_points(pts_debug)
             t += 1

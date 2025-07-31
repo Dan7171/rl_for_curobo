@@ -68,6 +68,7 @@ class DynamicObsCollPredictor:
         # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
         self._window_ranges = [] 
+        self._debug = {'p_own':np.ndarray([]), 'p_obs':np.ndarray([])}
         if self.sparse_steps['use']:
             assert self.sparse_steps['ratio'] > 0 and self.sparse_steps['ratio'] <= 1, "Error: The ratio must be between 0 and 1"
 
@@ -268,6 +269,8 @@ class DynamicObsCollPredictor:
     def cost_fn(self, prad_own_R: torch.Tensor):
         """Ultra-optimized collision cost computation."""
         
+        
+            
         # Update transformation matrix if needed
         if self.transform_matrix_dirty or self.rotation_matrix is None:
             self.update_world_pose(self.X)
@@ -296,6 +299,11 @@ class DynamicObsCollPredictor:
         # Broadcasting: [n_rollouts, n_sampling_steps, n_valid_own, 1, 3] - [1, n_sampling_steps, 1, n_valid_obs, 3]
         torch.sub(self.p_own_buf_broadcast, self.p_obs_buf_broadcast, out=self.ownobs_diff_vector_buff)
         
+        self._debug['p_own'] = self.p_own_buf_broadcast.squeeze(3).cpu().numpy()
+        self._debug['r_own'] = self.rad_own_buf.cpu().numpy()
+        self._debug['p_obs'] = self.p_obs_buf_broadcast.squeeze(0).squeeze(1).cpu().numpy()
+        self._debug['r_obs'] = self.rad_obs_buf.cpu().numpy()
+
         # Compute L2 norm (distance between sphere centers)
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_surface_dist_buf)
         

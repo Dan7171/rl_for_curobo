@@ -32,9 +32,9 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   mpc: # mpc related default values (if not specified in the agent)
     mpc_solver_cfg:
-      override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
+      override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
       use_cuda_graph: False 
-      step_dt: 0.03
+      step_dt: 0.02
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
@@ -46,24 +46,34 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on: true 
+      is_on: False 
       ts_delta: 2 # int
-      color: 'green'
+      color: viz_color
 
     visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
-      is_on: false
+      is_on: False
       ts_delta: 2 # int
       
 
     visualize_plan: # visualize the planned trajectory of the robot (for debugging)
-      is_on: True
-      color: 'red'
+      is_on: False
+      color: viz_color
       ts_delta: 1 # int
     
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-      is_on: True
+      is_on: False
       color: 'green'
-      ts_delta: 10 # int
+      ts_delta: 1 # int
+
+    visualize_col_pred:
+      own: False
+      own_color: 'blue'
+      own_mean_only: True
+      obs: False
+      obs_color: 'red'
+      
+      ts_delta: 1 # int
+
 
   plan_pub_sub: # default values for publishing and subscribing to plans (if not specified by the agent)
     pub:
@@ -96,7 +106,11 @@ pose_utils:
 
 sim_task:
   # task_type: 'manual' # reach/follow/manual (for debugging)
-  task_type: 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  task_type: CBSMP1 # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  cfg:
+    spacing: 0.5
+    noise: False
+    robot_base_radius: 0.025
   # cfg:
     
 sim_env:
@@ -156,7 +170,64 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   #   is_mobile: True
   #   mobile_base_link_subpath: "/panda_link0"
 
-  - robot:  curobo/src/curobo/content/configs/robot/simple_disk.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  
+
+
+  - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+    planner: 'mpc' # mpc or cumotion 
+    base_pose: [0, 1.0, 0.0, 1, 0, 0, 0]
+    viz_color: 'orange'
+    is_mobile: True
+    mobile_base_link_subpath: "/ee_link"
+    cu_world_wrapper: # curoboworld collision wrapper
+      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
+      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
+      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
+    
+    sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
+      visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+        is_on: False 
+        ts_delta: 2 # int
+        color: 'green'
+
+      visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
+        is_on: False
+        ts_delta: 2 # int
+        
+
+      visualize_plan: # visualize the planned trajectory of the robot (for debugging)
+        is_on: True
+        color: 'green'
+        ts_delta: 1 # int
+      
+      visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
+        is_on: True
+        color: 'orange'
+        ts_delta: 1 # int
+
+      visualize_col_pred:
+        own: True
+        own_color: 'blue'
+        own_mean_only: True
+        obs: True
+        obs_color: 'red'
+        
+        ts_delta: 1 # int
+
+    mpc: # mpc related default values (if not specified in the agent)
+      mpc_solver_cfg:
+        override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
+        use_cuda_graph: False 
+        step_dt: 0.02
+        use_cuda_graph_metrics: True
+        self_collision_check: True
+        collision_checker_type: MESH
+        collision_cache: {"obb": 15, "mesh": 15}
+        use_mppi: True
+        use_lbfgs: False
+        plot_costs: True # for debugging
+    
+  - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
     base_pose: [1, 0.0, 0.0, 1, 0, 0, 0]
     viz_color: 'purple'
@@ -166,45 +237,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
       never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
       never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
-    mpc: # mpc related default values (if not specified in the agent)
-      mpc_solver_cfg:
-        override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
-        use_cuda_graph: False 
-        step_dt: 0.03
-        use_cuda_graph_metrics: True
-        self_collision_check: True
-        collision_checker_type: MESH
-        collision_cache: {"obb": 15, "mesh": 15}
-        use_mppi: True
-        use_lbfgs: False
-        plot_costs: False # for debugging
-
-  - robot:  curobo/src/curobo/content/configs/robot/simple_disk.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion 
-    base_pose: [1, 1.0, 0.0, 1, 0, 0, 0]
-    viz_color: 'orange'
-    is_mobile: True
-    mobile_base_link_subpath: "/ee_link"
-    cu_world_wrapper: # curoboworld collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
-    mpc: # mpc related default values (if not specified in the agent)
-      mpc_solver_cfg:
-        override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
-        use_cuda_graph: False 
-        step_dt: 0.03
-        use_cuda_graph_metrics: True
-        self_collision_check: True
-        collision_checker_type: MESH
-        collision_cache: {"obb": 15, "mesh": 15}
-        use_mppi: True
-        use_lbfgs: False
-        plot_costs: False # for debugging
-    
-    
+      
 
     # # mpc_solver_cfg:
     # override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
@@ -219,5 +252,5 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
     # plot_costs: True # for debugging
   
 batch:
-  n: [4] # at index i set number of instances from agent_cfgs[i]
+  n: [1,1] # at index i set number of instances from agent_cfgs[i]
   # base_poses: [] # list of poses for the agents
