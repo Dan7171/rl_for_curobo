@@ -1692,12 +1692,20 @@ class CbsMp1Task(ManualTask):
                 # d_current += d_start
             g.extend(deepcopy(self.start_poses[i][3:]))
             self.goal_poses.append(g)
-
+        
+        
         if add_walls: # add walls to the world
+            # material with full transparency:
+            # material = UsdPhysics.Material(prim_path="/World/Xform/wall1/Material")
+            # material.CreateTransparencyAttr().Set(1.0)
+            # material.CreateMetallicAttr().Set(0.0)
+            # material.CreateRoughnessAttr().Set(0.0)
+            # material.CreateSpecularAttr().Set(0.0)
+            # material.CreateSpecularColorAttr().Set(np.array([0.0, 0.0, 0.0]))
             # add wall parallel to y  axis
-            wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.1 ,d_final/2,0]),scale=np.array([0.1,d_final,d_final]))
+            wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.2 ,d_final/2 + 0.2,0]),scale=np.array([0.1,1.5*d_final,d_final]))
             # add wall parallel to x axis
-            wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2,d_final + 0.1,0]),scale=np.array([d_final,0.1,d_final]))
+            wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2 + 0.2,d_final + 0.2,0]),scale=np.array([1.5*d_final,0.1,d_final]))
             
         # for s in self.start_poses:    
         #     if s[0] == 0:

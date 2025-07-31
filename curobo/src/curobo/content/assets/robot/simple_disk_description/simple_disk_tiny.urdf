@@ -38,7 +38,7 @@
     </collision>
     <inertial>
       <origin xyz="0 0 0.01" rpy="0 0 0"/>
-      <mass value="0.01"/>
+      <mass value="0.1"/>
       <inertia ixx="0.015" ixy="0" ixz="0" iyy="0.015" iyz="0" izz="0.0225"/>
     </inertial>
   </link>
@@ -58,8 +58,8 @@
     <child link="intermediate"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-100" upper="100" velocity="2.0" effort="100"/>
-    <dynamics damping="1.0"/>
+    <limit lower="-100" upper="100" velocity="5.0" effort="1000"/>
+    <dynamics damping="0.5"/>
   </joint>
 
   <!-- Prismatic joint for Y movement -->
@@ -68,8 +68,8 @@
     <child link="base_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-100" upper="100" velocity="2.0" effort="100"/>
-    <dynamics damping="1.0"/>
+    <limit lower="-100" upper="100" velocity="5.0" effort="1000"/>
+    <dynamics damping="0.5"/>
   </joint>
 
   <!-- Fixed joint to end-effector -->
