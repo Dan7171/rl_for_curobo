@@ -43,10 +43,10 @@ cost:
     run_weight: 1.0
 
   bound_cfg:
-    weight: [5000.0, 5000.0,5000.0,0000.0]
-    activation_distance: [0.15,0.15,0.15,0.15] # for position, velocity, acceleration and jerk
+    weight: [5000.0, 5000.0,5000.0, 0000.0]
+    activation_distance: [0.2,0.2,0.15, 0.2] # for position, velocity, acceleration and jerk
     smooth_weight: [0.0, 50.0, 0.0,0.0] # [vel, acc, jerk, alpha_vel, eta_position, eta_vel, eta_acc]
-    run_weight_velocity: 1.0
+    run_weight_velocity: 0.0
     run_weight_acceleration: 1.0
     run_weight_jerk: 1.0
     null_space_weight: [10.0]
@@ -81,7 +81,7 @@ cost:
         config_class_name: "DynamicObsCostConfig"
         weight: 5000.0  # 100  
         terminal: False
-        safety_margin: 0.05
+        safety_margin: 0.1
         prior_rule: pose # rule of prioratization: none/pose/random
         prior_p_err_impact_rad: 0.05 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_rot_err_impact_angle: 180 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost

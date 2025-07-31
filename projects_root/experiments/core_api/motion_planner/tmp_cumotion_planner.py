@@ -17,8 +17,8 @@ headless = meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]
 simulation_app = SimulationApp(
     {
         "headless": headless is not None,
-        "width": "1920",
-        "height": "1080",
+        "width": 800,# "1920",
+        "height": 600,# "1080",
     }
 )
 
@@ -1744,7 +1744,7 @@ class CbsMp1Task(ManualTask):
         """
         half of the robots start at along x axis, and half along y"""
         s = []
-        d = spacing + 2*robot_base_radius # distance from origin         
+        d = spacing  # - 2*robot_base_radius # distance from origin         
         for a_idx in range(n_agents):
             if noise:
                 d += random.uniform(-d/10, d/10)
