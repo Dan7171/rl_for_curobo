@@ -1703,39 +1703,30 @@ class CbsMp1Task(ManualTask):
             # material.CreateSpecularAttr().Set(0.0)
             # material.CreateSpecularColorAttr().Set(np.array([0.0, 0.0, 0.0]))
             # add wall parallel to y  axis
-            wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.2 ,d_final/2 + 0.2,0]),scale=np.array([0.1,1.5*d_final,d_final]))
+            wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.2 ,d_final/2 + 0.2,0]),scale=np.array([0.05,1.5*d_final,d_final]))
             # add wall parallel to x axis
-            wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2 + 0.2,d_final + 0.2,0]),scale=np.array([1.5*d_final,0.1,d_final]))
-            
-        # for s in self.start_poses:    
-        #     if s[0] == 0:
-        #         g = [d-0.2,s[1]+0.1,0] 
-        #     else:
-        #         g = [s[0],d+0.2,0]
-    
+            wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2 + 0.2,d_final + 0.2,0]),scale=np.array([1.5*d_final,0.05,d_final]))
         
-        # self.goal_poses = [Pose.from_list(p) for p in self.goal_poses]
-        
-             
-        # n_agents = len(self.agent_task_cfgs)
-        # link_name_to_target_pose_np = [{} for _ in range(n_agents)]
 
-        # # set goal positions for each agent (half along x, half along y)
-        # goal_positions = self.get_agents_goal_positions([start_poses[a_idx][:3] for a_idx in range(n_agents)],grid_step_size=1)
+            # import omni.kit.viewport.utility as viewport_utility
+            # from pxr import Gf
 
-        # # set full goal poses from the goal positions (keep rotation from start)
-        # for a_idx in range(n_agents):
-        #     assert len(self.link_name_to_path[a_idx]) == 1, "only one link per agent is supported for this task"
-        #     ee_link_name = list(self.link_name_to_path[a_idx].keys())[0]
-        #     link_name_to_target_pose_np[a_idx][ee_link_name] = (np.array(goal_positions[a_idx]), np.array(start_poses[a_idx][3:]))
-        
-        # # set goal poses in sim
-        # self._set_targets_world_pose(link_name_to_target_pose_np)
-        
-        # # parse goal poses to Pose
-        # link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_target_pose_np)
-        # self._last_update = link_name_to_next_target_pose
-        
+            # # Get the default viewport window
+            # # viewport = omni.kit.viewport.get_viewport_interface()
+            # # window = viewport.get_default_viewport_window()
+
+            # # Get the default viewport window (usually "Viewport")
+            # window = viewport_utility.get_active_viewport()
+            # # Set the camera position and target
+            # camera_position = Gf.Vec3d(1.0, 1.0, 1.0)  # Position in positive X-Y quadrant, above
+            # camera_target = Gf.Vec3d(0.0, 0.0, 0.0)    # Look at origin
+            # camera_up = Gf.Vec3d(0.0, 0.0, 1.0)        # Up is Z
+            # # Normalize direction if needed, but this setup gives 45 deg between X/Y downward
+
+            # # Apply the camera transform
+            # window.set_camera_view(camera_position, camera_target, camera_up)
+
+      
 
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         if not self._is_initialized:
