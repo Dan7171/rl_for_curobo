@@ -51,6 +51,7 @@ curobo/docker/isaac_sim_45v1_deprecated.dockerfile
 curobo/docker/isaac_sim_45v2.dockerfile
 curobo/docker/setup_dev_env.sh
 curobo/docker/simple_setup.sh
+curobo/docker/start_apptrainer_isaac_sim45v5user.sh
 curobo/docker/start_dev_docker.sh
 curobo/docker/start_docker.sh
 curobo/docker/start_docker_aarch64.sh

@@ -22,6 +22,7 @@ echo "--------------------------------"
 # Initialize default values
 # CONTAINER_REGISTRY='de257' # change this to your own registry after pulling the image from the registry
 IMAGE_NAME='curobo_isaac45v5' 
+INSTANCE_NAME='my_instance'
 DC_ENABLED='false' # enable depth camera
 DC_DEV_ID='002' # device id for depth camera. You need to run 'lsusb' in linux host to find the device id and pass it
 REPO_PATH_HOST=$(realpath ~/rl_for_curobo) # must be absolute path, change this to where you cloned the repo
@@ -162,8 +163,14 @@ privacy_userid="${PRIVACY_USERID:-$omni_user}"
 xhost +
 
 echo "Running Isaac Sim Apptainer container with X11 forwarding..."
-# apptainer exec \
+echo "--------------------------------"
+echo "Instance name: $INSTANCE_NAME will start in background"
+echo "to ENTER the instance run: apptainer shell instance://$INSTANCE_NAME "
+echo "to STOP the instance run: apptainer instance stop $INSTANCE_NAME to STOP the instance"
+echo "to VIEW the living instances run: apptainer instance list"
+echo "--------------------------------"
 apptainer instance start \
+  --writable-tmpfs \
   --nv \
   --env "ACCEPT_EULA=${accept_eula}" \
   --env "OMNI_SERVER=${omni_server}" \
@@ -184,8 +191,15 @@ apptainer instance start \
   -B ~/docker/isaac-sim/pkg:$CONTAINER_HOME/.local/share/ov/pkg:rw \
   -B ~/docker/isaac-sim/documents:$CONTAINER_HOME/Documents:rw \
   ~/${IMAGE_NAME}.sif \
-  my_instance \
+  $INSTANCE_NAME \
   bash -c "cd $REPO_PATH_CONTAINER && \
+  /isaac-sim/python.sh -m pip install --user ninja && \
+  /isaac-sim/python.sh -m pip install --user -e $REPO_PATH_CONTAINER --verbose && \
+  source /opt/ros/humble/setup.sh && \
+  $DOCKER_CMD"
+
+apptainer exec instance://$INSTANCE_NAME bash -c "cd $REPO_PATH_CONTAINER && \
+  /isaac-sim/python.sh -m pip install  tomli wheel ninja && \
   /isaac-sim/python.sh -m pip install --user -e $REPO_PATH_CONTAINER --verbose && \
   source /opt/ros/humble/setup.sh && \
   $DOCKER_CMD"

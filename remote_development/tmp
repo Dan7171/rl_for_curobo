@@ -1,0 +1,2 @@
+verified:
+(env_isaacsim) [evrond@ise-4090-12 rl_for_curobo]$ python projects_root/examples/livestream/mpc_example.py --robot simple_disk_tiny.yml
