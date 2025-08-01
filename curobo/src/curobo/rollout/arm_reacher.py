@@ -396,18 +396,22 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     goal_cost = self.goal_cost.forward(
                         ee_pos_for_cost, ee_quat_for_cost, self._goal_buffer
                     )
-                # if goal_cost is not None:
-                #     goal_cost.clip_(max=1000)
-                # # cost_list.append(goal_cost)
+                
+                if goal_cost is not None:                    
+                    goal_cost[torch.isinf(goal_cost)] = 100000.0
+                    # goal_cost = torch.maximum(goal_cost, t)
+                # cost_list.append(goal_cost)
                 cost_dict["goal"] = goal_cost
                 
                 
-
+                # Set priorities using dynamic obs cost
                 modified_dyn_obs_cost = False
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
                     if self._custom_arm_base_costs['dynamic_obs_cost'].prior_rule != 'none':
                         dyn_cost = self._custom_arm_base_costs['dynamic_obs_cost']
                         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
+                        
+                        
                         robot_id = dyn_cost.robot_id
                         robot_context = get_topics().get_default_env()[robot_id]
                         if dyn_cost.prior_rule == 'random':

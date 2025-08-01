@@ -1706,8 +1706,7 @@ class CbsMp1Task(ManualTask):
             wall1 = FixedCuboid(prim_path="/World/Xform/wall1", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final + 0.2 ,d_final/2 + 0.2,0]),scale=np.array([0.05,1.5*d_final,d_final]))
             # add wall parallel to x axis
             wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2 + 0.2,d_final + 0.2,0]),scale=np.array([1.5*d_final,0.05,d_final]))
-
-            # set camera view to look at the center of the grid
+            
             set_camera_view(eye=[0, 0, d_final], target=[d_final/2, d_final/2, 0], camera_prim_path="/OmniverseKit_Persp") # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#omni.isaac.core.utils.viewports.set_camera_view
 
       
