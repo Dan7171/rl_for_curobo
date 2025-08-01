@@ -245,7 +245,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         collision_cache: {"obb": 15, "mesh": 15}
         use_mppi: True
         use_lbfgs: False
-        plot_costs: True # for debugging
+        plot_costs: False # for debugging
     
   - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 

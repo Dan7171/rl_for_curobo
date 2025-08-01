@@ -80,7 +80,7 @@ from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_p
 from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres, transform_poses_batched
 from projects_root.utils.draw import draw_points
 from projects_root.utils.colors import npColors
-
+from projects_root.utils.issacsim import  activate_gpu_dynamics
 
 class PoseUtils:
     def __init__(self, seed:Optional[int]=None):
@@ -1531,18 +1531,27 @@ class SimTask:
                 self.goal_errors[a_idx][link_name].append((error, now))
                 
     def update_stats(self,t):
+        stat_names = []
+        stat_vals = []
+        # get the stats that need to be collected at this time step
         for stat_name in self.stats.collect_list:
             if t % self.stats.collect_dt[self.stats.collect_list.index(stat_name)] == 0:
                 match stat_name:
                     case 'contact':
                         contact_matrix = self.check_contact()
-                        self.stats.update('contact', contact_matrix, t)
+                        stat_names.append(stat_name)
+                        stat_vals.append(contact_matrix)
                     case 'goal_error':
                         link_name_to_error = self._get_link_errors()
-                        self.stats.update('goal_error', link_name_to_error, t)
+                        stat_names.append(stat_name)
+                        stat_vals.append(link_name_to_error)
                     case _:
                         raise ValueError(f"Invalid stat name: {stat_name}")
-
+        
+        # update the stats
+        for stat_name, stat_val in zip(stat_names, stat_vals):
+            self.stats.update(stat_name, stat_val, t)
+            
     def _get_link_errors(self) -> tuple[list[dict[str,tuple[float,float]]], list[dict[str,tuple[np.ndarray, np.ndarray]]], list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         n_agents = len(self.agent_task_cfgs)
         link_name_to_error = [{} for _ in range(n_agents)]
@@ -1871,6 +1880,7 @@ def main():
     
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
+    activate_gpu_dynamics(my_world)
     my_world.scene.add_default_ground_plane()
     stage = my_world.stage
     xform = stage.DefinePrim("/World", "Xform")
