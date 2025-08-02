@@ -342,7 +342,7 @@ class DynamicObsCollPredictor:
         self.cost_mat_buf.mul_(self.cost_weight)
 
         # set upper bound to 10_000 to avoid numerical issues        
-        self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 10_000)
+        self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
         
         return self.cost_mat_buf
 
