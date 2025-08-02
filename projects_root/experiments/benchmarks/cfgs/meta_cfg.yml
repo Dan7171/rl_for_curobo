@@ -91,15 +91,21 @@ default: # default values to fallback to if not specified in the agent cfg. Note
 env:
   simulation: # todo
     is_on: True
-    # physics_dt: 0.03
-    # render_dt: 0.03
-    # enable_gpu_dynamics: True
+    # physics_dt=1.0/60.0 #
+    # min_rendering_dt=1.0/60.0
+    enable_gpu_dynamics: True
     init_app_settings:
       headless: null # set 'true' to run in headless mode
+      width: "1920"
+      height: "1080"
+      physics_dt: 0.016666666666666666 # 0.016666666666666666
+      rendering_dt: 0.016666666666666666 # 0.016666666666666666
+      backend: "torch"
+  
   real: # todo
     is_on: False
   
-async: False
+async: True
 
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
@@ -273,5 +279,5 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
 batch:
   # n: [1,31] # at index i set number of instances from agent_cfgs[i]
-  n: [16,1,15]
+  n: [1,0,1] # [16,1,15]
   # base_poses: [] # list of poses for the agents
