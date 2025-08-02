@@ -457,9 +457,12 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                     assert w >= 0 and w <= 1
                                     new_dyn_obs_cost = w * old_dyn_obs_cost
 
-                                    
-                                    cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost        
-                                    modified_dyn_obs_cost = True
+                                
+                                    cost_dict['dynamic_obs_cost'] = new_dyn_obs_cost
+
+                                # set upper bound to 10_000 to avoid numerical issues        
+                                # cost_dict['dynamic_obs_cost'] = torch.max(cost_dict['dynamic_obs_cost'], torch.ones_like(cost_dict['dynamic_obs_cost']) * 10_000)
+                                modified_dyn_obs_cost = True
                       
 
 

@@ -79,7 +79,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        weight: 300.0  # 100  
+        weight: 500.0  # 100  
         terminal: False
         safety_margin: 0.05
         prior_rule: pose # rule of prioratization: none/pose/random
