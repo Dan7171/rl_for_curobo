@@ -109,15 +109,15 @@ sim_task:
   task_type: CBSMP1 # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
   stats_cfg:
     collect: True # if True, the stats will be collected and saved to a file
-    collect_list: [contact,goal_error]
+    collect_list: [contact, goal_error]
     collect_dt: [1,5] # save stats every save_stats_dt steps
     verbose: [True,False]
     save_path: "stats.pkl" # path to save the stats
     save: True # if True, the stats will be saved to a file
   
   cfg:
-    spacing: 0.25 # 0.15
-    noise: True
+    spacing: 0.125 # 0.25 # 0.15 # 
+    noise: False
     robot_base_radius: 0.025
     add_walls: True
     
@@ -216,7 +216,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         
 
       visualize_plan: # visualize the planned trajectory of the robot (for debugging)
-        is_on: True
+        is_on: False
         color: 'green'
         ts_delta: 1 # int
       
@@ -229,7 +229,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         own: True
         own_color: 'blue'
         own_mean_only: True
-        obs: True
+        obs: False
         obs_color: 'red'
         
         ts_delta: 1 # int
@@ -273,5 +273,5 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
 batch:
   # n: [1,31] # at index i set number of instances from agent_cfgs[i]
-  n: [8,1,7]
+  n: [16,1,15]
   # base_poses: [] # list of poses for the agents
