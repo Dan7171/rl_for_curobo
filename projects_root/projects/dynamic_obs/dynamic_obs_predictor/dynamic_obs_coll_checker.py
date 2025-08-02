@@ -310,10 +310,30 @@ class DynamicObsCollPredictor:
         # Subtract radius sums to get surface-to-surface distance
         self.pairwise_surface_dist_buf.sub_(self.pairwise_radsum_broadcast)
         
-        # Check collision condition and count violations
-        # Using lt_ for in-place comparison, then sum to count violations
-        collision_mask = self.pairwise_surface_dist_buf.lt_(self.safety_margin)
-        torch.sum(collision_mask, dim=[2, 3, 4], out=self.tmp_cost_mat_buf_sparse)
+        
+        # make a mxn matrix where for each rollout i<m time step (sparsed) j<n where element i,j is the minimal distance between 
+        # any sphere of the robot and any sphere of the obstacle
+        min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
+        
+        # Remove negative distances
+        min_dist_surf2surf = torch.max(min_dist_surf2surf, torch.zeros_like(min_dist_surf2surf)) # negative values (distances) mean intersection between spheres. We set distance to 0 instead, treating it just as contact between spheres.
+        
+        
+        # Set cost to 1 / min distance between own and obs spheres (min over all pairs of own and obs spheres)
+        self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) / (min_dist_surf2surf + 1e-6) # cost[i,j] = 1 / min distance[i,j] 
+        
+        # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
+        margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
+        
+        # Mask out the cost where collision distance >  safety margin
+        self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
+
+
+        
+        # # Check collision condition and count violations
+        # # Using lt_ for in-place comparison, then sum to count violations
+        # collision_mask = self.pairwise_surface_dist_buf.lt_(self.safety_margin)
+        # torch.sum(collision_mask, dim=[2, 3, 4], out=self.tmp_cost_mat_buf_sparse)
         
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)

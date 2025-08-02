@@ -98,14 +98,15 @@ env:
       headless: null # set 'true' to run in headless mode
       width: "1920"
       height: "1080"
-      physics_dt: 0.016666666666666666 # 0.016666666666666666
-      rendering_dt: 0.016666666666666666 # 0.016666666666666666
+      # physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
+      # rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
       backend: "torch"
   
   real: # todo
     is_on: False
   
-async: True
+async: False
+async_type: "step" # "step" or "loop"
 
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
@@ -235,7 +236,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         own: True
         own_color: 'blue'
         own_mean_only: True
-        obs: False
+        obs: True
         obs_color: 'red'
         
         ts_delta: 1 # int
@@ -251,7 +252,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         collision_cache: {"obb": 15, "mesh": 15}
         use_mppi: True
         use_lbfgs: False
-        plot_costs: False # for debugging
+        plot_costs: True # for debugging
     
   - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
@@ -279,5 +280,5 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
 batch:
   # n: [1,31] # at index i set number of instances from agent_cfgs[i]
-  n: [1,0,1] # [16,1,15]
+  n: [2,1,1] # [16,1,15]
   # base_poses: [] # list of poses for the agents
