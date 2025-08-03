@@ -611,6 +611,7 @@ if __name__ == "__main__":
             sim_app.update()
     except KeyboardInterrupt:
         pass
+        print("Caught Ctrl+C (SIGINT). Exiting gracefully.")
     finally:
         sim_app.close()
     # sim_app, stage = load_usd("usd_collection/envs/World-_360_convoyer.usd", headless=False)

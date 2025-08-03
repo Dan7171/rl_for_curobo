@@ -22,3 +22,4 @@ third_party
 *.html
 *.pl
 *data
+*.pkl
