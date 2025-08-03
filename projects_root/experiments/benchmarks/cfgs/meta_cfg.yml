@@ -124,7 +124,7 @@ sim_task:
     save: True # if True, the stats will be saved to a file
   
   cfg:
-    spacing: 0.2 # 0.25 # 0.15 # 
+    spacing: 0.1 # 0.25 # 0.15 # 
     noise: False
     robot_base_radius: 0.025
     add_walls: True
@@ -281,5 +281,5 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
 batch:
   # n: [1,31] # at index i set number of instances from agent_cfgs[i]
-  n: [32,0,0] # [16,1,15] # [16,1,15]
+  n: [64,0,0] # [16,1,15] # [16,1,15]
   # base_poses: [] # list of poses for the agents
