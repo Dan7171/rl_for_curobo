@@ -120,8 +120,26 @@ class PoseUtils:
         ans.append(sphere_center[1] + y_delta)
         ans.append(sphere_center[2] + z_delta)
         return ans
-
-    def rotate_quat(self, q_in:Union[np.ndarray, list[float]], euler_deg:Union[np.ndarray, list[float]],q_in_wxyz:bool=True, q_out_wxyz:bool=True)->list[float]:
+    
+    @staticmethod
+    def rotate_quat(q_in:Union[np.ndarray, list[float]], euler_deg:Union[np.ndarray, list[float]],q_in_wxyz:bool=True, q_out_wxyz:bool=True)->list[float]:
+        """
+        given a quaternion and euler angles, return the new quaternion rotated by the euler angles.
+        Args:
+            q_in (Union[np.ndarray, list[float]]): quaternion (wxyz)
+            euler_deg (Union[np.ndarray, list[float]]): euler angles (xyz)
+            q_in_wxyz (bool): if True, q_in is in wxyz format, if False, q_in is in xyzw format
+            q_out_wxyz (bool): if True, q_out is in wxyz format, if False, q_out is in xyzw format
+        Returns:
+            list[float]: new quaternion (wxyz)
+        Example:
+            q_in = [1,0,0,0] # (identity)
+            euler_deg = [0,0,0] # no rotation
+            q_out = [1,0,0,0] # (identity)
+            q_in = [1,0,0,0] # (x-axis)
+            euler_deg = [0,0,90] # 90 degrees around z-axis
+            q_out = [0,0,0,1] # (z-axis) # TODO VERIFY THIS
+        """
         # q_in: scalar-first (wxyz)
         # euler_deg: rotation to apply, in degrees (xyz)
 
@@ -673,6 +691,8 @@ class BinTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0]):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
         self.pose_utils = pose_utils
+        self._local_rng = random.Random(self.pose_utils.seed)
+
         self.robots_base_pose = base_pose
         self._is_initialized = False
         
@@ -759,7 +779,7 @@ class BinTask(SimTask):
             
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
-        local_rng = random.Random(self.pose_utils.seed)
+        
         _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
         if not self._is_initialized:
             self._is_initialized = True
@@ -771,10 +791,10 @@ class BinTask(SimTask):
             
             for a_idx in range(len(self.agent_task_cfgs)):
                 for link_name in link_name_to_pose[a_idx]:
-                    goal_type = local_rng.choice(self._goal_types)
+                    goal_type = self._local_rng.choice(self._goal_types)
                     self._link_name_to_goal_type[a_idx][link_name] = goal_type
                     if goal_type == 'bin':
-                        goal_pose = local_rng.choice(self.bin_goal_poses)
+                        goal_pose = self._local_rng.choice(self.bin_goal_poses)
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                     else:
                         _link_name_to_target_pose_np[a_idx][link_name] = self.agent_back_goal_poses[a_idx]
@@ -783,15 +803,16 @@ class BinTask(SimTask):
         
         else: # check which agents reached their goal, and update the goal type for them (other agents keep their goal type)
             for a_idx in range(len(self.agent_task_cfgs)):
+                
                 for link_name in link_name_to_pose[a_idx]:
                     err_p, err_q =  errors[a_idx][link_name]
-                    print(f"err_p: {err_p}, err_q: {err_q}")
+                    print(f"debug err_p: {err_p}, err_q: {err_q}")
                     cur_goal_type = self._link_name_to_goal_type[a_idx][link_name]
                     target_name = self.name_link_to_target[a_idx][link_name]
                     twin_exists = target_name in self._target_name_to_moving_twin_prim[a_idx] # target has a carried twin for visual effect
                     target_prim = self.target_path_to_prim[a_idx][self.target_name_to_path[a_idx][target_name]]
 
-                    reached_goal = err_p < 0.05 and err_q < 5 
+                    reached_goal = err_p < 0.05 # and err_q < 5 
                     if reached_goal: 
                         if cur_goal_type == 'bin': # agent "placed item" in bin, changing goal to "behind back"
                             goal_pose = self.agent_back_goal_poses[a_idx]
@@ -806,11 +827,12 @@ class BinTask(SimTask):
                                 target_prim.get_applied_visual_material().set_color(twin.get_applied_visual_material().get_color()) # set target to white (to differentiate from the moving twin)                          
                                 
                                 # hide the twin (we just placed the item in the bin, we dont need to render until picked up again)
-                                self._target_name_to_free_fall_count[a_idx][target_name] = 100 # retset to 10 steps to free fall
+                                self._target_name_to_free_fall_count[a_idx][target_name] = 50 # retset to 10 steps to free fall
                                 
                                 
                         else: # agent picked from behind its back, changing goal to bin
-                            goal_pose = local_rng.choice(self.bin_goal_poses)
+                            goal_pose = self._local_rng.choice(self.bin_goal_poses)
+                            # print(f'debug agent index: {a_idx}, goal pose: {goal_pose}')
                             goal_type = 'bin'
                             if link_name not in self.link_name_to_picked_from_back[a_idx]:
                                 self.link_name_to_picked_from_back[a_idx][link_name] = 0
@@ -840,20 +862,21 @@ class BinTask(SimTask):
                                 self._target_name_to_moving_twin_prim[a_idx][target_name].set_world_pose(position=link_pos, orientation=link_quat)
                         
                         # visual free fall for placed item if needed:
-                        if target_name in self._target_name_to_free_fall_count[a_idx]:
-                            if self._target_name_to_free_fall_count[a_idx][target_name] > 0: 
-                                if twin_exists:
-                                    twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
-                                    # update the twin position (free fall)
-                                    twin_p, twin_q = twin.get_world_pose()
-                                    twin_p[2] -= 0.005
-                                    self._target_name_to_moving_twin_prim[a_idx][target_name].set_world_pose(position=twin_p, orientation=twin_q)
-                                    
-                                    # if falling for too long, hide the twin
-                                    self._target_name_to_free_fall_count[a_idx][target_name] -= 1
-                                    if self._target_name_to_free_fall_count[a_idx][target_name] == 0:
-                                        twin.set_visibility(False)
-                                    
+                        else:
+                            if target_name in self._target_name_to_free_fall_count[a_idx]:
+                                if self._target_name_to_free_fall_count[a_idx][target_name] > 0: 
+                                    if twin_exists:
+                                        twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
+                                        # update the twin position (free fall)
+                                        twin_p, twin_q = twin.get_world_pose()
+                                        twin_p[2] -= 0.01
+                                        self._target_name_to_moving_twin_prim[a_idx][target_name].set_world_pose(position=twin_p, orientation=twin_q)
+                                        
+                                        # if falling for too long, hide the twin
+                                        self._target_name_to_free_fall_count[a_idx][target_name] -= 1
+                                        if self._target_name_to_free_fall_count[a_idx][target_name] == 0:
+                                            twin.set_visibility(False)
+                                        
 
 
         # update the targets in sim
@@ -2235,11 +2258,19 @@ def main():
         # sleep(2)
         robot_cfgs_paths[a_idx] = a_cfg["robot"]
         robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
+        robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = a_cfg["retract_cfg"] 
         planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
         sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
         sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
         base_pose[a_idx] = a_cfg["base_pose"]
-        
+        if len(base_pose[a_idx]) == 6: # base pose is from the form of [x,y,z,deg_x, deg_y, deg_z] (position and euler angles)
+            base_pose[a_idx][3:] = PoseUtils.rotate_quat([1,0,0,0], base_pose[a_idx][3:], q_in_wxyz=True, q_out_wxyz=True)
+            print(f'debug base_pose[a_idx] new: {base_pose[a_idx]}')
+        elif len(base_pose[a_idx]) == 7: # base pose is from the form of [x,y,z,qw,qx,qy,qz] (position and quaternion)
+            pass
+        else:
+            raise ValueError(f"Invalid base pose type: {type(base_pose[a_idx][0])}")
+
         if "plan_pub_sub" in a_cfg and "sub" in a_cfg["plan_pub_sub"]:
             pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
         else:
