@@ -402,12 +402,19 @@ class SimTask:
         self._link_name_to_pose = link_name_to_pose
         self._target_name_to_pose = target_name_to_pose
         self._update_err_log(errors)
+
+
+        # Update targets in sim if required, based on the custom task logic
         link_name_to_next_target_pose_np = self._update_sim_targets(errors, target_name_to_pose, link_name_to_pose)
-        if link_name_to_next_target_pose_np is not None:
-            link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_next_target_pose_np)
-            self._last_update = link_name_to_next_target_pose
-        return self._last_update
-    
+        
+        if link_name_to_next_target_pose_np is not None: # got new target poses for some links
+            # We'll update the state of task, so the solvers will react to it and change their goals accordingly
+            link_name_to_next_target_pose = self._parse_np_to_pose(link_name_to_next_target_pose_np) # convert given np to Pose format
+            for a_idx in range(len(link_name_to_next_target_pose)):
+                for link_name in link_name_to_next_target_pose[a_idx].keys():
+                    self._last_update[a_idx][link_name] = link_name_to_next_target_pose[a_idx][link_name] # update link in task state
+        
+        return self._last_update # return updated task state
 
     def check_contact(self)->list[list[int]]:
         """
@@ -426,7 +433,12 @@ class SimTask:
     
     @abstractmethod
     def _update_sim_targets(self,errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
-        # return None if no new targets are needed else update the targts in sim and return the new target poses as np tuples
+        """
+        here you perform any updates to the targets in sim if required, based on the task logic and errors.
+        If target pose needs to be change in the simulation, that's the place to do it
+        That way you can write your customized tasks with custom logic.
+        """
+        
         pass
     
     def _get_targets_world_pose(self) -> list[dict[str,tuple[np.ndarray, np.ndarray]]]:
@@ -444,7 +456,7 @@ class SimTask:
     def _set_targets_world_pose(self, new_target_poses:list[dict[str,tuple[np.ndarray, np.ndarray]]]):
         n_agents = len(self.link_name_to_path)
         for a_idx in range(n_agents):
-            for link_name in self.link_name_to_path[a_idx].keys():
+            for link_name in new_target_poses[a_idx].keys():
                 target_name = self.name_link_to_target[a_idx][link_name]
                 target_path = self.target_name_to_path[a_idx][target_name]
                 target_prim = self.target_path_to_prim[a_idx][target_path]
@@ -658,19 +670,30 @@ class CbsMp1Task(ManualTask):
                     
         return contact_matrix
 class BinTask(SimTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0]):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0]):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
         self.pose_utils = pose_utils
+        self.robots_base_pose = base_pose
+        self._is_initialized = False
+        
+
+        # Spawn Bin:
         height, width, depth = wall_dims_hwd
         bin_pos = np.array(bin_pose[:3])
         dim0_step_size = width/2 +depth/2
         dim1_step_size = width/2 +depth/2
         dim2_step_size = height/2
         
-        out_wall0_pos = bin_pos + np.array([0,dim1_step_size,dim2_step_size])
-        out_wall1_pos = bin_pos + np.array([dim0_step_size,0,dim2_step_size])
-        out_wall2_pos = bin_pos + np.array([0,-dim1_step_size,dim2_step_size])
-        out_wall3_pos = bin_pos + np.array([-dim0_step_size,0,dim2_step_size])
+        bin_to_out0_step = np.array([0,dim1_step_size,dim2_step_size])
+        bin_to_out1_step = np.array([dim0_step_size,0,dim2_step_size])
+        bin_to_out2_step = np.array([0,-dim1_step_size,dim2_step_size])
+        bin_to_out3_step = np.array([-dim0_step_size,0,dim2_step_size])
+
+        out_wall0_pos = bin_pos + bin_to_out0_step
+        out_wall1_pos = bin_pos + bin_to_out1_step
+        out_wall2_pos = bin_pos + bin_to_out2_step
+        out_wall3_pos = bin_pos + bin_to_out3_step
+
         out_wall_scale = np.array([width,depth,height])
         in_wall_scale = np.array([width,depth/2,height])
         
@@ -683,7 +706,6 @@ class BinTask(SimTask):
         in_wall_1_quat = rotated_walls_quat
         root_stage = '/World/SpawnedObs/Bin'
         color = np.array([0.2, 0.2, 0.2])
-
     
         out_wall0 = FixedCuboid(prim_path=f"{root_stage}/Out0", 
                             color=color,position=out_wall0_pos, scale=out_wall_scale)
@@ -699,20 +721,78 @@ class BinTask(SimTask):
         in_wall1 = FixedCuboid(prim_path=f"{root_stage}/In1", 
                             color=color,position=in_wall_pos, orientation=in_wall_1_quat, scale=in_wall_scale)
         
+        quarter0_pos = bin_pos + bin_to_out0_step / 2 + bin_to_out1_step /2
+        quarter1_pos = bin_pos + bin_to_out0_step / 2 + bin_to_out3_step /2
+        quarter2_pos = bin_pos + bin_to_out2_step / 2 + bin_to_out1_step /2
+        quarter3_pos = bin_pos + bin_to_out2_step / 2 + bin_to_out3_step /2
         
-        
-    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
-        # if not self._is_initialized:
-        #     self._is_initialized = True
-        #     _link_name_to_target_pose = [{} for _ in range(len(self.goal_poses))]
-        #     for a_idx in range(len(errors)):
-        #         for link_name in errors[a_idx].keys():
-        #             p_target, q_target = self.goal_poses[a_idx][:3], self.goal_poses[a_idx][3:]
-        #             _link_name_to_target_pose[a_idx][link_name] = (np.array(p_target), np.array(q_target))
-        #             self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
+        # goals around the bin:
+        self.bin_goal_poses = []
+        for quarter_pos in [quarter0_pos, quarter1_pos, quarter2_pos, quarter3_pos]:
+            goal_pos = copy(quarter_pos)
+            goal_pos[2] = height + 0.05 
+            goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
+            pose = (goal_pos, goal_quat)
+            self.bin_goal_poses.append(pose)
 
-        #     self._set_targets_world_pose(_link_name_to_target_pose)
-        return None
+        # poses behind the agent, assuming bin is in front of the agent
+        self.agent_back_goal_poses = []
+        for base_pose in self.robots_base_pose:
+            bin_ground_pos = np.array(bin_pos[:3])
+            robot_ground_pos = np.array(base_pose[:3])
+            robot_minus_bin =  robot_ground_pos - bin_ground_pos
+            behind_agent_pos = robot_ground_pos + robot_minus_bin 
+            behind_agent_pos[2] = behind_agent_pos[2] + 0.7 # 0.5 m above the base
+            behind_agent_goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
+            goal_pose = (behind_agent_pos, behind_agent_goal_quat)
+            self.agent_back_goal_poses.append(goal_pose)
+            # behind_agent_goal_pose = Pose(position=self.tensor_args.to_device(behind_agent_pos), quaternion=self.tensor_args.to_device(behind_agent_goal_quat))
+
+
+
+
+
+            
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        
+        local_rng = random.Random(self.pose_utils.seed)
+        _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
+        if not self._is_initialized:
+            self._is_initialized = True
+            self._ee_link_name_to_goal_type = [{} for _ in range(len(self.agent_task_cfgs))]
+            self._goal_types = ['bin', 'agent_back']
+            for a_idx in range(len(self.agent_task_cfgs)):
+                for link_name in link_name_to_pose[a_idx]:
+                    goal_type = local_rng.choice(self._goal_types)
+                    self._ee_link_name_to_goal_type[a_idx][link_name] = goal_type
+                    if goal_type == 'bin':
+                        goal_pose = local_rng.choice(self.bin_goal_poses)
+                        _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
+                    else:
+                        _link_name_to_target_pose_np[a_idx][link_name] = self.agent_back_goal_poses[a_idx]
+            
+        
+        else: # check which agents reached their goal, and update the goal type for them (other agents keep their goal type)
+            for a_idx in range(len(self.agent_task_cfgs)):
+                for link_name in link_name_to_pose[a_idx]:
+                    err_p, err_q =  errors[a_idx][link_name]
+                    print(f"err_p: {err_p}, err_q: {err_q}")
+                    if err_p < 0.05 and err_q < 5: # error of 5 cm in norm (position) and 5 degrees on average per axis (rotation)
+                        cur_goal_type = self._ee_link_name_to_goal_type[a_idx][link_name]
+                        if cur_goal_type == 'bin': # just done with bin goal, so we set it a agent back goal
+                            goal_pose = self.agent_back_goal_poses[a_idx]
+                            goal_type = 'agent_back'
+                            
+                        else: # just done with agent back goal, so we set it a bin goal (randomly)
+                            goal_pose = local_rng.choice(self.bin_goal_poses)
+                            goal_type = 'bin'
+                        _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
+                        self._ee_link_name_to_goal_type[a_idx][link_name] = goal_type
+        
+        # update the targets in sim
+        self._set_targets_world_pose(_link_name_to_target_pose_np)
+        return _link_name_to_target_pose_np
+    
 
 class PlanPubSub:
     def __init__(self,
@@ -2198,7 +2278,7 @@ def main():
         elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
             sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,base_pose,**meta_cfg["sim_task"]["cfg"])
         elif sim_task_type == 'bin':
-            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils, **meta_cfg["sim_task"]["cfg"])
+            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils,base_pose, **meta_cfg["sim_task"]["cfg"])
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 

@@ -190,7 +190,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
   - robot:  curobo/src/curobo/content/configs/robot/franka.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
-    base_pose: [0, 1.0, 0.0, 1, 0, 0, 0]
+    base_pose: [0, 0.5, 0.0, 1, 0, 0, 0]
     viz_color: 'orange'
     cu_world_wrapper: # curoboworld collision wrapper
       verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
