@@ -1,42 +1,25 @@
-# import argparse
-# parser = argparse.ArgumentParser()
-# args = parser.parse_args()
-meta_cfg_path='projects_root/experiments/benchmarks/cfgs/meta_cfg.yml'
+# meta config
+meta_cfg_path= 'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
 from curobo.util_file import load_yaml
 meta_cfg = load_yaml(meta_cfg_path)
 
+
+
+# Isaac Sim
 try:
-    # Third Party
     import isaacsim
 except ImportError:
     pass
-
-# Isaac Sim
 from omni.isaac.kit import SimulationApp
-simulation_app = SimulationApp(
-    {
-        **meta_cfg["env"]["simulation"]["init_app_settings"],
-
-        # "headless": headless is not None,
-        # "width": width,
-        # "height": height,
-        # "physics_dt": physics_dt,
-        # "rendering_dt": rendering_dt,
-    }
-)
+simulation_app = SimulationApp({**meta_cfg["env"]["simulation"]["init_app_settings"]})
 
 from projects_root.examples.helper import add_extensions
 add_extensions(simulation_app, headless_mode=meta_cfg["env"]["simulation"]["init_app_settings"]["headless"])
-# import matplotlib
-# matplotlib.use('Agg')
 import os
-os.environ.setdefault("MPLBACKEND", "Agg")  # Set non-interactive backend before any Matplotlib imports
-
 from abc import abstractmethod
 from collections.abc import Callable
 from copy import copy, deepcopy
 import dataclasses
-import os
 from time import time, sleep
 from threading import Lock, Event, Thread
 from typing import Optional, Tuple, Dict, Union, Callable
@@ -46,12 +29,12 @@ import torch
 import pandas as pd
 import random
 from datetime import datetime
-
+# os.environ.setdefault("MPLBACKEND", "Agg")  # Set non-interactive backend before any Matplotlib imports
 from scipy.spatial.transform import Rotation as R
 import carb
 import numpy as np
 import signal
-import sys
+# import sys
 from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
@@ -338,9 +321,10 @@ class SimTask:
                         stat_names.append(stat_name)
                         stat_vals.append(contact_matrix)
                     case 'goal_error':
-                        link_name_to_error = self.goal_errors
-                        stat_names.append(stat_name)
-                        stat_vals.append(link_name_to_error)
+                        pass
+                        # link_name_to_error = self.goal_errors[-1][0]
+                        # stat_names.append(stat_name)
+                        # stat_vals.append(link_name_to_error)
                     case 'spheres':
                         stat_names.append(stat_name)
                         stat_vals.append(spheres) 
@@ -672,11 +656,7 @@ class CbsMp1Task(ManualTask):
                     
         return contact_matrix
     
-    
-                
-        
-    
-        
+            
 class PlanPubSub:
     def __init__(self,
         pub_cfg:dict,
@@ -1403,7 +1383,6 @@ class CumotionPlanner(CuPlanner):
         return None # TODO
 
 
-
 class SimRobot:
     def __init__(self, robot, path:str,visualize_col_spheres:dict,visualize_obj_bound_spheres:dict,visualize_plan:dict,visualize_mpc_ee_rollouts:dict,visualize_col_pred:dict,viz_color:str):
         self.robot = robot
@@ -1967,25 +1946,16 @@ class Stats:
         for stat_name in self.collect_list:
             self.stats[stat_name] = []
         
+
     
-    def to_df(self)->list[pd.DataFrame]:
-        df_list = []
-        
-        contact_history = self.stats["contact"]
-        df_contact = pd.DataFrame(contact_history)
-        df_list.append(df_contact)
-        
-        return df_list
-    
-    def save(self,time_stamp:str,df_first=False):
+    def save(self,time_stamp:str):
         if self.collect and self.should_save:
-            item = self.to_df() if df_first else self.stats
             os.makedirs(self.save_path, exist_ok=True)
             experiment_out_path = os.path.join(self.save_path, time_stamp)
             os.makedirs(experiment_out_path, exist_ok=False) # 
             path = os.path.join(experiment_out_path, f'stats.pkl')
             with open(path, "wb") as f:
-                pickle.dump(item, f)
+                pickle.dump(self.stats, f)
             return self.save_path
         else:
             return 'No stats saved (either collect is False or save is False)'
@@ -1996,11 +1966,8 @@ class Stats:
             print(f"{stat_name} updated at time {t}: {value}")
             
             
-            
 
-
-                
-
+stop_event = Event()                       
 def main():
     
     my_world = World(stage_units_in_meters=1.0)
@@ -2330,15 +2297,16 @@ def main():
                         a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, cu_js, planner.solver, a.base_pose)
 
                     if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
-                        debug_data = a.planner.get_col_pred_debug()
-                        if debug_data is not None:
-                            p_obs, p_own, r_obs, r_own = debug_data
-                            if a.sim_robot.viz_col_pred_own_mean_only:
-                                p_own = p_own.mean(axis=0)
-                            if viz_cpred_own:
-                                pts_debug.append({'points': p_own, 'color': a.sim_robot.viz_col_pred_own_color})
-                            if viz_cpred_obs:
-                                pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
+                        if a.is_plan_publisher() and len(cu_agents) > 1:
+                            debug_data = a.planner.get_col_pred_debug()
+                            if debug_data is not None:
+                                p_obs, p_own, r_obs, r_own = debug_data
+                                if a.sim_robot.viz_col_pred_own_mean_only:
+                                    p_own = p_own.mean(axis=0)
+                                if viz_cpred_own:
+                                    pts_debug.append({'points': p_own, 'color': a.sim_robot.viz_col_pred_own_color})
+                                if viz_cpred_obs:
+                                    pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
                 if len(pts_debug):
                     draw_points(pts_debug)
             
@@ -2360,7 +2328,7 @@ def main():
 
             if stop_simulation:
                 print("Saving stats...")
-                stats_out = sim_task.stats.save(formatted_time, df_first=False)
+                stats_out = sim_task.stats.save(formatted_time)
                 print(f"Stats saved to {stats_out}")
                 simulation_app.close()
                 break
@@ -2438,7 +2406,7 @@ def main():
             plans_lock = Lock() # locking plans board
             sim_lock = Lock() # locking simulator 
             t_lock = Lock() # locking time step index
-            stop_event = Event()  
+            
             debug_lock = Lock()
             goals_lock = Lock()
             
@@ -2503,6 +2471,8 @@ def signal_handler(signum, frame):
     global stop_simulation
     print(f"\nReceived signal {signum} - shutting down gracefully...")
     stop_simulation = True
+    if meta_cfg["async"]:
+        stop_event.set()
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 

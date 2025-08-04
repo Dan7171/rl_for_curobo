@@ -106,34 +106,30 @@ env:
     is_on: False
   
 async: False
-async_type: "step" # "step" or "loop"
+async_type: "loop" # "step" or "loop"
 
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
 
 sim_task:
   # task_type: 'manual' # reach/follow/manual (for debugging)
-  task_type: CBSMP1 # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  task_type: manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
   stats_cfg:
-    collect: True # if True, the stats will be collected and saved to a file
+    collect: False # if True, the stats will be collected and saved to a file
     collect_list: [contact, goal_error, spheres]
     collect_dt: [1,5,3] # save stats every save_stats_dt steps
-    verbose: [True,False,True]
+    verbose: [False,False,False]
     save_path: "projects_root/experiments/out" # path to save the stats
     add_timestep_to_path: True # if True, the timestep will be added to the path of the stats file
-    save: True # if True, the stats will be saved to a file
+    save: False # if True, the stats will be saved to a file
   
   cfg:
-    spacing: 0.1 # 0.25 # 0.15 # 
-    noise: False
-    robot_base_radius: 0.025
-    add_walls: True
-    
+    timeout: 3  
   # cfg:
     
 sim_env:
   cfg:
-    n_obs: 0
+    n_obs: 4
     obj_shape: 'sphere' # type of the obstacle ('cube' or 'sphere')
     max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere
@@ -188,25 +184,13 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   #   is_mobile: True
   #   mobile_base_link_subpath: "/panda_link0"
 
-  - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion 
-    base_pose: [1, 0.0, 0.0, 1, 0, 0, 0]
-    viz_color: 'purple'
-    is_mobile: True
-    mobile_base_link_subpath: "/ee_link"
-    cu_world_wrapper: # curoboworld collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-      
 
 
-  - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+
+  - robot:  curobo/src/curobo/content/configs/robot/franka.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
     base_pose: [0, 1.0, 0.0, 1, 0, 0, 0]
     viz_color: 'orange'
-    is_mobile: True
-    mobile_base_link_subpath: "/ee_link"
     cu_world_wrapper: # curoboworld collision wrapper
       verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
       never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
@@ -244,7 +228,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
     mpc: # mpc related default values (if not specified in the agent)
       mpc_solver_cfg:
-        override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
+        override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
         use_cuda_graph: False 
         step_dt: 0.02
         use_cuda_graph_metrics: True
@@ -255,31 +239,19 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         use_lbfgs: False
         plot_costs: False # for debugging
     
-  - robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion 
-    base_pose: [1, 0.0, 0.0, 1, 0, 0, 0]
-    viz_color: 'purple'
-    is_mobile: True
-    mobile_base_link_subpath: "/ee_link"
-    cu_world_wrapper: # curoboworld collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-      
-
-    # # mpc_solver_cfg:
-    # override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file.yml # projects_root/projects/cfgs_by_robot/franka/mpc_single_arm/particle_mpc.yml
-    # use_cuda_graph: False 
-    # step_dt: 0.03
-    # use_cuda_graph_metrics: True
-    # self_collision_check: False
-    # collision_checker_type: MESH
-    # collision_cache: {"obb": 15, "mesh": 15}h
-    # use_mppi: True
-    # use_lbfgs: False
-    # plot_costs: True # for debugging
+  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: 'mpc' # mpc or cumotion 
+  #   base_pose: [1, 0.0, 0.0, 1, 0, 0, 0]
+  #   viz_color: 'purple'
+  #   cu_world_wrapper: # curoboworld collision wrapper
+  #     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
+  #     never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
+  #     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
   
-batch:
-  # n: [1,31] # at index i set number of instances from agent_cfgs[i]
-  n: [64,0,0] # [16,1,15] # [16,1,15]
-  # base_poses: [] # list of poses for the agents
+  
+
+
+  
+# batch:
+#   n: [64,0] # [16,1,15] # [16,1,15]
+#   # base_poses: [] # list of poses for the agents
