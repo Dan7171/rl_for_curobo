@@ -126,6 +126,7 @@ sim_task:
   cfg:
     wall_dims_hwd: [0.5,0.5,0.05]
     bin_pose: [0,0,0,1,0,0,0]
+    
   # cfg:
     
 sim_env:

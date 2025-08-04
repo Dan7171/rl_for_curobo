@@ -676,6 +676,10 @@ class BinTask(SimTask):
         self.robots_base_pose = base_pose
         self._is_initialized = False
         
+        self.link_name_to_placed_in_bin = [{} for _ in range(len(self.agent_task_cfgs))] # statistics
+        self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] # statistics
+            
+        
 
         # Spawn Bin:
         height, width, depth = wall_dims_hwd
@@ -730,7 +734,7 @@ class BinTask(SimTask):
         self.bin_goal_poses = []
         for quarter_pos in [quarter0_pos, quarter1_pos, quarter2_pos, quarter3_pos]:
             goal_pos = copy(quarter_pos)
-            goal_pos[2] = height + 0.05 
+            goal_pos[2] = height + 0.15 # drop 15 cm above the bin
             goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
             pose = (goal_pos, goal_quat)
             self.bin_goal_poses.append(pose)
@@ -759,36 +763,99 @@ class BinTask(SimTask):
         _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
         if not self._is_initialized:
             self._is_initialized = True
-            self._ee_link_name_to_goal_type = [{} for _ in range(len(self.agent_task_cfgs))]
+            self._link_name_to_goal_type = [{} for _ in range(len(self.agent_task_cfgs))]
             self._goal_types = ['bin', 'agent_back']
+            
+            self._target_name_to_moving_twin_prim = [{} for _ in range(len(self.agent_task_cfgs))] # visual effects
+            self._target_name_to_free_fall_count = [{} for _ in range(len(self.agent_task_cfgs))] # visual effects
+            
             for a_idx in range(len(self.agent_task_cfgs)):
                 for link_name in link_name_to_pose[a_idx]:
                     goal_type = local_rng.choice(self._goal_types)
-                    self._ee_link_name_to_goal_type[a_idx][link_name] = goal_type
+                    self._link_name_to_goal_type[a_idx][link_name] = goal_type
                     if goal_type == 'bin':
                         goal_pose = local_rng.choice(self.bin_goal_poses)
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                     else:
                         _link_name_to_target_pose_np[a_idx][link_name] = self.agent_back_goal_poses[a_idx]
-            
+                        
+
         
         else: # check which agents reached their goal, and update the goal type for them (other agents keep their goal type)
             for a_idx in range(len(self.agent_task_cfgs)):
                 for link_name in link_name_to_pose[a_idx]:
                     err_p, err_q =  errors[a_idx][link_name]
                     print(f"err_p: {err_p}, err_q: {err_q}")
-                    if err_p < 0.05 and err_q < 5: # error of 5 cm in norm (position) and 5 degrees on average per axis (rotation)
-                        cur_goal_type = self._ee_link_name_to_goal_type[a_idx][link_name]
-                        if cur_goal_type == 'bin': # just done with bin goal, so we set it a agent back goal
+                    cur_goal_type = self._link_name_to_goal_type[a_idx][link_name]
+                    target_name = self.name_link_to_target[a_idx][link_name]
+                    twin_exists = target_name in self._target_name_to_moving_twin_prim[a_idx] # target has a carried twin for visual effect
+                    target_prim = self.target_path_to_prim[a_idx][self.target_name_to_path[a_idx][target_name]]
+
+                    reached_goal = err_p < 0.05 and err_q < 5 
+                    if reached_goal: 
+                        if cur_goal_type == 'bin': # agent "placed item" in bin, changing goal to "behind back"
                             goal_pose = self.agent_back_goal_poses[a_idx]
-                            goal_type = 'agent_back'
-                            
-                        else: # just done with agent back goal, so we set it a bin goal (randomly)
+                            goal_type = 'agent_back'    
+                            if link_name not in self.link_name_to_placed_in_bin[a_idx]:
+                                self.link_name_to_placed_in_bin[a_idx][link_name] = 0
+                            self.link_name_to_placed_in_bin[a_idx][link_name] += 1
+
+                            if twin_exists:
+                                twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
+                                # reset target color to original
+                                target_prim.get_applied_visual_material().set_color(twin.get_applied_visual_material().get_color()) # set target to white (to differentiate from the moving twin)                          
+                                
+                                # hide the twin (we just placed the item in the bin, we dont need to render until picked up again)
+                                self._target_name_to_free_fall_count[a_idx][target_name] = 100 # retset to 10 steps to free fall
+                                
+                                
+                        else: # agent picked from behind its back, changing goal to bin
                             goal_pose = local_rng.choice(self.bin_goal_poses)
                             goal_type = 'bin'
+                            if link_name not in self.link_name_to_picked_from_back[a_idx]:
+                                self.link_name_to_picked_from_back[a_idx][link_name] = 0
+                            self.link_name_to_picked_from_back[a_idx][link_name] += 1
+                            
+                            if twin_exists: # if twin exists
+                                # show the twin (carried item)
+                                twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
+                                twin.set_visibility(True)
+                                # set target color to white (to differentiate from the moving twin)
+                                original_color_darker = twin.get_applied_visual_material().get_color()/4
+                                # set target (around bin) color to original color but darker
+                                target_prim.get_applied_visual_material().set_color(original_color_darker)                           
+
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
-                        self._ee_link_name_to_goal_type[a_idx][link_name] = goal_type
-        
+                        self._link_name_to_goal_type[a_idx][link_name] = goal_type
+                    
+                    else: # not yet in goal (still moving)
+                        if cur_goal_type == 'bin': # carrying item to bin
+                            target_path = self.target_name_to_path[a_idx][target_name]
+                            target_prim = self.target_path_to_prim[a_idx][target_path]
+                            link_pos, link_quat = link_name_to_pose[a_idx][link_name]                            
+                            if target_name not in self._target_name_to_moving_twin_prim[a_idx]: # only once
+                                target_vis_material = target_prim.get_applied_visual_material()
+                                self._target_name_to_moving_twin_prim[a_idx][target_name] = cuboid.VisualCuboid(target_path + "_moving", position=link_pos, orientation=link_quat, color=target_vis_material.get_color(), size=target_prim.get_size())
+                            else: # let the item create the illusion of picked and moves with the link
+                                self._target_name_to_moving_twin_prim[a_idx][target_name].set_world_pose(position=link_pos, orientation=link_quat)
+                        
+                        # visual free fall for placed item if needed:
+                        if target_name in self._target_name_to_free_fall_count[a_idx]:
+                            if self._target_name_to_free_fall_count[a_idx][target_name] > 0: 
+                                if twin_exists:
+                                    twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
+                                    # update the twin position (free fall)
+                                    twin_p, twin_q = twin.get_world_pose()
+                                    twin_p[2] -= 0.005
+                                    self._target_name_to_moving_twin_prim[a_idx][target_name].set_world_pose(position=twin_p, orientation=twin_q)
+                                    
+                                    # if falling for too long, hide the twin
+                                    self._target_name_to_free_fall_count[a_idx][target_name] -= 1
+                                    if self._target_name_to_free_fall_count[a_idx][target_name] == 0:
+                                        twin.set_visibility(False)
+                                    
+
+
         # update the targets in sim
         self._set_targets_world_pose(_link_name_to_target_pose_np)
         return _link_name_to_target_pose_np
