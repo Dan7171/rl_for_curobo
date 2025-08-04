@@ -113,7 +113,7 @@ pose_utils:
 
 sim_task:
   # task_type: 'manual' # reach/follow/manual (for debugging)
-  task_type: manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  task_type: bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
   stats_cfg:
     collect: False # if True, the stats will be collected and saved to a file
     collect_list: [contact, goal_error, spheres]
@@ -124,7 +124,8 @@ sim_task:
     save: False # if True, the stats will be saved to a file
   
   cfg:
-    timeout: 3  
+    wall_dims_hwd: [0.5,0.5,0.05]
+    bin_pose: [0,0,0,1,0,0,0]
   # cfg:
     
 sim_env:

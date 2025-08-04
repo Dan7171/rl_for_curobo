@@ -121,6 +121,33 @@ class PoseUtils:
         ans.append(sphere_center[2] + z_delta)
         return ans
 
+    def rotate_quat(self, q_in:Union[np.ndarray, list[float]], euler_deg:Union[np.ndarray, list[float]],q_in_wxyz:bool=True, q_out_wxyz:bool=True)->list[float]:
+        # q_in: scalar-first (wxyz)
+        # euler_deg: rotation to apply, in degrees (xyz)
+
+        # Convert input quaternion to scalar-last for scipy
+        if q_in_wxyz: # q_orig is wxyz
+            q_in_scipy = [q_in[1], q_in[2], q_in[3], q_in[0]]
+        else: # q_in is xyzw
+            q_in_scipy = q_in
+            
+        r_in = R.from_quat(q_in_scipy)
+
+        # Create rotation from Euler angles (in degrees)
+        # Default order is 'xyz', change if needed (e.g., 'zyx', 'xyz', etc.)
+        r_delta = R.from_euler('xyz', euler_deg, degrees=True)
+
+        # Apply the new rotation
+        r_new = r_delta * r_in  # r_delta is applied first
+
+        # Convert result back to scalar-first
+        q_new = r_new.as_quat()   # [x, y, z, w]
+        if q_out_wxyz: # return wxyz format
+            q_out = [q_new[3], q_new[0], q_new[1], q_new[2]]
+        else: # return xyzw format
+            q_out = q_new
+        return q_out
+    
 class Plan:
     def __init__(self, cmd_idx=0, cmd_plan:Optional[JointState]=None):
         self.cmd_idx = cmd_idx
@@ -574,14 +601,10 @@ class CbsMp1Task(ManualTask):
             _link_name_to_target_pose = [{} for _ in range(len(self.goal_poses))]
             for a_idx in range(len(errors)):
                 for link_name in errors[a_idx].keys():
-                    # p_err, q_err = errors[a_idx][link_name]
-                    # target_name = self.name_link_to_target[a_idx][link_name]
-                    # p_target, q_target = [(a_idx + 1), 0, 0], [1,0,0,0]
                     p_target, q_target = self.goal_poses[a_idx][:3], self.goal_poses[a_idx][3:]
                     _link_name_to_target_pose[a_idx][link_name] = (np.array(p_target), np.array(q_target))
                     self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
-                    # print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
-                    # print(f'p_target: {p_target}, q_target: {q_target}')
+
             self._set_targets_world_pose(_link_name_to_target_pose)
         return None
 
@@ -602,13 +625,7 @@ class CbsMp1Task(ManualTask):
             
             s.append(start_pos)
         return s
-        # for a_idx in range(n_agents):
-        #     d = (a_idx+1) * space_meters
-        #     if a_idx <= n_agents // 2:
-        #         s.append([d,0,0])
-        #     else:
-        #         s.append([0,d,0])
-        # return s
+
     @staticmethod
     def get_agents_goal_positions(start_positions,grid_step_size=1):
         """
@@ -623,21 +640,6 @@ class CbsMp1Task(ManualTask):
             else: # x = 0
                 g.append([d_final, sp[1], 0]) # going from x = 0 to x = d_final
         return g
-        # grid_dim_len = np.ceil(len(start_positions)/2)
-        # target_dist = grid_step_size * (grid_dim_len+1)
-        # g = []
-        
-        # for sp in start_positions:
-        #     start_x = sp[0]
-        #     start_y = sp[1]
-        #     if start_y == 0:
-        #         g.append([start_x, target_dist,0])
-        #     else:
-        #         g.append([target_dist, start_y, 0])
-        # return g
-    
-    # def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
-    #     return None # no need to update targets in sim, targets are fixed in this task
  
     def check_contact(self)->list[list[int]]:
         eps = 0.01
@@ -655,8 +657,63 @@ class CbsMp1Task(ManualTask):
                     contact_matrix[j].append(i)
                     
         return contact_matrix
+class BinTask(SimTask):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0]):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
+        self.pose_utils = pose_utils
+        height, width, depth = wall_dims_hwd
+        bin_pos = np.array(bin_pose[:3])
+        dim0_step_size = width/2 +depth/2
+        dim1_step_size = width/2 +depth/2
+        dim2_step_size = height/2
+        
+        out_wall0_pos = bin_pos + np.array([0,dim1_step_size,dim2_step_size])
+        out_wall1_pos = bin_pos + np.array([dim0_step_size,0,dim2_step_size])
+        out_wall2_pos = bin_pos + np.array([0,-dim1_step_size,dim2_step_size])
+        out_wall3_pos = bin_pos + np.array([-dim0_step_size,0,dim2_step_size])
+        out_wall_scale = np.array([width,depth,height])
+        in_wall_scale = np.array([width,depth/2,height])
+        
+        # internal  bin walls:
+        in_wall_pos = bin_pos + np.array([0,0,dim2_step_size])
+         
+        rotated_walls_quat = self.pose_utils.rotate_quat(bin_pose[3:], [0,0,90], q_in_wxyz=True, q_out_wxyz=True)
+        out_wall_1_quat = rotated_walls_quat
+        out_wall_3_quat = rotated_walls_quat
+        in_wall_1_quat = rotated_walls_quat
+        root_stage = '/World/SpawnedObs/Bin'
+        color = np.array([0.2, 0.2, 0.2])
+
     
-            
+        out_wall0 = FixedCuboid(prim_path=f"{root_stage}/Out0", 
+                            color=color,position=out_wall0_pos, scale=out_wall_scale)
+        out_wall1 = FixedCuboid(prim_path=f"{root_stage}/Out1", 
+                            color=color,position=out_wall1_pos,orientation=out_wall_1_quat, scale=out_wall_scale)
+        out_wall2 = FixedCuboid(prim_path=f"{root_stage}/Out2", 
+                            color=color,position=out_wall2_pos, scale=out_wall_scale)
+        out_wall3 = FixedCuboid(prim_path=f"{root_stage}/Out3", 
+                            color=color,position=out_wall3_pos, orientation=out_wall_3_quat, scale=out_wall_scale)
+        
+        in_wall0 = FixedCuboid(prim_path=f"{root_stage}/In0", 
+                            color=color,position=in_wall_pos, scale=in_wall_scale)
+        in_wall1 = FixedCuboid(prim_path=f"{root_stage}/In1", 
+                            color=color,position=in_wall_pos, orientation=in_wall_1_quat, scale=in_wall_scale)
+        
+        
+        
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+        # if not self._is_initialized:
+        #     self._is_initialized = True
+        #     _link_name_to_target_pose = [{} for _ in range(len(self.goal_poses))]
+        #     for a_idx in range(len(errors)):
+        #         for link_name in errors[a_idx].keys():
+        #             p_target, q_target = self.goal_poses[a_idx][:3], self.goal_poses[a_idx][3:]
+        #             _link_name_to_target_pose[a_idx][link_name] = (np.array(p_target), np.array(q_target))
+        #             self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
+
+        #     self._set_targets_world_pose(_link_name_to_target_pose)
+        return None
+
 class PlanPubSub:
     def __init__(self,
         pub_cfg:dict,
@@ -2140,6 +2197,8 @@ def main():
             sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils, **meta_cfg["sim_task"]["cfg"])
         elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
             sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,base_pose,**meta_cfg["sim_task"]["cfg"])
+        elif sim_task_type == 'bin':
+            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils, **meta_cfg["sim_task"]["cfg"])
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 
