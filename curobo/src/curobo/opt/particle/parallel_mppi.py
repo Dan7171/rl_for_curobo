@@ -194,7 +194,8 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
         return w
 
     def _exp_util_from_costs(self, costs):
-        w = jit_calculate_exp_util_from_costs(costs, self.gamma_seq, self.beta)
+        col_mask = getattr(self.rollout_fn, 'current_collision_mask', None)
+        w = jit_calculate_exp_util_from_costs(costs, self.gamma_seq, self.beta, col_mask)
         return w
 
     def _compute_mean(self, w, actions):
@@ -687,9 +688,34 @@ def jit_calculate_exp_util(beta: float, total_costs):
 
 
 @get_torch_jit_decorator()
-def jit_calculate_exp_util_from_costs(costs, gamma_seq, beta: float):
+def jit_calculate_exp_util_from_costs(costs, gamma_seq, beta: float, col_mask:Optional[torch.Tensor]=None):
+    
+    # discounted costs (by gamma)
     cost_seq = gamma_seq * costs
-    cost_seq = torch.sum(cost_seq, dim=-1, keepdim=False) / gamma_seq[..., 0]
+    cost_seq = torch.sum(cost_seq, dim=-1, keepdim=False) / gamma_seq[..., 0] #[B x Nrollouts] discounted cost sum over horizon and mean across particles
+
+    if col_mask is not None: # Upper bound mode
+        # print("DEBUG: Upper bound mode")
+        cfree_rollout_mask = (torch.sum(col_mask, dim=-1) == 0).unsqueeze(0) # 1 where no collision in rollout, 0 elsewhere
+        col_rollout_mask = (torch.sum(col_mask, dim=-1) > 0).unsqueeze(0) # 1 where collision in rollout, 0 elsewhere
+        cfree_rollouts = cost_seq[cfree_rollout_mask]
+        col_rollouts = cost_seq[col_rollout_mask]
+        if len(cfree_rollouts) > 0:
+            max_cfree_cost = torch.max(cfree_rollouts)
+        else:
+            max_cfree_cost = torch.tensor(0.0)
+        if len(col_rollouts) > 0:
+            min_col_cost = torch.min(col_rollouts)
+        else:
+            min_col_cost = torch.tensor(0.0)
+
+        if len(cfree_rollouts) > 0 and len(col_rollouts) > 0:
+            print(f"DEBUG: max_cfree_cost: {max_cfree_cost}, min_col_cost: {min_col_cost}")
+            k = torch.max(torch.tensor(0.0), max_cfree_cost - min_col_cost) + 1e-6
+            print(f"DEBUG adding k: {k} to col rollouts: (N_col_rollouts: {len(col_rollouts)}), N_cfree_rollouts: {len(cfree_rollouts)}")
+            cost_seq = cost_seq[col_rollout_mask] + k # add k to col rollouts to make them larger than col free rollouts
+        
+    
     w = torch.softmax((-1.0 / beta) * cost_seq, dim=-1)
     return w
 
