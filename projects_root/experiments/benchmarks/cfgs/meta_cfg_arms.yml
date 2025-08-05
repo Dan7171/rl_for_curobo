@@ -104,7 +104,7 @@ env:
     is_on: False
   
 async: False
-async_type: "loop" # "step" or "loop"
+async_type: "step" # "step" or "loop"
 
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
@@ -143,7 +143,6 @@ sim_env:
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
 
-
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: 'mpc' # mpc or cumotion 
     base_pose: [0.5, 0.0, 0.0,0,0,180.0]
@@ -165,7 +164,6 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         is_on: False
         ts_delta: 2 # int
         
-
       visualize_plan: # visualize the planned trajectory of the robot (for debugging)
         is_on: False
         color: 'green'
