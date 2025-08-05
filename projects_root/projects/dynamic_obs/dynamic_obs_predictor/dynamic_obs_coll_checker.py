@@ -31,6 +31,7 @@ class DynamicObsCollPredictor:
     
 
     def __init__(self, 
+                 cost_mode:str,
                  tensor_args, 
                  H=30, 
                  n_rollouts=400, 
@@ -57,7 +58,7 @@ class DynamicObsCollPredictor:
             col_with_idx_map: Dictionary mapping robot IDs to their index ranges in the concatenated obstacle tensor
             """
         
-
+        self.cost_mode = cost_mode # normal/upper_bound
         self.X = X # the pose (x y z qw qx qy qz) of the robot in the world frame
         self.tensor_args = tensor_args 
         self.H = H
@@ -310,7 +311,7 @@ class DynamicObsCollPredictor:
         # Subtract radius sums to get surface-to-surface distance
         self.pairwise_surface_dist_buf.sub_(self.pairwise_radsum_broadcast)
         
-        
+        # << NEW LOGIC >>
         # make a mxn matrix where for each rollout i<m time step (sparsed) j<n where element i,j is the minimal distance between 
         # any sphere of the robot and any sphere of the obstacle
         min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
@@ -325,11 +326,14 @@ class DynamicObsCollPredictor:
         # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
         margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
         
-        # Mask out the cost where collision distance >  safety margin
-        self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
+        if self.cost_mode == 'upper_bound':
+            self.tmp_cost_mat_buf_sparse = margin_mask
+        else: # normal mode
+            # Mask out the cost where collision distance >  safety margin
+            self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
 
 
-        
+        # << OLD LOGIC >>
         # # Check collision condition and count violations
         # # Using lt_ for in-place comparison, then sum to count violations
         # collision_mask = self.pairwise_surface_dist_buf.lt_(self.safety_margin)
@@ -338,12 +342,13 @@ class DynamicObsCollPredictor:
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
         
-        # Apply cost weight
-        self.cost_mat_buf.mul_(self.cost_weight)
+        if self.cost_mode == 'normal':
+            # Apply cost weight
+            self.cost_mat_buf.mul_(self.cost_weight)
 
-        # set upper bound to 10_000 to avoid numerical issues        
-        self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
-        
+            # set upper bound to 10_000 to avoid numerical issues        
+            self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
+            
         return self.cost_mat_buf
 
     def update_robot_spheres(self, robot_id: int, p_robot_spheres: torch.Tensor):

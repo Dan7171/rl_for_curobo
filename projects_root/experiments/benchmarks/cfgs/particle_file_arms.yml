@@ -79,6 +79,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
+        cost_mode: upper_bound # normal/upper_bound
         weight: 500.0  # 100  
         terminal: False
         safety_margin: 0.15
@@ -90,7 +91,6 @@ cost:
         sparse_steps:
           use: False
           ratio: 0.2
-        
         sparse_spheres:
           use: True
 

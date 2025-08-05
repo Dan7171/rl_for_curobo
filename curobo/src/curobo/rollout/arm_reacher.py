@@ -406,12 +406,19 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 
                 # Set priorities using dynamic obs cost
                 modified_dyn_obs_cost = False
+                apply_upper_bound = False
+                # col_rollouts = None
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
-                    if self._custom_arm_base_costs['dynamic_obs_cost'].prior_rule != 'none':
-                        dyn_cost = self._custom_arm_base_costs['dynamic_obs_cost']
+                    dyn_cost = self._custom_arm_base_costs['dynamic_obs_cost']
+
+                    if dyn_cost.cost_mode == 'upper_bound': # THEORY BASED WAY
+                        apply_upper_bound = True
+                        # safety_violation_mask = cost_dict['dynamic_obs_cost'] # in this mode, the returned value is not the cost yet but 1 at entries i,j where there is a safety violation (i.e some sphere of the agent is too close (distance under the safety margin) to a sphere of other agent)
+                        # col_rollouts = torch.sum(safety_violation_mask, dim=1) > 0 # rows where there is at least one safety violation
+                        # col_free_rollouts = torch.sum(safety_violation_mask, dim=1) == 0 # rows where there is no safety violation
+                        
+                    elif dyn_cost.cost_mode == 'normal' and dyn_cost.prior_rule != 'none': # MODIFY COST FOR PRIORITIZATION BETWEEN AGENTS                      
                         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
-                        
-                        
                         robot_id = dyn_cost.robot_id
                         robot_context = get_topics().get_default_env()[robot_id]
                         if dyn_cost.prior_rule == 'random':
@@ -536,35 +543,15 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         custom_cost = cost_instance.forward(state)
                         # cost_list.append(custom_cost)
                         cost_dict[cost_name] = custom_cost
-                        # try:
-                        #     custom_cost = cost_instance.forward(state)
-                        #     cost_list.append(custom_cost)
-                        # except Exception as e:
-                        #     log_error(f"Error computing custom arm_reacher cost {cost_name}: {e}")
         
-        # Add live plotting support for ArmReacher - plot all costs in one comprehensive view
+        # Now that we have collected all costs from all cost terms (arm reacher and arm base),
+        # We can apply the upper bound logic for the dynamic obs cost if needed
+        if apply_upper_bound:
+            safety_violation_mask = cost_dict['dynamic_obs_cost'] # in this mode, the returned value is not the cost yet but 1 at entries i,j where there is a safety violation (i.e some sphere of the agent is too close (distance under the safety margin) to a sphere of other agent)
+            cost_dict.pop('dynamic_obs_cost') # we remove it because its not a real cost term in the upper_bound mode, but just a marker for the upper bound logic marking the unsafe rollouts
+            self.current_collision_mask = safety_violation_mask
+            
 
-
-        # spectral_concentration_score = 0.0
-        # entropy_score = 0.0
-        # # if not hasattr(self, 'last_total_costs'):
-        # #     self.last_total_costs = [cat_sum_reacher(list(cost_dict.values()))]
-        # # else:
-        #     # self.last_total_costs.append(cat_sum_reacher(list(cost_dict.values())))
-        #     # if len(self.last_total_costs) > 100:
-        #     #     self.last_total_costs.pop(0)
-        
-        #     #     last_total_cost = cat_sum_reacher(self.last_total_costs)
-        #     #     X = np.fft.fft(last_total_cost.cpu().numpy())
-        #     #     power_spectrum = np.abs(X)**2
-        #     #     power_spectrum[0] = 0 # remove DC component
-        #     #     power_spectrum /= np.sum(power_spectrum) # normalize
-        #     #     spectral_concentration_score = np.max(power_spectrum)
-
-        #     #     entropy = -np.sum(power_spectrum * np.log2(power_spectrum + 1e-12))  # Avoid log(0)
-        #     #     max_entropy = np.log2(len(power_spectrum))
-        #     #     entropy_score = 1 - (entropy / max_entropy)
-                
 
         if getattr(self, '_enable_live_plotting', False):
             dict_to_plot =  {'total': cat_sum_reacher(list(cost_dict.values()))}
@@ -582,11 +569,16 @@ class ArmReacher(ArmBase, ArmReacherConfig):
 
         
         cost_list = list(cost_dict.values())
-        with profiler.record_function("cat_sum"):
-            if self.sum_horizon:
-                cost = cat_sum_horizon_reacher(cost_list)
-            else:
-                cost = cat_sum_reacher(cost_list)
+        if self.sum_horizon:
+            cost = cat_sum_horizon_reacher(cost_list)
+        else:
+            cost = cat_sum_reacher(cost_list)
+    
+        # we'll know fin the max cost over the safe rollouts:
+        
+        # first we get the total cost for each rollout
+        cost_sum = torch.sum(cost, dim=1)
+
 
         return cost
 

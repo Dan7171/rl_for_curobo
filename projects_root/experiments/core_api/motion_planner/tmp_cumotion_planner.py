@@ -2522,9 +2522,10 @@ def main():
     _ = simulation_startup(simulation_app, my_world, cu_agents)
     
     # start stats
+    
     for a in cu_agents:
         a.stats.start()    
-    sim_stats = SimStats(verbosity=True,collect_dt=1)
+    sim_stats = SimStats(**meta_cfg["sim_stats"])
     sim_stats.start(my_world.current_time)
     lw = sim_stats.loop_iter_watch # control loop watch
     
