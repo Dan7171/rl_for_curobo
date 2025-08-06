@@ -79,7 +79,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        cost_mode: upper_bound # normal/upper_bound
+        a_select_mode: col_free  # normal/col_free
         weight: 500.0  # 100  
         terminal: False
         safety_margin: 0.15
@@ -103,7 +103,7 @@ mppi:
   cold_start_n_iters: 5
   step_size_mean    : 0.9
   step_size_cov     : 0.01
-  beta              : 0.1
+  beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
   num_particles     : 400 #10000
   update_cov        : True

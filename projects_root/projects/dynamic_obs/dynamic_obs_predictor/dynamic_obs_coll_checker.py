@@ -31,7 +31,7 @@ class DynamicObsCollPredictor:
     
 
     def __init__(self, 
-                 cost_mode:str,
+                 a_select_mode:str,
                  tensor_args, 
                  H=30, 
                  n_rollouts=400, 
@@ -58,7 +58,7 @@ class DynamicObsCollPredictor:
             col_with_idx_map: Dictionary mapping robot IDs to their index ranges in the concatenated obstacle tensor
             """
         
-        self.cost_mode = cost_mode # normal/upper_bound
+        self.a_select_mode = a_select_mode # normal/col_free
         self.X = X # the pose (x y z qw qx qy qz) of the robot in the world frame
         self.tensor_args = tensor_args 
         self.H = H
@@ -326,11 +326,10 @@ class DynamicObsCollPredictor:
         # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
         margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
         
-        if self.cost_mode == 'upper_bound':
-            self.tmp_cost_mat_buf_sparse = margin_mask
-        else: # normal mode
-            # Mask out the cost where collision distance >  safety margin
-            self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
+
+
+        # Mask out the cost where collision distance >  safety margin
+        self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
 
 
         # << OLD LOGIC >>
@@ -342,13 +341,13 @@ class DynamicObsCollPredictor:
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
         
-        if self.cost_mode == 'normal':
-            # Apply cost weight
-            self.cost_mat_buf.mul_(self.cost_weight)
 
-            # set upper bound to 10_000 to avoid numerical issues        
-            self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
-            
+        # Apply cost weight
+        self.cost_mat_buf.mul_(self.cost_weight)
+
+        # set upper bound to 10_000 to avoid numerical issues        
+        self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
+        
         return self.cost_mat_buf
 
     def update_robot_spheres(self, robot_id: int, p_robot_spheres: torch.Tensor):

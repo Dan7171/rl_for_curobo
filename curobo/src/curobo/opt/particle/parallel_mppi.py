@@ -194,8 +194,8 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
         return w
 
     def _exp_util_from_costs(self, costs):
-        col_mask = getattr(self.rollout_fn, 'current_collision_mask', None)
-        w = jit_calculate_exp_util_from_costs(costs, self.gamma_seq, self.beta, col_mask)
+        # col_mask = getattr(self.rollout_fn, 'current_collision_mask', None)
+        w = jit_calculate_exp_util_from_costs(costs, self.gamma_seq, self.beta) #, col_mask)
         return w
 
     def _compute_mean(self, w, actions):
@@ -300,8 +300,32 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
             # Update best action
             if self.sample_mode == SampleMode.BEST:
                 w = self._exp_util_from_costs(costs)
-                best_idx = torch.argmax(w, dim=-1)
+                col_mask = getattr(self.rollout_fn, 'current_collision_mask', None)
+                a_selected_from_cfree = False
+                if col_mask is not None:
+                        
+                    #[B x Nrollouts] discounted cost sum over horizon and mean across particles (normally b = 1)
+                  
+                    cfree_rollout_mask = (torch.sum(col_mask, dim=-1) == 0).unsqueeze(0) # 1 where no collision in rollout, 0 elsewhere
+                    cfree_w = w[cfree_rollout_mask]
+                    if len(cfree_w) > 0:
+                        best_idx = torch.argmax(cfree_w, dim=-1)
+                        a_selected_from_cfree = True
+
+                    # # print(f'DEBUG: len(cfree_rollouts): {len(cfree_rollouts)}, len(col_rollouts): {len(col_rollouts)}')
+                    # if len(cfree_rollouts) > 0 and len(col_rollouts) > 0:
+                    #     max_cfree_cost = torch.max(cfree_rollouts)
+                    #     min_col_cost = torch.min(col_rollouts)
+                    #     # print(f"DEBUG: max_cfree_cost: {max_cfree_cost}, min_col_cost: {min_col_cost}")
+                    #     k = torch.max(torch.tensor(0.0), max_cfree_cost - min_col_cost) + 1000 
+                    #     # print(f"DEBUG adding k: {k} to col rollouts: (N_col_rollouts: {len(col_rollouts)}), N_cfree_rollouts: {len(cfree_rollouts)}")
+                    #     cost_seq[col_rollout_mask] = cost_seq[col_rollout_mask] + k # add k to col rollouts to make them larger than col free rollouts
+                        
+                if not a_selected_from_cfree:
+                    best_idx = torch.argmax(w, dim=-1)
                 self.best_traj.copy_(actions[self.problem_col, best_idx])
+                print(f"DEBUG: best idx: {best_idx}, min w: {w.min()}, max w: {w.max()}, sum w: {w.sum()}")
+        
         with profiler.record_function("mppi/store_rollouts"):
 
             if self.store_rollouts and self.visual_traj is not None:
@@ -687,34 +711,29 @@ def jit_calculate_exp_util(beta: float, total_costs):
     return w
 
 
-@get_torch_jit_decorator()
-def jit_calculate_exp_util_from_costs(costs, gamma_seq, beta: float, col_mask:Optional[torch.Tensor]=None):
+# @get_torch_jit_decorator()
+def jit_calculate_exp_util_from_costs(costs, gamma_seq, beta: float): #, col_mask:Optional[torch.Tensor]=None):
     
     # discounted costs (by gamma)
     cost_seq = gamma_seq * costs
     cost_seq = torch.sum(cost_seq, dim=-1, keepdim=False) / gamma_seq[..., 0] #[B x Nrollouts] discounted cost sum over horizon and mean across particles
 
-    if col_mask is not None: # Upper bound mode
-        # print("DEBUG: Upper bound mode")
-        cfree_rollout_mask = (torch.sum(col_mask, dim=-1) == 0).unsqueeze(0) # 1 where no collision in rollout, 0 elsewhere
-        col_rollout_mask = (torch.sum(col_mask, dim=-1) > 0).unsqueeze(0) # 1 where collision in rollout, 0 elsewhere
-        cfree_rollouts = cost_seq[cfree_rollout_mask]
-        col_rollouts = cost_seq[col_rollout_mask]
-        if len(cfree_rollouts) > 0:
-            max_cfree_cost = torch.max(cfree_rollouts)
-        else:
-            max_cfree_cost = torch.tensor(0.0)
-        if len(col_rollouts) > 0:
-            min_col_cost = torch.min(col_rollouts)
-        else:
-            min_col_cost = torch.tensor(0.0)
-
-        if len(cfree_rollouts) > 0 and len(col_rollouts) > 0:
-            print(f"DEBUG: max_cfree_cost: {max_cfree_cost}, min_col_cost: {min_col_cost}")
-            k = torch.max(torch.tensor(0.0), max_cfree_cost - min_col_cost) + 1e-6
-            print(f"DEBUG adding k: {k} to col rollouts: (N_col_rollouts: {len(col_rollouts)}), N_cfree_rollouts: {len(cfree_rollouts)}")
-            cost_seq = cost_seq[col_rollout_mask] + k # add k to col rollouts to make them larger than col free rollouts
+    # if col_mask is not None: # Upper bound mode
+    #     # print("DEBUG: Upper bound mode")
+    #     cfree_rollout_mask = (torch.sum(col_mask, dim=-1) == 0).unsqueeze(0) # 1 where no collision in rollout, 0 elsewhere
+    #     col_rollout_mask = (torch.sum(col_mask, dim=-1) > 0).unsqueeze(0) # 1 where collision in rollout, 0 elsewhere
+    #     cfree_rollouts = cost_seq[cfree_rollout_mask]
+    #     col_rollouts = cost_seq[col_rollout_mask]
         
+    #     # print(f'DEBUG: len(cfree_rollouts): {len(cfree_rollouts)}, len(col_rollouts): {len(col_rollouts)}')
+    #     if len(cfree_rollouts) > 0 and len(col_rollouts) > 0:
+    #         max_cfree_cost = torch.max(cfree_rollouts)
+    #         min_col_cost = torch.min(col_rollouts)
+    #         # print(f"DEBUG: max_cfree_cost: {max_cfree_cost}, min_col_cost: {min_col_cost}")
+    #         k = torch.max(torch.tensor(0.0), max_cfree_cost - min_col_cost) + 1000 
+    #         # print(f"DEBUG adding k: {k} to col rollouts: (N_col_rollouts: {len(col_rollouts)}), N_cfree_rollouts: {len(cfree_rollouts)}")
+    #         cost_seq[col_rollout_mask] = cost_seq[col_rollout_mask] + k # add k to col rollouts to make them larger than col free rollouts
+            
     
     w = torch.softmax((-1.0 / beta) * cost_seq, dim=-1)
     return w

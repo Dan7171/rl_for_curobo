@@ -15,7 +15,7 @@ from curobo.util_file import load_yaml
 @dataclass
 class DynamicObsCostConfig(CostConfig):
     """Configuration for dynamic obstacle collision cost."""
-    cost_mode: str = "normal" # normal/upper_bound
+    a_select_mode: str = "normal" # normal/col_free
     weight: float = 100.0    
     sparse_steps: dict = field(default_factory=lambda: {'use': False, 'ratio': 0.5})
     sparse_spheres: dict = field(default_factory=lambda: {'use': False})
@@ -25,7 +25,7 @@ class DynamicObsCostConfig(CostConfig):
     prior_rot_err_impact_angle: float = 180 # if ee error is >= this, then the dynamic obs cost is not affected by the pose cost
     prior_pos_to_rot_ratio: float = 0.9 # If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.
     safety_margin: float = 0.1
-    assert cost_mode in ["normal", "upper_bound"], "Invalid cost mode"
+    assert a_select_mode in ["normal", "col_free"], "Invalid action selection mode"
     assert prior_rot_err_impact_angle >= 0 and prior_rot_err_impact_angle <= 180, "Rotation error affection angle must be between 0 and 180"
     assert prior_p_err_impact_rad >= 0 , "Position error affection radius must be positive (its recommended to set it small, like 0.3 or below)"
     assert prior_rule in ["none", "pose", "random"], "Invalid prioritization rule"
@@ -174,7 +174,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 current_idx += n_valid_other
         
         self.col_pred = DynamicObsCollPredictor(
-            self.cost_mode,
+            self.a_select_mode,
             self.tensor_args, 
             horizon, 
             n_rollouts, 

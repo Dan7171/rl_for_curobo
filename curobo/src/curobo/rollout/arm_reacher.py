@@ -406,18 +406,13 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 
                 # Set priorities using dynamic obs cost
                 modified_dyn_obs_cost = False
-                apply_upper_bound = False
+                #apply_upper_bound = False
                 # col_rollouts = None
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
                     dyn_cost = self._custom_arm_base_costs['dynamic_obs_cost']
 
-                    if dyn_cost.cost_mode == 'upper_bound': # THEORY BASED WAY
-                        apply_upper_bound = True
-                        # safety_violation_mask = cost_dict['dynamic_obs_cost'] # in this mode, the returned value is not the cost yet but 1 at entries i,j where there is a safety violation (i.e some sphere of the agent is too close (distance under the safety margin) to a sphere of other agent)
-                        # col_rollouts = torch.sum(safety_violation_mask, dim=1) > 0 # rows where there is at least one safety violation
-                        # col_free_rollouts = torch.sum(safety_violation_mask, dim=1) == 0 # rows where there is no safety violation
-                        
-                    elif dyn_cost.cost_mode == 'normal' and dyn_cost.prior_rule != 'none': # MODIFY COST FOR PRIORITIZATION BETWEEN AGENTS                      
+
+                    if dyn_cost.prior_rule != 'none': # MODIFY COST FOR PRIORITIZATION BETWEEN AGENTS                      
                         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
                         robot_id = dyn_cost.robot_id
                         robot_context = get_topics().get_default_env()[robot_id]
@@ -471,6 +466,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                 # cost_dict['dynamic_obs_cost'] = torch.max(cost_dict['dynamic_obs_cost'], torch.ones_like(cost_dict['dynamic_obs_cost']) * 10_000)
                                 modified_dyn_obs_cost = True
                       
+                    if dyn_cost.a_select_mode == 'col_free': # THEORY BASED WAY
+                        self.current_collision_mask = cost_dict['dynamic_obs_cost'] # safety_violation_mask
 
 
         with profiler.record_function("cost/link_poses"):
@@ -544,13 +541,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         # cost_list.append(custom_cost)
                         cost_dict[cost_name] = custom_cost
         
-        # Now that we have collected all costs from all cost terms (arm reacher and arm base),
-        # We can apply the upper bound logic for the dynamic obs cost if needed
-        if apply_upper_bound:
-            safety_violation_mask = cost_dict['dynamic_obs_cost'] # in this mode, the returned value is not the cost yet but 1 at entries i,j where there is a safety violation (i.e some sphere of the agent is too close (distance under the safety margin) to a sphere of other agent)
-            cost_dict.pop('dynamic_obs_cost') # we remove it because its not a real cost term in the upper_bound mode, but just a marker for the upper bound logic marking the unsafe rollouts
-            self.current_collision_mask = safety_violation_mask
-            
+
 
 
         if getattr(self, '_enable_live_plotting', False):
