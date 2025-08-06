@@ -1,5 +1,5 @@
 # meta config
-meta_cfg_path= 'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
+meta_cfg_path= "projects_root/experiments/benchmarks/cfgs/meta_cfg_arms_storm_cent.yml" #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
 from curobo.util_file import load_yaml
 meta_cfg = load_yaml(meta_cfg_path)
 
