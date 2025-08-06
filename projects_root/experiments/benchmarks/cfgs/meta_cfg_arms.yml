@@ -77,7 +77,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
 
   plan_pub_sub: # default values for publishing and subscribing to plans (if not specified by the agent)
     pub:
-      is_on: True # meaning agent is publishing plans (so they can be used by other agents). If false, plan will be just the current state of the robot.
+      is_on: False # meaning agent is publishing plans (so they can be used by other agents). If false, plan will be just the current state of the robot.
       dt: 1 # agent will publish plans every pub_dt steps or seconds
       is_dt_in_sec: False # if True, dt is in seconds, if False, pub_dt is in steps
       pr: 1.0 # probability of publishing the plans (0.0 to 1.0) *when* dt is reached.
@@ -141,17 +141,16 @@ sim_env:
     obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
 
 sim_stats: 
-  collect_dt: 1
+  collect_dt: 25
   verbosity: True
 
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
 
   - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion 
+    planner: cumotion # 'mpc' # mpc or cumotion 
     base_pose: [0.5, 0.0, 0.0,0,0,180.0]
     retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-    # retract_cfg: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     viz_color: 'orange'
     cu_world_wrapper: # curoboworld collision wrapper
       verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
@@ -187,15 +186,15 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
         
         ts_delta: 1 # int
 
-  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: 'mpc' # mpc or cumotion 
-    base_pose: [-0.5, 0.0, 0.0, 1, 0, 0, 0]
-    retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-    viz_color: 'blue'
-    cu_world_wrapper: # curoboworld collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
+  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  #   planner: cumotion # 'mpc' # mpc or cumotion 
+  #   base_pose: [-0.5, 0.0, 0.0, 1, 0, 0, 0]
+  #   retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
+  #   viz_color: 'blue'
+  #   cu_world_wrapper: # curoboworld collision wrapper
+  #     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
+  #     never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
+  #     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
     
     
 

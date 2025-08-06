@@ -397,8 +397,13 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         ee_pos_for_cost, ee_quat_for_cost, self._goal_buffer
                     )
                 
-                if goal_cost is not None:                    
-                    goal_cost[torch.isinf(goal_cost)] = 100000.0
+                if goal_cost is not None:
+                    try: # legacy, probably not needed                    
+                        goal_cost[torch.isinf(goal_cost)] = 100000.0
+                    except:
+                        print(f"WARNING: Tried to replace inf with 100000.0 in goal cost, but failed")
+                        # print(f"goal_cost: {goal_cost}")
+                        pass
                     # goal_cost = torch.maximum(goal_cost, t)
                 # cost_list.append(goal_cost)
                 cost_dict["goal"] = goal_cost
@@ -565,10 +570,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         else:
             cost = cat_sum_reacher(cost_list)
     
-        # we'll know fin the max cost over the safe rollouts:
-        
-        # first we get the total cost for each rollout
-        cost_sum = torch.sum(cost, dim=1)
+ 
 
 
         return cost

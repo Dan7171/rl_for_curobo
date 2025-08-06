@@ -1,14 +1,3 @@
-##
-## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-##
-## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
-## property and proprietary rights in and to this material, related
-## documentation and any modifications thereto. Any use, reproduction,
-## disclosure or distribution of this material and related documentation
-## without an express license agreement from NVIDIA CORPORATION or
-## its affiliates is strictly prohibited.
-##
-
 model:
   horizon: 30
   state_filter_cfg:
@@ -79,7 +68,7 @@ cost:
         module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
-        a_select_mode: col_free  # normal/col_free
+        a_select_mode: col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
         weight: 500.0  # 100  
         terminal: False
         safety_margin: 0.15

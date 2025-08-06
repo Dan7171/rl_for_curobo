@@ -191,14 +191,17 @@ class Plan:
         self.cmd_plan = cmd_plan
     
     def _is_finished(self):
-        return self.cmd_idx >= len(self.cmd_plan.position) - 1
+        exhausted_plan =  self.cmd_idx >= len(self.cmd_plan.position) - 1
+        if exhausted_plan:
+            print(f"DEBUG exhausted_plan: {exhausted_plan} after {self.cmd_idx} steps")
+        return exhausted_plan
     
     def consume_action(self):
-        if self.cmd_plan is None or self._is_finished():
+        if self.cmd_plan is None or self._is_finished(): # if no plan or plan is exhausted, reset the plan
             self.cmd_idx = 0
             self.cmd_plan = None
             return None
-        else:
+        else: # take from plan
             cmd = self.cmd_plan[self.cmd_idx]
             self.cmd_idx += 1
             return cmd
@@ -981,11 +984,16 @@ class CuPlanner:
 
             current_solver_goal_pos = self.plan_goals[link_name].position.flatten().cpu().numpy()
             current_solver_goal_quat = self.plan_goals[link_name].quaternion.flatten().cpu().numpy()
-            
+            # print(f"DEBUG current_solver_goal_pos: {current_solver_goal_pos}, updated_goal_pos: {updated_goal_pos}")
+            # print(f"DEBUG current_solver_goal_quat: {current_solver_goal_quat}, updated_goal_quat: {updated_goal_quat}")
             pos_changed = np.linalg.norm(current_solver_goal_pos - updated_goal_pos) > 1e-9
             rot_changed = np.linalg.norm(get_per_axis_euler_error(list(current_solver_goal_quat), list(updated_goal_quat))) > 1e-9
+            # print(f"DEBUG pos_changed: {pos_changed}, rot_changed: {rot_changed}")
+
             if pos_changed or rot_changed:
                 return True
+            
+            
             # if pos_changed:
 
             # if link_name not in self.plan_goals or pos_changed or rot_changed:
@@ -1559,7 +1567,7 @@ class CumotionPlanner(CuPlanner):
             print("planned successfully, resetting plan...")
             self.plan.cmd_plan = result.get_interpolated_plan()
             self.plan.cmd_idx = 0
-            self.plan_goals = goals
+            self.plan_goals = deepcopy(goals)
             return True
         else:
             carb.log_warn("Plan did not converge to a solution: " + str(result.status))
@@ -1591,14 +1599,18 @@ class CumotionPlanner(CuPlanner):
 
         if self._outdated_plan_goals(goals):
             if self._in_move(joint_velocities):
+                print(f"DEBUG in move, stopping in place...")
                 code = STOP_IN_PLACE
             else:
+                print(f"DEBUG not in move, planning new...")
                 code = PLAN_NEW
+            
         else:
             code = CONSUME_FROM_PLAN
+        # print(f"DEBUG code: {code}")
         consume = True
         if code == PLAN_NEW:
-            # print(f'planning...')
+            print(f'planning...')
             _success = self._plan_new(cu_js, goals)
             
         elif code == STOP_IN_PLACE:
@@ -2399,8 +2411,6 @@ def main():
         else:
             col_pred_with[a_idx] = pub_sub_cfgs[a_idx]["sub"]["to"]
         pub_sub_cfgs[a_idx]["sub"]["to"] = col_pred_with[a_idx]
-        # print(f'col_pred_with: {col_pred_with[a_idx]}')
-        # sleep(2)
         if "plan_pub_sub" in a_cfg and "pub" in a_cfg["plan_pub_sub"] and a_cfg["plan_pub_sub"]["pub"]:
             pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
         else:
@@ -2509,9 +2519,6 @@ def main():
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
-    
-        
-    # sim_env = PrimsEnv(my_world,pose_utils, **meta_cfg["sim_env"]["cfg"])
     
     my_world.reset()
     my_world.play()
