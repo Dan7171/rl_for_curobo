@@ -52,7 +52,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on: True 
+      is_on: False # currently has an issue with rotation-showing wrong orientation smetimes
       ts_delta: 2 # int
       color: viz_color
 

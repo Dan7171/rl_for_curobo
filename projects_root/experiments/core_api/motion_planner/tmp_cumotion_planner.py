@@ -311,8 +311,6 @@ class SimEnv:
     def step(self,**kwargs):
         pass
 
-
-
     
 class PrimsEnv(SimEnv):
     def __init__(self,
@@ -471,7 +469,7 @@ class SimTask:
             for link_name, error in link_name_to_error[a_idx].items():
                 self.goal_errors[a_idx][link_name].append((error, now))
                 
-    def update_stats(self,t, spheres:Optional[list[list[float]]]=None):
+    def update_stats(self,t, spheres:Optional[list[list[list[float]]]]=None):
         stat_names = []
         stat_vals = []
         # get the stats that need to be collected at this time step
@@ -1161,6 +1159,28 @@ class CuPlanner:
     def get_col_pred_debug(self)->Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
         return None
     
+    def get_spheres_from_solkin(self,to_world_frame:bool=True)->torch.Tensor:
+        """
+        return spheres of robot- positions are in robot frame
+        """
+        spheres_pr_robot_frame =  deepcopy(self.solver.kinematics.robot_spheres) # Sx4 tensor row i =  [xi,yi,zi,ri] (S is the number of spheres)
+        if spheres_pr_robot_frame is None:
+            return torch.tensor([])
+        if to_world_frame:
+            robot_base_pos = self.solver.tensor_args.to_device(torch.tensor(self.base_pose[:3]))
+            spheres_pr_robot_frame[:, :3] += robot_base_pos
+        return spheres_pr_robot_frame
+    
+    def get_robot_link_meshes_from_solkin(self):
+        # put that here only to note that it exists
+        return self.solver.kinematics.get_robot_link_meshes() # Sx4 tensor row i =  [xi,yi,zi,ri] (S is the number of spheres)
+
+    
+    def attach_external_obj_from_robot(self, joint_state, external_robot):
+        # put that here only to note that it exists
+        return self.solver.kinematics.attach_external_objects_to_robot(joint_state, external_robot)
+    
+
 class MpcPlanner(CuPlanner):
 
     def __init__(self, base_pose:list[float], solver_config_dict: dict, robot_cfg:dict, world_cfg:WorldConfig, particle_file_path:str):
@@ -1914,7 +1934,6 @@ def calculate_robot_sphere_count(robot_cfg):
         
     return sphere_count, extra_sphere_count
 
-
 class CuAgent:
     class Astats:
                     
@@ -1923,6 +1942,7 @@ class CuAgent:
             self.cmds_tsec = [] # times commands were sent
             self.plan_watch_times = [] # for each step, total time taken to plan
             self.simops_watch_times = [] # time taken to execute simulation related operations of the agent (e.g. sense obstacles, sense joints, apply action)
+            
             self.plan_watch = Stopwatch()
             self.sim_watch = Stopwatch()
         
@@ -2074,13 +2094,14 @@ class CuAgent:
         print("WorldModelWrapper reset finished successfully!")
         print(f"Known prims in collision world: {self.cu_world_wrapper.get_known_prims()}")        
 
- 
+    def get_spheres_from_solkin(self,to_world_frame:bool=True)->torch.Tensor:
+        return self.planner.get_spheres_from_solkin(to_world_frame)
 
     def update_col_pred(self, plans_board, plans_lock:Optional[Lock]=None):
         sub_to = self.plan_pub_sub.sub_cfg["to"] if isinstance(self.planner, MpcPlanner) else []
         self.planner.update_col_pred(plans_board, self.idx, sub_to)
     
-
+    
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
         self._last_t = -1
@@ -2766,9 +2787,10 @@ def main():
     sim_stats = SimStats(**meta_cfg["sim_stats"])
     sim_stats.start(my_world.current_time)
     lw = sim_stats.loop_iter_watch # control loop watch
+    task_stats = [{} for _ in range(len(cu_agents))]
     
     if not meta_cfg["async"]: # sync mode
-            
+        
         while simulation_app.is_running():
             lw.on()
             my_world.step(render=True)
@@ -2781,6 +2803,7 @@ def main():
             # Updating obstacles. Updating obstacles in sim so they can be sensed by robots
             sim_env.step()
 
+            
             for a_idx, a in enumerate(cu_agents):
                 planner = a.planner
                 sw = a.stats.sim_watch
@@ -2818,7 +2841,11 @@ def main():
                         if viz_plans and t % viz_plans_dt == 0:
                             pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
                     
- 
+                    spheres_tensor = a.get_spheres_from_solkin(to_world_frame=False)
+                    d_per_sphere, safety_thresh = a.cu_world_wrapper.col_check_wrap.get_distance_to_nearest_obs(spheres_tensor)
+                    print("min distance:", d_per_sphere.min().item())
+                    print("safety_thresh:", safety_thresh)
+      
         
                     # sense obstacles 
                     sw.on()
@@ -2896,25 +2923,14 @@ def main():
                                 if viz_cpred_obs:
                                     pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
                     a.stats.update()
-                    # physics_cur_time = my_world.current_time - physics_start_time
-                    # print(f"simulated time (physics): {physics_cur_time:.2f}")
+
 
                 if len(pts_debug):
                     draw_points(pts_debug)
             
-            task_stats = {}
-            if 'spheres' in sim_task.stats.collect_list:
-                task_stats['spheres'] = []
-                # list of spheres, each sphere is a 3d point and a radius of now's state
-                for a_idx, a in enumerate(cu_agents):
-                    if plans_board[a_idx] is not None:
-                        agent_posrads = torch.cat([plans_board[a_idx]['task_space']['spheres']['p'][0], plans_board[a_idx]['task_space']['spheres']['r'][0].unsqueeze(1)], dim=1).to(torch.float16).tolist()
-                    else:
-                        agent_posrads = None
-                    task_stats['spheres'].append(agent_posrads)
 
             lw.off()
-            sim_task.update_stats(t, **task_stats)
+            sim_task.update_stats(t, task_stats)
             sim_stats.update(t, my_world.current_time)            
             t += 1
             if stop_simulation:

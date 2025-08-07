@@ -209,11 +209,11 @@ def main():
             draw = _debug_draw.acquire_debug_draw_interface()
             # if draw.get_num_points() > 0:
             draw.clear_lines()
-        if d.item() == 0.0:
+        if d.item() == 0.0: # beyond threshold (no collision-green)
             target_material.set_color(np.ravel([0, 1, 0]))
-        elif d.item() <= model.contact_distance:
+        elif d.item() <= model.contact_distance: # inside threshold (close to collision- blue)
             target_material.set_color(np.array([0, 0, p]))
-        elif d.item() >= model.contact_distance:
+        elif d.item() >= model.contact_distance: # beyond threshold (collision-red)
             target_material.set_color(np.array([p, 0, 0]))
 
 

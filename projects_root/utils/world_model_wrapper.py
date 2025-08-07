@@ -30,6 +30,8 @@ from curobo.geom.types import WorldConfig
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from curobo.geom.sphere_fit import SphereFitType
+from curobo.wrap.model.robot_world import RobotWorld, RobotWorldConfig
+from curobo.geom.sdf.world import CollisionCheckerType
 
 
 # Project utilities
@@ -89,7 +91,9 @@ class WorldModelWrapper:
         
         if self.verbosity:
             log_info("WorldModelWrapper initialized with base frame: {}".format(self.base_frame))
-    
+        self.col_check_wrap: ColCheckWrapper
+
+
     def initialize_from_cu_world(
         self,
         cu_world_R: WorldConfig,
@@ -177,6 +181,8 @@ class WorldModelWrapper:
                 assert id(self.collision_checker.world_model)==id(self.collision_world), "Collision checker world model and self.collision_world must be the same object"
                 self.collision_world = self.collision_checker.world_model
                 #print("assetion done:")
+                self.col_check_wrap = ColCheckWrapper(robot_file_name='franka.yml', world=self.collision_world, collision_activation_distance=0.4,world_collision_checker=self.collision_checker)
+                self.col_check_wrap.set_activation_distance(0.4)
         except Exception:
             # Fallback – leave previous reference in place
             raise Exception("Failed to set collision checker reference")
@@ -431,6 +437,7 @@ class WorldModelWrapper:
         if newly_added and self.collision_checker is not None:
             try:
                 self.collision_checker.load_collision_model(self.collision_world)
+                
             except Exception as e:
                 log_warn(f"Could not reload collision checker after adding new obstacles: {e}")
 
@@ -620,3 +627,93 @@ class WorldModelWrapper:
                 continue
 
         return sphere_list
+
+
+import os
+# class ColCheckWrapper:
+#     # inspired by next example: curobo/examples/isaac_sim/collision_checker.py to check distances to obstacles in the world model
+#     def __init__(self, robot_file_name:str,world:WorldConfig, collision_activation_distance:float=0.4, collision_checker_type:CollisionCheckerType=CollisionCheckerType.MESH):
+
+#         self.config = RobotWorldConfig.load_from_config(
+#             robot_file_name,
+#             world,
+#             collision_activation_distance=collision_activation_distance,
+#             collision_checker_type=  CollisionCheckerType.MESH
+#         )
+#         self.danger_distance = collision_activation_distance
+#         self.model = RobotWorld(self.config)
+#         self.tensor_args = self.model.tensor_args
+class ColCheckWrapper:
+    def __init__(
+        self,
+        robot_file_name: str,
+        world: WorldConfig,
+        collision_activation_distance: float = 0.4,
+        collision_checker_type: CollisionCheckerType = CollisionCheckerType.MESH,
+        max_collision_distance: float = 10.0,   # <-- add
+        world_collision_checker = None,
+    ):
+        self.config = RobotWorldConfig.load_from_config(
+            robot_file_name,
+            world,
+            collision_activation_distance=collision_activation_distance,
+            max_collision_distance=max_collision_distance,        # <-- add
+            collision_checker_type=collision_checker_type,        # <-- use param
+            world_collision_checker=world_collision_checker,
+        )
+        self.danger_distance = collision_activation_distance
+        self.model = RobotWorld(self.config)
+        self.tensor_args = self.model.tensor_args
+        
+    def get_distance_to_nearest_obs(self, spheres:torch.Tensor)->tuple[torch.Tensor, float]:
+        """
+        input:
+            spheres: Sx4 tensor, row i = [xi,yi,zi,ri]
+        output:
+            tuple[torch.Tensor, float]:
+                dist: S tensor, each is a sphere's distance to the nearest obstacle (signed).
+                danger_distance: float
+        """
+        # Normalize to [B,H,S,4]
+        if spheres.dim() == 2:
+            spheres = spheres.unsqueeze(0).unsqueeze(0)
+        elif spheres.dim() == 3:
+            spheres = spheres.unsqueeze(0)
+
+        spheres = self.tensor_args.to_device(spheres)
+
+        # Initialize/update buffers for the active collision types (mesh/primitive/…)
+        cc = self.model.collision_cost  # PrimitiveCollisionCost
+        cc._collision_query_buffer.update_buffer_shape(
+            spheres.shape,
+            self.tensor_args,
+            cc.world_coll_checker.collision_types,
+        )
+
+        # Query raw per-sphere values directly (no reduction across spheres)
+        raw = cc.coll_check_fn(
+            spheres,
+            cc._collision_query_buffer,
+            cc.weight,
+            activation_distance=cc.activation_distance,
+            return_loss=True,           # return per-sphere values
+            sum_collisions=True,        # sum across obstacles
+            compute_esdf=True,          # true ESDF for distances
+        )  # shape [B,H,S]
+
+        raw = raw.view(-1)  # [S]
+
+        # ESDF sign in cuRobo: positive inside, negative outside -> flip so outside is positive
+        signed = (-raw).contiguous()
+
+        return signed.cpu(), self.danger_distance
+    
+
+
+
+    def set_activation_distance(self, distance: float) -> None:
+        """Set activation distance used only by this checker."""
+        self.danger_distance = float(distance)
+        self.model.collision_cost.activation_distance = self.tensor_args.to_device([self.danger_distance])
+    
+ 
