@@ -136,7 +136,7 @@ sim_task:
     
 sim_env:
   cfg:
-    n_obs: 0
+    n_obs: 2
     obj_shape: 'sphere' # type of the obstacle ('cube' or 'sphere')
     max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere

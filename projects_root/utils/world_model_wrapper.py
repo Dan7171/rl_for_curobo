@@ -717,3 +717,85 @@ class ColCheckWrapper:
         self.model.collision_cost.activation_distance = self.tensor_args.to_device([self.danger_distance])
     
  
+
+    def get_min_esdf_distance(self, spheres: torch.Tensor) -> float:
+        """
+        True min Euclidean signed distance across all spheres to world obstacles (outside positive).
+        spheres: [S,4] or [B,H,S,4] in ROBOT frame.
+        """
+        # Normalize to [B,H,S,4]
+        if spheres.dim() == 2:
+            spheres = spheres.unsqueeze(0).unsqueeze(0)
+        elif spheres.dim() == 3:
+            spheres = spheres.unsqueeze(0)
+
+        spheres = self.tensor_args.to_device(spheres)
+
+        # Use the same live world checker as PrimitiveCollisionCost
+        cc = self.model.collision_cost
+        wc = cc.world_coll_checker
+
+        # Ensure buffers exist for the active collision types
+        cc._collision_query_buffer.update_buffer_shape(
+            spheres.shape, self.tensor_args, wc.collision_types
+        )
+
+        # activation=0 to avoid any window/clamping. ESDF returns (+ inside, − outside)
+        act0 = self.tensor_args.to_device([0.0])
+        esdf = wc.get_sphere_distance(
+            spheres,
+            cc._collision_query_buffer,
+            weight=cc.weight,
+            activation_distance=act0,
+            return_loss=True,           # return per-sphere values
+            sum_collisions=False,        # sum across obstacles
+            compute_esdf=True,          # true ESDF for distances
+        )  # [B,H,S]
+
+        esdf = esdf.view(-1)           # signed: +inside, −outside
+        d_outside_pos = (-esdf)        # outside positive
+        return float(d_outside_pos.min().item())
+
+    # def get_min_esdf_distance(self, spheres: torch.Tensor) -> float:
+    #     """
+    #     True min Euclidean signed distance across all spheres to world obstacles (outside positive).
+    #     spheres: [S,4] or [B,H,S,4] in ROBOT frame.
+    #     """
+    #     # Normalize to [B,H,S,4]
+    #     if spheres.dim() == 2:
+    #         spheres = spheres.unsqueeze(0).unsqueeze(0)
+    #     elif spheres.dim() == 3:
+    #         spheres = spheres.unsqueeze(0)
+    #     spheres = self.tensor_args.to_device(spheres)
+
+    #     cc = self.model.collision_cost
+    #     wc = cc.world_coll_checker
+
+    #     # Ensure buffers exist
+    #     cc._collision_query_buffer.update_buffer_shape(
+    #         spheres.shape, self.tensor_args, wc.collision_types
+    #     )
+
+    #     # Temporarily force a single backend to avoid max(mesh, primitive) saturation
+    #     orig_flags = dict(wc.collision_types)
+    #     try:
+    #         # Prefer mesh if available; else primitive
+    #         if orig_flags.get("mesh", False):
+    #             wc.collision_types["mesh"] = True
+    #             wc.collision_types["primitive"] = False
+    #         elif orig_flags.get("primitive", False):
+    #             wc.collision_types["primitive"] = True
+    #         # activation=0 to avoid window/clamping; ESDF (+inside, −outside)
+    #         act0 = self.tensor_args.to_device([0.0])
+    #         esdf = wc.get_sphere_distance(
+    #             spheres,
+    #             cc._collision_query_buffer,
+    #             weight=cc.weight,
+    #             activation_distance=act0,
+    #             compute_esdf=True,
+    #         ).view(-1)
+    #     finally:
+    #         wc.collision_types.update(orig_flags)
+
+    #     # Flip sign so outside is positive, inside negative
+    #     return float((-esdf).min().item())

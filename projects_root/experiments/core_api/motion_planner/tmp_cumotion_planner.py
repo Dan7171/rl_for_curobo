@@ -2841,10 +2841,7 @@ def main():
                         if viz_plans and t % viz_plans_dt == 0:
                             pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
                     
-                    spheres_tensor = a.get_spheres_from_solkin(to_world_frame=False)
-                    d_per_sphere, safety_thresh = a.cu_world_wrapper.col_check_wrap.get_distance_to_nearest_obs(spheres_tensor)
-                    print("min distance:", d_per_sphere.min().item())
-                    print("safety_thresh:", safety_thresh)
+                    
       
         
                     # sense obstacles 
@@ -2856,6 +2853,14 @@ def main():
                         paths_to_search_obs_under=["/World"]
                     )
                     
+                    if plan is not None:
+                        spheres_tensor = torch.cat((plan['task_space']['spheres']['p'][0], plan['task_space']['spheres']['r'][0].unsqueeze(1)),dim=1) # torch.cat([plan['task_space']['spheres']['p'][0],plan['task_space']['spheres']['r'][0]],dim=1)
+                        spheres_tensor[:,:3] -= torch.tensor(a.base_pose[:3], device=a.tensor_args.device, dtype=a.tensor_args.dtype)
+                    else:
+                        spheres_tensor = torch.zeros(0,4)
+                    min_d = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor)
+                    print(f"min_d: {min_d}")
+
                     # sense joints
                     js = a.sim_robot.get_js(sync_new=True) 
                     if js is None:

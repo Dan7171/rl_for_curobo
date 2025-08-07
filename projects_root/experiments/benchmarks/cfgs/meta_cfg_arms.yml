@@ -46,7 +46,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on: False 
+      is_on: True 
       ts_delta: 2 # int
       color: viz_color
 
@@ -130,8 +130,8 @@ sim_task:
     
 sim_env:
   cfg:
-    n_obs: 0
-    obj_shape: 'sphere' # type of the obstacle ('cube' or 'sphere')
+    n_obs: 3
+    obj_shape: 'cube' # type of the obstacle ('cube' or 'sphere')
     max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere
     volume_center_pos: [0, 0,0.5] # center position of the obstacle volume (xyz in world frame)
@@ -149,7 +149,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
   - robot:  curobo/src/curobo/content/configs/robot/ur10e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: mpc # 'mpc' # mpc or cumotion 
-    base_pose: [0.5, 0.0, 0.0,0,0,180.0]
+    base_pose: [0.5, 0.0, 0.0,0,0, 0.0]
     retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
     viz_color: 'orange'
     cu_world_wrapper: # curoboworld collision wrapper
@@ -157,34 +157,34 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
       never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
     
-    sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
-      visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-        is_on: False 
-        ts_delta: 2 # int
-        color: 'green'
+    # sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
+    #   visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+    #     is_on: False 
+    #     ts_delta: 2 # int
+    #     color: 'green'
 
-      visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
-        is_on: False
-        ts_delta: 2 # int
+    #   visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
+    #     is_on: False
+    #     ts_delta: 2 # int
         
-      visualize_plan: # visualize the planned trajectory of the robot (for debugging)
-        is_on: False
-        color: 'green'
-        ts_delta: 1 # int
+    #   visualize_plan: # visualize the planned trajectory of the robot (for debugging)
+    #     is_on: False
+    #     color: 'green'
+    #     ts_delta: 1 # int
       
-      visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-        is_on: True
-        color: 'orange'
-        ts_delta: 1 # int
+    #   visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
+    #     is_on: True
+    #     color: 'orange'
+    #     ts_delta: 1 # int
 
-      visualize_col_pred:
-        own: True
-        own_color: 'blue'
-        own_mean_only: True
-        obs: True
-        obs_color: 'red'
+    #   visualize_col_pred:
+    #     own: True
+    #     own_color: 'blue'
+    #     own_mean_only: True
+    #     obs: True
+    #     obs_color: 'red'
         
-        ts_delta: 1 # int
+    #     ts_delta: 1 # int
 
 
   # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
