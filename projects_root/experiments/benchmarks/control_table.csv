@@ -1,0 +1,104 @@
+Task, Difficulty, N, Algorithm, Robot, Status, Out, Notes
+B,1,2,O,U5,,,(Bin task-easiest-2robots-Ours-Ur5e-Not started)
+B,1,2,C,U5,,,   
+B,1,2,SD,U5,,,
+B,1,2,SC,U5,,,
+B,1,2,D,U5,,,
+
+B,1,4,O,U5,,,
+B,1,4,C,U5,,,   
+B,1,4,SD,U5,,,
+B,1,4,SC,U5,,,
+B,1,4,D,U5,,,
+
+B,5,2,O,U5,,,
+B,5,2,C,U5,,,   
+B,5,2,SD,U5,,,
+B,5,2,SC,U5,,,
+B,5,2,D,U5,,,
+
+B,5,4,O,U5,,,
+B,5,4,C,U5,,,   
+B,5,4,SD,U5,,,
+B,5,4,SC,U5,,,
+B,5,4,D,U5,,,
+
+S,1,2,O,U5,,,
+S,1,2,C,U5,,,   
+S,1,2,SD,U5,,,
+S,1,2,SC,U5,,,
+S,1,2,D,U5,,,
+
+S,1,4,O,U5,,,
+S,1,4,C,U5,,,   
+S,1,4,SD,U5,,,
+S,1,4,SC,U5,,,
+S,1,4,D,U5,,,
+
+S,5,2,O,U5,,,
+S,5,2,C,U5,,,   
+S,5,2,SD,U5,,,
+S,5,2,SC,U5,,,
+S,5,2,D,U5,,,
+
+S,5,4,O,U5,,,
+S,5,4,C,U5,,,   
+S,5,4,SD,U5,,,
+S,5,4,SC,U5,,,
+S,5,4,D,U5,,,
+ 
+
+F,1,2,O,U5,,,
+F,1,2,C,U5,,,   
+F,1,2,SD,U5,,,
+F,1,2,SC,U5,,,
+F,1,2,D,U5,,,
+
+F,1,4,O,U5,,,
+F,1,4,C,U5,,,   
+F,1,4,SD,U5,,,
+F,1,4,SC,U5,,,
+F,1,4,D,U5,,,
+
+F,5,2,O,U5,,,
+F,5,2,C,U5,,,   
+F,5,2,SD,U5,,,
+F,5,2,SC,U5,,,
+F,5,2,D,U5,,,
+
+F,5,4,O,U5,,,
+F,5,4,C,U5,,,   
+F,5,4,SD,U5,,,
+F,5,4,SC,U5,,,
+F,5,4,D,U5,,,
+
+
+Task, Difficulty, N, Algorithm, Robot, Status, Output, Notes
+B=bin, 1=easiest, robot number, O=Ours(dec mpc colpred), F=Franka,V=Completed,File name of outputs 
+S=static target, 5=easiest,, C=Cumotion(centralized),U5=Ur5e,<Empty>=Not started
+F=follow target, ,,SD=Storm-decentralized,U10=Ur10e
+,,,SC=Storm-centralized
+,,,D=DRRT*
+
+
+Task, Difficulty, Meaning
+B, 1, pr(same quareter) = 0.25 (default random distribution)
+B, 2, not defined
+B, 3, pr(same quareter) = 0.5
+B, 4, not defined
+B, 5, pr(same quareter) = 1.0
+S, 1, 0 obstacles
+S, 2, 5 static obstacles
+S, 3, 10 static obstacles
+S, 4, 5 dynamic obstacles
+S, 5, 10 dynamic obstacles
+F, 1, 0 obstacles 
+F, 2, 5 static obstacles
+F, 3, 10 static obstacles
+F, 4, 5 dynamic obstacles
+F, 5, 10 dynamic obstacles
+
+
+
+
+
