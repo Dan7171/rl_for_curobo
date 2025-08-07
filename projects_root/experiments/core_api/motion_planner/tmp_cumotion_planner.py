@@ -33,7 +33,7 @@ parser.add_argument("-p", "--planner", type=str, required=False, default="", hel
 parser.add_argument("-c", "--centralized", required=False, default="", help="y for centralized, n for decentralized. If not supplied, will will be taken from cfg file")
 parser.add_argument("-r", "--robot_type", required=False, default="", help=f"robot type: (for centralized: {get_cent_robot_types()}, for decentralized: {get_dec_robot_types()})")
 parser.add_argument("-n", "--n_robots", type=int, required=False, default=0, help=f"number of robots from the provided robot type")
-
+parser.add_argument("-b", "--alg", type=str, required=False, default="", help=f"algorithm: CC, O, SD, SC, D, O-")
 # meta_cfg_path= "projects_root/experiments/benchmarks/cfgs/meta_cfg_arms_storm_cent.yml" #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
 meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
 robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
@@ -85,19 +85,7 @@ if interactive:
                         exit()
                 print(f"Using robot cfg file: {robot_cfg_path}")
 
-            # case 1: # decentralized
-            #     print(f'available robot types:')
-            #     for i, robot_type in enumerate(decentralized_robot_cfgs):
-            #         print(f"{i}: {robot_type}")
-            #     print("For each of the following, enter the desired robot type and number of robots in next format of list[r:n] for eaxample- [0:1,1:3,2:0,...] (you can skip robots by not adding them to list)")
-            #     l = input("Enter your choice")
-            #     l = l.split(",")
-            #     l = [tuple(map(int, i.split(":"))) for i in l]
-            #     for i,n in l:
-
-
-            #     robot_cfg_path = os.path.join(meta_cfgs_dir, robot_cfg_path)
-            #     print(f"Using robot cfg file: {robot_cfg_path}")
+        
             case _:
                 print("Invalid robot type")
                 exit()
@@ -2541,29 +2529,30 @@ def main():
         meta_cfg = modify_to_benchmark_mode(meta_cfg)
         
     else:
-        if args.n_robots > 0 and len(args.robot_type) > 0 and len(args.planner) > 0:
+        pass
+        # if args.n_robots > 0 and len(args.robot_type) > 0 and len(args.planner) > 0:
 
-            if args.centralized:
-                robot_cfg_path = os.path.join(robot_cfgs_dir, cent_robot_cfgs[args.robot_type][args.n_robots])
-                meta_cfg["cu_agents"] = gen_cu_agent_cfgs(1, robot_cfg_path, args.planner)
-                print(f"Using robot type: {args.robot_type} and number of robots: {args.n_robots}")
+        #     if args.centralized:
+        #         robot_cfg_path = os.path.join(robot_cfgs_dir, cent_robot_cfgs[args.robot_type][args.n_robots])
+        #         meta_cfg["cu_agents"] = gen_cu_agent_cfgs(1, robot_cfg_path, args.planner)
+        #         print(f"Using robot type: {args.robot_type} and number of robots: {args.n_robots}")
             
-            else:
-                robot_cfg_path = os.path.join(robot_cfgs_dir, decentralized_robot_cfgs[args.robot_type])
-                meta_cfg["cu_agents"] = gen_cu_agent_cfgs(args.n_robots, robot_cfg_path, args.planner)
-                print(f"Using decentralized {args.n_robots} robots of type {args.robot_type} with planner {args.planner}")
+        #     else:
+        #         robot_cfg_path = os.path.join(robot_cfgs_dir, decentralized_robot_cfgs[args.robot_type])
+        #         meta_cfg["cu_agents"] = gen_cu_agent_cfgs(args.n_robots, robot_cfg_path, args.planner)
+        #         print(f"Using decentralized {args.n_robots} robots of type {args.robot_type} with planner {args.planner}")
             
 
-        if 'batch' in meta_cfg: # if batch is defined, then we need to create a batch of agents
-            _agent_cfgs_batch = []
-            for a_type in range(len(meta_cfg["batch"]["n"])): # for each agent type
-                agents_from_type = [deepcopy(meta_cfg["cu_agents"][a_type]) for _ in range(meta_cfg["batch"]["n"][a_type])]
-                _agent_cfgs_batch.extend(agents_from_type)
+        # if 'batch' in meta_cfg: # if batch is defined, then we need to create a batch of agents
+        #     _agent_cfgs_batch = []
+        #     for a_type in range(len(meta_cfg["batch"]["n"])): # for each agent type
+        #         agents_from_type = [deepcopy(meta_cfg["cu_agents"][a_type]) for _ in range(meta_cfg["batch"]["n"][a_type])]
+        #         _agent_cfgs_batch.extend(agents_from_type)
 
-            # if meta_cfg["batch"]["base_poses"] is not None:
-            #     for a_idx in range(len(_agent_cfgs_batch)):
-            #         _agent_cfgs_batch[a_idx]["base_pose"] = meta_cfg["batch"]["base_poses"][a_idx]
-            meta_cfg["cu_agents"] = _agent_cfgs_batch
+        #     # if meta_cfg["batch"]["base_poses"] is not None:
+        #     #     for a_idx in range(len(_agent_cfgs_batch)):
+        #     #         _agent_cfgs_batch[a_idx]["base_pose"] = meta_cfg["batch"]["base_poses"][a_idx]
+        #     meta_cfg["cu_agents"] = _agent_cfgs_batch
     
     if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
         start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["cfg"])

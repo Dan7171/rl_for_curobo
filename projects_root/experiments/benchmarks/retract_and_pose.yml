@@ -14,7 +14,20 @@ ur10e:
         - [-0.75,0.75,0.0, 0.0, 0.0, 0.0] # arm 2 base pose [x,y,z,roll,pitch,yaw]  
         - [0.75,-0.75,0.0, 0.0, 0.0, 180.0] # arm 3 base pose [x,y,z,roll,pitch,yaw]
         - [-0.75,-0.75,0.0, 0.0, 0.0, 180.0] # arm 4 base pose [x,y,z,roll,pitch,yaw]
-  
+ur5e:
+  4:
+    retract:
+      - [-1.57, -2.2, 1.9, -1.383, -1.57, 0.00] # arm 1 retract
+      - [1.57, -2.2, 1.9, -1.383, -1.57, 0.00] # arm 2 retract
+      - [-1.57, -2.2, 1.9, -1.383, -1.57, 0.00] # arm 3 retract
+      - [1.57, -2.2, 1.9, -1.383, -1.57, 0.00] # arm 4 retract
+    pose:
+      # cent: [0.0,0.0,0.0,0.0,0.0,0.0] # centralized planner base pose [x,y,z,roll,pitch,yaw]
+      dec:
+        - [0.75,0.75,0.0, 0.0, 0.0, 0.0] # arm 1 base pose [x,y,z,roll,pitch,yaw]
+        - [-0.75,0.75,0.0, 0.0, 0.0, 0.0] # arm 2 base pose [x,y,z,roll,pitch,yaw]  
+        - [0.75,-0.75,0.0, 0.0, 0.0, 180.0] # arm 3 base pose [x,y,z,roll,pitch,yaw]
+        - [-0.75,-0.75,0.0, 0.0, 0.0, 180.0] # arm 4 base pose [x,y,z,roll,pitch,yaw]
 # ur5e:
 #   retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
 #   base_pose: [0.5, 0.0, 0.0,0,0,180.0]

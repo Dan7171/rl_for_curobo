@@ -1,8 +1,8 @@
 benchmark_mode: 
   is_on: True
-  robot_fam: ur10e
-  n_arms: 4
-  alg: 'CC'
+  robot_fam: ur5e # ur10e
+  n_arms: 4 # 4
+  alg: 'O' # CC, O, SD, SC, D, O-
 
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
   is_mobile: False
@@ -41,7 +41,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
       use_cuda_graph: False 
       step_dt: 0.02
-      use_cuda_graph_metrics: True
+      use_cuda_graph_metrics: False
       self_collision_check: True
       collision_checker_type: MESH
       collision_cache: {"obb": 15, "mesh": 15}
