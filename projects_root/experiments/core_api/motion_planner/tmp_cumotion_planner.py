@@ -1793,6 +1793,7 @@ class SimRobot:
                 sp = sphere.VisualSphere(
                     prim_path=f"{subroot}/R{a_idx}S{si}",
                     position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]),
+                    orientation=np.ravel(base_pose[3:]),
                     radius=float(s.radius),
                     color=np.array([0, 0.8, 0.2]),
                 )
@@ -1803,7 +1804,10 @@ class SimRobot:
         else: # update visualization spheres
             for si, s in enumerate(spheres):
                 if not np.isnan(s.position[0]):
-                    self._vis_spheres[si].set_world_pose(position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]))
+                    self._vis_spheres[si].set_world_pose(
+                        position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]),
+                        orientation=np.ravel(base_pose[3:]),
+                    )
                     self._vis_spheres[si].set_radius(float(s.radius))
 
 
