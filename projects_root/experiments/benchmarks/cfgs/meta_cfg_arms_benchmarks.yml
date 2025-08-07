@@ -1,3 +1,9 @@
+benchmark_mode: 
+  is_on: True
+  robot_fam: ur10e
+  n_arms: 4
+  alg: 'CC'
+
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
   is_mobile: False
   mobile_base_link_subpath: ''
@@ -144,70 +150,3 @@ sim_stats:
   collect_dt: 25
   verbosity: True
 
-cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
-
-
-  - robot:  curobo/src/curobo/content/configs/robot/ur10e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: mpc # 'mpc' # mpc or cumotion 
-    base_pose: [0.5, 0.0, 0.0,0,0,180.0]
-    retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-    viz_color: 'orange'
-    cu_world_wrapper: # curoboworld collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
-    sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
-      visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-        is_on: False 
-        ts_delta: 2 # int
-        color: 'green'
-
-      visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
-        is_on: False
-        ts_delta: 2 # int
-        
-      visualize_plan: # visualize the planned trajectory of the robot (for debugging)
-        is_on: False
-        color: 'green'
-        ts_delta: 1 # int
-      
-      visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-        is_on: True
-        color: 'orange'
-        ts_delta: 1 # int
-
-      visualize_col_pred:
-        own: True
-        own_color: 'blue'
-        own_mean_only: True
-        obs: True
-        obs_color: 'red'
-        
-        ts_delta: 1 # int
-
-
-  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-  #   planner: cumotion # 'mpc' # mpc or cumotion 
-  #   base_pose: [-0.5, 0.0, 0.0, 1, 0, 0, 0]
-  #   retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-  #   viz_color: 'blue'
-  #   cu_world_wrapper: # curoboworld collision wrapper
-  #     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-  #     never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-  #     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
- 
-
-
-  
-# batch:
-#   n: [64,0] # [16,1,15] # [16,1,15]
-#   # base_poses: [] # list of poses for the agents
-
-
-
-# Reference:
-# Default retract configs (in robot cfg- a.robot_cfg["kinematics"]["cspace"]["retract_config"]):
-#  franka: [0.0, -1.3,  0.0, -2.5,  0.0,  1.0,  0.0] # 
-#  ur5e: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]

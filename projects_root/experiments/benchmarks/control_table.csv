@@ -1,84 +1,109 @@
-Task, Difficulty, N, Algorithm, Robot, Status, Out, Notes
-B,1,2,O,U5,,,(Bin task-easiest-2robots-Ours-Ur5e-Not started)
-B,1,2,C,U5,,,   
-B,1,2,SD,U5,,,
-B,1,2,SC,U5,,,
-B,1,2,D,U5,,,
+,Task, Difficulty, N, Algorithm, Robot, Status, Out, Notes
 
-B,1,4,O,U5,,,
-B,1,4,C,U5,,,   
-B,1,4,SD,U5,,,
-B,1,4,SC,U5,,,
-B,1,4,D,U5,,,
+Bin-easy- 2 robots
+,B,1,2,O,U,,,(Bin task-easiest-2robots-Ours-Ur5e-Not started)
+,B,1,2,CC,U,,,   
+,B,1,2,SD,U,,,
+,B,1,2,SC,U,,,
+,B,1,2,D,U,,,
+,B,1,2,O-,U,,,
 
-B,5,2,O,U5,,,
-B,5,2,C,U5,,,   
-B,5,2,SD,U5,,,
-B,5,2,SC,U5,,,
-B,5,2,D,U5,,,
+Bin-easy- 4 robots
+,B,1,4,O,U,,,
+,B,1,4,CC,U,,,   
+,B,1,4,SD,U,,,
+,B,1,4,SC,U,,,
+,B,1,4,D,U,,,
+,B,1,4,O-,U,,,
 
-B,5,4,O,U5,,,
-B,5,4,C,U5,,,   
-B,5,4,SD,U5,,,
-B,5,4,SC,U5,,,
-B,5,4,D,U5,,,
+Bin-hard- 2 robots
+,B,5,2,O,U,,,
+,B,5,2,CC,U,,,   
+,B,5,2,SD,U,,,
+,B,5,2,SC,U,,,
+,B,5,2,D,U,,,
+,B,5,2,O-,U,,,
 
-S,1,2,O,U5,,,
-S,1,2,C,U5,,,   
-S,1,2,SD,U5,,,
-S,1,2,SC,U5,,,
-S,1,2,D,U5,,,
+Bin-hard- 4 robots
+,B,5,4,O,U,,,
+,B,5,4,CC,U,,,   
+,B,5,4,SD,U,,,
+,B,5,4,SC,U,,,
+,B,5,4,D,U,,,
+,B,5,4,O-,U,,,
 
-S,1,4,O,U5,,,
-S,1,4,C,U5,,,   
-S,1,4,SD,U5,,,
-S,1,4,SC,U5,,,
-S,1,4,D,U5,,,
+Static-easy- 2 robots
+,S,1,2,O,U,,,
+,S,1,2,CC,U,,,   
+,S,1,2,SD,U,,,
+,S,1,2,SC,U,,,
+,S,1,2,D,U,,,
+,S,1,2,O-,U,,,
 
-S,5,2,O,U5,,,
-S,5,2,C,U5,,,   
-S,5,2,SD,U5,,,
-S,5,2,SC,U5,,,
-S,5,2,D,U5,,,
+Static-easy- 4 robots
+,S,1,4,O,U,,,
+,S,1,4,CC,U,,,   
+,S,1,4,SD,U,,,
+,S,1,4,SC,U,,,
+,S,1,4,D,U,,,
+,S,1,4,O-,U,,,
 
-S,5,4,O,U5,,,
-S,5,4,C,U5,,,   
-S,5,4,SD,U5,,,
-S,5,4,SC,U5,,,
-S,5,4,D,U5,,,
+Static-hard- 2 robots
+,S,5,2,O,U,,,
+,S,5,2,CC,U,,,   
+,S,5,2,SD,U,,,
+,S,5,2,SC,U,,,
+,S,5,2,D,U,,,
+,S,5,2,O-,U,,,
+
+Static-hard- 4 robots
+,S,5,4,O,U,,,
+,S,5,4,CC,U,,,   
+,S,5,4,SD,U,,,
+,S,5,4,SC,U,,,
+,S,5,4,D,U,,,
+,S,5,4,O-,U,,,
  
 
-F,1,2,O,U5,,,
-F,1,2,C,U5,,,   
-F,1,2,SD,U5,,,
-F,1,2,SC,U5,,,
-F,1,2,D,U5,,,
+Follow-easy- 2 robots
+,F,1,2,O,U,,,
+,F,1,2,CC,U,,,   
+,F,1,2,SD,U,,,pose
 
-F,1,4,O,U5,,,
-F,1,4,C,U5,,,   
-F,1,4,SD,U5,,,
-F,1,4,SC,U5,,,
-F,1,4,D,U5,,,
+Follow-easy- 4 robots
+,F,1,4,O,U,,,
+,F,1,4,CC,U,,,   
+,F,1,4,SD,U,,,
+,F,1,4,SC,U,,,
+,F,1,4,D,U,,,pose
+,F,1,4,O-,U,,,
 
-F,5,2,O,U5,,,
-F,5,2,C,U5,,,   
-F,5,2,SD,U5,,,
-F,5,2,SC,U5,,,
-F,5,2,D,U5,,,
+Follow-hard- 2 robots
+,F,5,2,O,U,,,
+,F,5,2,CC,U,,,   
+,F,5,2,SD,U,,,
+,F,5,2,SC,U,,,
+,F,5,2,D,U,,,
+,F,5,2,O-,U,,,
 
-F,5,4,O,U5,,,
-F,5,4,C,U5,,,   
-F,5,4,SD,U5,,,
-F,5,4,SC,U5,,,
-F,5,4,D,U5,,,
+Follow-hard- 4 robots
+,F,5,4,O,U,,,
+,F,5,4,CC,U,,,   
+,F,5,4,SD,U,,,
+,F,5,4,SC,U,,,
+,F,5,4,D,U,,,
+,F,5,4,O-,U,,,
+
+
 
 
 Task, Difficulty, N, Algorithm, Robot, Status, Output, Notes
 B=bin, 1=easiest, robot number, O=Ours(dec mpc colpred), F=Franka,V=Completed,File name of outputs 
-S=static target, 5=easiest,, C=Cumotion(centralized),U5=Ur5e,<Empty>=Not started
+S=static target, 5=easiest,, CC=Cumotion centralized,U=Ur10e,<Empty>=Not started
 F=follow target, ,,SD=Storm-decentralized,U10=Ur10e
 ,,,SC=Storm-centralized
 ,,,D=DRRT*
+,,,O-(Ours minus pose based prioratization)
 
 
 Task, Difficulty, Meaning

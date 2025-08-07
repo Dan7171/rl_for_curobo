@@ -3,7 +3,6 @@ import argparse
 import os
 from curobo.util_file import load_yaml
 import numpy as np
-
 cent_robot_cfgs = {'franka':
                     {
                         1:'franka.yml',
@@ -16,60 +15,17 @@ cent_robot_cfgs = {'franka':
                         1:f'ur10e.yml',
                         2:f'dual_ur10e.yml',
                         3: f'tri_ur10e.yml',
-                        4:'quad_ur10e.yml'}
+                        4:'quad_ur10e.yml'
+                        }
                     }
-
-decentralized_robot_cfgs = ['franka_mobile.yml' ,'ur5e.yml', 'ur10e.yml', 'iiwa.yml','kinova_gen3.yml', 'jaco7.yml',]
+decentralized_robot_cfgs = ['franka.yml','franka_mobile.yml' ,'ur5e.yml', 'ur10e.yml', 'iiwa.yml','kinova_gen3.yml', 'jaco7.yml',]
+dec_robot_fam_to_cfg = {'franka': 'franka.yml', 'franka_mobile': 'franka_mobile.yml', 'ur5e': 'ur5e.yml', 'ur10e': 'ur10e.yml', 'iiwa': 'iiwa.yml', 'kinova_gen3': 'kinova_gen3.yml', 'jaco7': 'jaco7.yml'}
 
 def get_cent_robot_types():
     return list(cent_robot_cfgs.keys())
 def get_dec_robot_types():
     return [x.split('.')[0] for x in decentralized_robot_cfgs] # remove .yml from the end
 
-def gen_cu_agent_cfgs(n, robot_cfg_path, planner_type, placement='circular'):
-    colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
-    
-    cu_agent_cfgs = []
-    
-    match n:
-        case 1:
-            positions = [[0,0,0]]
-            rotations = [[0,0,0]]
-        case 2:
-            positions = [[0.5,0,0], [-0.5,0,0]]
-            rotations = [[0,0,0], [0,0,180]]
-        case 3:
-            positions = [[0.5,0,0], [-0.5,0,0], [0,0,0]]
-            rotations = [[0,0,0], [0,0,0], [0,0,90]]
-        case 4:
-            positions = [[0.5,0,0], [-0.5,0,0], [0,0.5,0], [0,-0.5,0]]
-            rotations = [[0,0,0], [0,0,0], [0,0,0], [0,0,0]]
-        case _:
-            raise ValueError(f"Invalid number of robots: {n}")
-        
-    for i in range(n):
-        position = positions[i]
-        rotation = rotations[i]
-        base_pose = [position[0], position[1], position[2], rotation[0], rotation[1], rotation[2]]
-        cu_agent_cfgs.append({
-            "robot": robot_cfg_path,
-            "planner": planner_type,
-            "base_pose": base_pose,
-            "viz_color": colors[i%n],
-        })
-    return cu_agent_cfgs
-
-    # robot: curobo/src/curobo/content/configs/robot/franka_4_arm.yml
-    # planner: mpc # 'mpc' # mpc or cumotion 
-    # base_pose: [0.0, 0.0, 0.0,0,0,0.0]
-    # viz_color: 'orange'
-    # cu_world_wrapper: # curoboworld collision wrapper
-    #   verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-    #   never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-    #   never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
-   
-    
 parser = argparse.ArgumentParser()
 parser.add_argument("--cfg", type=str, required=False, default="", help="path to meta config file")
 parser.add_argument("-i", "--interactive", required=False, action="store_true", help="interacttive mode")
@@ -77,13 +33,13 @@ parser.add_argument("-p", "--planner", type=str, required=False, default="", hel
 parser.add_argument("-c", "--centralized", required=False, default="", help="y for centralized, n for decentralized. If not supplied, will will be taken from cfg file")
 parser.add_argument("-r", "--robot_type", required=False, default="", help=f"robot type: (for centralized: {get_cent_robot_types()}, for decentralized: {get_dec_robot_types()})")
 parser.add_argument("-n", "--n_robots", type=int, required=False, default=0, help=f"number of robots from the provided robot type")
+
 # meta_cfg_path= "projects_root/experiments/benchmarks/cfgs/meta_cfg_arms_storm_cent.yml" #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
 meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
 robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
+benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
 default_centralized_meta_cfg = "meta_cfg_arms_cent.yml"
 default_decentralized_meta_cfg = "meta_cfg_arms.yml"
-
-
 args = parser.parse_args()
 interactive = args.interactive
 args.centralized = args.centralized.lower() == 'y'
@@ -2470,6 +2426,98 @@ def simulation_startup(simulation_app, my_world, cu_agents):
         break
     return # Return the updated counter
 
+
+
+
+
+def modify_to_benchmark_mode(meta_cfg):
+    
+    n_arms, robot_fam, alg = meta_cfg["benchmark_mode"]["n_arms"], meta_cfg["benchmark_mode"]["robot_fam"], meta_cfg["benchmark_mode"]["alg"]
+    colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
+    
+    
+    ret_pose_cfg = load_yaml(benchmarks_ret_cfg)
+    
+    # take retract cfg of benchmarks
+    alg_to_planner = {
+        'CC': 'cumotion', # Cumotion centralized
+        'O': 'mpc', # Ours
+        'SD' : 'mpc', # Storm decentralized
+        'SC': 'mpc', # Storm centralized
+        'D': 'drrt*', # todo
+        'O-': 'mpc' # Ours minus prioirity (priority ablation)
+    }
+    
+    alg_to_plan_pub_sub = {
+        'CC':False,
+        'O':True,
+        'SD':False,
+        'SC':False,
+        'D':False,
+        'O-':True,
+    }
+        
+    meta_cfg["default"]["plan_pub_sub"] = {
+        'pub':{'is_on':alg_to_plan_pub_sub[alg],'dt':1,'is_dt_in_sec':False,'pr':1.0},
+        'sub':{'is_on':alg_to_plan_pub_sub[alg],'to':'all'}
+    }
+   
+    if alg == 'O-': # In priority ablation- same as O but using a particle config with a small change (the changing priority mode)
+        meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
+
+    cent = alg in ['CC', 'SC','D'] # centralized planner        
+    planner_type = alg_to_planner[alg]
+
+    
+    if cent:
+        robot_cfg_path =  cent_robot_cfgs[robot_fam][n_arms]
+        n_cfgs = 1
+    else:
+        robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
+        n_cfgs = n_arms
+    
+    robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path)
+    ret_root = ret_pose_cfg[robot_fam][n_arms]["retract"]
+    pose_root = ret_pose_cfg[robot_fam][n_arms]["pose"]
+
+    meta_cfg["cu_agents"] = []
+    for a_idx in range(n_cfgs):
+        if cent: # n_cfgs = 1 (centralized planner)
+            # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
+            ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
+            base_pose = pose_root["cent"]
+        else:
+            ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
+            base_pose = pose_root["dec"][a_idx] # arm base pose   
+    
+        
+        meta_cfg["cu_agents"].append({
+            "robot": robot_cfg_path,
+            "planner": planner_type,
+            "base_pose": base_pose,
+            "viz_color": colors[a_idx%n_arms],
+            "retract_cfg": ret_cfg,
+        })
+    return meta_cfg
+
+def parse_cent_robot_config_path(robot_cfg_path):
+    """return the robot family and actual number of robots at centralized planner (the num of arms/robots its controlling)"""
+    for robot_fam in cent_robot_cfgs:
+        for n in cent_robot_cfgs[robot_fam]:
+            if cent_robot_cfgs[robot_fam][n] in robot_cfg_path:
+                return robot_fam, n
+    raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {cent_robot_cfgs}")
+
+def parse_dec_robot_config_path(robot_cfg_path):
+    """return the robot family and actual number of robots at decentralized planner (the num of arms/robots its controlling)"""
+    for robot_fam in dec_robot_fam_to_cfg:
+        for v in dec_robot_fam_to_cfg[robot_fam]:
+            if v in robot_cfg_path:
+                return robot_fam
+            
+    raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {decentralized_robot_cfgs}")
+
+
 stop_event = Event()                       
 def main():
     
@@ -2487,31 +2535,35 @@ def main():
     now = datetime.now()
     formatted_time = now.strftime("%Y-%m-%d_%H:%M:%S")
     
-    # meta_cfg = load_yaml(meta_cfg_path)
-    
-    if args.n_robots > 0 and len(args.robot_type) > 0 and len(args.planner) > 0:
-
-        if args.centralized:
-            robot_cfg_path = os.path.join(robot_cfgs_dir, cent_robot_cfgs[args.robot_type][args.n_robots])
-            meta_cfg["cu_agents"] = gen_cu_agent_cfgs(1, robot_cfg_path, args.planner)
-            print(f"Using robot type: {args.robot_type} and number of robots: {args.n_robots}")
+    meta_cfg = load_yaml(meta_cfg_path)
+    benchmark_mode = "benchmark_mode" in meta_cfg and meta_cfg["benchmark_mode"]["is_on"]
+    if benchmark_mode:        
+        meta_cfg = modify_to_benchmark_mode(meta_cfg)
         
-        else:
-            robot_cfg_path = os.path.join(robot_cfgs_dir, decentralized_robot_cfgs[args.robot_type])
-            meta_cfg["cu_agents"] = gen_cu_agent_cfgs(args.n_robots, robot_cfg_path, args.planner)
-            print(f"Using decentralized {args.n_robots} robots of type {args.robot_type} with planner {args.planner}")
-        
+    else:
+        if args.n_robots > 0 and len(args.robot_type) > 0 and len(args.planner) > 0:
 
-    if 'batch' in meta_cfg: # if batch is defined, then we need to create a batch of agents
-        _agent_cfgs_batch = []
-        for a_type in range(len(meta_cfg["batch"]["n"])): # for each agent type
-            agents_from_type = [deepcopy(meta_cfg["cu_agents"][a_type]) for _ in range(meta_cfg["batch"]["n"][a_type])]
-            _agent_cfgs_batch.extend(agents_from_type)
+            if args.centralized:
+                robot_cfg_path = os.path.join(robot_cfgs_dir, cent_robot_cfgs[args.robot_type][args.n_robots])
+                meta_cfg["cu_agents"] = gen_cu_agent_cfgs(1, robot_cfg_path, args.planner)
+                print(f"Using robot type: {args.robot_type} and number of robots: {args.n_robots}")
+            
+            else:
+                robot_cfg_path = os.path.join(robot_cfgs_dir, decentralized_robot_cfgs[args.robot_type])
+                meta_cfg["cu_agents"] = gen_cu_agent_cfgs(args.n_robots, robot_cfg_path, args.planner)
+                print(f"Using decentralized {args.n_robots} robots of type {args.robot_type} with planner {args.planner}")
+            
 
-        # if meta_cfg["batch"]["base_poses"] is not None:
-        #     for a_idx in range(len(_agent_cfgs_batch)):
-        #         _agent_cfgs_batch[a_idx]["base_pose"] = meta_cfg["batch"]["base_poses"][a_idx]
-        meta_cfg["cu_agents"] = _agent_cfgs_batch
+        if 'batch' in meta_cfg: # if batch is defined, then we need to create a batch of agents
+            _agent_cfgs_batch = []
+            for a_type in range(len(meta_cfg["batch"]["n"])): # for each agent type
+                agents_from_type = [deepcopy(meta_cfg["cu_agents"][a_type]) for _ in range(meta_cfg["batch"]["n"][a_type])]
+                _agent_cfgs_batch.extend(agents_from_type)
+
+            # if meta_cfg["batch"]["base_poses"] is not None:
+            #     for a_idx in range(len(_agent_cfgs_batch)):
+            #         _agent_cfgs_batch[a_idx]["base_pose"] = meta_cfg["batch"]["base_poses"][a_idx]
+            meta_cfg["cu_agents"] = _agent_cfgs_batch
     
     if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
         start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["cfg"])
@@ -2519,6 +2571,7 @@ def main():
             meta_cfg["cu_agents"][a_idx]["base_pose"][:3] = p
         
         
+    
         
     agent_cfgs = meta_cfg["cu_agents"]
     # init runtime topics (must be done before solvers are initialized (so that dynamic obs cost will be initialized properly))
@@ -2541,32 +2594,40 @@ def main():
     base_pose = [[] for _ in range(len(agent_cfgs))]
     pub_sub_cfgs = [{} for _ in range(len(agent_cfgs))]
     
+    
+
+        
     for a_idx, a_cfg in enumerate(agent_cfgs):
         # print(f'a_idx: {a_idx}')   
         # sleep(2)
         robot_cfgs_paths[a_idx] = a_cfg["robot"]
         robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
-        
-        # optionally override the retract config, else use the default retract config from the robot cfg
-        if "retract_cfg" in a_cfg:
-            robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = a_cfg["retract_cfg"]
-        
-        if len(args.planner): # if planner is specified in the command line, use it
-            planner_type[a_idx] = args.planner
-            print(f"Using planner: {planner_type[a_idx]}")
-        else:
-            planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
-        
-        sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
-        sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
+
+        # if retract cfg specificed for robot, uue it. Else will take default from ["kinematics"]["cspace"]["retract_config"]
+        if "retract_cfg" in a_cfg: 
+            robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = a_cfg["retract_cfg"]        
+            
+        # parse base rotation (if euler angles, convert to quaternion)
         base_pose[a_idx] = a_cfg["base_pose"]
         if len(base_pose[a_idx]) == 6: # base pose is from the form of [x,y,z,deg_x, deg_y, deg_z] (position and euler angles)
             base_pose[a_idx][3:] = PoseUtils.rotate_quat([1,0,0,0], base_pose[a_idx][3:], q_in_wxyz=True, q_out_wxyz=True)
             print(f'debug base_pose[a_idx] new: {base_pose[a_idx]}')
-        elif len(base_pose[a_idx]) == 7: # base pose is from the form of [x,y,z,qw,qx,qy,qz] (position and quaternion)
-            pass
-        else:
+        elif len(base_pose[a_idx]) != 7: # base pose is from the form of [x,y,z,qw,qx,qy,qz] (position and quaternion)
             raise ValueError(f"Invalid base pose type: {type(base_pose[a_idx][0])}")
+
+
+        if not benchmark_mode:
+            if len(args.planner): # if planner is specified in the command line, use it
+                planner_type[a_idx] = args.planner
+                print(f"Using planner: {planner_type[a_idx]}")
+            else:
+                planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
+        else:
+            planner_type[a_idx] = a_cfg["planner"]
+        
+        sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
+        sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
+ 
 
         if "plan_pub_sub" in a_cfg and "sub" in a_cfg["plan_pub_sub"]:
             pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
