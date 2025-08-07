@@ -16,6 +16,12 @@ cent_robot_cfgs = {'franka':
                         2:f'dual_ur10e.yml',
                         3: f'tri_ur10e.yml',
                         4:'quad_ur10e.yml'
+                        },
+                    'ur5e': {
+                        1:f'ur5e.yml',
+                        2:f'dual_ur5e.yml',
+                        3: f'tri_ur5e.yml',
+                        4:'quad_ur5e.yml'
                         }
                     }
 decentralized_robot_cfgs = ['franka.yml','franka_mobile.yml' ,'ur5e.yml', 'ur10e.yml', 'iiwa.yml','kinova_gen3.yml', 'jaco7.yml',]
