@@ -2442,18 +2442,22 @@ def modify_to_benchmark_mode(meta_cfg):
         'O-': 'mpc' # Ours minus prioirity (priority ablation)
     }
     
-    alg_to_plan_pub_sub = {
-        'CC':False,
-        'O':True,
-        'SD':False,
-        'SC':False,
-        'D':False,
-        'O-':True,
+    # [pub, sub] 
+    # pub means- centralized planners should not publish (pub=False). For decentralized planners - depends. pub=True means publish full policy, and pub=False means publish current pose as policy (equivalent to static obs)
+    # sub means- sub tells if subscribing to other robots as obstalces (either their current state or policy). So if other robots exists (like in all decentralized planners) sub should be true.
+    alg_to_pub_sub = { 
+        'CC':[False,False], # centralized planners do not publish or subscribe to plans
+        'O':[True,True], # ours - publish full policy, and subscribe to others (naturally)
+        'SD':[False,True], # storm decentralized - publish current pose as policy (equivalent to static obs), still listening to others
+        'SC':[False,False], # storm centralized - centralized planners do not publish or subscribe to plans (naturally)
+        'D':[False,False], # drrt* - centralized planners do not publish or subscribe to plans (naturally)
+        'O-':[True,True], # ours minus priority - same as O (publish full policy, and subscribe to others)
     }
-        
+    is_pub = alg_to_pub_sub[alg][0]
+    is_sub = alg_to_pub_sub[alg][1]
     meta_cfg["default"]["plan_pub_sub"] = {
-        'pub':{'is_on':alg_to_plan_pub_sub[alg],'dt':1,'is_dt_in_sec':False,'pr':1.0},
-        'sub':{'is_on':alg_to_plan_pub_sub[alg],'to':'all'}
+        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
+        'sub':{'is_on':is_sub,'to':'all'}
     }
    
     if alg == 'O-': # In priority ablation- same as O but using a particle config with a small change (the changing priority mode)

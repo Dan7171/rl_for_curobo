@@ -324,7 +324,7 @@ class ParallelMPPI(ParticleOptBase, ParallelMPPIConfig):
                 if not a_selected_from_cfree:
                     best_idx = torch.argmax(w, dim=-1)
                 self.best_traj.copy_(actions[self.problem_col, best_idx])
-                print(f"DEBUG: best idx: {best_idx}, min w: {w.min()}, max w: {w.max()}, sum w: {w.sum()}")
+                # print(f"DEBUG: best idx: {best_idx}, min w: {w.min()}, max w: {w.max()}, sum w: {w.sum()}")
         
         with profiler.record_function("mppi/store_rollouts"):
 
