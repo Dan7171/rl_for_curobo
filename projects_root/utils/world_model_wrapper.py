@@ -260,9 +260,9 @@ class WorldModelWrapper:
                     X_obs_W = np.array(obstacle.pose)  # [x, y, z, qw, qx, qy, qz]
 
                     # Check if pose actually changed since last update
-                    last_pose = self._last_world_poses.get(obstacle_name)
-                    if last_pose is not None and np.allclose(
-                        last_pose, X_obs_W, atol=self.pose_change_threshold
+                    known_obj_pose_W_np = self._last_world_poses.get(obstacle_name)
+                    if known_obj_pose_W_np is not None and np.allclose(
+                        known_obj_pose_W_np, X_obs_W, atol=self.pose_change_threshold
                     ):
                         # Skip unchanged obstacle to avoid spurious "MOVED" logs
                         continue
@@ -516,27 +516,27 @@ class WorldModelWrapper:
         if not self._initialized or self.collision_checker is None:
             return
 
-        for name, pose_list in pose_dict.items():
+        for name, obj_pose_W_list in pose_dict.items(): # for each known obstacle (obj_pose_W_list = a world frame pose of obstalce)
             if name not in self.obstacle_names:
                 # Unknown object – handled elsewhere
                 continue
 
-            pose_arr = np.asarray(pose_list, dtype=float)
+            obj_pose_W_np = np.asarray(obj_pose_W_list, dtype=float)
 
-            last_pose = self._last_world_poses.get(name)
-            if last_pose is not None and np.allclose(
-                last_pose, pose_arr, atol=self.pose_change_threshold
+            known_obj_W_pose_np = self._last_world_poses.get(name) # last known pose of obstacle in world frame
+            if known_obj_W_pose_np is not None and np.allclose( # check if pose changed since last update
+                known_obj_W_pose_np, obj_pose_W_np, atol=self.pose_change_threshold
             ):
-                continue  # unchanged
+                continue  # unchanged. No update needed.
+            # if reach here, pose changed since last update
+            self._last_world_poses[name] = obj_pose_W_np.copy()
 
-            self._last_world_poses[name] = pose_arr.copy()
+            # Convert new pose to robot base frame (from world)
+            obj_pose_R = self._transform_pose_world_to_base(obj_pose_W_np) # object pose in robot base frame
 
-            # Convert to robot base frame
-            base_pose = self._transform_pose_world_to_base(pose_arr)
-
-            cu_pose = Pose(
-                position=self.tensor_args.to_device(base_pose[:3]),
-                quaternion=self.tensor_args.to_device(base_pose[3:]),
+            cu_pose = Pose( # cast obs pose in R frame to curobo Pose object
+                position=self.tensor_args.to_device(obj_pose_R[:3]),
+                quaternion=self.tensor_args.to_device(obj_pose_R[3:]),
             )
 
             try:
@@ -549,8 +549,8 @@ class WorldModelWrapper:
                 if self.verbosity >= 3:
                     self._vprint(f"{name} MOVED (fast-dict)")
                     self._vprint(
-                                f"  X_W (pose w.r to world frame): : {self._pose_str(pose_arr)}\n"
-                                f"  X_R (pose w.r to collision world frame): {self._pose_str(base_pose)}"
+                                f"  X_W (pose w.r to world frame): : {self._pose_str(obj_pose_W_np)}\n"
+                                f"  X_R (pose w.r to collision world frame): {self._pose_str(obj_pose_R)}"
                             )
             except Exception as e:
                 log_warn(f"update_from_pose_dict failed for {name}: {e}")
@@ -754,7 +754,7 @@ class ColCheckWrapper:
 
         esdf = esdf.view(-1)           # signed: +inside, −outside
         d_outside_pos = (-esdf)        # outside positive
-        return float(d_outside_pos.min().item())
+        return float(d_outside_pos.min().item() - wc.max_distance) # < 0 # 0.0 no collision, negative = collison
 
     # def get_min_esdf_distance(self, spheres: torch.Tensor) -> float:
     #     """

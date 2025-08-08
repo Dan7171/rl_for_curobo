@@ -56,9 +56,9 @@ if not len(args.cfg): # no custom config
     else:
         meta_cfg_path = default_decentralized_meta_cfg
     meta_cfg_path = os.path.join(meta_cfgs_dir, meta_cfg_path)
-else:
-    meta_cfg_path = args.cfg
 
+else: # config argument provided
+    meta_cfg_path = args.cfg
 
 args.planner = args.planner.lower() # mpc or cumotion
 args.robot_type = args.robot_type.lower() # franka, ur10e, etc.
@@ -1027,7 +1027,8 @@ class CuPlanner:
         base_pose:list[float], 
         solver:Union[MotionGen, MpcSolver], 
         solver_config:Union[MotionGenConfig, MpcSolverConfig], 
-        ordered_j_names:list[str]
+        ordered_j_names:list[str],
+        robot_cfg:dict
         ):
         
         self.base_pose = base_pose # robot base pose in world frame
@@ -1044,6 +1045,8 @@ class CuPlanner:
         # buffer for the state of the current planning goals (for ee link + extra constrained links)
         self.plan_goals:dict[str, Pose] = {} 
 
+        self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(robot_cfg))
+        
     def _set_goals_to_retract_state(self):
         """
         init the plan goals to be as the retract state
@@ -1181,6 +1184,47 @@ class CuPlanner:
         return self.solver.kinematics.attach_external_objects_to_robot(joint_state, external_robot)
     
 
+    def get_state_in_task_space(self, js:JointState, frame='W',):
+        """
+        js: JointState object
+        frame: 'W' or 'R'
+        robot_base_pose: list of 7 elements [x,y,z,qw, qx,qy,qz]
+        """
+        crm = self.crm
+        robot_base_pose = self.base_pose
+
+        js_tensor_2d = js.position # [1,DOF]
+
+        # all the poses from next call are in robot frame:
+        p_ee, q_ee, _, _, p_links, q_links, prad = crm.forward(js_tensor_2d) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+        
+        q_spheres = torch.empty(prad.shape[:-1] + torch.Size([4]), device=prad.device)
+        q_spheres[...,:] = torch.tensor([1,0,0,0],device=prad.device, dtype=prad.dtype)  # [1,0,0,0] is the identity quaternion
+
+        d = {'ee': {'p': p_ee, 'q': q_ee}, 'links': {'p': p_links, 'q': q_links}, 'spheres': {'p': prad[:,:,:3], 'q': q_spheres, 'r': prad[:,:,3]}}
+        
+        # We first convert the poses to world frame
+        if frame == 'W':
+            for key in d.keys():
+                # pKey = 
+                
+                # if 'q' not in d[key].keys(): # spheres
+                #     qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
+                #     qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
+                # else: # links and ee
+                #     qKey = d[key]['q']
+
+                # OPTIMIZED VERSION: Use ultra-fast specialized function
+                X_world = transform_poses_batched_optimized_for_spheres(torch.cat([d[key]['p'], d[key]['q']], dim=-1), robot_base_pose)
+                d[key]['p'] = X_world[...,:3]
+                d[key]['q'] = X_world[...,3:]
+            
+        # elif frame == 'R2':
+
+        return d    
+
+
+
 class MpcPlanner(CuPlanner):
 
     def __init__(self, base_pose:list[float], solver_config_dict: dict, robot_cfg:dict, world_cfg:WorldConfig, particle_file_path:str):
@@ -1194,7 +1238,7 @@ class MpcPlanner(CuPlanner):
         solver = MpcSolver(_solver_cfg)
         ordered_j_names = solver.rollout_fn.joint_names
         self.cmd_state_full = None
-        super().__init__(base_pose, solver, _solver_cfg, ordered_j_names)
+        super().__init__(base_pose, solver, _solver_cfg, ordered_j_names, robot_cfg)
         
         retract_cfg = self.solver.rollout_fn.dynamics_model.retract_config.clone().unsqueeze(0)
         joint_names = self.solver.rollout_fn.joint_names
@@ -1227,7 +1271,7 @@ class MpcPlanner(CuPlanner):
         self.solver.update_goal(self.solver_goal_buf_R)
         mpc_result = self.solver.step(self.current_state, max_attempts=2)
         
-        self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(robot_cfg))
+        # self.crm = CudaRobotModel(CudaRobotModelConfig.from_data_dict(robot_cfg))
         self.particle_cfg_dict = load_yaml(particle_file_path)
         self.particle_file_path = particle_file_path
         self.solver_cfg_dict = solver_config_dict        
@@ -1639,6 +1683,7 @@ class CumotionPlanner(CuPlanner):
                 motion_gen_config:MotionGenConfig, 
                 plan_config:MotionGenPlanConfig, 
                 warmup_config:dict,
+                robot_cfg:dict
             ):
         """
         Cumotion planning kit. Can accept goals for end effector and optional extra links (e.g. "constrained" links).
@@ -1652,7 +1697,7 @@ class CumotionPlanner(CuPlanner):
         solver_config = motion_gen_config
         ordered_j_names = solver.kinematics.joint_names
         
-        super().__init__(base_pose, solver, solver_config, ordered_j_names)
+        super().__init__(base_pose, solver, solver_config, ordered_j_names, robot_cfg)
         self.plan_config = plan_config
         self.warmup_config = warmup_config
         self.solver:MotionGen = self.solver # only for linter 
@@ -1801,20 +1846,20 @@ class SimRobot:
  
         
     
-    def update_robot_sim_spheres(self, subroot:str, visible:bool, a_idx:int, cu_js:JointState,solver:Union[MpcSolver, MotionGen], base_pose:list[float]=[0,0,0,1,0,0,0]):
-        if cu_js is None:
-            return
+    def update_robot_sim_spheres(self, subroot:str, visible:bool,a_idx:int, spheres_tensor:torch.Tensor):
+        # if cu_js is None:
+        #     return
         
-        spheres = solver.kinematics.get_robot_as_spheres(cu_js.position)[0]
+        # spheres = solver.kinematics.get_robot_as_spheres(cu_js.position)[0]
 
         if not hasattr(self, "_vis_spheres"): # init visualization spheres
             self._vis_spheres = []
-            for si, s in enumerate(spheres):
+            for si, s in enumerate(spheres_tensor):
                 sp = sphere.VisualSphere(
                     prim_path=f"{subroot}/R{a_idx}S{si}",
-                    position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]),
-                    orientation=np.ravel(base_pose[3:]),
-                    radius=float(s.radius),
+                    position=np.ravel(s[:3].cpu().numpy()),
+                    orientation=np.ravel(s[3:7].cpu().numpy()),
+                    radius=float(s[7].cpu().item()),
                     color=np.array([0, 0.8, 0.2]),
                 )
                 self._vis_spheres.append(sp)
@@ -1822,13 +1867,13 @@ class SimRobot:
                     sp.set_visibility(False)
 
         else: # update visualization spheres
-            for si, s in enumerate(spheres):
-                if not np.isnan(s.position[0]):
+            for si, s in enumerate(spheres_tensor):
+                if not np.isnan(s[0].item()):
                     self._vis_spheres[si].set_world_pose(
-                        position=np.ravel(s.position[:3]) + np.ravel(base_pose[:3]),
-                        orientation=np.ravel(base_pose[3:]),
-                    )
-                    self._vis_spheres[si].set_radius(float(s.radius))
+                        position=np.ravel(s[:3].cpu().numpy()   ),
+                        orientation=np.ravel(s[3:7].cpu().numpy()),
+                        )
+                    self._vis_spheres[si].set_radius(float(s[7].cpu().item()))
 
 
     def parse_viz_color(self, color:str)->list[float]:
@@ -2044,7 +2089,7 @@ class CuAgent:
             pose_dict = _get_pose_dict_from_sim()
         # Fast pose update (only pose updates, no world-model re-initialization as before)
         
-        self.cu_world_wrapper.update_from_pose_dict(pose_dict)
+        self.cu_world_wrapper.update_from_pose_dict(pose_dict) 
         current_paths = set(
             list_relevant_prims(usd_help, paths_to_search_obs_under, ignore_list)
         )
@@ -2542,7 +2587,7 @@ def parse_dec_robot_config_path(robot_cfg_path):
 
 
 stop_event = Event()                       
-def main():
+def main(meta_cfg):
     
     my_world = World(stage_units_in_meters=1.0)
     activate_gpu_dynamics(my_world)
@@ -2558,7 +2603,7 @@ def main():
     now = datetime.now()
     formatted_time = now.strftime("%Y-%m-%d_%H:%M:%S")
     
-    meta_cfg = load_yaml(meta_cfg_path)
+    # meta_cfg = load_yaml(meta_cfg_)
     benchmark_mode = "benchmark_mode" in meta_cfg and meta_cfg["benchmark_mode"]["is_on"]
     if benchmark_mode:        
         meta_cfg = modify_to_benchmark_mode(meta_cfg)
@@ -2853,13 +2898,16 @@ def main():
                         paths_to_search_obs_under=["/World"]
                     )
                     
-                    if plan is not None:
-                        spheres_tensor = torch.cat((plan['task_space']['spheres']['p'][0], plan['task_space']['spheres']['r'][0].unsqueeze(1)),dim=1) # torch.cat([plan['task_space']['spheres']['p'][0],plan['task_space']['spheres']['r'][0]],dim=1)
-                        spheres_tensor[:,:3] -= torch.tensor(a.base_pose[:3], device=a.tensor_args.device, dtype=a.tensor_args.dtype)
-                    else:
-                        spheres_tensor = torch.zeros(0,4)
-                    min_d = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor)
-                    print(f"min_d: {min_d}")
+                    # if plan is not None:
+                    #     # spheres_tensor_W = torch.cat((plan['task_space']['spheres']['p'][0], plan['task_space']['spheres']['r'][0].unsqueeze(1)),dim=1) # torch.cat([plan['task_space']['spheres']['p'][0],plan['task_space']['spheres']['r'][0]],dim=1)
+                    #     # cu_spheres_R = a.planner.solver.kinematics.get_robot_as_spheres(tensor_args.to_device(torch.tensor(js.positions)))[0] # a.get_spheres_from_solkin(to_world_frame=False)
+                    #     # spheres_tensor_R = a.planner.get_state_in_task_space(cu_js, frame='R')['spheres']['p']
+                    #     # print(f"spheres_tensor_R: {spheres_tensor_R}")
+
+                    # else:
+                    #     spheres_tensor_R = torch.zeros(0,4)
+                    # # min_d = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_R)
+                    # # print(f"min_d: {min_d}")
 
                     # sense joints
                     js = a.sim_robot.get_js(sync_new=True) 
@@ -2871,10 +2919,22 @@ def main():
                     pw.on()
                     _0 = tensor_args.to_device(js.positions) * 0.0
                     cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
-                    
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
-                    
+                    task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
+                    task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')
+                    # task_space_state_R2 = a.planner.get_state_in_task_space(cu_js, frame='R2')
+                    spheres_tensor_R = torch.cat((task_space_state_R['spheres']['p'].squeeze(0), task_space_state_R['spheres']['r'].T),dim=1)
+                    # spheres_tensor_W = torch.cat((task_space_state_W['spheres']['p'].squeeze(0), task_space_state_W['spheres']['r'].T),dim=1)
+                    sphere_viz_tensor_W = torch.cat((task_space_state_W['spheres']['p'].squeeze(0), task_space_state_W['spheres']['q'].squeeze(0), task_space_state_W['spheres']['r'].T),dim=1)
+                    sphere_viz_tensor_R = torch.cat((task_space_state_R['spheres']['p'].squeeze(0), task_space_state_R['spheres']['q'].squeeze(0), task_space_state_R['spheres']['r'].T),dim=1)
+                    sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_viz_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
+                    min_d_R = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_R)
+                    # min_d_W = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_W)
+                    # min_d_R2 = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_R2)
+                    print(f"collision: {min_d_R}")
+                    # print(f"min_d_W: {min_d_W}")
+                    # print(f"min_d_R2: {min_d_R2}")
                     
                     # sense plans
                     if a.is_plan_subscriber():
@@ -2914,7 +2974,7 @@ def main():
                     
                     # debug
                     if viz_col_spheres and t % viz_col_spheres_dt == 0:
-                        a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, cu_js, planner.solver, a.base_pose)
+                        a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor)
 
                     if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
                         if a.is_plan_publisher() and len(cu_agents) > 1:
@@ -3043,4 +3103,4 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
-main()
+main(meta_cfg)

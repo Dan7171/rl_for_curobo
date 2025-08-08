@@ -147,9 +147,9 @@ sim_stats:
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
 
-  - robot:  curobo/src/curobo/content/configs/robot/ur10e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
     planner: mpc # 'mpc' # mpc or cumotion 
-    base_pose: [0.5, 0.0, 0.0,0,0, 0.0]
+    base_pose: [1.5, 2.0, 0.0, 0.0, 0.0, 180.0]
     retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
     viz_color: 'orange'
     cu_world_wrapper: # curoboworld collision wrapper
@@ -200,10 +200,6 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
  
 
 
-  
-# batch:
-#   n: [64,0] # [16,1,15] # [16,1,15]
-#   # base_poses: [] # list of poses for the agents
 
 
 
