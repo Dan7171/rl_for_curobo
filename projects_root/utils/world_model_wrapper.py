@@ -755,7 +755,7 @@ class ColCheckWrapper:
         esdf = esdf.view(-1)           # signed: +inside, −outside
         d_outside_pos = (-esdf)        # outside positive
         return float(d_outside_pos.min().item() - wc.max_distance) # < 0 # 0.0 no collision, negative = collison
-
+        # return float(d_outside_pos.min().item()) 
     # def get_min_esdf_distance(self, spheres: torch.Tensor) -> float:
     #     """
     #     True min Euclidean signed distance across all spheres to world obstacles (outside positive).

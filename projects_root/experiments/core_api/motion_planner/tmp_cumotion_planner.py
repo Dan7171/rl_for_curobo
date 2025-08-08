@@ -1811,7 +1811,8 @@ class SimRobot:
         self.viz_color = viz_color
         
         # debugging variables
-        self.viz_col_spheres_on = visualize_col_spheres['is_on']
+        self.viz_col_spheres_on_world = visualize_col_spheres['is_on_world']
+        self.viz_col_spheres_on_robot = visualize_col_spheres['is_on_robot']
         self.viz_col_spheres_dt = visualize_col_spheres['ts_delta']
         self.viz_col_spheres_color = self.viz_color if visualize_col_spheres['color'] == 'viz_color' else visualize_col_spheres['color']
 
@@ -1870,7 +1871,7 @@ class SimRobot:
             for si, s in enumerate(spheres_tensor):
                 if not np.isnan(s[0].item()):
                     self._vis_spheres[si].set_world_pose(
-                        position=np.ravel(s[:3].cpu().numpy()   ),
+                        position=np.ravel(s[:3].cpu().numpy()),
                         orientation=np.ravel(s[3:7].cpu().numpy()),
                         )
                     self._vis_spheres[si].set_radius(float(s[7].cpu().item()))
@@ -2857,7 +2858,8 @@ def main(meta_cfg):
                 if a.sim_robot is not None:
 
                     viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt # debug
-                    viz_col_spheres, viz_col_spheres_dt = a.sim_robot.viz_col_spheres_on, a.sim_robot.viz_col_spheres_dt # debug
+                    viz_col_spheres_world, viz_col_spheres_robot = a.sim_robot.viz_col_spheres_on_world, a.sim_robot.viz_col_spheres_on_robot
+                    viz_col_spheres_dt = a.sim_robot.viz_col_spheres_dt # debug
                     viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.viz_mpc_ee_rollouts_on, a.sim_robot.viz_mpc_ee_rollouts_dt 
                     
                     viz_cpred_dt = a.sim_robot.viz_col_pred_dt
@@ -2922,19 +2924,12 @@ def main(meta_cfg):
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
                     task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
-                    task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')
-                    # task_space_state_R2 = a.planner.get_state_in_task_space(cu_js, frame='R2')
-                    spheres_tensor_R = torch.cat((task_space_state_R['spheres']['p'].squeeze(0), task_space_state_R['spheres']['r'].T),dim=1)
-                    # spheres_tensor_W = torch.cat((task_space_state_W['spheres']['p'].squeeze(0), task_space_state_W['spheres']['r'].T),dim=1)
-                    sphere_viz_tensor_W = torch.cat((task_space_state_W['spheres']['p'].squeeze(0), task_space_state_W['spheres']['q'].squeeze(0), task_space_state_W['spheres']['r'].T),dim=1)
-                    sphere_viz_tensor_R = torch.cat((task_space_state_R['spheres']['p'].squeeze(0), task_space_state_R['spheres']['q'].squeeze(0), task_space_state_R['spheres']['r'].T),dim=1)
-                    sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_viz_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
-                    min_d_R = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_R)
-                    # min_d_W = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_W)
-                    # min_d_R2 = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_R2)
-                    print(f"collision: {min_d_R}")
-                    # print(f"min_d_W: {min_d_W}")
-                    # print(f"min_d_R2: {min_d_R2}")
+                    spheres_R = task_space_state_R['spheres']
+                    p_R, r_R = spheres_R['p'], spheres_R['r']
+                    pr_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1) # S (sphres) x 4 (xyzr)
+                    in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
+                    print(f"collision: {in_col}")
+
                     
                     # sense plans
                     if a.is_plan_subscriber():
@@ -2973,7 +2968,25 @@ def main(meta_cfg):
                     sw.off()
                     
                     # debug
-                    if viz_col_spheres and t % viz_col_spheres_dt == 0:
+                    if t % viz_col_spheres_dt == 0:
+                        if viz_col_spheres_world:
+                            task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
+                            spheres_W = task_space_state_W['spheres']
+                            p_W, q_W, r_W = spheres_W['p'], spheres_W['q'], spheres_W['r']
+                            sphere_viz_tensor_W = torch.cat((p_W.squeeze(0), q_W.squeeze(0), r_W.T),dim=1)
+                        if viz_col_spheres_robot:
+                            spheres_R = task_space_state_R['spheres']
+                            p_R, q_R, r_R = spheres_R['p'], spheres_R['q'], spheres_R['r']
+                            sphere_viz_tensor_R = torch.cat((p_R.squeeze(0), q_R.squeeze(0), r_R.T),dim=1)
+                        if viz_col_spheres_world and viz_col_spheres_robot:
+                            sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_viz_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
+                        elif viz_col_spheres_world:
+                            sphere_viz_tensor = sphere_viz_tensor_W
+                        elif viz_col_spheres_robot:
+                            sphere_viz_tensor = sphere_viz_tensor_R
+                        else:
+                            sphere_viz_tensor = torch.zeros(0,4)
+                        
                         a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor)
 
                     if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
