@@ -3,6 +3,7 @@ import argparse
 import os
 from curobo.util_file import load_yaml
 import numpy as np
+from torch.utils.checkpoint import Any
 cent_robot_cfgs = {'franka':
                     {
                         1:'franka.yml',
@@ -415,7 +416,7 @@ class SimTask:
         world:World, 
         usd_help:UsdHelper,        
         tensor_args:TensorDeviceType,
-        stats_cfg:dict,
+        stat_man_cfg:dict,
         ):
         
         self.agent_task_cfgs = agent_task_cfgs
@@ -433,7 +434,7 @@ class SimTask:
         self._link_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self._target_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self._last_update = [{} for _ in range(len(agent_task_cfgs))] # last updated goal poses in sim
-        self.stats = TaskStats(**stats_cfg)
+        self.stat_man = StatManager(**stat_man_cfg, unique_name='task_stats')
         # set targets to retract poses
         for a_idx, a_cfg in enumerate(agent_task_cfgs):
             for link_name in a_cfg.keys():
@@ -468,32 +469,38 @@ class SimTask:
         for a_idx in range(len(self.agent_task_cfgs)):
             for link_name, error in link_name_to_error[a_idx].items():
                 self.goal_errors[a_idx][link_name].append((error, now))
-                
-    def update_stats(self,t, spheres:Optional[list[list[list[float]]]]=None):
-        stat_names = []
-        stat_vals = []
-        # get the stats that need to be collected at this time step
-        for stat_name in self.stats.collect_list:
-            if t % self.stats.collect_dt[self.stats.collect_list.index(stat_name)] == 0:
-                match stat_name:
-                    case 'contact':
-                        contact_matrix = self.check_contact()
-                        stat_names.append(stat_name)
-                        stat_vals.append(contact_matrix)
-                    case 'goal_error':
-                        pass
-                        # link_name_to_error = self.goal_errors[-1][0]
-                        # stat_names.append(stat_name)
-                        # stat_vals.append(link_name_to_error)
-                    case 'spheres':
-                        stat_names.append(stat_name)
-                        stat_vals.append(spheres) 
-                    case _:
-                        raise ValueError(f"Invalid stat name: {stat_name}")
+    @abstractmethod
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        """
+        get the stats values for the given stat names
+        """
+        pass
+    
+    # def update_stats(self,t, spheres:Optional[list[list[list[float]]]]=None):
+    #     stat_names = []
+    #     stat_vals = []
+    #     # get the stats that need to be collected at this time step
+    #     for stat_name in self.stats.collect_list:
+    #         if t % self.stats.collect_dt[self.stats.collect_list.index(stat_name)] == 0:
+    #             match stat_name:
+    #                 case 'contact':
+    #                     contact_matrix = self.check_contact()
+    #                     stat_names.append(stat_name)
+    #                     stat_vals.append(contact_matrix)
+    #                 case 'goal_error':
+    #                     pass
+    #                     # link_name_to_error = self.goal_errors[-1][0]
+    #                     # stat_names.append(stat_name)
+    #                     # stat_vals.append(link_name_to_error)
+    #                 case 'spheres':
+    #                     stat_names.append(stat_name)
+    #                     stat_vals.append(spheres) 
+    #                 case _:
+    #                     raise ValueError(f"Invalid stat name: {stat_name}")
         
-        # update the stats
-        for stat_name, stat_val in zip(stat_names, stat_vals):
-            self.stats.update(stat_name, stat_val, t)
+    #     # update the stats
+    #     for stat_name, stat_val in zip(stat_names, stat_vals):
+    #         self.stats.update(stat_name, stat_val, t)
             
     def _get_link_errors(self) -> tuple[list[dict[str,tuple[float,float]]], list[dict[str,tuple[np.ndarray, np.ndarray]]], list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         n_agents = len(self.agent_task_cfgs)
@@ -684,6 +691,7 @@ class FollowTask(SimTask):
                 new_target_lin_vel = self._pose_utils.sample_pos_in_box([0,0,0], self.max_abs_axis_vel)
                 self.target_name_to_target_lin_vel[a_idx][target_name] = new_target_lin_vel
                 
+
 class ManualTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
@@ -697,11 +705,15 @@ class ManualTask(SimTask):
                 self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
                 # print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
                 # print(f'p_target: {p_target}, q_target: {q_target}')
-        
+    
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        return {}
             
 class ReachTask(FollowTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout, 0.0)
+
+    
 
 
 class CbsMp1Task(ManualTask):
@@ -997,6 +1009,20 @@ class BinTask(SimTask):
         # update the targets in sim
         self._set_targets_world_pose(_link_name_to_target_pose_np)
         return _link_name_to_target_pose_np
+    
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        
+        stats = {}
+        for stat_name in stat_names:
+            match stat_name:
+                case 'n_picks':
+                    val = self.link_name_to_picked_from_back
+                case 'n_drops':
+                    val = self.link_name_to_placed_in_bin
+                case _:
+                    raise ValueError(f"Invalid stat name: {stat_name}")
+            stats[stat_name] = val
+        return stats
     
 
 class PlanPubSub:
@@ -1981,26 +2007,26 @@ def calculate_robot_sphere_count(robot_cfg):
     return sphere_count, extra_sphere_count
 
 class CuAgent:
-    class Astats:
+    # class Astats:
                     
-        def __init__(self):
-            # self.cmds_tstep = [] # time steps commands were sent
-            self.cmds_tsec = [] # times commands were sent
-            self.plan_watch_times = [] # for each step, total time taken to plan
-            self.simops_watch_times = [] # time taken to execute simulation related operations of the agent (e.g. sense obstacles, sense joints, apply action)
+    #     def __init__(self):
+    #         # self.cmds_tstep = [] # time steps commands were sent
+    #         self.cmds_tsec = [] # times commands were sent
+    #         self.plan_watch_times = [] # for each step, total time taken to plan
+    #         self.simops_watch_times = [] # time taken to execute simulation related operations of the agent (e.g. sense obstacles, sense joints, apply action)
             
-            self.plan_watch = Stopwatch()
-            self.sim_watch = Stopwatch()
+    #         self.plan_watch = Stopwatch()
+    #         self.sim_watch = Stopwatch()
         
-        def update(self):
-            self.cmds_tsec.append(time()-self.start_time_sim)
-            self.plan_watch_times.append(self.plan_watch.total)
-            self.simops_watch_times.append(self.sim_watch.total)
-            self.plan_watch.reset()
-            self.sim_watch.reset()
+    #     def update(self):
+    #         self.cmds_tsec.append(time()-self.start_time_sim)
+    #         self.plan_watch_times.append(self.plan_watch.total)
+    #         self.simops_watch_times.append(self.sim_watch.total)
+    #         self.plan_watch.reset()
+    #         self.sim_watch.reset()
 
-        def start(self):
-            self.start_time_sim = time()
+    #     def start(self):
+    #         self.start_time_sim = time()
 
     def __init__(self, 
                 idx:int,
@@ -2012,8 +2038,9 @@ class CuAgent:
                 sim_robot:Optional[SimRobot]=None,
                 plan_pub_sub:Optional[PlanPubSub]=None,
                 viz_color:str='orange',
-                is_mobile:bool=False,
-                mobile_base_link_subpath:str='',
+                stat_man_cfg:dict={},
+                # is_mobile:bool=False,
+                # mobile_base_link_subpath:str='',
                 ):
         
         self.idx = idx
@@ -2025,7 +2052,8 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
-        self.stats = self.Astats() 
+
+        self.stat_man = StatManager(**stat_man_cfg) 
 
         # self.is_mobile = is_mobile
         # self.mobile_base_link_subpath = mobile_base_link_subpath
@@ -2293,19 +2321,19 @@ class CuAgent:
         like async_control_loop_sim, but only for one step
         """
         
-        sw = self.stats.sim_watch
-        pw = self.stats.plan_watch
+        # sw = self.stats.sim_watch
+        # pw = self.stats.plan_watch
 
         if self.sim_robot is None:
             return
         
-        sw.on()
+        # sw.on()
         ctrl_dof_names = self.sim_robot.robot.dof_names # or from real
         ctrl_dof_indices = self.sim_robot.robot.get_dof_index # or from real
         js = self.sim_robot.get_js(sync_new=False) # get last step's joint state
-        sw.off()
+        # sw.off()
 
-        pw.on()
+        # pw.on()
         plan = None
         if js is not None: #and self.plan_pub_sub.should_pub_now(t):
             share_full_plan = self.is_plan_publisher() # naive means broadcase state as plan over horizon
@@ -2313,29 +2341,29 @@ class CuAgent:
         if plan is not None: # currently available in mpc only
             with plans_lock:
                 plans_board[self.idx] = plan
-        pw.off()
+        # pw.off()
             # if viz_plans and t % viz_plans_dt == 0:
             #     pts_debug[self.idx].append({'points': plan['task_space']['spheres']['p'], 'color': self.sim_robot.viz_plan_color})
             
     
         # sense obstacles 
-        sw.on()
+        # sw.on()
         self.update_col_model_from_isaac_sim(
                 self.sim_robot.path, 
                 usd_help, 
                 ignore_list=self.cu_world_wrapper_update_policy["never_add"] + self.cu_world_wrapper_update_policy["never_update"], 
                 paths_to_search_obs_under=["/World"]
             )
-        sw.off()
+        #sw.off()
         # sense joints
-        sw.on()
+        # sw.on()
         js = self.sim_robot.get_js(sync_new=True) 
         if js is None:
             print("sim_js is None")
             return
-        sw.off()
+        #sw.off()
 
-        pw.on()
+        # pw.on()
         _0 = self.tensor_args.to_device(js.positions) * 0.0
         cu_js = JointState(self.tensor_args.to_device(js.positions),self.tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(self.planner.ordered_j_names)
         if isinstance(self.planner, MpcPlanner):
@@ -2367,16 +2395,16 @@ class CuAgent:
             #     pts_debug[self.idx].append({'points': planner.get_rollouts_in_world_frame(), 'color': self.sim_robot.viz_mpc_ee_rollouts_color})
         else:
             raise ValueError(f"Invalid planner type")
-        pw.off()
+        # pw.off()
         # act
-        sw.on()
+        # sw.on()
         if action is not None:
             with sim_lock:
                 isaac_action = self.planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
                 self.sim_robot.articulation_controller.apply_action(isaac_action)
-        sw.off()
+        # sw.off()
 
-        self.stats.update()
+        # self.stat_man.update()
 
     def is_plan_subscriber(self)->bool:
         return self.plan_pub_sub is not None and self.plan_pub_sub.sub_cfg["is_on"]
@@ -2384,69 +2412,147 @@ class CuAgent:
     def is_plan_publisher(self):
         return self.plan_pub_sub.pub_cfg["is_on"]
 
-class TaskStats:
-    def __init__(self, collect:bool, collect_list=['contact','goal_error'], collect_dt=[1,5], save_path:str='projects_root/experiments/out', save:bool=False, verbose:list[bool]=[False,False], add_timestep_to_path:bool=True):
-        self.collect = collect
-        self.collect_list = collect_list
-        self.collect_dt = collect_dt
-        self.save_path = save_path
+
+class StatManager:
+    """
+    Run statistics manager
+    """
+    def __init__(self, keys:list[str]=[], stat_names:list[list[str]]=[], collect_dt:Union[int,float,list[int],list[float]]=[], dt_in_sec:bool=False, save:bool=False, verbose:Union[bool,list[bool]]=False,unique_name:str=''):
+        self.keys = keys
+        
+        self._last_update_time = []
+        self.collect_dt = collect_dt if isinstance(collect_dt, list) else [collect_dt for _ in range(len(stat_names))]
+        self.dt_in_sec = dt_in_sec if isinstance(dt_in_sec, list) else [dt_in_sec for _ in range(len(stat_names))]
+        self.verbose = verbose if isinstance(verbose, list) else [verbose for  _ in range(len(stat_names))]
         self.should_save = save
-        self.verbose = verbose
-        self.add_timestep_to_path = add_timestep_to_path
+        self.unique_name = unique_name
+        
         self.stats = {}
-        for stat_name in self.collect_list:
+        for i, stat_name in enumerate(stat_names):
             self.stats[stat_name] = []
-        
+            if self.dt_in_sec[i]:
+                self._last_update_time.append(time())
+            else: # in steps (tstep)
+                self._last_update_time.append(0)
 
-    
-    def save(self,time_stamp:str, a_stats:list, run_stats:dict):
-        if self.collect and self.should_save:
-            os.makedirs(self.save_path, exist_ok=True)
-            experiment_out_path = os.path.join(self.save_path, time_stamp)
-            os.makedirs(experiment_out_path, exist_ok=False) # 
-            path = os.path.join(experiment_out_path, f'task_stats.pkl')
-            with open(path, "wb") as f:
-                pickle.dump({'task_stats':self.stats, 'a_stats':a_stats, 'run_stats':run_stats}, f)
-            return self.save_path
-        else:
-            return 'No stats saved (either collect is False or save is False)'
-    
-    def update(self, stat_name, value,t):
-        self.stats[stat_name].append((t,value))
-        if self.verbose[self.collect_list.index(stat_name)]:
-            print(f"{stat_name} updated at time {t}: {value}")
-            
+    def _get_updated_keys(self):
+        ans = []
+        for i in range(len(self.keys)):
+            match self.keys[i]:
+                case 'tsys':
+                    ans.append(time())
+                case _:
+                    raise ValueError(f"Invalid key: {self.keys[i]}")
+        return ans
 
-class SimStats:
-    def __init__(self,collect_dt:int=1,verbosity:bool=False):
-        self.collect_dt = collect_dt
-        self.verbosity = verbosity
-        self.loop_iter_watch = Stopwatch() 
-        self.tstep = [] # time step (step idx)
-        self.total_loop_time = [] # each item is the total time spent in the control loop (ctrl_loop_sim) up to this step
-        self.total_physics_time = [] # the total time passed *in simulation* (physics) up to the step (from internal world time)
 
-    def update(self,t,sim_time):
-        if t % self.collect_dt == 0:
-            if len(self.total_loop_time) > 0:
-                total_loop_time = self.loop_iter_watch.total + self.total_loop_time[-1]
+    def get_now_update_names(self, tstep:int)->list[str]:
+        stats_to_update = []
+        for i, stat_name in enumerate(self.stats):
+            if self.dt_in_sec[i]:
+                now_time = time() # time in seconds
             else:
-                total_loop_time = self.loop_iter_watch.total
-            self.total_loop_time.append(total_loop_time)
-            self.loop_iter_watch.reset()
-            self.tstep.append(t)
-            self.total_physics_time.append(sim_time - self.physics_start_time)
-            if self.verbosity:
-                print(f"tstep: {t}, total_loop_time: {self.total_loop_time[-1]}, total_physics_time: {self.total_physics_time[-1]}")
-    def start(self,physics_start_time):
-        self.physics_start_time = physics_start_time # physics world time when physics started (from internal world time)
+                now_time = tstep # time in steps (pass sim step or agent step whatever you want)
+            update = now_time - self._last_update_time[i] >= self.collect_dt[i]
+            if update:
+                stats_to_update.append(stat_name)
+               
+        return stats_to_update
+
+    def update(self, stats:dict, tstep: Optional[int]=None):
+        """
+        stats_to_vals is a dict of stat_names to update(returned from get_stats_to_update):
+        value: tat vals
+        """
+        if stats is None or len(stats) == 0:
+            return
+            
+        for stat_name in stats:
+            
+            # keys to attach to stats
+            keys = {}
+            now_keys = self._get_updated_keys()        
+            for key_name, key_val in zip(self.keys, now_keys):
+                keys[key_name] = key_val
+            
+            # save keys + data
+            key_list = list(stats.keys())
+            for i in range(len(key_list)):
+                stat_name = key_list[i]
+                if stat_name not in self.stats:
+                    raise ValueError(f"StatManager {self.unique_name} does not have stat {stat_name}")
+                self.stats[stat_name].append(deepcopy({'keys':keys, 'data':stats[stat_name]}))
+            
+                
+                # update last update time to know when to update next
+                if self.dt_in_sec[i]:
+                    now_time = time() # time in seconds
+                else:
+                    if tstep is None:
+                        raise ValueError(f"tstep is None but dt_in_sec is False (must pass tstep)")
+                    now_time = tstep # time in steps (pass sim step or agent step whatever you want)
+                self._last_update_time[i] = now_time
+                
+                if self.verbose[i]:
+                    print(f"StatManager manager updated at time {now_time}: with value {stats[stat_name]}")
+                    
+
+            
+    @staticmethod
+    def save(stat_managers:list, save_path:str, time_stamp:str):
+        out = {}
+        for i, stat_man in enumerate(stat_managers):
+            if not stat_man.should_save:
+                continue
+            if stat_man.unique_name in out:
+                new_name = f'{stat_man.unique_name}_{i}'
+                print(f"WARNING: StatManager {stat_man.unique_name} already exists, stat {stat_man.unique_name} will be renamed to {new_name}")
+                stat_man.unique_name = new_name                
+            out[stat_man.unique_name] = stat_man.stats
         
-    def to_dict(self):
-        return {
-            'tstep': self.tstep,
-            'total_loop_time': self.total_loop_time,
-            'total_physics_time': self.total_physics_time
-        }
+        os.makedirs(save_path, exist_ok=True)
+        experiment_out_path = os.path.join(save_path, time_stamp)
+        os.makedirs(experiment_out_path, exist_ok=False) # 
+        path = os.path.join(experiment_out_path, f'stats.pkl')
+        with open(path, "wb") as f:
+            pickle.dump(out, f)
+        print(f"Saved stats to {path}")
+        print(f"under keys: {list(out.keys())}")
+        return save_path
+
+    
+
+# class SimStats:
+#     def __init__(self,collect_dt:int=1,verbosity:bool=False):
+#         self.collect_dt = collect_dt
+#         self.verbosity = verbosity
+#         self.loop_iter_watch = Stopwatch() 
+#         self.tstep = [] # time step (step idx)
+#         self.total_loop_time = [] # each item is the total time spent in the control loop (ctrl_loop_sim) up to this step
+#         self.total_physics_time = [] # the total time passed *in simulation* (physics) up to the step (from internal world time)
+
+#     def update(self,t,sim_time):
+#         if t % self.collect_dt == 0:
+#             if len(self.total_loop_time) > 0:
+#                 total_loop_time = self.loop_iter_watch.total + self.total_loop_time[-1]
+#             else:
+#                 total_loop_time = self.loop_iter_watch.total
+#             self.total_loop_time.append(total_loop_time)
+#             self.loop_iter_watch.reset()
+#             self.tstep.append(t)
+#             self.total_physics_time.append(sim_time - self.physics_start_time)
+#             if self.verbosity:
+#                 print(f"tstep: {t}, total_loop_time: {self.total_loop_time[-1]}, total_physics_time: {self.total_physics_time[-1]}")
+    
+#     def start(self,physics_start_time):
+#         self.physics_start_time = physics_start_time # physics world time when physics started (from internal world time)
+        
+#     def to_dict(self):
+#         return {
+#             'tstep': self.tstep,
+#             'total_loop_time': self.total_loop_time,
+#             'total_physics_time': self.total_physics_time
+#         }
 
 
 def simulation_startup(simulation_app, my_world, cu_agents):
@@ -2758,7 +2864,8 @@ def main(meta_cfg):
             raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
         
-        
+        a_stat_man_cfg = deepcopy(a_cfg["stat_man_cfg"]) if "stat_man_cfg" in a_cfg else deepcopy(meta_cfg["default"]["stat_man_cfg"])
+        a_stat_man_cfg["unique_name"] = f'agent_{a_idx}'
         a = CuAgent(
             a_idx,
             tensor_args,
@@ -2769,6 +2876,7 @@ def main(meta_cfg):
             sim_robot=sim_robot, # optional, when using simulation
             plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
             viz_color=viz_color,
+            stat_man_cfg=a_stat_man_cfg,
             # is_mobile=a_cfg["is_mobile"] if "is_mobile" in a_cfg else meta_cfg["default"]["is_mobile"],
             # mobile_base_link_subpath=a_cfg["mobile_base_link_subpath"] if "mobile_base_link_subpath" in a_cfg else meta_cfg["default"]["mobile_base_link_subpath"],
         )
@@ -2791,18 +2899,20 @@ def main(meta_cfg):
             agents_task_cfgs.append(cfg)
 
     if len(agents_task_cfgs) > 0:
-        stats_cfg = meta_cfg["sim_task"]["stats_cfg"]
+        
         sim_task_type = meta_cfg["sim_task"]["task_type"]
+        sim_task_cfg = meta_cfg["sim_task"]["task_cfgs"][sim_task_type]
+        stat_man_cfg = meta_cfg["sim_task"]["stat_man_cfgs"][sim_task_type]
         if sim_task_type == 'reach':
-            sim_task = ReachTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils, **meta_cfg["sim_task"]["cfg"])
+            sim_task = ReachTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils, **sim_task_cfg)
         elif sim_task_type == 'manual':
-            sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args, stats_cfg)
+            sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args, stat_man_cfg)
         elif sim_task_type == 'follow':
-            sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils, **meta_cfg["sim_task"]["cfg"])
+            sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils, **sim_task_cfg)
         elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
-            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,base_pose,**meta_cfg["sim_task"]["cfg"])
+            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,base_pose,**sim_task_cfg)
         elif sim_task_type == 'bin':
-            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stats_cfg,pose_utils,base_pose, **meta_cfg["sim_task"]["cfg"])
+            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils,base_pose,**sim_task_cfg)
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 
@@ -2828,17 +2938,18 @@ def main(meta_cfg):
     
     # start stats
     
-    for a in cu_agents:
-        a.stats.start()    
-    sim_stats = SimStats(**meta_cfg["sim_stats"])
-    sim_stats.start(my_world.current_time)
-    lw = sim_stats.loop_iter_watch # control loop watch
-    task_stats = [{} for _ in range(len(cu_agents))]
-    
+    # for a in cu_agents:
+    #     a.stats.start()    
+    # sim_stats = SimStats(**meta_cfg["sim_stats"])
+    # sim_stats.start(my_world.current_time)
+    # # lw = sim_stats.loop_iter_watch # control loop watch
+    # task_stats = [{} for _ in range(len(cu_agents))]
+    sim_stat_man = StatManager(**meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
+    physics_time_start = my_world.current_time
     if not meta_cfg["async"]: # sync mode
         
         while simulation_app.is_running():
-            lw.on()
+            # lw.on()
             my_world.step(render=True)
             
             pts_debug = []
@@ -2852,9 +2963,8 @@ def main(meta_cfg):
             
             for a_idx, a in enumerate(cu_agents):
                 planner = a.planner
-                sw = a.stats.sim_watch
-                pw = a.stats.plan_watch
-
+                # sw = a.stats.sim_watch
+                # pw = a.stats.plan_watch
                 if a.sim_robot is not None:
 
                     viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt # debug
@@ -2871,17 +2981,17 @@ def main(meta_cfg):
                     
 
                     # publish 
-                    sw.on()
+                    # sw.on()
                     js = a.sim_robot.get_js(sync_new=False) # get last step's joint state
-                    sw.off()
+                    # sw.off()
 
                     
                     plan = None
-                    pw.on()
+                    # pw.on()
                     if js is not None and a.plan_pub_sub.should_pub_now(t):
                         share_full_plan = a.is_plan_publisher() # naive means broadcase state as plan over horizon
                         plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))
-                    pw.off()         
+                    # pw.off()         
                     
                     if plan is not None: # currently available in mpc only
                         plans_board[a.idx] = plan
@@ -2892,7 +3002,7 @@ def main(meta_cfg):
       
         
                     # sense obstacles 
-                    sw.on()
+                    # sw.on()
                     a.update_col_model_from_isaac_sim(
                         a.sim_robot.path, 
                         usd_help, 
@@ -2916,9 +3026,9 @@ def main(meta_cfg):
                     if js is None:
                         print("sim_js is None")
                         continue
-                    sw.off()
+                    # sw.off()
                     
-                    pw.on()
+                    # pw.on()
                     _0 = tensor_args.to_device(js.positions) * 0.0
                     cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                     if isinstance(planner, MpcPlanner):
@@ -2928,7 +3038,7 @@ def main(meta_cfg):
                     p_R, r_R = spheres_R['p'], spheres_R['r']
                     pr_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1) # S (sphres) x 4 (xyzr)
                     in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
-                    print(f"collision: {in_col}")
+                    # print(f"DEBUG: collision: {in_col}")
 
                     
                     # sense plans
@@ -2939,14 +3049,15 @@ def main(meta_cfg):
                     goals = link_name_to_target_pose[a.idx]
 
                     # plan
-                    
-                    # update robot context with current poses and target poses (for dynamic obs cost)
-                    if a.is_plan_subscriber(): 
-                        robot_context = get_topics().get_default_env()[a.idx]
-                        robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
-                        robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
-                        robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
-                        # robot_context["robot_pose"] = a.base_pose
+
+                    robot_context = get_topics().get_default_env()[a.idx]
+                    robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
+                    robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
+                    robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
+                    # # update robot context with current poses and target poses (for dynamic obs cost)
+                    # if a.is_plan_subscriber(): 
+                    #     robot_context = get_topics().get_default_env()[a.idx]
+                    #     # robot_context["robot_pose"] = a.base_pose
 
                     # yield action
                     if isinstance(planner, CumotionPlanner):
@@ -2958,14 +3069,14 @@ def main(meta_cfg):
 
                     else:
                         raise ValueError(f"Invalid planner type: {planner_type}")
-                    pw.off()
+                    # pw.off()
                     
                     # act
-                    sw.on()
+                    # sw.on()
                     if action is not None:
                         isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
                         a.sim_robot.articulation_controller.apply_action(isaac_action)
-                    sw.off()
+                    # sw.off()
                     
                     # debug
                     if t % viz_col_spheres_dt == 0:
@@ -3000,21 +3111,63 @@ def main(meta_cfg):
                                     pts_debug.append({'points': p_own, 'color': a.sim_robot.viz_col_pred_own_color})
                                 if viz_cpred_obs:
                                     pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
-                    a.stats.update()
+                    
+                    # update agent stats
+                    stats_to_update_now = a.stat_man.get_now_update_names(t)
+                    stats = {}
+                    for stat_name in stats_to_update_now:
+                        match stat_name:
+                            case 'step':
+                                val = t
+                            case 'REC':
+                                val = in_col  
+                            case 'RRC':
+                                val = 0 # TODO: add 
+                            case 'link_target_poses':
+                                val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
+                            case 'spheres':
+                                task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
+                                spheres_W = task_space_state_W['spheres']
+                                p_W, r_W = spheres_W['p'], spheres_W['r']
+                                spheres_pr_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
+                                val = spheres_pr_W
+                            case 'total_planning_time':
+                                val = 0 # a.stat_man.plan_watch.total
+                            case _:
+                               raise ValueError(f"Invalid stat name: {stat_name}")
+                        stats[stat_name] = val
+                    a.stat_man.update(stats, t)
 
 
                 if len(pts_debug):
                     draw_points(pts_debug)
             
 
-            lw.off()
-            sim_task.update_stats(t, task_stats)
-            sim_stats.update(t, my_world.current_time)            
+            # update task stats
+            sim_task.stat_man.update(sim_task.get_stat_vals(sim_task.stat_man.get_now_update_names(t)),t)
+            
+            # update sim stats
+            stats_to_update_now_sim = sim_stat_man.get_now_update_names(t)
+            stats = {}
+            for stat_name_sim in stats_to_update_now_sim:
+                match stat_name_sim:
+                    case 'tphysics':
+                        val = my_world.current_time - physics_time_start
+                    case _:
+                        raise ValueError(f"Invalid stat name: {stats_to_update_now_sim}")
+                stats[stat_name_sim] = val
+            sim_stat_man.update(stats,t)
+
+                
+            
+            
             t += 1
             if stop_simulation:
                 print("Saving stats...")
-                a_stats = [a.stats for a in cu_agents]
-                stats_out = sim_task.stats.save(formatted_time, a_stats, sim_stats.to_dict())
+                # a_stats = [a.stats for a in cu_agents]
+                # stats_out = sim_task.stats.save(formatted_time, a_stats, sim_stats.to_dict())
+                stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
+                stats_out = StatManager.save(stat_managers, 'projects_root/experiments/out', formatted_time)
                 print(f"Stats saved to {stats_out}")
                 simulation_app.close()
                 break
@@ -3030,7 +3183,7 @@ def main(meta_cfg):
             plans_board = [None for _ in range(len(cu_agents))]
 
             while simulation_app.is_running():
-                lw.on()
+                #lw.on()
                 link_name_to_target_pose = sim_task.step()
                 sim_env.step()
                  
@@ -3045,7 +3198,7 @@ def main(meta_cfg):
                 for th in threads:
                     th.join()
 
-                lw.off()
+                #lw.off()
                 my_world.step(render=True)
                 sim_task.update_stats(t)
                 

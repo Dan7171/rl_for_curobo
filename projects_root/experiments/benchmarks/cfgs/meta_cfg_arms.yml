@@ -87,7 +87,15 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       to: 'all' # meaning agent will subscribe to plans from all robots (except itself). 'to' can be a list of robot indices or 'all'. When agent is subscribed to plans, it will use the plans to plan its own steps (to make collision free steps).
       
   
-
+  # agent stats
+  stat_man_cfg:
+    keys: ['tsys'] # added to  every stat
+    stat_names: ['step', 'REC', 'RRC', 'link_target_poses', 'spheres', 'total_planning_time']
+    collect_dt: [1,1,5,20,5,5] # dt for each stat
+    verbose: [True,True,True,True,True,True]
+    dt_in_sec: False # if True, dt is in seconds, if False, dt is in steps (agent steps, not world steps)
+  
+                
 # default (and only) values for environments (sim/real) 
 env:
   simulation: # todo
@@ -110,25 +118,34 @@ async_type: "step" # "step" or "loop"
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
 
+  
 sim_task:
   # task_type: 'manual' # reach/follow/manual (for debugging)
   task_type: manual # bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
-  stats_cfg:
-    collect: False # if True, the stats will be collected and saved to a file
-    collect_list: [contact, goal_error, spheres]
-    collect_dt: [1,5,3] # save stats every save_stats_dt steps
-    verbose: [False,False,False]
-    save_path: "projects_root/experiments/out" # path to save the stats
-    add_timestep_to_path: True # if True, the timestep will be added to the path of the stats file
-    save: False # if True, the stats will be saved to a file
+  stat_man_cfgs:
+    bin: 
+      keys: ['tsys']
+      stat_names: ['n_picks', 'n_drops']
+      collect_dt: [5]
+      dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
+    reach: # link and target poses will be available by agent stats (and no other stats needed)
+      {}
+    follow: # link and target poses will be available by agent stats (and no other stats needed)
+      {}
 
-  cfg:
-    wall_dims_hwd: [0.4,0.5,0.05] # height, width, depth of the bin walls
-    bin_pose: [0,0,0,1,0,0,0] # position and orientation of the bin (xyz, wxyz)
-    # pos_err_tol = 0.03 # position error tolerance
-    # rot_err_tol = 
-  # cfg:
+    manual: 
+      {}
+
+
+  task_cfgs:
+    manual: {}
+    follow: {}
+    reach: {}
+    bin:
+      wall_dims_hwd: [0.4,0.5,0.05] # height, width, depth of the bin walls
+      bin_pose: [0,0,0,1,0,0,0] # position and orientation of the bin (xyz, wxyz)
     
+      
 sim_env:
   cfg:
     n_obs: 3
@@ -141,9 +158,13 @@ sim_env:
     obj_lin_vel: [0,0,0] # [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
     obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
 
-sim_stats: 
-  collect_dt: 25
-  verbosity: True
+sim_stat_man_cfg:
+  keys: ['tsys']
+  stat_names: ['tphysics']
+  collect_dt: 10
+  save: True
+  verbose: True
+  dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
 
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
