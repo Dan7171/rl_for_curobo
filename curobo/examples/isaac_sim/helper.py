@@ -57,7 +57,7 @@ from omni.isaac.core.utils.extensions import enable_extension
 from curobo.util_file import get_assets_path, get_filename, get_path_of_dir, join_path
 
 
-def add_extensions(simulation_app, headless_mode: Optional[str] = None):
+def add_extensions(simulation_app,extra_extensions: List[str] = [], headless_mode: Optional[str] = None):
     ext_list = [
         "omni.kit.asset_converter",
         "omni.kit.tool.asset_importer",
@@ -66,7 +66,8 @@ def add_extensions(simulation_app, headless_mode: Optional[str] = None):
     if headless_mode is not None:
         log_warn("Running in headless mode: " + headless_mode)
         ext_list += ["omni.kit.livestream." + headless_mode]
-    [enable_extension(x) for x in ext_list]
+    [enable_extension(x) for x in ext_list+extra_extensions]
+
     simulation_app.update()
 
     return True

@@ -90,11 +90,11 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   # agent stats
   stat_man_cfg:
     keys: ['tsys'] # added to  every stat
-    stat_names: ['step', 'REC', 'RRC', 'link_target_poses', 'spheres', 'total_planning_time']
-    collect_dt: [1,1,5,20,5,5] # dt for each stat
-    verbose: [True,True,True,True,True,True]
+    stat_names: ['w_step', 'a_step', 'rec', 'link_target_poses', 'spheres', 'total_planning_time']
+    collect_dt: [1,1,1,5,5,5] # dt for each stat
+    verbose: [True,True,True,False,False,True]
     dt_in_sec: False # if True, dt is in seconds, if False, dt is in steps (agent steps, not world steps)
-  
+    save: True
                 
 # default (and only) values for environments (sim/real) 
 env:
@@ -128,6 +128,7 @@ sim_task:
       stat_names: ['n_picks', 'n_drops']
       collect_dt: [5]
       dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
+      save: True
     reach: # link and target poses will be available by agent stats (and no other stats needed)
       {}
     follow: # link and target poses will be available by agent stats (and no other stats needed)
@@ -158,6 +159,7 @@ sim_env:
     obj_lin_vel: [0,0,0] # [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
     obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
 
+
 sim_stat_man_cfg:
   keys: ['tsys']
   stat_names: ['tphysics']
@@ -166,6 +168,9 @@ sim_stat_man_cfg:
   verbose: True
   dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
 
+video:
+  is_on: True # if True, video will be recorded
+  
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
 

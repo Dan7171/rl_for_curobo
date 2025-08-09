@@ -1,4 +1,5 @@
-# meta config
+
+from __future__ import annotations
 import argparse
 import os
 from curobo.util_file import load_yaml
@@ -2007,26 +2008,7 @@ def calculate_robot_sphere_count(robot_cfg):
     return sphere_count, extra_sphere_count
 
 class CuAgent:
-    # class Astats:
-                    
-    #     def __init__(self):
-    #         # self.cmds_tstep = [] # time steps commands were sent
-    #         self.cmds_tsec = [] # times commands were sent
-    #         self.plan_watch_times = [] # for each step, total time taken to plan
-    #         self.simops_watch_times = [] # time taken to execute simulation related operations of the agent (e.g. sense obstacles, sense joints, apply action)
-            
-    #         self.plan_watch = Stopwatch()
-    #         self.sim_watch = Stopwatch()
-        
-    #     def update(self):
-    #         self.cmds_tsec.append(time()-self.start_time_sim)
-    #         self.plan_watch_times.append(self.plan_watch.total)
-    #         self.simops_watch_times.append(self.sim_watch.total)
-    #         self.plan_watch.reset()
-    #         self.sim_watch.reset()
-
-    #     def start(self):
-    #         self.start_time_sim = time()
+  
 
     def __init__(self, 
                 idx:int,
@@ -2044,6 +2026,8 @@ class CuAgent:
                 ):
         
         self.idx = idx
+        self.step_count = 0 # num of completed control iterations where agent was able to sense->pub->plan->execute an action
+        self.planning_stopwatch = Stopwatch() # total planning time (in seconds) only planning time (no simulation related ops time)
         self.tensor_args = tensor_args
         self.planner = planner        
         self.base_pose = planner.base_pose
@@ -2052,8 +2036,8 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = self.sim_robot.parse_viz_color(viz_color)
-
         self.stat_man = StatManager(**stat_man_cfg) 
+        
 
         # self.is_mobile = is_mobile
         # self.mobile_base_link_subpath = mobile_base_link_subpath
@@ -2175,6 +2159,11 @@ class CuAgent:
         sub_to = self.plan_pub_sub.sub_cfg["to"] if isinstance(self.planner, MpcPlanner) else []
         self.planner.update_col_pred(plans_board, self.idx, sub_to)
     
+    def check_col_with_other(self,other:CuAgent,threshold=0.05):
+        other
+        if self.cu_world_wrapper.check_col_with_other_agents(other_agent.cu_world_wrapper):
+                return True
+        return False
     
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
@@ -2476,26 +2465,26 @@ class StatManager:
                 keys[key_name] = key_val
             
             # save keys + data
-            key_list = list(stats.keys())
-            for i in range(len(key_list)):
-                stat_name = key_list[i]
-                if stat_name not in self.stats:
-                    raise ValueError(f"StatManager {self.unique_name} does not have stat {stat_name}")
-                self.stats[stat_name].append(deepcopy({'keys':keys, 'data':stats[stat_name]}))
+        
+            if stat_name not in self.stats:
+                raise ValueError(f"StatManager {self.unique_name} does not have stat {stat_name}")
             
-                
-                # update last update time to know when to update next
-                if self.dt_in_sec[i]:
-                    now_time = time() # time in seconds
-                else:
-                    if tstep is None:
-                        raise ValueError(f"tstep is None but dt_in_sec is False (must pass tstep)")
-                    now_time = tstep # time in steps (pass sim step or agent step whatever you want)
-                self._last_update_time[i] = now_time
-                
-                if self.verbose[i]:
-                    print(f"StatManager manager updated at time {now_time}: with value {stats[stat_name]}")
-                    
+            
+            self.stats[stat_name].append((keys, stats[stat_name]))
+        
+            i = list(self.stats.keys()).index(stat_name)
+            # update last update time to know when to update next
+            if self.dt_in_sec[i]:
+                now_time = time() # time in seconds
+            else:
+                if tstep is None:
+                    raise ValueError(f"tstep is None but dt_in_sec is False (must pass tstep)")
+                now_time = tstep # time in steps (pass sim step or agent step whatever you want)
+            self._last_update_time[i] = now_time
+            
+            if self.verbose[i]:
+                print(f"stats: {self.unique_name}/{stat_name}/{now_time}: {stats[stat_name]}")
+            
 
             
     @staticmethod
@@ -2856,7 +2845,7 @@ def main(meta_cfg):
                 **cumotion_plan_cfgs[a_idx],
             )
             _warmup_config = dict(cumotion_warmup_cfgs[a_idx])            
-            planner = CumotionPlanner(base_pose[a_idx], _motion_gen_config, _plan_config, _warmup_config)
+            planner = CumotionPlanner(base_pose[a_idx], _motion_gen_config, _plan_config, _warmup_config,robot_cfgs[a_idx])
         
         elif planner_type[a_idx] == 'mpc':
             planner = MpcPlanner(base_pose[a_idx], solver_cfgs[a_idx], robot_cfgs[a_idx], world_cfg, mpc_particle_file_paths[a_idx])
@@ -2936,16 +2925,9 @@ def main(meta_cfg):
     
     _ = simulation_startup(simulation_app, my_world, cu_agents)
     
-    # start stats
-    
-    # for a in cu_agents:
-    #     a.stats.start()    
-    # sim_stats = SimStats(**meta_cfg["sim_stats"])
-    # sim_stats.start(my_world.current_time)
-    # # lw = sim_stats.loop_iter_watch # control loop watch
-    # task_stats = [{} for _ in range(len(cu_agents))]
     sim_stat_man = StatManager(**meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
     physics_time_start = my_world.current_time
+
     if not meta_cfg["async"]: # sync mode
         
         while simulation_app.is_running():
@@ -2963,8 +2945,7 @@ def main(meta_cfg):
             
             for a_idx, a in enumerate(cu_agents):
                 planner = a.planner
-                # sw = a.stats.sim_watch
-                # pw = a.stats.plan_watch
+                psw = a.planning_stopwatch
                 if a.sim_robot is not None:
 
                     viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt # debug
@@ -2979,20 +2960,19 @@ def main(meta_cfg):
                     ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
                     ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
                     
-
                     # publish 
                     # sw.on()
                     js = a.sim_robot.get_js(sync_new=False) # get last step's joint state
                     # sw.off()
 
                     
+                    psw.on()
                     plan = None
-                    # pw.on()
                     if js is not None and a.plan_pub_sub.should_pub_now(t):
                         share_full_plan = a.is_plan_publisher() # naive means broadcase state as plan over horizon
                         plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))
-                    # pw.off()         
-                    
+                    psw.off()
+
                     if plan is not None: # currently available in mpc only
                         plans_board[a.idx] = plan
                         if viz_plans and t % viz_plans_dt == 0:
@@ -3002,7 +2982,6 @@ def main(meta_cfg):
       
         
                     # sense obstacles 
-                    # sw.on()
                     a.update_col_model_from_isaac_sim(
                         a.sim_robot.path, 
                         usd_help, 
@@ -3010,37 +2989,27 @@ def main(meta_cfg):
                         paths_to_search_obs_under=["/World"]
                     )
                     
-                    # if plan is not None:
-                    #     # spheres_tensor_W = torch.cat((plan['task_space']['spheres']['p'][0], plan['task_space']['spheres']['r'][0].unsqueeze(1)),dim=1) # torch.cat([plan['task_space']['spheres']['p'][0],plan['task_space']['spheres']['r'][0]],dim=1)
-                    #     # cu_spheres_R = a.planner.solver.kinematics.get_robot_as_spheres(tensor_args.to_device(torch.tensor(js.positions)))[0] # a.get_spheres_from_solkin(to_world_frame=False)
-                    #     # spheres_tensor_R = a.planner.get_state_in_task_space(cu_js, frame='R')['spheres']['p']
-                    #     # print(f"spheres_tensor_R: {spheres_tensor_R}")
-
-                    # else:
-                    #     spheres_tensor_R = torch.zeros(0,4)
-                    # # min_d = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(spheres_tensor_R)
-                    # # print(f"min_d: {min_d}")
-
-                    # sense joints
+       
+        
                     js = a.sim_robot.get_js(sync_new=True) 
                     if js is None:
                         print("sim_js is None")
                         continue
-                    # sw.off()
-                    
-                    # pw.on()
+                     
+                    psw.on()
                     _0 = tensor_args.to_device(js.positions) * 0.0
                     cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                     if isinstance(planner, MpcPlanner):
                         planner.update_state(cu_js)
+                    
                     task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
                     spheres_R = task_space_state_R['spheres']
                     p_R, r_R = spheres_R['p'], spheres_R['r']
                     pr_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1) # S (sphres) x 4 (xyzr)
-                    in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
-                    # print(f"DEBUG: collision: {in_col}")
+                    psw.off()
 
                     
+                    psw.on()
                     # sense plans
                     if a.is_plan_subscriber():
                         a.update_col_pred(plans_board)
@@ -3049,15 +3018,11 @@ def main(meta_cfg):
                     goals = link_name_to_target_pose[a.idx]
 
                     # plan
-
                     robot_context = get_topics().get_default_env()[a.idx]
                     robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
                     robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
                     robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
-                    # # update robot context with current poses and target poses (for dynamic obs cost)
-                    # if a.is_plan_subscriber(): 
-                    #     robot_context = get_topics().get_default_env()[a.idx]
-                    #     # robot_context["robot_pose"] = a.base_pose
+
 
                     # yield action
                     if isinstance(planner, CumotionPlanner):
@@ -3069,14 +3034,13 @@ def main(meta_cfg):
 
                     else:
                         raise ValueError(f"Invalid planner type: {planner_type}")
-                    # pw.off()
+                    psw.off()
                     
                     # act
-                    # sw.on()
                     if action is not None:
                         isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
                         a.sim_robot.articulation_controller.apply_action(isaac_action)
-                    # sw.off()
+                        a.step_count += 1
                     
                     # debug
                     if t % viz_col_spheres_dt == 0:
@@ -3113,30 +3077,31 @@ def main(meta_cfg):
                                     pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
                     
                     # update agent stats
-                    stats_to_update_now = a.stat_man.get_now_update_names(t)
+                    stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
                     stats = {}
                     for stat_name in stats_to_update_now:
                         match stat_name:
-                            case 'step':
+                            case 'w_step': # world step
                                 val = t
-                            case 'REC':
+                            case 'a_step': # agent step (control iteration)
+                                val = a.step_count
+                            case 'rec': # robot env collision
+                                in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
                                 val = in_col  
-                            case 'RRC':
-                                val = 0 # TODO: add 
-                            case 'link_target_poses':
+                            case 'link_target_poses': # link and target poses
                                 val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
-                            case 'spheres':
+                            case 'spheres': # spheres pos and radius (in world frame)
                                 task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
                                 spheres_W = task_space_state_W['spheres']
                                 p_W, r_W = spheres_W['p'], spheres_W['r']
                                 spheres_pr_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
                                 val = spheres_pr_W
-                            case 'total_planning_time':
-                                val = 0 # a.stat_man.plan_watch.total
+                            case 'total_planning_time': # total planning time
+                                val = psw.total 
                             case _:
                                raise ValueError(f"Invalid stat name: {stat_name}")
                         stats[stat_name] = val
-                    a.stat_man.update(stats, t)
+                    a.stat_man.update(stats, a.step_count)
 
 
                 if len(pts_debug):
