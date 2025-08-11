@@ -2653,10 +2653,15 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                     "retract_cfg": ret_cfg,
                                 })
 
-                            out_name = f'{robot_fam}_{n_arms}_{alg}_{meta_cfg["sim_task"]["task_type"]}_{meta_cfg["sim_task"]["level"]}'
+                            
+                            meta_cfg["sim_task"]["task_type"] = task
+                            meta_cfg["sim_task"]["level"] = level
+                            
+                            out_name = f'{robot_fam}{n_arms}{alg}_{task}{level}'
                             
                             meta_cfgs.append(meta_cfg)
                             out_names.append(out_name)
+                            print(f'debug: out_name: {out_name}')
                             
     return meta_cfgs, out_names
 
@@ -3268,15 +3273,13 @@ if __name__ == "__main__":
         out_names = ['my_sim']
     
     else: # using custom meta cfg file (from command line)
-        if args.cfg.endswith('.yml'): # single meta cfg file
-            
-            if args.cfg == combo_cfg_path:
+        if args.cfg.endswith('.yml'): # single meta cfg file            
+            meta_cfg_path = args.cfg
+            meta_cfg = load_yaml(meta_cfg_path)
+            meta_cfgs = [meta_cfg]
+            out_names = ['my_sim']
+        elif 'combo' in args.cfg: # combo cfg file
                 meta_cfgs, out_names = modify_to_benchmark_mode(combo_cfg_path)
-            else:
-                meta_cfg_path = args.cfg
-                meta_cfg = load_yaml(meta_cfg_path)
-                meta_cfgs = [meta_cfg]
-                out_names = ['my_sim']
         else: # path to a directory with multiple meta cfg files
             cfg_names = os.listdir(args.cfg)
             meta_cfgs = []
@@ -3296,10 +3299,10 @@ if __name__ == "__main__":
 
 
 
-    for meta_cfg, out_name in zip(meta_cfgs, out_names):
+    # for meta_cfg, out_name in zip(meta_cfgs, out_names):
 
-        formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        out_path = os.path.join(meta_cfg["out_dir"], f'{formatted_time}_{out_name}')
-        keep_running = main(meta_cfg, out_path)
-        if not keep_running:
-            break
+    #     formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    #     out_path = os.path.join(meta_cfg["out_dir"], f'{formatted_time}_{out_name}')
+    #     keep_running = main(meta_cfg, out_path)
+    #     if not keep_running:
+    #         break
