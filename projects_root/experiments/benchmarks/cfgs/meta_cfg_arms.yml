@@ -1,6 +1,12 @@
+tstep_timeout: 20
+sec_timeout: 20
+physics_timeout: 200
+out_dir: '/home/dan/mr_mpc_logs'
+
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
-  is_mobile: False
-  mobile_base_link_subpath: ''
+  # is_mobile: False
+  # mobile_base_link_subpath: ''
+  viz_color: 'orange'
   cu_world_wrapper: # curoboworld collision wrapper
     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
     never_add: [] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
@@ -46,16 +52,23 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True
-      is_on_robot: True
+      is_on_world: False # visualize collision spheres in world frame
+      is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
       ts_delta: 2 # int
       color: viz_color
-
+      
+    visualize_col_pred:
+        own: True
+        own_color: 'blue'
+        own_mean_only: True
+        obs: True
+        obs_color: 'red'
+        
+        ts_delta: 1 # int
     visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
       is_on: False
       ts_delta: 2 # int
       
-
     visualize_plan: # visualize the planned trajectory of the robot (for debugging)
       is_on: False
       color: viz_color
@@ -66,8 +79,6 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       color: 'green'
       ts_delta: 1 # int
 
-    visualize_col_pred:
-      own: False
       own_color: 'blue'
       own_mean_only: True
       obs: False
@@ -91,26 +102,11 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   stat_man_cfg:
     keys: ['tsys'] # added to  every stat
     stat_names: ['w_step', 'a_step', 'rec', 'link_target_poses', 'spheres', 'total_planning_time']
-    collect_dt: [1,1,1,5,5,5] # dt for each stat
+    collect_dt: [1,1,1,5,10,5] # dt for each stat
     verbose: [True,True,True,False,False,True]
     dt_in_sec: False # if True, dt is in seconds, if False, dt is in steps (agent steps, not world steps)
-    save: True
+    save: False
                 
-# default (and only) values for environments (sim/real) 
-env:
-  simulation: # todo
-    is_on: True
-    enable_gpu_dynamics: True
-    init_app_settings:
-      headless: null # set 'true' to run in headless mode
-      width: "1920"
-      height: "1080"
-      # physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-      # rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-      backend: "torch"
-  
-  real: # todo
-    is_on: False
   
 async: False
 async_type: "step" # "step" or "loop"
@@ -121,22 +117,21 @@ pose_utils:
   
 sim_task:
   # task_type: 'manual' # reach/follow/manual (for debugging)
-  task_type: manual # bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  task_type: bin # bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  level: 1 # 1: easy, 2: medium, 3: hard
   stat_man_cfgs:
     bin: 
       keys: ['tsys']
       stat_names: ['n_picks', 'n_drops']
-      collect_dt: [5]
+      collect_dt: 5
       dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
-      save: True
+      save: False
     reach: # link and target poses will be available by agent stats (and no other stats needed)
       {}
     follow: # link and target poses will be available by agent stats (and no other stats needed)
       {}
-
     manual: 
       {}
-
 
   task_cfgs:
     manual: {}
@@ -145,11 +140,12 @@ sim_task:
     bin:
       wall_dims_hwd: [0.4,0.5,0.05] # height, width, depth of the bin walls
       bin_pose: [0,0,0,1,0,0,0] # position and orientation of the bin (xyz, wxyz)
+      
     
       
 sim_env:
   cfg:
-    n_obs: 3
+    n_obs: 0
     obj_shape: 'cube' # type of the obstacle ('cube' or 'sphere')
     max_dim: 0.1 # max dimension of the obstacle (in meters): side length for cube, diameter for sphere
     min_dim: 0.1 # min dimension of the obstacle (in meters): side length for cube, diameter for sphere
@@ -159,78 +155,35 @@ sim_env:
     obj_lin_vel: [0,0,0] # [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
     obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
 
-
 sim_stat_man_cfg:
   keys: ['tsys']
   stat_names: ['tphysics']
   collect_dt: 10
-  save: True
   verbose: True
   dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
+  save: False
 
-video:
-  is_on: True # if True, video will be recorded
-  
+
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
-
-  - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    planner: mpc # 'mpc' # mpc or cumotion 
-    base_pose: [1.5, 2.0, 0.0, 0.0, 0.0, 180.0]
-    retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-    viz_color: 'orange'
-    cu_world_wrapper: # curoboworld collision wrapper
-      verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-      never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-      never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
-    # sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
-    #   visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-    #     is_on: False 
-    #     ts_delta: 2 # int
-    #     color: 'green'
-
-    #   visualize_obj_bound_spheres: # show sphres bounding curobo obstacles (for debugging)
-    #     is_on: False
-    #     ts_delta: 2 # int
-        
-    #   visualize_plan: # visualize the planned trajectory of the robot (for debugging)
-    #     is_on: False
-    #     color: 'green'
-    #     ts_delta: 1 # int
-      
-    #   visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-    #     is_on: True
-    #     color: 'orange'
-    #     ts_delta: 1 # int
-
-    #   visualize_col_pred:
-    #     own: True
-    #     own_color: 'blue'
-    #     own_mean_only: True
-    #     obs: True
-    #     obs_color: 'red'
-        
-    #     ts_delta: 1 # int
+- robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  planner: mpc # 'mpc' # mpc or cumotion 
+  base_pose: [0.5, 0.0, 0.0,0,0,180.0]
+  retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
+  viz_color: 'orange'
+  cu_world_wrapper: # curoboworld collision wrapper
+    verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
+    never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
+    never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
 
 
-  # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-  #   planner: cumotion # 'mpc' # mpc or cumotion 
-  #   base_pose: [-0.5, 0.0, 0.0, 1, 0, 0, 0]
-  #   retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-  #   viz_color: 'blue'
-  #   cu_world_wrapper: # curoboworld collision wrapper
-  #     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-  #     never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-  #     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-    
- 
-
-
-
-
-
-# Reference:
-# Default retract configs (in robot cfg- a.robot_cfg["kinematics"]["cspace"]["retract_config"]):
-#  franka: [0.0, -1.3,  0.0, -2.5,  0.0,  1.0,  0.0] # 
-#  ur5e: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
+- robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
+  planner: mpc # 'mpc' # mpc or cumotion 
+  base_pose: [-0.5, 0.0, 0.0, 1, 0, 0, 0]
+  retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
+  viz_color: 'blue'
+  cu_world_wrapper: # curoboworld collision wrapper
+    verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
+    never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
+    never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
+  

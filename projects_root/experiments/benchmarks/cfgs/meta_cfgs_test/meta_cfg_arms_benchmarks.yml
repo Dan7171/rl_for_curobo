@@ -2,12 +2,13 @@ tstep_timeout: 20
 sec_timeout: 20
 physics_timeout: 200
 
+out: '/home/dan/mr_mpc_logs'
+
 benchmark_mode: 
   is_on: True
   robot_fam: ur5e # ur10e
   n_arms: 4 # 4
   alg: 'SD' # CC, O, SD, SC, D, O-
-  out: '/home/dan/benchmarks'
 
 
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).

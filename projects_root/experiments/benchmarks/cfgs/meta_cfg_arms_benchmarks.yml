@@ -1,12 +1,13 @@
-timeout: 60
-timeout_type: 'tseps' # tsteps = time steps, pc_time = runtime, physics_time = simualtedf time
+tstep_timeout: 20
+sec_timeout: 20
+physics_timeout: 200
+out_dir: '/home/dan/mr_mpc_logs'
 
-benchmark_mode: 
-  is_on: True
-  robot_fam: ur5e # ur10e
-  n_arms: 4 # 4
-  alg: 'SD' # CC, O, SD, SC, D, O-
-  out: '/home/dan/benchmarks'
+# benchmark_mode: 
+#   is_on: True
+#   robot_fam: ur5e # ur10e
+#   n_arms: 4 # 4
+#   alg: 'SD' # CC, O, SD, SC, D, O-
 
 
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
@@ -105,23 +106,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     verbose: [True,True,True,False,False,True]
     dt_in_sec: False # if True, dt is in seconds, if False, dt is in steps (agent steps, not world steps)
     save: False
-                
-# default (and only) values for environments (sim/real) 
-# env:
-#   simulation: # todo
-#     is_on: True
-#     enable_gpu_dynamics: True
-#     init_app_settings:
-#       headless: null # set 'true' to run in headless mode
-#       width: "1920"
-#       height: "1080"
-#       # physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-#       # rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-#       backend: "torch"
-  
-#   real: # todo
-#     is_on: False
-  
+
 async: False
 async_type: "step" # "step" or "loop"
 

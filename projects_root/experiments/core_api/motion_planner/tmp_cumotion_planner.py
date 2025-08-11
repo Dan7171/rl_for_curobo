@@ -6,34 +6,6 @@ import numpy as np
 from torch.utils.checkpoint import Any
 import yaml
 
-cent_robot_cfgs = {'franka':
-                    {
-                        1:'franka.yml',
-                        2:f'franka_dual_arm.yml',
-                        3:f'franka_3_arm.yml',
-                        4:f'franka_4_arm.yml',
-                    },
-                          
-                    'ur10e': {
-                        1:f'ur10e.yml',
-                        2:f'dual_ur10e.yml',
-                        3: f'tri_ur10e.yml',
-                        4:'quad_ur10e.yml'
-                        },
-                    'ur5e': {
-                        1:f'ur5e.yml',
-                        2:f'dual_ur5e.yml',
-                        3: f'tri_ur5e.yml',
-                        4:'quad_ur5e.yml'
-                        }
-                    }
-decentralized_robot_cfgs = ['franka.yml','franka_mobile.yml' ,'ur5e.yml', 'ur10e.yml', 'iiwa.yml','kinova_gen3.yml', 'jaco7.yml',]
-dec_robot_fam_to_cfg = {'franka': 'franka.yml', 'franka_mobile': 'franka_mobile.yml', 'ur5e': 'ur5e.yml', 'ur10e': 'ur10e.yml', 'iiwa': 'iiwa.yml', 'kinova_gen3': 'kinova_gen3.yml', 'jaco7': 'jaco7.yml'}
-
-def get_cent_robot_types():
-    return list(cent_robot_cfgs.keys())
-def get_dec_robot_types():
-    return [x.split('.')[0] for x in decentralized_robot_cfgs] # remove .yml from the end
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--cfg", type=str, required=False, default="", help="path to meta config file")
@@ -43,102 +15,8 @@ parser.add_argument(
     default=None,
     help="To run headless, use one of [native, websocket], webrtc might not work.",
 )
-# parser.add_argument("-i", "--interactive", required=False, action="store_true", help="interacttive mode")
-# parser.add_argument("-p", "--planner", type=str, required=False, default="", help="planner type (mpc/cumotion)")
-# parser.add_argument("-c", "--centralized", required=False, default="", help="y for centralized, n for decentralized. If not supplied, will will be taken from cfg file")
-# parser.add_argument("-r", "--robot_type", required=False, default="", help=f"robot type: (for centralized: {get_cent_robot_types()}, for decentralized: {get_dec_robot_types()})")
-# parser.add_argument("-n", "--n_robots", type=int, required=False, default=0, help=f"number of robots from the provided robot type")
-# meta_cfg_path= "projects_root/experiments/benchmarks/cfgs/meta_cfg_arms_storm_cent.yml" #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
-
-meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
-robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
-benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
-default_meta_cfg_path = "meta_cfg_arms_benchmarks.yml"
-simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
-# default_centralized_meta_cfg = "meta_cfg_arms_cent.yml"
-# default_decentralized_meta_cfg = "meta_cfg_arms.yml"
-args = parser.parse_args()
-args.cfg = "projects_root/experiments/benchmarks/cfgs/meta_cfgs_test" # temp
-
-if not len(args.cfg):
-    print(f"Using default meta cfg file: {default_meta_cfg_path}")
-    meta_cfg_path = os.path.join(meta_cfgs_dir, default_meta_cfg_path)
-    meta_cfg = load_yaml(meta_cfg_path)
-    meta_cfgs = [meta_cfg_path]
-else:
-    if args.cfg.endswith('.yml'):
-        meta_cfg_path = args.cfg
-        meta_cfg = load_yaml(meta_cfg_path)
-        meta_cfgs = [meta_cfg_path]
-    else:
-        cfg_names = os.listdir(args.cfg)
-        meta_cfgs = []
-        for item in cfg_names:
-            if item.endswith('.yml'):
-                meta_cfg_path = os.path.join(args.cfg, item)
-                meta_cfg = load_yaml(meta_cfg_path)
-                meta_cfgs.append(meta_cfg)
-                
-        print(f"Available meta cfg files: {meta_cfgs}")
-        print(f'in total has {len(meta_cfgs)} meta cfg files')
-
-    print(f"Using custom meta cfg file: {meta_cfg_path}")
-
-# meta_cfg_path = os.path.join(meta_cfgs_dir, default_meta_cfg_path) if not len(args.cfg) else args.cfg   
-# interactive = args.interactive
-# args.centralized = args.centralized.lower() == 'y'
-
-# if not len(args.cfg): # no custom config
-#     if args.centralized:
-#         meta_cfg_path = default_centralized_meta_cfg
-#     else:
-#         meta_cfg_path = default_decentralized_meta_cfg
-#     meta_cfg_path = os.path.join(meta_cfgs_dir, meta_cfg_path)
-
-# else: # config argument provided
-#     meta_cfg_path = args.cfg
-
-# args.planner = args.planner.lower() # mpc or cumotion
-# args.robot_type = args.robot_type.lower() # franka, ur10e, etc.
 
 
-
-# if interactive:
-
-#     input_cfg_path = print("Select a template cfg file from the following list")
-#     for i, cfg_file in enumerate(os.listdir(meta_cfgs_dir)):
-#         print(f"{i}: {cfg_file}")
-#     input_cfg_path = input("Enter the index to the cfg file: ")
-#     input_cfg_path = int(input_cfg_path)
-#     meta_cfg_path = os.path.join(meta_cfgs_dir, os.listdir(meta_cfgs_dir)[input_cfg_path])
-#     print(f"Using tempate cfg file: {meta_cfg_path}")
-#     meta_cfg = load_yaml(meta_cfg_path)
-#     input_robot_cfg_path = input("\nEdit cfg for run? (y/n): (changes won't be saved to file) ")
-#     if input_robot_cfg_path == 'y':
-#         cent_decent = input("Select the robot type: 0: centralized, 1: decentralized: ")
-#         cent_decent = int(cent_decent)
-#         match cent_decent:
-#             case 0: # centralized
-#                 n = int(input("Enter the number of robots:  "))
-#                 robot_type = (input("Select the robot type: 0: franka, 1: ur10e "))
-#                 match robot_type:
-#                     case 0:
-#                         robot_cfg_path = cent_robot_cfgs['franka'][n]
-#                     case 1:
-#                         robot_cfg_path = cent_robot_cfgs['ur10e'][n]
-#                     case _:
-#                         print("Invalid robot type")
-#                         exit()
-#                 print(f"Using robot cfg file: {robot_cfg_path}")
-
-        
-#             case _:
-#                 print("Invalid robot type")
-#                 exit()
-        
-# else:
-#     meta_cfg = load_yaml(meta_cfg_path)
-    
 
 # Isaac Sim
 try:
@@ -147,13 +25,13 @@ except ImportError:
     pass
 from omni.isaac.kit import SimulationApp
 
-
+simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
 simapp_cfg = load_yaml(simapp_cfg_path)
 simulation_app = SimulationApp({**simapp_cfg["env"]["simulation"]["init_app_settings"]})
 
 from projects_root.examples.helper import add_extensions
-# headless = meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]
-add_extensions(simulation_app, headless_mode=args.headless_mode)
+add_extensions(simulation_app, headless_mode=simapp_cfg["env"]["simulation"]["init_app_settings"]["headless"])
+
 import os
 from abc import abstractmethod
 from collections.abc import Callable
@@ -2659,10 +2537,31 @@ def simulation_startup(simulation_app, my_world, cu_agents):
 
 
 
-def modify_to_benchmark_mode(meta_cfg, time_stamp):
+def modify_to_benchmark_mode(combo_cfg_path):
     
-    n_arms, robot_fam, alg = meta_cfg["benchmark_mode"]["n_arms"], meta_cfg["benchmark_mode"]["robot_fam"], meta_cfg["benchmark_mode"]["alg"]
     colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
+    dec_robot_fam_to_cfg = {'franka': 'franka.yml', 'franka_mobile': 'franka_mobile.yml', 'ur5e': 'ur5e.yml', 'ur10e': 'ur10e.yml', 'iiwa': 'iiwa.yml', 'kinova_gen3': 'kinova_gen3.yml', 'jaco7': 'jaco7.yml'}
+    cent_robot_cfgs = {'franka':
+                    {
+                        1:'franka.yml',
+                        2:f'franka_dual_arm.yml',
+                        3:f'franka_3_arm.yml',
+                        4:f'franka_4_arm.yml',
+                    },
+                          
+                    'ur10e': {
+                        1:f'ur10e.yml',
+                        2:f'dual_ur10e.yml',
+                        3: f'tri_ur10e.yml',
+                        4:'quad_ur10e.yml'
+                        },
+                    'ur5e': {
+                        1:f'ur5e.yml',
+                        2:f'dual_ur5e.yml',
+                        3: f'tri_ur5e.yml',
+                        4:'quad_ur5e.yml'
+                        }
+                    }
     
     ret_pose_cfg = load_yaml(benchmarks_ret_cfg)
     
@@ -2687,54 +2586,79 @@ def modify_to_benchmark_mode(meta_cfg, time_stamp):
         'D':[False,False], # drrt* - centralized planners do not publish or subscribe to plans (naturally)
         'O-':[True,True], # ours minus priority - same as O (publish full policy, and subscribe to others)
     }
-    is_pub = alg_to_pub_sub[alg][0]
-    is_sub = alg_to_pub_sub[alg][1]
-    meta_cfg["default"]["plan_pub_sub"] = {
-        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
-        'sub':{'is_on':is_sub,'to':'all'}
-    }
-   
-    if alg == 'O-': # In priority ablation- same as O but using a particle config with a small change (the changing priority mode)
-        meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
-    else:
-        meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
-    cent = alg in ['CC', 'SC','D'] # centralized planner        
-    planner_type = alg_to_planner[alg]
 
-    
-    if cent:
-        robot_cfg_path =  cent_robot_cfgs[robot_fam][n_arms]
-        n_cfgs = 1
-    else:
-        robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
-        n_cfgs = n_arms
-    
-    robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path)
-    ret_root = ret_pose_cfg[robot_fam][n_arms]["retract"]
-    pose_root = ret_pose_cfg[robot_fam][n_arms]["pose"]
 
-    meta_cfg["cu_agents"] = []
-    for a_idx in range(n_cfgs):
-        if cent: # n_cfgs = 1 (centralized planner)
-            # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
-            ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
-            base_pose = pose_root["cent"]
-        else:
-            ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
-            base_pose = pose_root["dec"][a_idx] # arm base pose   
-    
-        
-        meta_cfg["cu_agents"].append({
-            "robot": robot_cfg_path,
-            "planner": planner_type,
-            "base_pose": base_pose,
-            "viz_color": colors[a_idx%n_arms],
-            "retract_cfg": ret_cfg,
-        })
+    combo_cfg = load_yaml(combo_cfg_path)
+    print(f'debug: combo_cfg: {combo_cfg}')
 
-    out_name = f'{time_stamp}_{robot_fam}_{n_arms}_{alg}_{meta_cfg["sim_task"]["task_type"]}_{meta_cfg["sim_task"]["level"]}'
+    base_options = combo_cfg["base"]
+    n_arms_options = combo_cfg["n_arms"]
+    robot_fam_options = combo_cfg["robot_fam"]
+    alg_options = combo_cfg["alg"]
+    task_to_levels_options = combo_cfg["task_to_levels"]
     
-    return meta_cfg, os.path.join(meta_cfg["benchmark_mode"]["out"], out_name)
+    out_names = []
+    meta_cfgs = []
+
+    for base_cfg_path in base_options:
+        for n_arms in n_arms_options: # list
+            for robot_fam in robot_fam_options: # list
+                for alg in alg_options: # list
+                    for task in task_to_levels_options: # dict
+                        for level in task_to_levels_options[task]: # list
+                            meta_cfg = load_yaml(base_cfg_path)
+
+                            is_pub = alg_to_pub_sub[alg][0]
+                            is_sub = alg_to_pub_sub[alg][1]
+                            meta_cfg["default"]["plan_pub_sub"] = {
+                                'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
+                                'sub':{'is_on':is_sub,'to':'all'}
+                            }
+                        
+                            if alg == 'O-': # In priority ablation- same as O but using a particle config with a small change (the changing priority mode)
+                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
+                            else:
+                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
+                            cent = alg in ['CC', 'SC','D'] # centralized planner        
+                            planner_type = alg_to_planner[alg]
+
+                            
+                            if cent:
+                                robot_cfg_path =  cent_robot_cfgs[robot_fam][n_arms]
+                                n_cfgs = 1
+                            else:
+                                robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
+                                n_cfgs = n_arms
+                            
+                            robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path)
+                            ret_root = ret_pose_cfg[robot_fam][n_arms]["retract"]
+                            pose_root = ret_pose_cfg[robot_fam][n_arms]["pose"]
+
+                            meta_cfg["cu_agents"] = []
+                            for a_idx in range(n_cfgs):
+                                if cent: # n_cfgs = 1 (centralized planner)
+                                    # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
+                                    ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
+                                    base_pose = pose_root["cent"]
+                                else:
+                                    ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
+                                    base_pose = pose_root["dec"][a_idx] # arm base pose   
+                            
+                                
+                                meta_cfg["cu_agents"].append({
+                                    "robot": robot_cfg_path,
+                                    "planner": planner_type,
+                                    "base_pose": base_pose,
+                                    "viz_color": colors[a_idx%n_arms],
+                                    "retract_cfg": ret_cfg,
+                                })
+
+                            out_name = f'{robot_fam}_{n_arms}_{alg}_{meta_cfg["sim_task"]["task_type"]}_{meta_cfg["sim_task"]["level"]}'
+                            
+                            meta_cfgs.append(meta_cfg)
+                            out_names.append(out_name)
+                            
+    return meta_cfgs, out_names
 
 # def parse_cent_robot_config_path(robot_cfg_path):
 #     """return the robot family and actual number of robots at centralized planner (the num of arms/robots its controlling)"""
@@ -2761,7 +2685,7 @@ def set_timeouts(meta_cfg):
     physics_timeout = meta_cfg["physics_timeout"] if "physics_timeout" in meta_cfg else 10000
     return tstep_timeout, sec_timeout, physics_timeout
 
-def main(meta_cfg):
+def main(meta_cfg, out_path):
     
     
     tsto, sto, pto = set_timeouts(meta_cfg)
@@ -2777,16 +2701,16 @@ def main(meta_cfg):
     usd_help.load_stage(my_world.stage)
     tensor_args = TensorDeviceType()
     setup_curobo_logger("warn")
-    now = datetime.now()
-    formatted_time = now.strftime("%Y-%m-%d_%H:%M:%S")
+    # now = datetime.now()
+    # formatted_time = now.strftime("%Y-%m-%d_%H:%M:%S")
     
     # meta_cfg = load_yaml(meta_cfg_)
-    benchmark_mode = "benchmark_mode" in meta_cfg and meta_cfg["benchmark_mode"]["is_on"]
-    if benchmark_mode:        
-        meta_cfg, out_path = modify_to_benchmark_mode(meta_cfg, formatted_time)
+    # benchmark_mode = "benchmark_mode" in meta_cfg and meta_cfg["benchmark_mode"]["is_on"]
+    # if benchmark_mode:        
+    #     meta_cfg, out_path = modify_to_benchmark_mode(meta_cfg, formatted_time)
         
-    else:
-        pass
+    # else:
+    #     pass
      
 
     if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
@@ -2840,15 +2764,7 @@ def main(meta_cfg):
             raise ValueError(f"Invalid base pose type: {type(base_pose[a_idx][0])}")
 
 
-        if not benchmark_mode:
-            if len(args.planner): # if planner is specified in the command line, use it
-                planner_type[a_idx] = args.planner
-                print(f"Using planner: {planner_type[a_idx]}")
-            else:
-                planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
-        else:
-            planner_type[a_idx] = a_cfg["planner"]
-        
+        planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
         sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
         sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
  
@@ -3199,8 +3115,6 @@ def main(meta_cfg):
                 # a_stats = [a.stats for a in cu_agents]
                 # stats_out = sim_task.stats.save(formatted_time, a_stats, sim_stats.to_dict())
                 stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
-                if not benchmark_mode:
-                    out_path = f'projects_root/experiments/out/{formatted_time}'
                 stats_out = StatManager.save(stat_managers, out_path)
                 with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
                     yaml.dump(meta_cfg, f)
@@ -3335,14 +3249,57 @@ def signal_handler(signum):
     stop_simulation = True
     stop_event.set()
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+
+if __name__ == "__main__":
+
+    meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
+    default_meta_cfg_path = "meta_cfg_arms.yml"
+    robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
+    benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
+    combo_cfg_path = "projects_root/experiments/benchmarks/cfgs/combo_cfg.yml" 
+    
+    args = parser.parse_args()
+
+    if not len(args.cfg): # using default meta cfg file
+        print(f"Using default meta cfg file: {default_meta_cfg_path}")
+        meta_cfg_path = os.path.join(meta_cfgs_dir, default_meta_cfg_path)
+        meta_cfg = load_yaml(meta_cfg_path)
+        meta_cfgs = [meta_cfg]
+        out_names = ['my_sim']
+    
+    else: # using custom meta cfg file (from command line)
+        if args.cfg.endswith('.yml'): # single meta cfg file
+            
+            if args.cfg == combo_cfg_path:
+                meta_cfgs, out_names = modify_to_benchmark_mode(combo_cfg_path)
+            else:
+                meta_cfg_path = args.cfg
+                meta_cfg = load_yaml(meta_cfg_path)
+                meta_cfgs = [meta_cfg]
+                out_names = ['my_sim']
+        else: # path to a directory with multiple meta cfg files
+            cfg_names = os.listdir(args.cfg)
+            meta_cfgs = []
+            for item in cfg_names:
+                if item.endswith('.yml'):
+                    meta_cfg_path = os.path.join(args.cfg, item)
+                    meta_cfg = load_yaml(meta_cfg_path)
+                    meta_cfgs.append(meta_cfg)
+            out_names = ['my_sim' for _ in range(len(meta_cfgs))]
+            
+        
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    stop_simulation = False
+    stop_event = Event()      
 
 
-stop_simulation = False
-stop_event = Event()      
-         
-for meta_cfg in meta_cfgs:
-    keep_running = main(meta_cfg)
-    if not keep_running:
-        break
+
+    for meta_cfg, out_name in zip(meta_cfgs, out_names):
+
+        formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        out_path = os.path.join(meta_cfg["out_dir"], f'{formatted_time}_{out_name}')
+        keep_running = main(meta_cfg, out_path)
+        if not keep_running:
+            break
