@@ -3187,9 +3187,9 @@ def main(meta_cfg):
             
             t += 1
 
-            tsto_reached = t > tsto
-            sto_reached = time() - sim_time_start > sto
-            pto_reached = my_world.current_time - physics_time_start > pto
+            tsto_reached = t > tsto # stop due to time step limit
+            sto_reached = time() - sim_time_start > sto # stop due to simulation time limit
+            pto_reached = my_world.current_time - physics_time_start > pto # stop due to physics time limit
 
             print(f"t: {t}, tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
 
@@ -3206,36 +3206,14 @@ def main(meta_cfg):
                     yaml.dump(meta_cfg, f)
 
                 print(f"All Outputs saved to {out_path}")
-                # if not stop_event.is_set():
-                #     
+               
 
                 if stop_event.is_set():
                     simulation_app.close()
                     return False
                 else:
                     # Thoroughly reset scene and World singleton so next iteration starts clean
-                    try:
-                        my_world.stop()
-                    except Exception:
-                        pass
-                    try:
-                        my_world.scene.clear(registry_only=False)
-                    except Exception:
-                        pass
-                    clear_stage()
-                    try:
-                        World.clear_instance()
-                    except Exception:
-                        pass
-                    try:
-                        from omni.isaac.core.utils.stage import create_new_stage
-                        create_new_stage()
-                    except Exception:
-                        pass
-                    try:
-                        simulation_app.update()
-                    except Exception:
-                        pass
+                    reset_stage(my_world)
                     return True
         
             
@@ -3319,6 +3297,33 @@ def main(meta_cfg):
                 
             
             simulation_app.close() 
+
+def reset_stage(my_world):
+    """
+    reset stage and world, normally before next simulation
+    """
+    try:
+        my_world.stop()
+    except Exception:
+        pass
+    try:
+        my_world.scene.clear(registry_only=False)
+    except Exception:
+        pass
+    clear_stage()
+    try:
+        World.clear_instance()
+    except Exception:
+        pass
+    try:
+        from omni.isaac.core.utils.stage import create_new_stage
+        create_new_stage()
+    except Exception:
+        pass
+    try:
+        simulation_app.update()
+    except Exception:
+        pass
 
 
 
