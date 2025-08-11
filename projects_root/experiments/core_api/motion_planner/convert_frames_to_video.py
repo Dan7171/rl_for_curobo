@@ -111,7 +111,7 @@ def main():
     parser = argparse.ArgumentParser(description="Convert recorded frames to video")
     parser.add_argument("--input_dir", type=str, required=True, 
                        help="Directory containing recorded frames")
-    parser.add_argument("--output", type=str, default="simulation_video.mp4",
+    parser.add_argument("--output", type=str, default="",
                        help="Output video filename")
     parser.add_argument("--fps", type=int, default=30,
                        help="Frames per second for output video")
@@ -119,6 +119,9 @@ def main():
                        help="Method to use for video conversion (auto=try imageio first, then opencv)")
     
     args = parser.parse_args()
+    if args.output == "":
+        args.output = f"{args.input_dir}/simulation_video.mp4"
+        print(f"Saving video to input directory: {args.output}")
     
     # Check if input directory exists
     if not os.path.exists(args.input_dir):
@@ -142,9 +145,8 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    
     # (env_isaacsim) [evrond@cs-4090-07 rl_for_curobo]$ python projects_root/experiments/core_api/motion_planner/convert_frames_to_video.py --input_dir /cs_storage/evrond/_out_sdrec
     # python projects_root/experiments/core_api/motion_planner/convert_frames_to_video.py --input_dir /cs_storage/evrond/_out_sdrec --method auto
     # search output under rl_for_curobo/
 
-    

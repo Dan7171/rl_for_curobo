@@ -12,6 +12,7 @@ import time
 import asyncio
 import numpy as np
 from datetime import datetime
+import os
 
 CONFIG = {
     "width": 1280,
@@ -28,16 +29,15 @@ CONFIG = {
 # Start the omniverse application
 from omni.isaac.kit import SimulationApp
 simulation_app = SimulationApp(launch_config=CONFIG)
-
-
 import omni
-
 from isaacsim.core.utils.extensions import enable_extension
-# Default Livestream settings
-simulation_app.set_setting("/app/window/drawMouse", True)
-# Enable Livestream extension
-enable_extension("omni.kit.livestream.webrtc")
+from omni.isaac.core import World
+# Import replicator after extensions are enabled
+import omni.replicator.core as rep
 
+# Default Livestream settings, enable Livestream extension
+simulation_app.set_setting("/app/window/drawMouse", True)
+enable_extension("omni.kit.livestream.webrtc")
 
 
 async def record_video_async(num_frames, output_dir):
@@ -112,7 +112,7 @@ def record_video_sync(num_frames, output_dir):
     writer = BasicWriter(
         output_dir=output_dir,
         frame_padding=4,
-        rgb=True
+        rgb=True # RGB only
     )
     
     # Attach writer to render product
@@ -161,12 +161,10 @@ def main():
     # Generate automatic timestamp-based output directory
     if args.output_dir is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output_dir = f"/cs_storage/evrond/{timestamp}"
-    
-    print(f"📁 Output directory: {args.output_dir}")
+        args.output_dir = f"/cs_storage/evrond/isaac_sim_outputs/{timestamp}"
     
     # Ensure output directory exists
-    import os
+    print(f"📁 Output directory: {args.output_dir}")
     os.makedirs(args.output_dir, exist_ok=True)
     print(f"✅ Created output directory: {args.output_dir}")
 
@@ -177,16 +175,12 @@ def main():
     # Wait for extensions to fully initialize
     time.sleep(3)
     
-        # Initialize basic world for demonstration
-    from omni.isaac.core import World
+    # Initialize basic world for demonstration
     my_world = World(stage_units_in_meters=1.0)
     my_world.scene.add_default_ground_plane()
-    
     my_world.reset()
 
     if args.video:
-        # Import replicator after extensions are enabled
-        import omni.replicator.core as rep
         
         # Initialize replicator
         rep.orchestrator.run()
@@ -195,7 +189,7 @@ def main():
             # Use async recording
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.   (record_video_async(args.video_length, args.output_dir))
+            loop.run_until_complete(record_video_async(args.video_length, args.output_dir))
             loop.close()
         else:
             # Use sync recording
