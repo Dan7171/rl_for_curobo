@@ -1,0 +1,14 @@
+env:
+  simulation: # todo
+    is_on: True
+    enable_gpu_dynamics: True
+    init_app_settings:
+      headless: null # set 'true' to run in headless mode
+      width: "1920"
+      height: "1080"
+      # physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
+      # rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
+      backend: "torch"
+  
+  real: # todo
+    is_on: False

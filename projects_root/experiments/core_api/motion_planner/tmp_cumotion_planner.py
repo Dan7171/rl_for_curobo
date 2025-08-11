@@ -1,10 +1,11 @@
-
 from __future__ import annotations
 import argparse
 import os
 from curobo.util_file import load_yaml
 import numpy as np
 from torch.utils.checkpoint import Any
+import yaml
+
 cent_robot_cfgs = {'franka':
                     {
                         1:'franka.yml',
@@ -36,70 +37,107 @@ def get_dec_robot_types():
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--cfg", type=str, required=False, default="", help="path to meta config file")
-parser.add_argument("-i", "--interactive", required=False, action="store_true", help="interacttive mode")
-parser.add_argument("-p", "--planner", type=str, required=False, default="", help="planner type (mpc/cumotion)")
-parser.add_argument("-c", "--centralized", required=False, default="", help="y for centralized, n for decentralized. If not supplied, will will be taken from cfg file")
-parser.add_argument("-r", "--robot_type", required=False, default="", help=f"robot type: (for centralized: {get_cent_robot_types()}, for decentralized: {get_dec_robot_types()})")
-parser.add_argument("-n", "--n_robots", type=int, required=False, default=0, help=f"number of robots from the provided robot type")
-parser.add_argument("-b", "--alg", type=str, required=False, default="", help=f"algorithm: CC, O, SD, SC, D, O-")
+parser.add_argument(
+    "--headless_mode",
+    type=str,
+    default=None,
+    help="To run headless, use one of [native, websocket], webrtc might not work.",
+)
+# parser.add_argument("-i", "--interactive", required=False, action="store_true", help="interacttive mode")
+# parser.add_argument("-p", "--planner", type=str, required=False, default="", help="planner type (mpc/cumotion)")
+# parser.add_argument("-c", "--centralized", required=False, default="", help="y for centralized, n for decentralized. If not supplied, will will be taken from cfg file")
+# parser.add_argument("-r", "--robot_type", required=False, default="", help=f"robot type: (for centralized: {get_cent_robot_types()}, for decentralized: {get_dec_robot_types()})")
+# parser.add_argument("-n", "--n_robots", type=int, required=False, default=0, help=f"number of robots from the provided robot type")
 # meta_cfg_path= "projects_root/experiments/benchmarks/cfgs/meta_cfg_arms_storm_cent.yml" #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml' #'projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml'
+
 meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
 robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
 benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
-default_centralized_meta_cfg = "meta_cfg_arms_cent.yml"
-default_decentralized_meta_cfg = "meta_cfg_arms.yml"
+default_meta_cfg_path = "meta_cfg_arms_benchmarks.yml"
+simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
+# default_centralized_meta_cfg = "meta_cfg_arms_cent.yml"
+# default_decentralized_meta_cfg = "meta_cfg_arms.yml"
 args = parser.parse_args()
-interactive = args.interactive
-args.centralized = args.centralized.lower() == 'y'
+args.cfg = "projects_root/experiments/benchmarks/cfgs/meta_cfgs_test" # temp
 
-if not len(args.cfg): # no custom config
-    if args.centralized:
-        meta_cfg_path = default_centralized_meta_cfg
-    else:
-        meta_cfg_path = default_decentralized_meta_cfg
-    meta_cfg_path = os.path.join(meta_cfgs_dir, meta_cfg_path)
-
-else: # config argument provided
-    meta_cfg_path = args.cfg
-
-args.planner = args.planner.lower() # mpc or cumotion
-args.robot_type = args.robot_type.lower() # franka, ur10e, etc.
-
-if interactive:
-
-    input_cfg_path = print("Select a template cfg file from the following list")
-    for i, cfg_file in enumerate(os.listdir(meta_cfgs_dir)):
-        print(f"{i}: {cfg_file}")
-    input_cfg_path = input("Enter the index to the cfg file: ")
-    input_cfg_path = int(input_cfg_path)
-    meta_cfg_path = os.path.join(meta_cfgs_dir, os.listdir(meta_cfgs_dir)[input_cfg_path])
-    print(f"Using tempate cfg file: {meta_cfg_path}")
+if not len(args.cfg):
+    print(f"Using default meta cfg file: {default_meta_cfg_path}")
+    meta_cfg_path = os.path.join(meta_cfgs_dir, default_meta_cfg_path)
     meta_cfg = load_yaml(meta_cfg_path)
-    input_robot_cfg_path = input("\nEdit cfg for run? (y/n): (changes won't be saved to file) ")
-    if input_robot_cfg_path == 'y':
-        cent_decent = input("Select the robot type: 0: centralized, 1: decentralized: ")
-        cent_decent = int(cent_decent)
-        match cent_decent:
-            case 0: # centralized
-                n = int(input("Enter the number of robots:  "))
-                robot_type = (input("Select the robot type: 0: franka, 1: ur10e "))
-                match robot_type:
-                    case 0:
-                        robot_cfg_path = cent_robot_cfgs['franka'][n]
-                    case 1:
-                        robot_cfg_path = cent_robot_cfgs['ur10e'][n]
-                    case _:
-                        print("Invalid robot type")
-                        exit()
-                print(f"Using robot cfg file: {robot_cfg_path}")
-
-        
-            case _:
-                print("Invalid robot type")
-                exit()
-        
+    meta_cfgs = [meta_cfg_path]
 else:
-    meta_cfg = load_yaml(meta_cfg_path)
+    if args.cfg.endswith('.yml'):
+        meta_cfg_path = args.cfg
+        meta_cfg = load_yaml(meta_cfg_path)
+        meta_cfgs = [meta_cfg_path]
+    else:
+        cfg_names = os.listdir(args.cfg)
+        meta_cfgs = []
+        for item in cfg_names:
+            if item.endswith('.yml'):
+                meta_cfg_path = os.path.join(args.cfg, item)
+                meta_cfg = load_yaml(meta_cfg_path)
+                meta_cfgs.append(meta_cfg)
+                
+        print(f"Available meta cfg files: {meta_cfgs}")
+        print(f'in total has {len(meta_cfgs)} meta cfg files')
+
+    print(f"Using custom meta cfg file: {meta_cfg_path}")
+
+# meta_cfg_path = os.path.join(meta_cfgs_dir, default_meta_cfg_path) if not len(args.cfg) else args.cfg   
+# interactive = args.interactive
+# args.centralized = args.centralized.lower() == 'y'
+
+# if not len(args.cfg): # no custom config
+#     if args.centralized:
+#         meta_cfg_path = default_centralized_meta_cfg
+#     else:
+#         meta_cfg_path = default_decentralized_meta_cfg
+#     meta_cfg_path = os.path.join(meta_cfgs_dir, meta_cfg_path)
+
+# else: # config argument provided
+#     meta_cfg_path = args.cfg
+
+# args.planner = args.planner.lower() # mpc or cumotion
+# args.robot_type = args.robot_type.lower() # franka, ur10e, etc.
+
+
+
+# if interactive:
+
+#     input_cfg_path = print("Select a template cfg file from the following list")
+#     for i, cfg_file in enumerate(os.listdir(meta_cfgs_dir)):
+#         print(f"{i}: {cfg_file}")
+#     input_cfg_path = input("Enter the index to the cfg file: ")
+#     input_cfg_path = int(input_cfg_path)
+#     meta_cfg_path = os.path.join(meta_cfgs_dir, os.listdir(meta_cfgs_dir)[input_cfg_path])
+#     print(f"Using tempate cfg file: {meta_cfg_path}")
+#     meta_cfg = load_yaml(meta_cfg_path)
+#     input_robot_cfg_path = input("\nEdit cfg for run? (y/n): (changes won't be saved to file) ")
+#     if input_robot_cfg_path == 'y':
+#         cent_decent = input("Select the robot type: 0: centralized, 1: decentralized: ")
+#         cent_decent = int(cent_decent)
+#         match cent_decent:
+#             case 0: # centralized
+#                 n = int(input("Enter the number of robots:  "))
+#                 robot_type = (input("Select the robot type: 0: franka, 1: ur10e "))
+#                 match robot_type:
+#                     case 0:
+#                         robot_cfg_path = cent_robot_cfgs['franka'][n]
+#                     case 1:
+#                         robot_cfg_path = cent_robot_cfgs['ur10e'][n]
+#                     case _:
+#                         print("Invalid robot type")
+#                         exit()
+#                 print(f"Using robot cfg file: {robot_cfg_path}")
+
+        
+#             case _:
+#                 print("Invalid robot type")
+#                 exit()
+        
+# else:
+#     meta_cfg = load_yaml(meta_cfg_path)
     
 
 # Isaac Sim
@@ -108,11 +146,14 @@ try:
 except ImportError:
     pass
 from omni.isaac.kit import SimulationApp
-simulation_app = SimulationApp({**meta_cfg["env"]["simulation"]["init_app_settings"]})
+
+
+simapp_cfg = load_yaml(simapp_cfg_path)
+simulation_app = SimulationApp({**simapp_cfg["env"]["simulation"]["init_app_settings"]})
 
 from projects_root.examples.helper import add_extensions
-headless = meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]
-add_extensions(simulation_app, headless_mode=headless)
+# headless = meta_cfg["env"]["simulation"]["init_app_settings"]["headless"]
+add_extensions(simulation_app, headless_mode=args.headless_mode)
 import os
 from abc import abstractmethod
 from collections.abc import Callable
@@ -142,6 +183,7 @@ import omni
 from pxr import UsdGeom, Gf, Sdf, UsdPhysics
 from omni.isaac.core.objects import DynamicCuboid, VisualCuboid, VisualSphere, DynamicSphere, FixedCuboid, FixedSphere
 from omni.isaac.core.utils.viewports import set_camera_view
+from omni.isaac.core.utils.stage import open_stage, clear_stage
 
 
 # CuRobo
@@ -173,7 +215,6 @@ from projects_root.utils.transforms import transform_poses_batched_optimized_for
 from projects_root.utils.draw import draw_points
 from projects_root.utils.colors import npColors
 from projects_root.utils.issacsim import  activate_gpu_dynamics
-
 
 class Stopwatch():
     def __init__(self):
@@ -816,7 +857,7 @@ class CbsMp1Task(ManualTask):
                     
         return contact_matrix
 class BinTask(SimTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0]):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0],level=1):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
         self.pose_utils = pose_utils
         self._local_rng = random.Random(self.pose_utils.seed)
@@ -826,8 +867,7 @@ class BinTask(SimTask):
         
         self.link_name_to_placed_in_bin = [{} for _ in range(len(self.agent_task_cfgs))] # statistics
         self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] # statistics
-            
-        
+
 
         # Spawn Bin:
         height, width, depth = wall_dims_hwd
@@ -900,9 +940,16 @@ class BinTask(SimTask):
             self.agent_back_goal_poses.append(goal_pose)
             # behind_agent_goal_pose = Pose(position=self.tensor_args.to_device(behind_agent_pos), quaternion=self.tensor_args.to_device(behind_agent_goal_quat))
 
-
-
-
+        self.level = level
+        self.force_unique_goals = self.level == 1
+        if self.force_unique_goals:
+            # self._free_bin_goals = set([0,1,2,3]) # all targets are free (not assigned to any agent)
+            self._link_name_to_cur_bingoal = [{} for _ in range(len(self.agent_task_cfgs))] # link name to current bin goal (index of the goal in self.bin_goal_poses)
+            for a_idx in range(len(self.agent_task_cfgs)):
+                for link_name in self.link_name_to_placed_in_bin[a_idx]:
+                    self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # no goals assigned yet (yet)
+                
+    
 
             
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
@@ -949,7 +996,11 @@ class BinTask(SimTask):
                                 self.link_name_to_placed_in_bin[a_idx][link_name] = 0
                             self.link_name_to_placed_in_bin[a_idx][link_name] += 1
 
-                            if twin_exists:
+                            if self.force_unique_goals:
+                                # free targets for other agents:
+                                self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
+
+                            if twin_exists: # visualization effect
                                 twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
                                 # reset target color to original
                                 target_prim.get_applied_visual_material().set_color(twin.get_applied_visual_material().get_color()) # set target to white (to differentiate from the moving twin)                          
@@ -958,8 +1009,28 @@ class BinTask(SimTask):
                                 self._target_name_to_free_fall_count[a_idx][target_name] = 50 # retset to 10 steps to free fall
                                 
                                 
-                        else: # agent picked from behind its back, changing goal to bin
-                            goal_pose = self._local_rng.choice(self.bin_goal_poses)
+                        else: # cur_goal_type == 'agent_back'
+                            if self.force_unique_goals: # if we want each link to have a unique goal (not the same as other links)
+                                # pick target from free bin goals:
+                                taken_bin_goals = []
+                                free_bin_goals = []
+                                for a2_idx in range(len(self.agent_task_cfgs)):
+                                    if a2_idx == a_idx:
+                                        continue
+                                    for link_name2 in self._link_name_to_cur_bingoal[a2_idx]:
+                                        if self._link_name_to_cur_bingoal[a2_idx][link_name2] != -1: # if link is aiming to a bin goal
+                                            taken_bin_goals.append(self._link_name_to_cur_bingoal[a2_idx][link_name2]) # add the bin goal to taken bin goals
+                                
+                                free_bin_goals = [i for i in range(len(self.bin_goal_poses)) if i not in taken_bin_goals] # all bin goals that are not taken by other agents
+                                if len(free_bin_goals) > 0: # free bin goal exists
+                                    new_bin_goal_idx = self._local_rng.choice(free_bin_goals) # pick a random free goal from bin goals
+                                    self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
+                                    goal_pose = self.bin_goal_poses[new_bin_goal_idx] # get goal pose
+                                    print(f"debug agent {a_idx} link {link_name} picked bin goal {new_bin_goal_idx}")
+                            
+            
+                            else:
+                                goal_pose = self._local_rng.choice(self.bin_goal_poses)
                             # print(f'debug agent index: {a_idx}, goal pose: {goal_pose}')
                             goal_type = 'bin'
                             if link_name not in self.link_name_to_picked_from_back[a_idx]:
@@ -2169,8 +2240,8 @@ class CuAgent:
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
         self._last_t = -1
         # viz_plans, viz_plans_dt = self.sim_robot.viz_plan_on, self.sim_robot.viz_plan_dt
-        # viz_col_spheres, viz_col_spheres_dt = self.sim_robot.viz_col_spheres_on, self.sim_robot.viz_col_spheres_dt
-        # viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = self.sim_robot.viz_mpc_ee_rollouts_on, self.sim_robot.viz_mpc_ee_rollouts_dt
+        # viz_col_spheres, viz_col_spheres_dt = self.sim_robot.viz_col_spheres_on, self.sim_robot.# viz_col_spheres_dt # debug
+        # viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = self.sim_robot.viz_mpc_ee_rollouts_on, self.sim_robot.viz_mpc_ee_rollouts_dt 
         
         
         while not stop_event.is_set():
@@ -2488,7 +2559,7 @@ class StatManager:
 
             
     @staticmethod
-    def save(stat_managers:list, save_path:str, time_stamp:str):
+    def save(stat_managers:list, out_path:str):
         out = {}
         for i, stat_man in enumerate(stat_managers):
             if not stat_man.should_save:
@@ -2499,15 +2570,13 @@ class StatManager:
                 stat_man.unique_name = new_name                
             out[stat_man.unique_name] = stat_man.stats
         
-        os.makedirs(save_path, exist_ok=True)
-        experiment_out_path = os.path.join(save_path, time_stamp)
-        os.makedirs(experiment_out_path, exist_ok=False) # 
-        path = os.path.join(experiment_out_path, f'stats.pkl')
-        with open(path, "wb") as f:
+        os.makedirs(out_path, exist_ok=True)
+        stats_path = os.path.join(out_path, f'stats.pkl')
+        with open(stats_path, "wb") as f:
             pickle.dump(out, f)
-        print(f"Saved stats to {path}")
+        print(f"Saved stats to {stats_path}")
         print(f"under keys: {list(out.keys())}")
-        return save_path
+        return out_path
 
     
 
@@ -2590,11 +2659,10 @@ def simulation_startup(simulation_app, my_world, cu_agents):
 
 
 
-def modify_to_benchmark_mode(meta_cfg):
+def modify_to_benchmark_mode(meta_cfg, time_stamp):
     
     n_arms, robot_fam, alg = meta_cfg["benchmark_mode"]["n_arms"], meta_cfg["benchmark_mode"]["robot_fam"], meta_cfg["benchmark_mode"]["alg"]
     colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
-    
     
     ret_pose_cfg = load_yaml(benchmarks_ret_cfg)
     
@@ -2628,7 +2696,8 @@ def modify_to_benchmark_mode(meta_cfg):
    
     if alg == 'O-': # In priority ablation- same as O but using a particle config with a small change (the changing priority mode)
         meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
-
+    else:
+        meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
     cent = alg in ['CC', 'SC','D'] # centralized planner        
     planner_type = alg_to_planner[alg]
 
@@ -2662,31 +2731,43 @@ def modify_to_benchmark_mode(meta_cfg):
             "viz_color": colors[a_idx%n_arms],
             "retract_cfg": ret_cfg,
         })
-    return meta_cfg
 
-def parse_cent_robot_config_path(robot_cfg_path):
-    """return the robot family and actual number of robots at centralized planner (the num of arms/robots its controlling)"""
-    for robot_fam in cent_robot_cfgs:
-        for n in cent_robot_cfgs[robot_fam]:
-            if cent_robot_cfgs[robot_fam][n] in robot_cfg_path:
-                return robot_fam, n
-    raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {cent_robot_cfgs}")
+    out_name = f'{time_stamp}_{robot_fam}_{n_arms}_{alg}_{meta_cfg["sim_task"]["task_type"]}_{meta_cfg["sim_task"]["level"]}'
+    
+    return meta_cfg, os.path.join(meta_cfg["benchmark_mode"]["out"], out_name)
 
-def parse_dec_robot_config_path(robot_cfg_path):
-    """return the robot family and actual number of robots at decentralized planner (the num of arms/robots its controlling)"""
-    for robot_fam in dec_robot_fam_to_cfg:
-        for v in dec_robot_fam_to_cfg[robot_fam]:
-            if v in robot_cfg_path:
-                return robot_fam
+# def parse_cent_robot_config_path(robot_cfg_path):
+#     """return the robot family and actual number of robots at centralized planner (the num of arms/robots its controlling)"""
+#     for robot_fam in cent_robot_cfgs:
+#         for n in cent_robot_cfgs[robot_fam]:
+#             if cent_robot_cfgs[robot_fam][n] in robot_cfg_path:
+#                 return robot_fam, n
+#     raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {cent_robot_cfgs}")
+
+# def parse_dec_robot_config_path(robot_cfg_path):
+#     """return the robot family and actual number of robots at decentralized planner (the num of arms/robots its controlling)"""
+#     for robot_fam in dec_robot_fam_to_cfg:
+#         for v in dec_robot_fam_to_cfg[robot_fam]:
+#             if v in robot_cfg_path:
+#                 return robot_fam
             
-    raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {decentralized_robot_cfgs}")
+#     raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {decentralized_robot_cfgs}")
 
 
-stop_event = Event()                       
+
+def set_timeouts(meta_cfg):
+    tstep_timeout = meta_cfg["tstep_timeout"] if "tstep_timeout" in meta_cfg else 10000
+    sec_timeout = meta_cfg["sec_timeout"] if "sec_timeout" in meta_cfg else 10000
+    physics_timeout = meta_cfg["physics_timeout"] if "physics_timeout" in meta_cfg else 10000
+    return tstep_timeout, sec_timeout, physics_timeout
+
 def main(meta_cfg):
     
+    
+    tsto, sto, pto = set_timeouts(meta_cfg)
+
     my_world = World(stage_units_in_meters=1.0)
-    activate_gpu_dynamics(my_world)
+    # activate_gpu_dynamics(my_world)
     my_world.scene.add_default_ground_plane()
     stage = my_world.stage
     xform = stage.DefinePrim("/World", "Xform")
@@ -2702,34 +2783,12 @@ def main(meta_cfg):
     # meta_cfg = load_yaml(meta_cfg_)
     benchmark_mode = "benchmark_mode" in meta_cfg and meta_cfg["benchmark_mode"]["is_on"]
     if benchmark_mode:        
-        meta_cfg = modify_to_benchmark_mode(meta_cfg)
+        meta_cfg, out_path = modify_to_benchmark_mode(meta_cfg, formatted_time)
         
     else:
         pass
-        # if args.n_robots > 0 and len(args.robot_type) > 0 and len(args.planner) > 0:
+     
 
-        #     if args.centralized:
-        #         robot_cfg_path = os.path.join(robot_cfgs_dir, cent_robot_cfgs[args.robot_type][args.n_robots])
-        #         meta_cfg["cu_agents"] = gen_cu_agent_cfgs(1, robot_cfg_path, args.planner)
-        #         print(f"Using robot type: {args.robot_type} and number of robots: {args.n_robots}")
-            
-        #     else:
-        #         robot_cfg_path = os.path.join(robot_cfgs_dir, decentralized_robot_cfgs[args.robot_type])
-        #         meta_cfg["cu_agents"] = gen_cu_agent_cfgs(args.n_robots, robot_cfg_path, args.planner)
-        #         print(f"Using decentralized {args.n_robots} robots of type {args.robot_type} with planner {args.planner}")
-            
-
-        # if 'batch' in meta_cfg: # if batch is defined, then we need to create a batch of agents
-        #     _agent_cfgs_batch = []
-        #     for a_type in range(len(meta_cfg["batch"]["n"])): # for each agent type
-        #         agents_from_type = [deepcopy(meta_cfg["cu_agents"][a_type]) for _ in range(meta_cfg["batch"]["n"][a_type])]
-        #         _agent_cfgs_batch.extend(agents_from_type)
-
-        #     # if meta_cfg["batch"]["base_poses"] is not None:
-        #     #     for a_idx in range(len(_agent_cfgs_batch)):
-        #     #         _agent_cfgs_batch[a_idx]["base_pose"] = meta_cfg["batch"]["base_poses"][a_idx]
-        #     meta_cfg["cu_agents"] = _agent_cfgs_batch
-    
     if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
         start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["cfg"])
         for a_idx, p in enumerate(start_positions):
@@ -2920,13 +2979,15 @@ def main(meta_cfg):
     my_world.reset()
     my_world.play()
     i = 0
-    t = 0        
     plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))] # plans will be stored here
     
     _ = simulation_startup(simulation_app, my_world, cu_agents)
     
     sim_stat_man = StatManager(**meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
+
+    t = 0        
     physics_time_start = my_world.current_time
+    sim_time_start = time()
 
     if not meta_cfg["async"]: # sync mode
         
@@ -3123,20 +3184,60 @@ def main(meta_cfg):
                 stats[stat_name_sim] = val
             sim_stat_man.update(stats,t)
 
-                
-            
             
             t += 1
-            if stop_simulation:
+
+            tsto_reached = t > tsto
+            sto_reached = time() - sim_time_start > sto
+            pto_reached = my_world.current_time - physics_time_start > pto
+
+            print(f"t: {t}, tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
+
+            if stop_simulation or tsto_reached or sto_reached or pto_reached or stop_event.is_set():
+                print(f"tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
                 print("Saving stats...")
                 # a_stats = [a.stats for a in cu_agents]
                 # stats_out = sim_task.stats.save(formatted_time, a_stats, sim_stats.to_dict())
                 stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
-                stats_out = StatManager.save(stat_managers, 'projects_root/experiments/out', formatted_time)
-                print(f"Stats saved to {stats_out}")
-                simulation_app.close()
-                break
+                if not benchmark_mode:
+                    out_path = f'projects_root/experiments/out/{formatted_time}'
+                stats_out = StatManager.save(stat_managers, out_path)
+                with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
+                    yaml.dump(meta_cfg, f)
 
+                print(f"All Outputs saved to {out_path}")
+                # if not stop_event.is_set():
+                #     
+
+                if stop_event.is_set():
+                    simulation_app.close()
+                    return False
+                else:
+                    # Thoroughly reset scene and World singleton so next iteration starts clean
+                    try:
+                        my_world.stop()
+                    except Exception:
+                        pass
+                    try:
+                        my_world.scene.clear(registry_only=False)
+                    except Exception:
+                        pass
+                    clear_stage()
+                    try:
+                        World.clear_instance()
+                    except Exception:
+                        pass
+                    try:
+                        from omni.isaac.core.utils.stage import create_new_stage
+                        create_new_stage()
+                    except Exception:
+                        pass
+                    try:
+                        simulation_app.update()
+                    except Exception:
+                        pass
+                    return True
+        
             
     
     else: # async mode
@@ -3222,16 +3323,21 @@ def main(meta_cfg):
 
 
 # Global flag to track if we should stop
-stop_simulation = False
-def signal_handler(signum, frame):
+def signal_handler(signum):
     """Handle Ctrl+C gracefully"""
     global stop_simulation
     print(f"\nReceived signal {signum} - shutting down gracefully...")
     stop_simulation = True
-    if meta_cfg["async"]:
-        stop_event.set()
+    stop_event.set()
+
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
-main(meta_cfg)
+stop_simulation = False
+stop_event = Event()      
+         
+for meta_cfg in meta_cfgs:
+    keep_running = main(meta_cfg)
+    if not keep_running:
+        break
