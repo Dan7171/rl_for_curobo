@@ -5,6 +5,8 @@ from curobo.util_file import load_yaml
 import numpy as np
 from torch.utils.checkpoint import Any
 import yaml
+from tqdm import tqdm
+from rich.progress import Progress
 
 
 parser = argparse.ArgumentParser()
@@ -369,7 +371,7 @@ class SimTask:
         self._link_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self._target_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self._last_update = [{} for _ in range(len(agent_task_cfgs))] # last updated goal poses in sim
-        self.stat_man = StatManager(**stat_man_cfg, unique_name='task_stats')
+        self.stat_man = StatManager(world, **stat_man_cfg, unique_name='task_stats')
         
         # set targets to retract poses
         for a_idx, a_cfg in enumerate(agent_task_cfgs):
@@ -849,8 +851,6 @@ class BinTask(SimTask):
             self.link_name_to_pick_pose[agent_idx][link_name] = behind_arm_goal_pose
             
      
-                
-        
         self.force_unique_goals = self.level == 1
         if self.force_unique_goals:
             # self._free_bin_goals = set([0,1,2,3]) # all targets are free (not assigned to any agent)
@@ -2002,6 +2002,7 @@ class CuAgent:
                 plan_pub_sub:Optional[PlanPubSub]=None,
                 viz_color:str='orange',
                 stat_man_cfg:dict={},
+                world:Optional[World]=None,
                 # is_mobile:bool=False,
                 # mobile_base_link_subpath:str='',
                 ):
@@ -2017,7 +2018,9 @@ class CuAgent:
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
         self.viz_color = SimRobot.parse_viz_color(viz_color)
-        self.stat_man = StatManager(**stat_man_cfg) 
+        self.stat_man:StatManager
+        if world is not None:
+            self.stat_man = StatManager(world, **stat_man_cfg) 
         
 
         # self.is_mobile = is_mobile
@@ -2297,9 +2300,7 @@ class CuAgent:
         ctrl_dof_names = self.sim_robot.robot.dof_names # or from real
         ctrl_dof_indices = self.sim_robot.robot.get_dof_index # or from real
         js = self.sim_robot.get_js(sync_new=False) # get last step's joint state
-        # sw.off()
-
-        # pw.on()
+     
         plan = None
         if js is not None: #and self.plan_pub_sub.should_pub_now(t):
             share_full_plan = self.is_plan_publisher() # naive means broadcase state as plan over horizon
@@ -2307,29 +2308,20 @@ class CuAgent:
         if plan is not None: # currently available in mpc only
             with plans_lock:
                 plans_board[self.idx] = plan
-        # pw.off()
-            # if viz_plans and t % viz_plans_dt == 0:
-            #     pts_debug[self.idx].append({'points': plan['task_space']['spheres']['p'], 'color': self.sim_robot.viz_plan_color})
-            
-    
-        # sense obstacles 
-        # sw.on()
+
+
         self.update_col_model_from_isaac_sim(
                 self.sim_robot.path, 
                 usd_help, 
                 ignore_list=self.cu_world_wrapper_update_policy["never_add"] + self.cu_world_wrapper_update_policy["never_update"], 
                 paths_to_search_obs_under=["/World"]
             )
-        #sw.off()
-        # sense joints
-        # sw.on()
+
         js = self.sim_robot.get_js(sync_new=True) 
         if js is None:
             print("sim_js is None")
             return
-        #sw.off()
 
-        # pw.on()
         _0 = self.tensor_args.to_device(js.positions) * 0.0
         cu_js = JointState(self.tensor_args.to_device(js.positions),self.tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(self.planner.ordered_j_names)
         if isinstance(self.planner, MpcPlanner):
@@ -2361,16 +2353,12 @@ class CuAgent:
             #     pts_debug[self.idx].append({'points': planner.get_rollouts_in_world_frame(), 'color': self.sim_robot.viz_mpc_ee_rollouts_color})
         else:
             raise ValueError(f"Invalid planner type")
-        # pw.off()
-        # act
-        # sw.on()
+        
         if action is not None:
             with sim_lock:
                 isaac_action = self.planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
                 self.sim_robot.articulation_controller.apply_action(isaac_action)
-        # sw.off()
-
-        # self.stat_man.update()
+        
 
     def is_plan_subscriber(self)->bool:
         return self.plan_pub_sub is not None and self.plan_pub_sub.sub_cfg["is_on"]
@@ -2383,12 +2371,13 @@ class StatManager:
     """
     Run statistics manager
     """
-    def __init__(self, keys:list[str]=[], stat_names:list[list[str]]=[], collect_dt:Union[int,float,list[int],list[float]]=[], dt_in_sec:bool=False, save:bool=False, verbose:Union[bool,list[bool]]=False,unique_name:str=''):
+    def __init__(self,my_world, keys:list[str]=[], stat_names:list[list[str]]=[], collect_dt:Union[int,float,list[int],list[float]]=[], dt_key_type:bool='tstep', save:bool=False, verbose:Union[bool,list[bool]]=False,unique_name:str=''):
+        self.my_world = my_world
         self.keys = keys
         
         self._last_update_time = []
         self.collect_dt = collect_dt if isinstance(collect_dt, list) else [collect_dt for _ in range(len(stat_names))]
-        self.dt_in_sec = dt_in_sec if isinstance(dt_in_sec, list) else [dt_in_sec for _ in range(len(stat_names))]
+        self.dt_key_type = dt_key_type if isinstance(dt_key_type, list) else [dt_key_type for _ in range(len(stat_names))]
         self.verbose = verbose if isinstance(verbose, list) else [verbose for  _ in range(len(stat_names))]
         self.should_save = save
         self.unique_name = unique_name
@@ -2396,36 +2385,53 @@ class StatManager:
         self.stats = {}
         for i, stat_name in enumerate(stat_names):
             self.stats[stat_name] = []
-            if self.dt_in_sec[i]:
+            if self.dt_key_type[i] == 'tsec':
                 self._last_update_time.append(time())
-            else: # in steps (tstep)
+            elif self.dt_key_type[i] == 'tstep': # in steps (tstep)
                 self._last_update_time.append(0)
+            elif self.dt_key_type[i] == 'tphysics': # in simulated physics steps 
+                self._last_update_time.append(my_world.current_time - 1)
+            else:
+                raise ValueError(f"Invalid dt_key_type: {self.dt_key_type[i]}")
 
-    def _get_updated_keys(self):
+
+    def _get_updated_keys(self, t_step, agent_step_count:int=-1):
         ans = []
         for i in range(len(self.keys)):
             match self.keys[i]:
                 case 'tsys':
                     ans.append(time())
+                case 'tphysics':
+                    ans.append(self.my_world.current_time)
+                case 'w_step':
+                    ans.append(t_step)
+                case 'a_step':  
+                    ans.append(agent_step_count)
                 case _:
                     raise ValueError(f"Invalid key: {self.keys[i]}")
+
         return ans
 
 
     def get_now_update_names(self, tstep:int)->list[str]:
         stats_to_update = []
         for i, stat_name in enumerate(self.stats):
-            if self.dt_in_sec[i]:
+            if self.dt_key_type[i] == 'tsec':
                 now_time = time() # time in seconds
-            else:
+            elif self.dt_key_type[i] == 'tstep':
                 now_time = tstep # time in steps (pass sim step or agent step whatever you want)
+            elif self.dt_key_type[i] == 'tphysics':
+                now_time = self.my_world.current_time 
+            else:
+                raise ValueError(f"Invalid dt_key_type: {self.dt_key_type[i]}")
+            
             update = now_time - self._last_update_time[i] >= self.collect_dt[i]
             if update:
                 stats_to_update.append(stat_name)
                
         return stats_to_update
 
-    def update(self, stats:dict, tstep: Optional[int]=None):
+    def update(self, stats:dict, tstep: Optional[int]=None, agent_step_count:int=-1):
         """
         stats_to_vals is a dict of stat_names to update(returned from get_stats_to_update):
         value: tat vals
@@ -2437,7 +2443,7 @@ class StatManager:
             
             # keys to attach to stats
             keys = {}
-            now_keys = self._get_updated_keys()        
+            now_keys = self._get_updated_keys(tstep, agent_step_count)        
             for key_name, key_val in zip(self.keys, now_keys):
                 keys[key_name] = key_val
             
@@ -2451,12 +2457,20 @@ class StatManager:
         
             i = list(self.stats.keys()).index(stat_name)
             # update last update time to know when to update next
-            if self.dt_in_sec[i]:
+            if self.dt_key_type[i] == 'tsec':
                 now_time = time() # time in seconds
-            else:
+            
+            elif self.dt_key_type[i] == 'tstep':
                 if tstep is None:
                     raise ValueError(f"tstep is None but dt_in_sec is False (must pass tstep)")
                 now_time = tstep # time in steps (pass sim step or agent step whatever you want)
+            
+            elif self.dt_key_type[i] == 'tphysics':
+                now_time = self.my_world.current_time 
+            
+            else:
+                raise ValueError(f"Invalid dt_key_type: {self.dt_key_type[i]}")
+            
             self._last_update_time[i] = now_time
             
             if self.verbose[i]:
@@ -2483,6 +2497,11 @@ class StatManager:
         print(f"Saved stats to {stats_path}")
         print(f"under keys: {list(out.keys())}")
         return out_path
+
+
+
+
+
 
 class FrameCapturer:
     def __init__(self, frames_output_dir):
@@ -2746,7 +2765,11 @@ def get_simulation_timeouts(meta_cfg):
     tstep_timeout = meta_cfg["timeout"]["tstep"] if "timeout" in meta_cfg and "tstep" in meta_cfg["timeout"] else 10000
     sec_timeout = meta_cfg["timeout"]["tsec"] if "timeout" in meta_cfg and "tsec" in meta_cfg["timeout"] else 10000
     physics_timeout = meta_cfg["timeout"]["physics_tsec"] if "timeout" in meta_cfg and "physics_tsec" in meta_cfg["timeout"] else 10000
+    
+    
     return tstep_timeout, sec_timeout, physics_timeout
+
+
 
 def main(meta_cfg, out_path):
     
@@ -2894,6 +2917,7 @@ def main(meta_cfg, out_path):
             plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
             viz_color=viz_color,
             stat_man_cfg=a_stat_man_cfg,
+            world=my_world if sim_robot is not None else None,
             # is_mobile=a_cfg["is_mobile"] if "is_mobile" in a_cfg else meta_cfg["default"]["is_mobile"],
             # mobile_base_link_subpath=a_cfg["mobile_base_link_subpath"] if "mobile_base_link_subpath" in a_cfg else meta_cfg["default"]["mobile_base_link_subpath"],
         )
@@ -2960,7 +2984,7 @@ def main(meta_cfg, out_path):
     _ = simulation_startup(simulation_app, my_world, cu_agents)
     
     # setup stats for simulation
-    sim_stat_man = StatManager(**meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
+    # sim_stat_man = StatManager(my_world, **meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
     
     
     # frame capturing
@@ -2977,314 +3001,316 @@ def main(meta_cfg, out_path):
     t = 0  # tstep     
     physics_time_start = my_world.current_time # time in seconds in world clock (physics time)
     sim_time_start = time() # time in seconds in process clock (actual running start time)
-
-    if not meta_cfg["async"]: # sync mode
+    with Progress() as progress:
+        task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
+        task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
+        task3 = progress.add_task(f"Physics (simulated) Time (lim={pto} sec)", total=pto)
         
-        while simulation_app.is_running():
-            my_world.step(render=True)
-            pts_debug = []
-
-            # Updating targets. Updating targets in sim and return new target poses so planners can react
-            link_name_to_target_pose = sim_task.step() 
+        if not meta_cfg["async"]: # sync mode
             
-            # Updating obstacles. Updating obstacles in sim so they can be sensed by robots
-            sim_env.step()
+            while simulation_app.is_running():
+                prog_bar_tsys_iter_start = time()
+                prog_bar_tphys_iter_start = my_world.current_time 
 
-            
-            for a_idx, a in enumerate(cu_agents):
-                planner = a.planner
-                psw = a.planning_stopwatch
-                if a.sim_robot is not None:
+                my_world.step(render=True)
+                pts_debug = []
 
-                    viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt # debug
-                    viz_col_spheres_world, viz_col_spheres_robot = a.sim_robot.viz_col_spheres_on_world, a.sim_robot.viz_col_spheres_on_robot
-                    viz_col_spheres_dt = a.sim_robot.viz_col_spheres_dt # debug
-                    viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.viz_mpc_ee_rollouts_on, a.sim_robot.viz_mpc_ee_rollouts_dt 
-                    
-                    viz_cpred_dt = a.sim_robot.viz_col_pred_dt
-                    viz_cpred_own = a.sim_robot.viz_col_pred_own_on
-                    viz_cpred_obs = a.sim_robot.viz_col_pred_obs_on
+                # Updating targets. Updating targets in sim and return new target poses so planners can react
+                link_name_to_target_pose = sim_task.step() 
+                
+                # Updating obstacles. Updating obstacles in sim so they can be sensed by robots
+                sim_env.step()
 
-                    ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
-                    ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
-                    
-                    # publish 
-                    # sw.on()
-                    js = a.sim_robot.get_js(sync_new=False) # get last step's joint state
-                    # sw.off()
+                
+                for a_idx, a in enumerate(cu_agents):
+                    planner = a.planner
+                    psw = a.planning_stopwatch
+                    if a.sim_robot is not None:
 
-                    
-                    psw.on()
-                    plan = None
-                    if js is not None and a.plan_pub_sub.should_pub_now(t):
-                        share_full_plan = a.is_plan_publisher() # naive means broadcase state as plan over horizon
-                        plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))
-                    psw.off()
-
-                    if plan is not None: # currently available in mpc only
-                        plans_board[a.idx] = plan
-                        if viz_plans and t % viz_plans_dt == 0:
-                            pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
-                    
-                    
-      
-        
-                    # sense obstacles 
-                    a.update_col_model_from_isaac_sim(
-                        a.sim_robot.path, 
-                        usd_help, 
-                        ignore_list=a.cu_world_wrapper_update_policy["never_add"] + a.cu_world_wrapper_update_policy["never_update"], 
-                        paths_to_search_obs_under=["/World"]
-                    )
-                    
-       
-        
-                    js = a.sim_robot.get_js(sync_new=True) 
-                    if js is None:
-                        print("sim_js is None")
-                        continue
-                     
-                    psw.on()
-                    _0 = tensor_args.to_device(js.positions) * 0.0
-                    cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
-                    if isinstance(planner, MpcPlanner):
-                        planner.update_state(cu_js)
-                    
-                    task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
-                    spheres_R = task_space_state_R['spheres']
-                    p_R, r_R = spheres_R['p'], spheres_R['r']
-                    pr_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1) # S (sphres) x 4 (xyzr)
-                    psw.off()
-
-                    
-                    psw.on()
-                    # sense plans
-                    if a.is_plan_subscriber():
-                        a.update_col_pred(plans_board)
-                                    
-                    # sense goals
-                    goals = link_name_to_target_pose[a.idx]
-
-                    # plan
-                    robot_context = get_topics().get_default_env()[a.idx]
-                    robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
-                    robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
-                    robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
-
-
-                    # yield action
-                    if isinstance(planner, CumotionPlanner):
-                        action = planner.yield_action(goals, cu_js, js.velocities)
-                    elif isinstance(planner, MpcPlanner):
-                        action = planner.yield_action(goals)
-                        if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
-                            pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.viz_mpc_ee_rollouts_color})
-
-                    else:
-                        raise ValueError(f"Invalid planner type: {planner_type}")
-                    psw.off()
-                    
-                    # act
-                    if action is not None:
-                        isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
-                        a.sim_robot.articulation_controller.apply_action(isaac_action)
-                        a.step_count += 1
-                    
-                    # debug
-                    if t % viz_col_spheres_dt == 0:
-                        if viz_col_spheres_world:
-                            task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
-                            spheres_W = task_space_state_W['spheres']
-                            p_W, q_W, r_W = spheres_W['p'], spheres_W['q'], spheres_W['r']
-                            sphere_viz_tensor_W = torch.cat((p_W.squeeze(0), q_W.squeeze(0), r_W.T),dim=1)
-                        if viz_col_spheres_robot:
-                            spheres_R = task_space_state_R['spheres']
-                            p_R, q_R, r_R = spheres_R['p'], spheres_R['q'], spheres_R['r']
-                            sphere_viz_tensor_R = torch.cat((p_R.squeeze(0), q_R.squeeze(0), r_R.T),dim=1)
-                        if viz_col_spheres_world and viz_col_spheres_robot:
-                            sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_viz_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
-                        elif viz_col_spheres_world:
-                            sphere_viz_tensor = sphere_viz_tensor_W
-                        elif viz_col_spheres_robot:
-                            sphere_viz_tensor = sphere_viz_tensor_R
-                        else:
-                            sphere_viz_tensor = torch.zeros(0,4)
+                        viz_plans, viz_plans_dt = a.sim_robot.viz_plan_on, a.sim_robot.viz_plan_dt # debug
+                        viz_col_spheres_world, viz_col_spheres_robot = a.sim_robot.viz_col_spheres_on_world, a.sim_robot.viz_col_spheres_on_robot
+                        viz_col_spheres_dt = a.sim_robot.viz_col_spheres_dt # debug
+                        viz_mpc_ee_rollouts, viz_mpc_ee_rollouts_dt = a.sim_robot.viz_mpc_ee_rollouts_on, a.sim_robot.viz_mpc_ee_rollouts_dt 
                         
-                        a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor)
+                        viz_cpred_dt = a.sim_robot.viz_col_pred_dt
+                        viz_cpred_own = a.sim_robot.viz_col_pred_own_on
+                        viz_cpred_obs = a.sim_robot.viz_col_pred_obs_on
 
-                    if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
-                        if a.is_plan_publisher() and len(cu_agents) > 1:
-                            debug_data = a.planner.get_col_pred_debug()
-                            if debug_data is not None:
-                                p_obs, p_own, r_obs, r_own = debug_data
-                                if a.sim_robot.viz_col_pred_own_mean_only:
-                                    p_own = p_own.mean(axis=0)
-                                if viz_cpred_own:
-                                    pts_debug.append({'points': p_own, 'color': a.sim_robot.viz_col_pred_own_color})
-                                if viz_cpred_obs:
-                                    pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
-                    
-                    # update agent stats
-                    stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
-                    stats = {}
-                    for stat_name in stats_to_update_now:
-                        match stat_name:
-                            case 'w_step': # world step
-                                val = t
-                            case 'a_step': # agent step (control iteration)
-                                val = a.step_count
-                            case 'rec': # robot env collision
-                                in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
-                                val = in_col  
-                            case 'link_target_poses': # link and target poses
-                                val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
-                            case 'spheres': # spheres pos and radius (in world frame)
+                        ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
+                        ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
+                        
+                        # publish 
+                        # sw.on()
+                        js = a.sim_robot.get_js(sync_new=False) # get last step's joint state
+                        # sw.off()
+
+                        
+                        psw.on()
+                        plan = None
+                        if js is not None and a.plan_pub_sub.should_pub_now(t):
+                            share_full_plan = a.is_plan_publisher() # naive means broadcase state as plan over horizon
+                            plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))
+                        psw.off()
+
+                        if plan is not None: # currently available in mpc only
+                            plans_board[a.idx] = plan
+                            if viz_plans and t % viz_plans_dt == 0:
+                                pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
+                        
+                        
+        
+            
+                        # sense obstacles 
+                        a.update_col_model_from_isaac_sim(
+                            a.sim_robot.path, 
+                            usd_help, 
+                            ignore_list=a.cu_world_wrapper_update_policy["never_add"] + a.cu_world_wrapper_update_policy["never_update"], 
+                            paths_to_search_obs_under=["/World"]
+                        )
+                        
+        
+            
+                        js = a.sim_robot.get_js(sync_new=True) 
+                        if js is None:
+                            print("sim_js is None")
+                            continue
+                        
+                        psw.on()
+                        _0 = tensor_args.to_device(js.positions) * 0.0
+                        cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
+                        if isinstance(planner, MpcPlanner):
+                            planner.update_state(cu_js)
+                        
+                        task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
+                        spheres_R = task_space_state_R['spheres']
+                        p_R, r_R = spheres_R['p'], spheres_R['r']
+                        pr_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1) # S (sphres) x 4 (xyzr)
+                        psw.off()
+
+                        
+                        psw.on()
+                        # sense plans
+                        if a.is_plan_subscriber():
+                            a.update_col_pred(plans_board)
+                                        
+                        # sense goals
+                        goals = link_name_to_target_pose[a.idx]
+
+                        # plan
+                        robot_context = get_topics().get_default_env()[a.idx]
+                        robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
+                        robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
+                        robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
+
+
+                        # yield action
+                        if isinstance(planner, CumotionPlanner):
+                            action = planner.yield_action(goals, cu_js, js.velocities)
+                        elif isinstance(planner, MpcPlanner):
+                            action = planner.yield_action(goals)
+                            if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
+                                pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.viz_mpc_ee_rollouts_color})
+
+                        else:
+                            raise ValueError(f"Invalid planner type: {planner_type}")
+                        psw.off()
+                        
+                        # act
+                        if action is not None:
+                            isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
+                            a.sim_robot.articulation_controller.apply_action(isaac_action)
+                            a.step_count += 1
+                        
+                        # debug
+                        if t % viz_col_spheres_dt == 0:
+                            if viz_col_spheres_world:
                                 task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
                                 spheres_W = task_space_state_W['spheres']
-                                p_W, r_W = spheres_W['p'], spheres_W['r']
-                                spheres_pr_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
-                                val = spheres_pr_W
-                            case 'total_planning_time': # total planning time
-                                val = psw.total 
-                            case _:
-                               raise ValueError(f"Invalid stat name: {stat_name}")
-                        stats[stat_name] = val
-                    a.stat_man.update(stats, a.step_count)
+                                p_W, q_W, r_W = spheres_W['p'], spheres_W['q'], spheres_W['r']
+                                sphere_viz_tensor_W = torch.cat((p_W.squeeze(0), q_W.squeeze(0), r_W.T),dim=1)
+                            if viz_col_spheres_robot:
+                                spheres_R = task_space_state_R['spheres']
+                                p_R, q_R, r_R = spheres_R['p'], spheres_R['q'], spheres_R['r']
+                                sphere_viz_tensor_R = torch.cat((p_R.squeeze(0), q_R.squeeze(0), r_R.T),dim=1)
+                            if viz_col_spheres_world and viz_col_spheres_robot:
+                                sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_viz_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
+                            elif viz_col_spheres_world:
+                                sphere_viz_tensor = sphere_viz_tensor_W
+                            elif viz_col_spheres_robot:
+                                sphere_viz_tensor = sphere_viz_tensor_R
+                            else:
+                                sphere_viz_tensor = torch.zeros(0,4)
+                            
+                            a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor)
+
+                        if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
+                            if a.is_plan_publisher() and len(cu_agents) > 1:
+                                debug_data = a.planner.get_col_pred_debug()
+                                if debug_data is not None:
+                                    p_obs, p_own, r_obs, r_own = debug_data
+                                    if a.sim_robot.viz_col_pred_own_mean_only:
+                                        p_own = p_own.mean(axis=0)
+                                    if viz_cpred_own:
+                                        pts_debug.append({'points': p_own, 'color': a.sim_robot.viz_col_pred_own_color})
+                                    if viz_cpred_obs:
+                                        pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
+                        
+                        # update agent stats
+                        stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
+                        stats = {}
+                        for stat_name in stats_to_update_now:
+                            match stat_name:
+                                case 'w_step': # world step
+                                    val = t
+                                case 'a_step': # agent step (control iteration)
+                                    val = a.step_count
+                                case 'rec': # robot env collision
+                                    in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
+                                    val = in_col  
+                                case 'link_target_poses': # link and target poses
+                                    val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
+                                case 'spheres': # spheres pos and radius (in world frame)
+                                    task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
+                                    spheres_W = task_space_state_W['spheres']
+                                    p_W, r_W = spheres_W['p'], spheres_W['r']
+                                    spheres_pr_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
+                                    val = spheres_pr_W
+                                case 'total_planning_time': # total planning time
+                                    val = psw.total 
+                                case _:
+                                    raise ValueError(f"Invalid stat name: {stat_name}")
+                            stats[stat_name] = val
+                        a.stat_man.update(stats, t, a.step_count)
 
 
-                if len(pts_debug):
-                    draw_points(pts_debug)
-            
-
-            # update task stats
-            sim_task.stat_man.update(sim_task.get_stat_vals(sim_task.stat_man.get_now_update_names(t)),t)
-            
-            # update sim stats
-            stats_to_update_now_sim = sim_stat_man.get_now_update_names(t)
-            stats = {}
-            for stat_name_sim in stats_to_update_now_sim:
-                match stat_name_sim:
-                    case 'tphysics':
-                        val = my_world.current_time - physics_time_start
-                    case _:
-                        raise ValueError(f"Invalid stat name: {stats_to_update_now_sim}")
-                stats[stat_name_sim] = val
-            sim_stat_man.update(stats,t)
-
-            
-            t += 1
-
-            tsto_reached = t > tsto # stop due to time step limit
-            sto_reached = time() - sim_time_start > sto # stop due to simulation time limit
-            pto_reached = my_world.current_time - physics_time_start > pto # stop due to physics time limit
-
-            print(f"t: {t}, tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
-
-            if stop_simulation or tsto_reached or sto_reached or pto_reached or stop_event.is_set():
-                if should_capture_frames:
-                    frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
-
-                if meta_cfg["out"]["stats"]: # save states
-                    print("Saving stats...")
-                    stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
-                    stats_out = StatManager.save(stat_managers, out_path)
-                if meta_cfg["out"]["meta_cfg"]:
-                    with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
-                        yaml.dump(meta_cfg, f)
+                    if len(pts_debug):
+                        draw_points(pts_debug)
                 
-                
-                print(f"All Outputs saved to {out_path}")
-               
 
-                if stop_event.is_set():
-                    simulation_app.close()
-                    return False
-                else:
-                    # Thoroughly reset scene and World singleton so next iteration starts clean
-                    reset_stage(my_world)
-                    return True
+                # update task stats
+                task_stats = sim_task.get_stat_vals(sim_task.stat_man.get_now_update_names(t))
+                sim_task.stat_man.update(task_stats,t)
+
+                
+
+                # advance time
+                t += 1                
         
-            
-    
-    else: # async mode
-        if meta_cfg["async_type"] == "step": 
-            
-            # link_name_to_target_pose = [{} for _ in range(len(cu_agents))]        
-            sim_lock = Lock()
-            plans_lock = Lock()
-            plans_board = [None for _ in range(len(cu_agents))]
+                # visualize progress          
+                progress.update(task1, advance=1) # one time step
+                progress.update(task2, advance= time() - prog_bar_tsys_iter_start) # simulation time
+                progress.update(task3, advance=my_world.current_time - prog_bar_tphys_iter_start) # physics time
 
-            while simulation_app.is_running():
-                #lw.on()
-                link_name_to_target_pose = sim_task.step()
-                sim_env.step()
-                 
-                # Create and start all threads
-                threads = [Thread(target=a.async_control_step_sim,args=(sim_lock,plans_lock,plans_board,link_name_to_target_pose[i],sim_task,usd_help), daemon=True) for i,a in enumerate(cu_agents)]
-                 
-                # Start all threads
-                for th in threads:
-                    th.start()
-                 
-                # Wait for all threads to complete
-                for th in threads:
-                    th.join()
+                # Check if reached any of the time limits or got a stop event (ctrl+c)
+                tsto_reached = t > tsto # stop due to time step limit
+                sto_reached = time() - sim_time_start > sto # stop due to simulation time limit
+                pto_reached = my_world.current_time - physics_time_start > pto # stop due to physics time limit
+                if stop_simulation or tsto_reached or sto_reached or pto_reached or stop_event.is_set():
+                    if should_capture_frames:
+                        frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
 
-                #lw.off()
-                my_world.step(render=True)
-                sim_task.update_stats(t)
-                
-                t += 1
-                print(f"t: {t}")
-                
-                if stop_simulation:
-                    print("Saving stats...")
-                    a_stats = [a.stats for a in cu_agents]
-                    stats_out = sim_task.stats.save(formatted_time,a_stats,{})
+                    if meta_cfg["out"]["stats"]: # save states
+                        print("Saving stats...")
+                        stat_managers:list[StatManager] = [sim_task.stat_man, *[a.stat_man for a in cu_agents]] # [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
+                        stats_out = StatManager.save(stat_managers, out_path)
+                    if meta_cfg["out"]["meta_cfg"]:
+                        with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
+                            yaml.dump(meta_cfg, f)
                     
-                    print(f"Stats saved to {stats_out}")
-                    simulation_app.close()
-                    break
-                         
-            simulation_app.close() 
-
-
-
-        elif meta_cfg["async_type"] == "loop":
-            
-            plans_lock = Lock() # locking plans board
-            sim_lock = Lock() # locking simulator 
-            t_lock = Lock() # locking time step index
-            
-            debug_lock = Lock()
-            goals_lock = Lock()
-            
-            pts_debug = []
-            link_name_to_target_pose = [{} for _ in range(len(cu_agents))]
-            a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock,goals_lock, debug_lock, stop_event, plans_board, lambda: t, pts_debug,usd_help,link_name_to_target_pose[i],sim_env,sim_task), daemon=True) for i,a in enumerate(cu_agents)]
-            for th in a_threads:
-                th.start()
-                print(f"thread {th.name} started")
+                    
+                    print(f"All Outputs saved to {out_path}")
                 
+                    
+                    if stop_event.is_set():
+                        simulation_app.close()
+                        return False
+                    else:
+                        # Thoroughly reset scene and World singleton so next iteration starts clean
+                        reset_stage(my_world)
+                        return True
             
-            while simulation_app.is_running():
-                print(f"t: {t}")
                 
-                with goals_lock:
-                    _link_name_to_target_pose = sim_task.step()     
-                    for i, a in enumerate(cu_agents):
-                        for l_name,t_pose in _link_name_to_target_pose[i].items():
-                            link_name_to_target_pose[i][l_name] = t_pose
+                    
+        
+        else: # async mode
+            if meta_cfg["async_type"] == "step": 
                 
-                # with debug_lock:
-                #     pts_debug = []
-                with sim_lock: 
+                # link_name_to_target_pose = [{} for _ in range(len(cu_agents))]        
+                sim_lock = Lock()
+                plans_lock = Lock()
+                plans_board = [None for _ in range(len(cu_agents))]
+
+                while simulation_app.is_running():
+                    #lw.on()
+                    link_name_to_target_pose = sim_task.step()
                     sim_env.step()
+                    
+                    # Create and start all threads
+                    threads = [Thread(target=a.async_control_step_sim,args=(sim_lock,plans_lock,plans_board,link_name_to_target_pose[i],sim_task,usd_help), daemon=True) for i,a in enumerate(cu_agents)]
+                    
+                    # Start all threads
+                    for th in threads:
+                        th.start()
+                    
+                    # Wait for all threads to complete
+                    for th in threads:
+                        th.join()
+
+                    #lw.off()
                     my_world.step(render=True)
+                    sim_task.update_stats(t)
+                    
                     t += 1
+                    print(f"t: {t}")
+                    
+                    if stop_simulation:
+                        print("Saving stats...")
+                        a_stats = [a.stats for a in cu_agents]
+                        stats_out = sim_task.stats.save(formatted_time,a_stats,{})
+                        
+                        print(f"Stats saved to {stats_out}")
+                        simulation_app.close()
+                        break
+                            
+                simulation_app.close() 
+
+
+
+            elif meta_cfg["async_type"] == "loop":
                 
-            
-            simulation_app.close() 
+                plans_lock = Lock() # locking plans board
+                sim_lock = Lock() # locking simulator 
+                t_lock = Lock() # locking time step index
+                
+                debug_lock = Lock()
+                goals_lock = Lock()
+                
+                pts_debug = []
+                link_name_to_target_pose = [{} for _ in range(len(cu_agents))]
+                a_threads = [Thread(target=a.async_control_loop_sim ,args=(t_lock, sim_lock, plans_lock,goals_lock, debug_lock, stop_event, plans_board, lambda: t, pts_debug,usd_help,link_name_to_target_pose[i],sim_env,sim_task), daemon=True) for i,a in enumerate(cu_agents)]
+                for th in a_threads:
+                    th.start()
+                    print(f"thread {th.name} started")
+                    
+                
+                while simulation_app.is_running():
+                    print(f"t: {t}")
+                    
+                    with goals_lock:
+                        _link_name_to_target_pose = sim_task.step()     
+                        for i, a in enumerate(cu_agents):
+                            for l_name,t_pose in _link_name_to_target_pose[i].items():
+                                link_name_to_target_pose[i][l_name] = t_pose
+                    
+                    # with debug_lock:
+                    #     pts_debug = []
+                    with sim_lock: 
+                        sim_env.step()
+                        my_world.step(render=True)
+                        t += 1
+                    
+                
+                simulation_app.close() 
 
 def reset_stage(my_world):
     """

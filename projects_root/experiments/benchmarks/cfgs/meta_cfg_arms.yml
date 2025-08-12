@@ -1,7 +1,7 @@
 timeout:
-  tstep: 100 # world steps timeout
-  tsec: 100 # seconds timeout
-  physics_tsec: 100 # physics seconds (world time) timeout
+  tstep: 500 # world steps timeout
+  tsec: 300 # seconds timeout
+  physics_tsec: 300 # physics seconds (world time) timeout
 
 out:
   out_dir: '/home/dan/mr_mpc_logs' # output directory
@@ -73,10 +73,10 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       color: viz_color
 
     visualize_col_pred:
-        own: True
+        own: False
         own_color: 'blue'
         own_mean_only: True
-        obs: True
+        obs: False
         obs_color: 'red'
         
         ts_delta: 1 # int
@@ -115,12 +115,12 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   # agent stats
   stat_man_cfg:
-    keys: ['tsys'] # added to  every stat
-    stat_names: ['w_step', 'a_step', 'rec', 'link_target_poses', 'spheres', 'total_planning_time']
+    dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
+    keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
+    stat_names: ['rec', 'link_target_poses', 'spheres', 'total_planning_time']
     collect_dt: [1,1,1,5,10,5] # dt for each stat
-    verbose: [False,False,False,False,False,True]
-    dt_in_sec: False # if True, dt is in seconds, if False, dt is in steps (agent steps, not world steps)
-    save: False
+    verbose: False # [False,False,False,False,False,True]
+    save: True
                 
   
 async: False
@@ -136,11 +136,11 @@ sim_task:
   level: 1 # 1: easy, 2: medium, 3: hard
   stat_man_cfgs:
     bin: 
-      keys: ['tsys']
+      keys: ['tsys', 'tphysics', 'w_step']
       stat_names: ['n_picks', 'n_drops']
-      collect_dt: 5
-      dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
-      save: False
+      collect_dt: 10
+      dt_key_type: 'tstep'
+      save: True
     reach: # link and target poses will be available by agent stats (and no other stats needed)
       {}
     follow: # link and target poses will be available by agent stats (and no other stats needed)
@@ -169,14 +169,6 @@ sim_env:
     volume_dim: 1 # dimension of the obstacle volume (radius for sphere, side length for box)
     obj_lin_vel: [0,0,0] # [0.2,0.2,0.2] # velocity of the obstacle (xyz in world frame)
     obj_rigid_body_enabled: False # if True, the obstacle will be a rigid body (for physics)
-
-sim_stat_man_cfg:
-  keys: ['tsys']
-  stat_names: ['tphysics']
-  collect_dt: 10
-  verbose: True
-  dt_in_sec: False # if True, dt is in seconds, if False, dt is in world steps
-  save: False
 
 
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
