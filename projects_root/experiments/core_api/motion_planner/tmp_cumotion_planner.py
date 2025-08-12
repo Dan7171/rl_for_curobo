@@ -2612,9 +2612,11 @@ class FrameCapturer:
             pause_timeline=False
         )
 
-    def finish(self):
+    def finish(self,to_mp4, to_mp4_cfg):
         rep.orchestrator.wait_until_complete()
-    
+        if to_mp4:
+            self.convert_frames_to_video(**to_mp4_cfg)
+        
     def convert_frames_to_video(self, result_path='', video_fps=30, in_background=True):
         """Convert frames to video using OpenCV"""
         # Get all frame files
@@ -3029,19 +3031,14 @@ def main(meta_cfg, out_path):
     
     # frame capturing
     frame_capturing_cfg = meta_cfg["out"]["frame_cap"]
-    frame_capture_stop_event = Event()
+    # frame_capture_stop_event = Event()
     should_capture_frames = frame_capturing_cfg["is_on"]
     if should_capture_frames:
         # start frame capturing in background
         out_path_frames = os.path.join(out_path, "frames")
         os.makedirs(out_path_frames, exist_ok=True)
         frame_capturer = FrameCapturer(out_path_frames)
-        
-
-
-
-
-
+  
         # capture_frames_async = frame_capturing_cfg["async"]
         # if capture_frames_async:
         #     loop = asyncio.new_event_loop()
@@ -3061,7 +3058,7 @@ def main(meta_cfg, out_path):
         while simulation_app.is_running():
             # lw.on()
             my_world.step(render=True)
-            
+
             if should_capture_frames:
                 frame_capturer.capture()
             
@@ -3273,7 +3270,7 @@ def main(meta_cfg, out_path):
                         yaml.dump(meta_cfg, f)
                 
                 if should_capture_frames:
-                    frame_capturer.finish()
+                    frame_capturer.finish(frame_capturing_cfg["to_mp4"], frame_capturing_cfg["to_mp4_cfg"])
 
                 print(f"All Outputs saved to {out_path}")
                

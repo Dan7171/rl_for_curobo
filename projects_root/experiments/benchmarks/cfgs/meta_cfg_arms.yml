@@ -9,9 +9,12 @@ out:
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
     is_on: True # capture and save frames to pngs
-    async: True # capture frames asynchronously
+    # async: False # capture frames asynchronously
     to_mp4: True # convert frames to mp4
-    video_fps: 30 # frames per second (for video)
+    to_mp4_cfg:
+      result_path: '' # result path for the mp4 video. If '', will be saved in the frames directory under the name 'simulation_video.mp4'
+      in_background: True # convert frames to mp4 in background
+      video_fps: 30 # frames per second (for video)
     
   
   
