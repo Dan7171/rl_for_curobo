@@ -2479,7 +2479,7 @@ class FrameCapturer:
             rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
         
         # Create render product
-        render_product = rep.create.render_product(self.camera, (1280, 720))
+        self.render_product = rep.create.render_product(self.camera, (1280, 720))
         
         # Create writer for video output - RGB only
         self.writer = BasicWriter(
@@ -2489,21 +2489,59 @@ class FrameCapturer:
         )
         
         # Attach writer to render product
-        self.writer.attach([render_product])
+        self.writer.attach([self.render_product])
+
+        # Start background capture task
+        self.capture_task = asyncio.ensure_future(self.capture_after_world_step())
         
+        
+    # def _capture(self):
+    #     rep.orchestrator.step_async(
+    #         rt_subframes=1,  # Like GUI's "RTSubframes" parameter
+    #         delta_time=None,
+    #         pause_timeline=False
+    #     )
+    # import asyncio
 
-    # def capture_frames_asynchronously(self):
-    #     pass
+    # def _capture(self):
+    #     coro = rep.orchestrator.step_async(rt_subframes=1, delta_time=None, pause_timeline=False)
+    #     loop = asyncio.get_event_loop()
+    #     if loop.is_running():
+    #         asyncio.create_task(coro)
+    #     else:
+    #         loop.run_until_complete(coro)
 
-    def capture(self):
-        rep.orchestrator.step(
-            rt_subframes=1,  # Like GUI's "RTSubframes" parameter
-            delta_time=None,
-            pause_timeline=False
-        )
+    # def capture(self, is_async=False):
+    #     if is_async:
+    #         coro = rep.orchestrator.step_async(rt_subframes=1, delta_time=None, pause_timeline=False)
+    #         loop = asyncio.get_event_loop()
+    #         if loop.is_running():
+    #             asyncio.create_task(coro)
+    #         else:
+    #             loop.run_until_complete(coro)
+    #     else:
+    #         rep.orchestrator.step(rt_subframes=1, delta_time=None, pause_timeline=False)
+
+    async def capture_after_world_step(self):
+        while True:
+            # Wait for the next world step to finish (simulate your own step)
+            await asyncio.sleep(0)  # yield control so main loop can run my_world.step()
+            
+            # Trigger Replicator to save current frame without advancing physics
+            await rep.orchestrator.step_async()
+
+    
 
     def finish(self, to_mp4_cfg):
-        rep.orchestrator.wait_until_complete()
+        # rep.orchestrator.wait_until_complete()
+        try:
+            self.writer.detach([self.render_product])
+            self.capture_task.cancel()
+            self.capture_task.result()
+
+        except Exception as e:
+            print(f'debug: error in finish: {e}')
+
         self.convert_frames_to_video(**to_mp4_cfg)
         
     def convert_frames_to_video(self,is_on, result_path='', video_fps=30, in_background=True):
@@ -2927,7 +2965,6 @@ def main(meta_cfg, out_path):
         out_path_frames = os.path.join(out_path, "frames")
         os.makedirs(out_path_frames, exist_ok=True)
         frame_capturer = FrameCapturer(out_path_frames)
-        # frame_capturer.start_async(max_backlog=frame_capturing_cfg.get("max_backlog", 0))
 
 
         
@@ -2941,9 +2978,9 @@ def main(meta_cfg, out_path):
         while simulation_app.is_running():
             my_world.step(render=True)
 
-            if should_capture_frames:
-                # frame_capturer.request_capture()
-                frame_capturer.capture()
+            # if should_capture_frames:
+            #     # frame_capturer.request_capture()
+            #     frame_capturer.capture(is_async=True)
             pts_debug = []
 
             # Updating targets. Updating targets in sim and return new target poses so planners can react
