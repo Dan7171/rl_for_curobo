@@ -45,6 +45,7 @@ from time import time, sleep
 import subprocess
 from threading import Lock, Event, Thread
 from typing import Optional, Tuple, Dict, Union, Callable
+from queue import Queue, Empty
 from typing_extensions import List
 import pickle
 import torch
@@ -2578,9 +2579,60 @@ class StatManager:
 #     print(f"📁 Check output directory: {output_dir}")
 
 
+# class FrameCapturer:
+#     def __init__(self, frames_output_dir):
+#         self.frames_dir = frames_output_dir
+#         # Create a camera for recording
+#         self.camera = rep.create.camera()
+        
+#         # Position camera to see the scene
+#         with self.camera:
+#             rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
+        
+#         # Create render product
+#         render_product = rep.create.render_product(self.camera, (1280, 720))
+        
+#         # Create writer for video output - RGB only
+#         self.writer = BasicWriter(
+#             output_dir=self.frames_dir,
+#             frame_padding=4,
+#             rgb=True # RGB only
+#         )
+        
+#         # Attach writer to render product
+#         self.writer.attach([render_product])
+        
+
+#     def capture(self):
+#         rep.orchestrator.step(
+#             rt_subframes=1,  # Like GUI's "RTSubframes" parameter
+#             delta_time=None,
+#             pause_timeline=False
+#         )
+
+#     def finish(self,to_mp4, to_mp4_cfg):
+#         rep.orchestrator.wait_until_complete()
+#         if to_mp4:
+#             self.convert_frames_to_video(**to_mp4_cfg)
+        
+#     def convert_frames_to_video(self, result_path='', video_fps=30, in_background=True):
+#         """Convert frames to video using OpenCV"""
+#         # Get all frame files
+#         if result_path == '':
+#             result_path = f'{self.frames_dir}/simulation_video.mp4'
+#         command = f'python projects_root/experiments/utils/convert_frames_to_video.py --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
+#         shell = True 
+#         if in_background:
+#             subprocess.Popen(command, shell=shell)
+#         else:
+#             subprocess.run(command, shell=shell)
+#         print(f'Finished converting frames to video: {result_path}')
+        
 class FrameCapturer:
     def __init__(self, frames_output_dir):
+
         self.frames_dir = frames_output_dir
+        
         # Create a camera for recording
         self.camera = rep.create.camera()
         
@@ -2600,10 +2652,56 @@ class FrameCapturer:
         
         # Attach writer to render product
         self.writer.attach([render_product])
-        
 
-    # def capture_frames_asynchronously(self):
-    #     pass
+        # Async members (initialized on start_async)
+        self._queue_lock = Lock()
+        self._queue = None
+        self._stop_event = None
+        self._worker = None
+
+    def start_async(self, max_backlog: int = 0):
+        if self._worker is not None:
+            return
+        self._queue = Queue(maxsize=max_backlog)  # 0 => unbounded
+        self._stop_event = Event()
+        self._pending = 0
+        self._worker = Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
+
+    def _worker_loop(self):
+        while True:
+            item = self._queue.get()  # block until a request arrives
+            if item is None:  # sentinel for shutdown
+                self._queue.task_done()
+                break
+            with self._queue_lock:
+                self._pending += 1
+            self._queue.task_done()
+
+    def request_capture(self):
+        # If async enabled, enqueue; else, do it inline
+        print('debug: request_capture')
+        if self._queue is not None:
+            print('debug: request_capture in request_capture')
+            try:
+                self._queue.put(1, block=False)
+                print(f'debug: request_capture enqueued')
+            except Exception as e:
+                print(f'debug: request_capture enqueue failed: {e}')
+        # else:
+        #     self.capture()
+
+    def drain_pending_on_main_thread(self):
+        # Must be called from the main thread (simulation loop)
+        while True:
+            with self._queue_lock:
+                if self._pending <= 0:
+                    break
+                self._pending -= 1
+            try:
+                self.capture()
+            except Exception as e:
+                print(f'debug: error capture failed: {e}')
 
     def capture(self):
         rep.orchestrator.step(
@@ -2612,13 +2710,24 @@ class FrameCapturer:
             pause_timeline=False
         )
 
-    def finish(self,to_mp4, to_mp4_cfg):
+    def finish(self, mp4_cfg):
+        # Drain pending requested captures if async
+        if self._queue is not None:
+            # signal worker to stop
+            try:
+                self._queue.put(None, block=False)
+            except Exception:
+                pass
+            if self._worker is not None:
+                self._worker.join()
         rep.orchestrator.wait_until_complete()
-        if to_mp4:
-            self.convert_frames_to_video(**to_mp4_cfg)
-        
-    def convert_frames_to_video(self, result_path='', video_fps=30, in_background=True):
+        self.convert_frames_to_video(**mp4_cfg)
+        print('debug: frame capture finish done')
+    
+    def convert_frames_to_video(self,is_on, result_path='', video_fps=30, in_background=True):
         """Convert frames to video using OpenCV"""
+        if not is_on: 
+            return  
         # Get all frame files
         if result_path == '':
             result_path = f'{self.frames_dir}/simulation_video.mp4'
@@ -2630,7 +2739,6 @@ class FrameCapturer:
             subprocess.run(command, shell=shell)
         print(f'Finished converting frames to video: {result_path}')
         
-
 
 def simulation_startup(simulation_app, my_world, cu_agents):
     """
@@ -3029,15 +3137,26 @@ def main(meta_cfg, out_path):
     # setup stats for simulation
     sim_stat_man = StatManager(**meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
     
+    
     # frame capturing
     frame_capturing_cfg = meta_cfg["out"]["frame_cap"]
-    # frame_capture_stop_event = Event()
     should_capture_frames = frame_capturing_cfg["is_on"]
     if should_capture_frames:
         # start frame capturing in background
         out_path_frames = os.path.join(out_path, "frames")
         os.makedirs(out_path_frames, exist_ok=True)
         frame_capturer = FrameCapturer(out_path_frames)
+        frame_capturer.start_async(max_backlog=frame_capturing_cfg.get("max_backlog", 0))
+    
+    # frame capturing
+    # frame_capturing_cfg = meta_cfg["out"]["frame_cap"]
+    # # frame_capture_stop_event = Event()
+    # should_capture_frames = frame_capturing_cfg["is_on"]
+    # if should_capture_frames:
+    #     # start frame capturing in background
+    #     out_path_frames = os.path.join(out_path, "frames")
+    #     os.makedirs(out_path_frames, exist_ok=True)
+    #     frame_capturer = FrameCapturer(out_path_frames)
   
         # capture_frames_async = frame_capturing_cfg["async"]
         # if capture_frames_async:
@@ -3056,12 +3175,12 @@ def main(meta_cfg, out_path):
     if not meta_cfg["async"]: # sync mode
         
         while simulation_app.is_running():
-            # lw.on()
             my_world.step(render=True)
 
             if should_capture_frames:
-                frame_capturer.capture()
-            
+                frame_capturer.request_capture()
+                frame_capturer.drain_pending_on_main_thread()
+
             pts_debug = []
 
             # Updating targets. Updating targets in sim and return new target poses so planners can react
@@ -3270,7 +3389,7 @@ def main(meta_cfg, out_path):
                         yaml.dump(meta_cfg, f)
                 
                 if should_capture_frames:
-                    frame_capturer.finish(frame_capturing_cfg["to_mp4"], frame_capturing_cfg["to_mp4_cfg"])
+                    frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
 
                 print(f"All Outputs saved to {out_path}")
                
