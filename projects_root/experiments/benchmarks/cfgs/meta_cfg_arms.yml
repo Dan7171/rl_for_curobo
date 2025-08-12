@@ -1,7 +1,7 @@
 timeout:
-  tstep: 500 # world steps timeout
-  tsec: 300 # seconds timeout
-  physics_tsec: 300 # physics seconds (world time) timeout
+  tstep: 100 # world steps timeout
+  tsec: 30 # seconds timeout
+  physics_tsec: 30 # physics seconds (world time) timeout
 
 out:
   out_dir: '/home/dan/mr_mpc_logs' # output directory

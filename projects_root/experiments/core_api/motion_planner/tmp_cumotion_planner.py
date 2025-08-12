@@ -936,7 +936,7 @@ class BinTask(SimTask):
                                     new_bin_goal_idx = self._local_rng.choice(free_bin_goals) # pick a random free goal from bin goals
                                     self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
                                     goal_pose = self.bin_goal_poses[new_bin_goal_idx] # get goal pose
-                                    print(f"debug agent {a_idx} link {link_name} picked bin goal {new_bin_goal_idx}")
+                                    # print(f"debug agent {a_idx} link {link_name} picked bin goal {new_bin_goal_idx}")
                             
             
                             else:
@@ -2536,12 +2536,12 @@ class FrameCapturer:
         frame_count = 0
         while True:
             # Wait for the next world step to finish (simulate your own step)
-            # await asyncio.sleep(0)  # yield control so main loop can run my_world.step()
+            await asyncio.sleep(0)  # yield control so main loop can run my_world.step()
             
             # Trigger Replicator to save current frame without advancing physics
             await rep.orchestrator.step_async()
             frame_count += 1
-            print(f'debug: frame_count: {frame_count}')
+            # print(f'debug: frame_count: {frame_count}')
 
     def finish(self, to_mp4_cfg):
         # rep.orchestrator.wait_until_complete()
