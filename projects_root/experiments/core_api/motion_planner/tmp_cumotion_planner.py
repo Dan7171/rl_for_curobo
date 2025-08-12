@@ -2468,171 +2468,9 @@ class StatManager:
         print(f"under keys: {list(out.keys())}")
         return out_path
 
-
- 
-
-# async def capture_frames_asynchronously(output_dir,stop_event):
-#     """Async recording function using Replicator orchestrator"""
-
-#     # Create a camera for recording
-#     camera = rep.create.camera()
-    
-#     # Position camera to see the scene
-#     with camera:
-#         rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
-    
-#     # Create render product
-#     render_product = rep.create.render_product(camera, (1280, 720))
-    
-#     # Create writer for video output - RGB only
-#     writer = BasicWriter(
-#         output_dir=output_dir,
-#         frame_padding=4,
-#         rgb=True
-#     )
-    
-#     # Attach writer to render product
-#     writer.attach([render_product])
-    
-#     current_frame = 0
-    
-#     # Recording loop
-#     while not stop_event.is_set():
-#         # Get timeline interface
-#         timeline = omni.timeline.get_timeline_interface()
-        
-#         # Start timeline if not playing
-#         if not timeline.is_playing():
-#             timeline.play()
-#             timeline.commit()
-        
-#         # Step the orchestrator
-#         # https://docs.omniverse.nvidia.com/extensions/latest/ext_replicator/subframes_examples.html#examples
-#         await rep.orchestrator.step_async(
-#             rt_subframes=1,
-#             delta_time=None,
-#             pause_timeline=False
-#         )
-        
-#         current_frame += 1
-#         if current_frame % 50 == 0:
-#             print(f"DEBUG Recorded {current_frame} frames")
-    
-#     # Stop timeline
-#     timeline.stop()
-#     print("Recording finished!")
-
-# def capture_frames_sync(output_dir,stop_event):
-#     """Synchronous recording function - replicates GUI Synthetic Data Recorder"""
-    
-    
-#     # Create a camera for recording
-#     camera = rep.create.camera()
-    
-#     # Position camera to see the scene
-#     with camera:
-#         rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
-    
-#     # Create render product
-#     render_product = rep.create.render_product(camera, (1280, 720))
-    
-#     # Create writer for video output - RGB only
-#     writer = BasicWriter(
-#         output_dir=output_dir,
-#         frame_padding=4,
-#         rgb=True # RGB only
-#     )
-    
-#     # Attach writer to render product
-#     writer.attach([render_product])
-    
-#     print(f"🚀 Starting RGB recording for {num_frames} frames...")
-#     print(f"📁 Output: {output_dir}")
-#     print(f"📸 Recording: RGB PNG frames only")
-    
-#     # Recording loop - replicates GUI behavior
-#     for frame in range(num_frames):
-#         # Get timeline interface
-#         timeline = omni.timeline.get_timeline_interface()
-        
-#         # Start timeline if not playing (like GUI's "Control Timeline" checkbox)
-#         if not timeline.is_playing():
-#             timeline.play()
-#             timeline.commit()
-            
-#         # Step the orchestrator synchronously (like GUI's step function)
-#         rep.orchestrator.step(
-#             rt_subframes=1,  # Like GUI's "RTSubframes" parameter
-#             delta_time=None,
-#             pause_timeline=False
-#         )
-        
-#         if frame % 50 == 0:
-#             print(f"📸 Recorded {frame}/{num_frames} frames")
-    
-#     # Wait for all data to be written (like GUI's wait functionality)
-#     rep.orchestrator.wait_until_complete()
-    
-#     # Stop timeline
-#     timeline.stop()
-#     print("✅ RGB recording finished!")
-#     print(f"📁 Check output directory: {output_dir}")
-
-
-# class FrameCapturer:
-#     def __init__(self, frames_output_dir):
-#         self.frames_dir = frames_output_dir
-#         # Create a camera for recording
-#         self.camera = rep.create.camera()
-        
-#         # Position camera to see the scene
-#         with self.camera:
-#             rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
-        
-#         # Create render product
-#         render_product = rep.create.render_product(self.camera, (1280, 720))
-        
-#         # Create writer for video output - RGB only
-#         self.writer = BasicWriter(
-#             output_dir=self.frames_dir,
-#             frame_padding=4,
-#             rgb=True # RGB only
-#         )
-        
-#         # Attach writer to render product
-#         self.writer.attach([render_product])
-        
-
-#     def capture(self):
-#         rep.orchestrator.step(
-#             rt_subframes=1,  # Like GUI's "RTSubframes" parameter
-#             delta_time=None,
-#             pause_timeline=False
-#         )
-
-#     def finish(self,to_mp4, to_mp4_cfg):
-#         rep.orchestrator.wait_until_complete()
-#         if to_mp4:
-#             self.convert_frames_to_video(**to_mp4_cfg)
-        
-#     def convert_frames_to_video(self, result_path='', video_fps=30, in_background=True):
-#         """Convert frames to video using OpenCV"""
-#         # Get all frame files
-#         if result_path == '':
-#             result_path = f'{self.frames_dir}/simulation_video.mp4'
-#         command = f'python projects_root/experiments/utils/convert_frames_to_video.py --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
-#         shell = True 
-#         if in_background:
-#             subprocess.Popen(command, shell=shell)
-#         else:
-#             subprocess.run(command, shell=shell)
-#         print(f'Finished converting frames to video: {result_path}')
-        
 class FrameCapturer:
     def __init__(self, frames_output_dir):
-
         self.frames_dir = frames_output_dir
-        
         # Create a camera for recording
         self.camera = rep.create.camera()
         
@@ -2652,56 +2490,10 @@ class FrameCapturer:
         
         # Attach writer to render product
         self.writer.attach([render_product])
+        
 
-        # Async members (initialized on start_async)
-        self._queue_lock = Lock()
-        self._queue = None
-        self._stop_event = None
-        self._worker = None
-
-    def start_async(self, max_backlog: int = 0):
-        if self._worker is not None:
-            return
-        self._queue = Queue(maxsize=max_backlog)  # 0 => unbounded
-        self._stop_event = Event()
-        self._pending = 0
-        self._worker = Thread(target=self._worker_loop, daemon=True)
-        self._worker.start()
-
-    def _worker_loop(self):
-        while True:
-            item = self._queue.get()  # block until a request arrives
-            if item is None:  # sentinel for shutdown
-                self._queue.task_done()
-                break
-            with self._queue_lock:
-                self._pending += 1
-            self._queue.task_done()
-
-    def request_capture(self):
-        # If async enabled, enqueue; else, do it inline
-        print('debug: request_capture')
-        if self._queue is not None:
-            print('debug: request_capture in request_capture')
-            try:
-                self._queue.put(1, block=False)
-                print(f'debug: request_capture enqueued')
-            except Exception as e:
-                print(f'debug: request_capture enqueue failed: {e}')
-        # else:
-        #     self.capture()
-
-    def drain_pending_on_main_thread(self):
-        # Must be called from the main thread (simulation loop)
-        while True:
-            with self._queue_lock:
-                if self._pending <= 0:
-                    break
-                self._pending -= 1
-            try:
-                self.capture()
-            except Exception as e:
-                print(f'debug: error capture failed: {e}')
+    # def capture_frames_asynchronously(self):
+    #     pass
 
     def capture(self):
         rep.orchestrator.step(
@@ -2710,24 +2502,14 @@ class FrameCapturer:
             pause_timeline=False
         )
 
-    def finish(self, mp4_cfg):
-        # Drain pending requested captures if async
-        if self._queue is not None:
-            # signal worker to stop
-            try:
-                self._queue.put(None, block=False)
-            except Exception:
-                pass
-            if self._worker is not None:
-                self._worker.join()
+    def finish(self, to_mp4_cfg):
         rep.orchestrator.wait_until_complete()
-        self.convert_frames_to_video(**mp4_cfg)
-        print('debug: frame capture finish done')
-    
+        self.convert_frames_to_video(**to_mp4_cfg)
+        
     def convert_frames_to_video(self,is_on, result_path='', video_fps=30, in_background=True):
         """Convert frames to video using OpenCV"""
-        if not is_on: 
-            return  
+        if not is_on:
+            return
         # Get all frame files
         if result_path == '':
             result_path = f'{self.frames_dir}/simulation_video.mp4'
@@ -3142,30 +2924,12 @@ def main(meta_cfg, out_path):
     frame_capturing_cfg = meta_cfg["out"]["frame_cap"]
     should_capture_frames = frame_capturing_cfg["is_on"]
     if should_capture_frames:
-        # start frame capturing in background
         out_path_frames = os.path.join(out_path, "frames")
         os.makedirs(out_path_frames, exist_ok=True)
         frame_capturer = FrameCapturer(out_path_frames)
-        frame_capturer.start_async(max_backlog=frame_capturing_cfg.get("max_backlog", 0))
-    
-    # frame capturing
-    # frame_capturing_cfg = meta_cfg["out"]["frame_cap"]
-    # # frame_capture_stop_event = Event()
-    # should_capture_frames = frame_capturing_cfg["is_on"]
-    # if should_capture_frames:
-    #     # start frame capturing in background
-    #     out_path_frames = os.path.join(out_path, "frames")
-    #     os.makedirs(out_path_frames, exist_ok=True)
-    #     frame_capturer = FrameCapturer(out_path_frames)
-  
-        # capture_frames_async = frame_capturing_cfg["async"]
-        # if capture_frames_async:
-        #     loop = asyncio.new_event_loop()
-        #     asyncio.set_event_loop(loop)
-        #     loop.run_until_complete(capture_frames_asynchronously(out_path_frames, frame_capture_stop_event))
-        #     loop.close()
-        #     if frame_capturing_cfg["to_mp4"]:
-        #         convert_frames_to_video(out_path_frames, out_path, frame_capturing_cfg["video_fps"], in_background=True)
+        # frame_capturer.start_async(max_backlog=frame_capturing_cfg.get("max_backlog", 0))
+
+
         
         
     t = 0  # tstep     
@@ -3178,9 +2942,8 @@ def main(meta_cfg, out_path):
             my_world.step(render=True)
 
             if should_capture_frames:
-                frame_capturer.request_capture()
-                frame_capturer.drain_pending_on_main_thread()
-
+                # frame_capturer.request_capture()
+                frame_capturer.capture()
             pts_debug = []
 
             # Updating targets. Updating targets in sim and return new target poses so planners can react
@@ -3380,6 +3143,9 @@ def main(meta_cfg, out_path):
             print(f"t: {t}, tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
 
             if stop_simulation or tsto_reached or sto_reached or pto_reached or stop_event.is_set():
+                if should_capture_frames:
+                    frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
+
                 if meta_cfg["out"]["stats"]: # save states
                     print("Saving stats...")
                     stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
@@ -3388,9 +3154,7 @@ def main(meta_cfg, out_path):
                     with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
                         yaml.dump(meta_cfg, f)
                 
-                if should_capture_frames:
-                    frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
-
+                
                 print(f"All Outputs saved to {out_path}")
                
 
@@ -3520,6 +3284,7 @@ def signal_handler(signum):
     print(f"\nReceived signal {signum} - shutting down gracefully...")
     stop_simulation = True
     stop_event.set()
+    
 
 
 if __name__ == "__main__":
