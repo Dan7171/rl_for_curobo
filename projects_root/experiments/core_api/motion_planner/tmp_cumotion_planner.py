@@ -8,7 +8,7 @@ import yaml
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--cfg", type=str, required=False, default="", help="path to meta config file") # --cfg combo for benchmark mode
+parser.add_argument("--cfg", type=str, required=False, default="combo", help="path to meta config file") # --cfg combo for benchmark mode
 parser.add_argument("--livestream", action="store_true", help="run in livestream mode")
 args = parser.parse_args()
 
@@ -756,7 +756,7 @@ class BinTask(SimTask):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,level)
         self.pose_utils = pose_utils
         self._local_rng = random.Random(self.pose_utils.seed)
-
+        self.n_agents = len(self.agent_task_cfgs)
         self.robots_base_pose = base_pose
         self._is_initialized = False
         
@@ -823,18 +823,34 @@ class BinTask(SimTask):
             self.bin_goal_poses.append(pose)
 
         # poses behind the agent, assuming bin is in front of the agent
-        self.agent_back_goal_poses = []
-        for base_pose in self.robots_base_pose:
-            bin_ground_pos = np.array(bin_pos[:3])
-            robot_ground_pos = np.array(base_pose[:3])
-            robot_minus_bin =  robot_ground_pos - bin_ground_pos
-            behind_agent_pos = robot_ground_pos + robot_minus_bin 
-            behind_agent_pos[2] = behind_agent_pos[2] + 0.7 # 0.5 m above the base
-            behind_agent_goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
-            goal_pose = (behind_agent_pos, behind_agent_goal_quat)
-            self.agent_back_goal_poses.append(goal_pose)
-            # behind_agent_goal_pose = Pose(position=self.tensor_args.to_device(behind_agent_pos), quaternion=self.tensor_args.to_device(behind_agent_goal_quat))
+        
+        self.link_name_to_pick_pose = [{} for _ in range(self.n_agents)]
+        is_centralized_planner = self.n_agents == 1
+        bin_ground_pos = np.array(bin_pos[:3])
 
+        for arm_idx in range(len(self.robots_base_pose)): 
+            arm_base_pose = self.robots_base_pose[arm_idx]
+            
+            robot_ground_pos = np.array(arm_base_pose[:3])
+            robot_minus_bin =  robot_ground_pos - bin_ground_pos
+            behind_arm_goal_pos = robot_ground_pos + robot_minus_bin 
+            behind_arm_goal_pos[2] = behind_arm_goal_pos[2] + 0.7 # 0.5 m above the base
+            behind_arm_goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
+            behind_arm_goal_pose = (behind_arm_goal_pos, behind_arm_goal_quat)
+            
+            if is_centralized_planner:
+                agent_idx = 0
+                link_idx = arm_idx
+            else:
+                agent_idx = arm_idx
+                link_idx = 0
+            
+            link_name = list(self.link_name_to_path[agent_idx].keys())[link_idx]
+            self.link_name_to_pick_pose[agent_idx][link_name] = behind_arm_goal_pose
+            
+     
+                
+        
         self.force_unique_goals = self.level == 1
         if self.force_unique_goals:
             # self._free_bin_goals = set([0,1,2,3]) # all targets are free (not assigned to any agent)
@@ -850,23 +866,23 @@ class BinTask(SimTask):
         
         
         _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
-        if not self._is_initialized:
+        if not self._is_initialized: # Initialize the targets
             self._is_initialized = True
             self._link_name_to_goal_type = [{} for _ in range(len(self.agent_task_cfgs))]
-            self._goal_types = ['bin', 'agent_back']
-            
+            self._goal_types = ['bin', 'behind_arm']
+            goal_type = self._goal_types[1] # all arms start with behind arm goal                    
+
             self._target_name_to_moving_twin_prim = [{} for _ in range(len(self.agent_task_cfgs))] # visual effects
             self._target_name_to_free_fall_count = [{} for _ in range(len(self.agent_task_cfgs))] # visual effects
             
             for a_idx in range(len(self.agent_task_cfgs)):
                 for link_name in link_name_to_pose[a_idx]:
-                    goal_type = self._local_rng.choice(self._goal_types)
                     self._link_name_to_goal_type[a_idx][link_name] = goal_type
                     if goal_type == 'bin':
                         goal_pose = self._local_rng.choice(self.bin_goal_poses)
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
-                    else:
-                        _link_name_to_target_pose_np[a_idx][link_name] = self.agent_back_goal_poses[a_idx]
+                    else: # behind arm
+                        _link_name_to_target_pose_np[a_idx][link_name] = self.link_name_to_pick_pose[a_idx][link_name]
                         
 
         
@@ -884,8 +900,8 @@ class BinTask(SimTask):
                     reached_goal = err_p < 0.05 # and err_q < 5 
                     if reached_goal: 
                         if cur_goal_type == 'bin': # agent "placed item" in bin, changing goal to "behind back"
-                            goal_pose = self.agent_back_goal_poses[a_idx]
-                            goal_type = 'agent_back'    
+                            goal_pose = self.link_name_to_pick_pose[a_idx][link_name]
+                            goal_type = 'behind_arm'    
                             if link_name not in self.link_name_to_placed_in_bin[a_idx]:
                                 self.link_name_to_placed_in_bin[a_idx][link_name] = 0
                             self.link_name_to_placed_in_bin[a_idx][link_name] += 1
@@ -903,7 +919,7 @@ class BinTask(SimTask):
                                 self._target_name_to_free_fall_count[a_idx][target_name] = 50 # retset to 10 steps to free fall
                                 
                                 
-                        else: # cur_goal_type == 'agent_back'
+                        else: # cur_goal_type == 'behind_arm'
                             if self.force_unique_goals: # if we want each link to have a unique goal (not the same as other links)
                                 # pick target from free bin goals:
                                 taken_bin_goals = []
@@ -936,7 +952,7 @@ class BinTask(SimTask):
                                 twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
                                 twin.set_visibility(True)
                                 # set target color to white (to differentiate from the moving twin)
-                                original_color_darker = twin.get_applied_visual_material().get_color()/4
+                                original_color_darker = twin.get_applied_visual_material().get_color()/8
                                 # set target (around bin) color to original color but darker
                                 target_prim.get_applied_visual_material().set_color(original_color_darker)                           
 
@@ -1868,8 +1884,8 @@ class SimRobot:
                         )
                     self._vis_spheres[si].set_radius(float(s[7].cpu().item()))
 
-
-    def parse_viz_color(self, color:str)->list[float]:
+    @staticmethod
+    def parse_viz_color(color:str)->list[float]:
         match color:
             case 'green':
                 return [0, 1, 0]
@@ -2000,7 +2016,7 @@ class CuAgent:
         self.robot_cfg_path = robot_cfg_path
         self.robot_cfg = robot_cfg
         self.plan_pub_sub = plan_pub_sub
-        self.viz_color = self.sim_robot.parse_viz_color(viz_color)
+        self.viz_color = SimRobot.parse_viz_color(viz_color)
         self.stat_man = StatManager(**stat_man_cfg) 
         
 
@@ -2492,52 +2508,27 @@ class FrameCapturer:
         self.writer.attach([self.render_product])
 
         # Start background capture task
-        self.capture_task = asyncio.ensure_future(self.capture_after_world_step())
+        self.capture_task = asyncio.ensure_future(self.capture_frames_async())
         
         
-    # def _capture(self):
-    #     rep.orchestrator.step_async(
-    #         rt_subframes=1,  # Like GUI's "RTSubframes" parameter
-    #         delta_time=None,
-    #         pause_timeline=False
-    #     )
-    # import asyncio
-
-    # def _capture(self):
-    #     coro = rep.orchestrator.step_async(rt_subframes=1, delta_time=None, pause_timeline=False)
-    #     loop = asyncio.get_event_loop()
-    #     if loop.is_running():
-    #         asyncio.create_task(coro)
-    #     else:
-    #         loop.run_until_complete(coro)
-
-    # def capture(self, is_async=False):
-    #     if is_async:
-    #         coro = rep.orchestrator.step_async(rt_subframes=1, delta_time=None, pause_timeline=False)
-    #         loop = asyncio.get_event_loop()
-    #         if loop.is_running():
-    #             asyncio.create_task(coro)
-    #         else:
-    #             loop.run_until_complete(coro)
-    #     else:
-    #         rep.orchestrator.step(rt_subframes=1, delta_time=None, pause_timeline=False)
-
-    async def capture_after_world_step(self):
+    
+    async def capture_frames_async(self):
+        # more info: https://docs.isaacsim.omniverse.nvidia.com/latest/replicator_tutorials/tutorial_replicator_getting_started.html
+        frame_count = 0
         while True:
             # Wait for the next world step to finish (simulate your own step)
-            await asyncio.sleep(0)  # yield control so main loop can run my_world.step()
+            # await asyncio.sleep(0)  # yield control so main loop can run my_world.step()
             
             # Trigger Replicator to save current frame without advancing physics
             await rep.orchestrator.step_async()
-
-    
+            frame_count += 1
+            print(f'debug: frame_count: {frame_count}')
 
     def finish(self, to_mp4_cfg):
         # rep.orchestrator.wait_until_complete()
         try:
-            self.writer.detach([self.render_product])
             self.capture_task.cancel()
-            self.capture_task.result()
+            self.writer.detach([self.render_product])
 
         except Exception as e:
             print(f'debug: error in finish: {e}')
@@ -2725,6 +2716,14 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             
                             meta_cfg["sim_task"]["task_type"] = task
                             meta_cfg["sim_task"]["level"] = level
+
+
+                            meta_cfg["sim_task"]["arm_poses"] = []
+                            for arm_idx in range(n_arms):
+                                arm_position = pose_root["dec"][arm_idx][:3]
+                                arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_position, q_in_wxyz=True, q_out_wxyz=True)
+                                arm_pose = [*arm_position, *arm_quat]
+                                meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
                             
                             out_name = f'{robot_fam}{n_arms}{alg}_{task}{level}'
                             
@@ -2904,6 +2903,8 @@ def main(meta_cfg, out_path):
     # prepare task 
 
     agents_task_cfgs = []
+    target_colors = ['red', 'green', 'blue', 'yellow', 'purple', 'orange', 'pink', 'brown', 'gray', 'black']
+    color_cnt = 0
     for a in cu_agents:
         if a.sim_robot is not None:
             cfg = {}
@@ -2911,7 +2912,10 @@ def main(meta_cfg, out_path):
             for link_name in links_with_target:
                 link_path = a.sim_robot.path + "/"  + link_name
                 link_prim = my_world.stage.GetPrimAtPath(link_path)
-                link_target_color = a.viz_color
+                link_target_color = SimRobot.parse_viz_color(target_colors[color_cnt])
+                color_cnt += 1
+                if color_cnt >= len(target_colors):
+                    color_cnt = 0
                 link_retract_pose = a.planner.plan_goals[link_name]
                 cfg[link_name] = [link_path, link_prim, link_target_color, link_retract_pose]
             agents_task_cfgs.append(cfg)
@@ -2930,7 +2934,8 @@ def main(meta_cfg, out_path):
         elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
             sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,base_pose,**sim_task_cfg)
         elif sim_task_type == 'bin':
-            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils,base_pose,**sim_task_cfg)
+            arm_poses = meta_cfg["sim_task"]["arm_poses"] # must run in benchmark mode
+            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils,arm_poses,**sim_task_cfg)
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 
@@ -2977,10 +2982,6 @@ def main(meta_cfg, out_path):
         
         while simulation_app.is_running():
             my_world.step(render=True)
-
-            # if should_capture_frames:
-            #     # frame_capturer.request_capture()
-            #     frame_capturer.capture(is_async=True)
             pts_debug = []
 
             # Updating targets. Updating targets in sim and return new target poses so planners can react
