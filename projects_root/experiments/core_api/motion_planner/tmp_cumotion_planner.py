@@ -8,15 +8,9 @@ import yaml
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--cfg", type=str, required=False, default="", help="path to meta config file")
-parser.add_argument(
-    "--headless_mode",
-    type=str,
-    default=None,
-    help="To run headless, use one of [native, websocket], webrtc might not work.",
-)
-
-
+parser.add_argument("--cfg", type=str, required=False, default="", help="path to meta config file") # --cfg combo for benchmark mode
+parser.add_argument("--livestream", action="store_true", help="run in livestream mode")
+args = parser.parse_args()
 
 # Isaac Sim
 try:
@@ -27,10 +21,20 @@ from omni.isaac.kit import SimulationApp
 
 simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
 simapp_cfg = load_yaml(simapp_cfg_path)
-simulation_app = SimulationApp({**simapp_cfg["env"]["simulation"]["init_app_settings"]})
+if args.livestream:
+    simapp_cfg = simapp_cfg["livestream_mode"]
+else:
+    simapp_cfg = simapp_cfg["gui_mode"]
 
+simulation_app = SimulationApp({**simapp_cfg["init_app_settings"]})
 from projects_root.examples.helper import add_extensions
-add_extensions(simulation_app, headless_mode=simapp_cfg["env"]["simulation"]["init_app_settings"]["headless"])
+add_extensions(simulation_app, headless_mode=simapp_cfg["init_app_settings"]["headless"])
+
+from isaacsim.core.utils.extensions import enable_extension
+if args.livestream:
+    # Default Livestream settings, enable Livestream extension
+    simulation_app.set_setting("/app/window/drawMouse", True)
+    enable_extension("omni.kit.livestream.webrtc")
 
 import os
 from abc import abstractmethod
@@ -38,6 +42,7 @@ from collections.abc import Callable
 from copy import copy, deepcopy
 import dataclasses
 from time import time, sleep
+import subprocess
 from threading import Lock, Event, Thread
 from typing import Optional, Tuple, Dict, Union, Callable
 from typing_extensions import List
@@ -48,10 +53,11 @@ import random
 from datetime import datetime
 # os.environ.setdefault("MPLBACKEND", "Agg")  # Set non-interactive backend before any Matplotlib imports
 from scipy.spatial.transform import Rotation as R
-import carb
 import numpy as np
-import signal
+import asyncio # frame capturing
+import signal # simulation stopping
 # import sys
+import carb
 from omni.isaac.core import World
 from omni.isaac.core.objects import cuboid, sphere
 from omni.isaac.core.utils.types import ArticulationAction
@@ -61,7 +67,13 @@ import omni
 from pxr import UsdGeom, Gf, Sdf, UsdPhysics
 from omni.isaac.core.objects import DynamicCuboid, VisualCuboid, VisualSphere, DynamicSphere, FixedCuboid, FixedSphere
 from omni.isaac.core.utils.viewports import set_camera_view
-from omni.isaac.core.utils.stage import open_stage, clear_stage
+from omni.isaac.core.utils.stage import open_stage, clear_stage # sim reset
+
+# frame capturing
+enable_extension("omni.replicator.core")
+enable_extension("omni.replicator.isaac")
+import omni.replicator.core as rep 
+from omni.replicator.core import BasicWriter 
 
 
 # CuRobo
@@ -337,12 +349,14 @@ class SimTask:
         usd_help:UsdHelper,        
         tensor_args:TensorDeviceType,
         stat_man_cfg:dict,
+        level:int=1,
         ):
         
         self.agent_task_cfgs = agent_task_cfgs
         self.world = world
         self.usd_help = usd_help
         self.tensor_args = tensor_args
+        self.level = level
         
         self.link_name_to_path = [{} for _ in range(len(agent_task_cfgs))]
         self.link_path_to_prim = [{} for _ in range(len(agent_task_cfgs))]
@@ -355,6 +369,7 @@ class SimTask:
         self._target_name_to_pose = [{} for _ in range(len(agent_task_cfgs))]
         self._last_update = [{} for _ in range(len(agent_task_cfgs))] # last updated goal poses in sim
         self.stat_man = StatManager(**stat_man_cfg, unique_name='task_stats')
+        
         # set targets to retract poses
         for a_idx, a_cfg in enumerate(agent_task_cfgs):
             for link_name in a_cfg.keys():
@@ -535,9 +550,10 @@ class FollowTask(SimTask):
                  stats_cfg:dict,
                  pose_utils:PoseUtils,
                  timeout:float=3.0,
-                 max_abs_axis_vel:float=0.1,
+                 max_abs_axis_vel:float=0.1,    
+                 level:int=1,
                  ):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, level)
         self.timeout = timeout
         self._last_update_time = 0.0
         self._pose_utils = pose_utils
@@ -630,8 +646,8 @@ class ManualTask(SimTask):
         return {}
             
 class ReachTask(FollowTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout, 0.0)
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0, level:int=1):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout, 0.0, level)
 
     
 
@@ -736,7 +752,7 @@ class CbsMp1Task(ManualTask):
         return contact_matrix
 class BinTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0],level=1):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,level)
         self.pose_utils = pose_utils
         self._local_rng = random.Random(self.pose_utils.seed)
 
@@ -818,7 +834,6 @@ class BinTask(SimTask):
             self.agent_back_goal_poses.append(goal_pose)
             # behind_agent_goal_pose = Pose(position=self.tensor_args.to_device(behind_agent_pos), quaternion=self.tensor_args.to_device(behind_agent_goal_quat))
 
-        self.level = level
         self.force_unique_goals = self.level == 1
         if self.force_unique_goals:
             # self._free_bin_goals = set([0,1,2,3]) # all targets are free (not assigned to any agent)
@@ -2108,11 +2123,7 @@ class CuAgent:
         sub_to = self.plan_pub_sub.sub_cfg["to"] if isinstance(self.planner, MpcPlanner) else []
         self.planner.update_col_pred(plans_board, self.idx, sub_to)
     
-    def check_col_with_other(self,other:CuAgent,threshold=0.05):
-        other
-        if self.cu_world_wrapper.check_col_with_other_agents(other_agent.cu_world_wrapper):
-                return True
-        return False
+
     
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
@@ -2456,39 +2467,167 @@ class StatManager:
         print(f"under keys: {list(out.keys())}")
         return out_path
 
-    
 
-# class SimStats:
-#     def __init__(self,collect_dt:int=1,verbosity:bool=False):
-#         self.collect_dt = collect_dt
-#         self.verbosity = verbosity
-#         self.loop_iter_watch = Stopwatch() 
-#         self.tstep = [] # time step (step idx)
-#         self.total_loop_time = [] # each item is the total time spent in the control loop (ctrl_loop_sim) up to this step
-#         self.total_physics_time = [] # the total time passed *in simulation* (physics) up to the step (from internal world time)
+ 
 
-#     def update(self,t,sim_time):
-#         if t % self.collect_dt == 0:
-#             if len(self.total_loop_time) > 0:
-#                 total_loop_time = self.loop_iter_watch.total + self.total_loop_time[-1]
-#             else:
-#                 total_loop_time = self.loop_iter_watch.total
-#             self.total_loop_time.append(total_loop_time)
-#             self.loop_iter_watch.reset()
-#             self.tstep.append(t)
-#             self.total_physics_time.append(sim_time - self.physics_start_time)
-#             if self.verbosity:
-#                 print(f"tstep: {t}, total_loop_time: {self.total_loop_time[-1]}, total_physics_time: {self.total_physics_time[-1]}")
+# async def capture_frames_asynchronously(output_dir,stop_event):
+#     """Async recording function using Replicator orchestrator"""
+
+#     # Create a camera for recording
+#     camera = rep.create.camera()
     
-#     def start(self,physics_start_time):
-#         self.physics_start_time = physics_start_time # physics world time when physics started (from internal world time)
+#     # Position camera to see the scene
+#     with camera:
+#         rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
+    
+#     # Create render product
+#     render_product = rep.create.render_product(camera, (1280, 720))
+    
+#     # Create writer for video output - RGB only
+#     writer = BasicWriter(
+#         output_dir=output_dir,
+#         frame_padding=4,
+#         rgb=True
+#     )
+    
+#     # Attach writer to render product
+#     writer.attach([render_product])
+    
+#     current_frame = 0
+    
+#     # Recording loop
+#     while not stop_event.is_set():
+#         # Get timeline interface
+#         timeline = omni.timeline.get_timeline_interface()
         
-#     def to_dict(self):
-#         return {
-#             'tstep': self.tstep,
-#             'total_loop_time': self.total_loop_time,
-#             'total_physics_time': self.total_physics_time
-#         }
+#         # Start timeline if not playing
+#         if not timeline.is_playing():
+#             timeline.play()
+#             timeline.commit()
+        
+#         # Step the orchestrator
+#         # https://docs.omniverse.nvidia.com/extensions/latest/ext_replicator/subframes_examples.html#examples
+#         await rep.orchestrator.step_async(
+#             rt_subframes=1,
+#             delta_time=None,
+#             pause_timeline=False
+#         )
+        
+#         current_frame += 1
+#         if current_frame % 50 == 0:
+#             print(f"DEBUG Recorded {current_frame} frames")
+    
+#     # Stop timeline
+#     timeline.stop()
+#     print("Recording finished!")
+
+# def capture_frames_sync(output_dir,stop_event):
+#     """Synchronous recording function - replicates GUI Synthetic Data Recorder"""
+    
+    
+#     # Create a camera for recording
+#     camera = rep.create.camera()
+    
+#     # Position camera to see the scene
+#     with camera:
+#         rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
+    
+#     # Create render product
+#     render_product = rep.create.render_product(camera, (1280, 720))
+    
+#     # Create writer for video output - RGB only
+#     writer = BasicWriter(
+#         output_dir=output_dir,
+#         frame_padding=4,
+#         rgb=True # RGB only
+#     )
+    
+#     # Attach writer to render product
+#     writer.attach([render_product])
+    
+#     print(f"🚀 Starting RGB recording for {num_frames} frames...")
+#     print(f"📁 Output: {output_dir}")
+#     print(f"📸 Recording: RGB PNG frames only")
+    
+#     # Recording loop - replicates GUI behavior
+#     for frame in range(num_frames):
+#         # Get timeline interface
+#         timeline = omni.timeline.get_timeline_interface()
+        
+#         # Start timeline if not playing (like GUI's "Control Timeline" checkbox)
+#         if not timeline.is_playing():
+#             timeline.play()
+#             timeline.commit()
+            
+#         # Step the orchestrator synchronously (like GUI's step function)
+#         rep.orchestrator.step(
+#             rt_subframes=1,  # Like GUI's "RTSubframes" parameter
+#             delta_time=None,
+#             pause_timeline=False
+#         )
+        
+#         if frame % 50 == 0:
+#             print(f"📸 Recorded {frame}/{num_frames} frames")
+    
+#     # Wait for all data to be written (like GUI's wait functionality)
+#     rep.orchestrator.wait_until_complete()
+    
+#     # Stop timeline
+#     timeline.stop()
+#     print("✅ RGB recording finished!")
+#     print(f"📁 Check output directory: {output_dir}")
+
+
+class FrameCapturer:
+    def __init__(self, frames_output_dir):
+        self.frames_dir = frames_output_dir
+        # Create a camera for recording
+        self.camera = rep.create.camera()
+        
+        # Position camera to see the scene
+        with self.camera:
+            rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
+        
+        # Create render product
+        render_product = rep.create.render_product(self.camera, (1280, 720))
+        
+        # Create writer for video output - RGB only
+        self.writer = BasicWriter(
+            output_dir=self.frames_dir,
+            frame_padding=4,
+            rgb=True # RGB only
+        )
+        
+        # Attach writer to render product
+        self.writer.attach([render_product])
+        
+
+    # def capture_frames_asynchronously(self):
+    #     pass
+
+    def capture(self):
+        rep.orchestrator.step(
+            rt_subframes=1,  # Like GUI's "RTSubframes" parameter
+            delta_time=None,
+            pause_timeline=False
+        )
+
+    def finish(self):
+        rep.orchestrator.wait_until_complete()
+    
+    def convert_frames_to_video(self, result_path='', video_fps=30, in_background=True):
+        """Convert frames to video using OpenCV"""
+        # Get all frame files
+        if result_path == '':
+            result_path = f'{self.frames_dir}/simulation_video.mp4'
+        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
+        shell = True 
+        if in_background:
+            subprocess.Popen(command, shell=shell)
+        else:
+            subprocess.run(command, shell=shell)
+        print(f'Finished converting frames to video: {result_path}')
+        
 
 
 def simulation_startup(simulation_app, my_world, cu_agents):
@@ -2665,35 +2804,25 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             
     return meta_cfgs, out_names
 
-# def parse_cent_robot_config_path(robot_cfg_path):
-#     """return the robot family and actual number of robots at centralized planner (the num of arms/robots its controlling)"""
-#     for robot_fam in cent_robot_cfgs:
-#         for n in cent_robot_cfgs[robot_fam]:
-#             if cent_robot_cfgs[robot_fam][n] in robot_cfg_path:
-#                 return robot_fam, n
-#     raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {cent_robot_cfgs}")
-
-# def parse_dec_robot_config_path(robot_cfg_path):
-#     """return the robot family and actual number of robots at decentralized planner (the num of arms/robots its controlling)"""
-#     for robot_fam in dec_robot_fam_to_cfg:
-#         for v in dec_robot_fam_to_cfg[robot_fam]:
-#             if v in robot_cfg_path:
-#                 return robot_fam
-            
-#     raise ValueError(f"Robot cfg path {robot_cfg_path} not found in {decentralized_robot_cfgs}")
 
 
-
-def set_timeouts(meta_cfg):
-    tstep_timeout = meta_cfg["tstep_timeout"] if "tstep_timeout" in meta_cfg else 10000
-    sec_timeout = meta_cfg["sec_timeout"] if "sec_timeout" in meta_cfg else 10000
-    physics_timeout = meta_cfg["physics_timeout"] if "physics_timeout" in meta_cfg else 10000
+def get_simulation_timeouts(meta_cfg):
+    """
+    Get simulation timeouts from meta cfg.
+    
+    Args:
+        meta_cfg: Meta cfg dictionary
+    Returns:
+    """
+    tstep_timeout = meta_cfg["timeout"]["tstep"] if "timeout" in meta_cfg and "tstep" in meta_cfg["timeout"] else 10000
+    sec_timeout = meta_cfg["timeout"]["tsec"] if "timeout" in meta_cfg and "tsec" in meta_cfg["timeout"] else 10000
+    physics_timeout = meta_cfg["timeout"]["physics_tsec"] if "timeout" in meta_cfg and "physics_tsec" in meta_cfg["timeout"] else 10000
     return tstep_timeout, sec_timeout, physics_timeout
 
 def main(meta_cfg, out_path):
     
     
-    tsto, sto, pto = set_timeouts(meta_cfg)
+    tsto, sto, pto = get_simulation_timeouts(meta_cfg)
 
     my_world = World(stage_units_in_meters=1.0)
     # activate_gpu_dynamics(my_world)
@@ -2706,17 +2835,7 @@ def main(meta_cfg, out_path):
     usd_help.load_stage(my_world.stage)
     tensor_args = TensorDeviceType()
     setup_curobo_logger("warn")
-    # now = datetime.now()
-    # formatted_time = now.strftime("%Y-%m-%d_%H:%M:%S")
-    
-    # meta_cfg = load_yaml(meta_cfg_)
-    # benchmark_mode = "benchmark_mode" in meta_cfg and meta_cfg["benchmark_mode"]["is_on"]
-    # if benchmark_mode:        
-    #     meta_cfg, out_path = modify_to_benchmark_mode(meta_cfg, formatted_time)
-        
-    # else:
-    #     pass
-     
+
 
     if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
         start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["cfg"])
@@ -2902,19 +3021,49 @@ def main(meta_cfg, out_path):
     i = 0
     plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))] # plans will be stored here
     
+    # setup simulation with dummy steps until initialized
     _ = simulation_startup(simulation_app, my_world, cu_agents)
     
+    # setup stats for simulation
     sim_stat_man = StatManager(**meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
+    
+    # frame capturing
+    frame_capturing_cfg = meta_cfg["out"]["frame_cap"]
+    frame_capture_stop_event = Event()
+    should_capture_frames = frame_capturing_cfg["is_on"]
+    if should_capture_frames:
+        # start frame capturing in background
+        out_path_frames = os.path.join(out_path, "frames")
+        os.makedirs(out_path_frames, exist_ok=True)
+        frame_capturer = FrameCapturer(out_path_frames)
+        
 
-    t = 0        
-    physics_time_start = my_world.current_time
-    sim_time_start = time()
+
+
+
+
+        # capture_frames_async = frame_capturing_cfg["async"]
+        # if capture_frames_async:
+        #     loop = asyncio.new_event_loop()
+        #     asyncio.set_event_loop(loop)
+        #     loop.run_until_complete(capture_frames_asynchronously(out_path_frames, frame_capture_stop_event))
+        #     loop.close()
+        #     if frame_capturing_cfg["to_mp4"]:
+        #         convert_frames_to_video(out_path_frames, out_path, frame_capturing_cfg["video_fps"], in_background=True)
+        
+        
+    t = 0  # tstep     
+    physics_time_start = my_world.current_time # time in seconds in world clock (physics time)
+    sim_time_start = time() # time in seconds in process clock (actual running start time)
 
     if not meta_cfg["async"]: # sync mode
         
         while simulation_app.is_running():
             # lw.on()
             my_world.step(render=True)
+            
+            if should_capture_frames:
+                frame_capturer.capture()
             
             pts_debug = []
 
@@ -3115,14 +3264,16 @@ def main(meta_cfg, out_path):
             print(f"t: {t}, tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
 
             if stop_simulation or tsto_reached or sto_reached or pto_reached or stop_event.is_set():
-                print(f"tsto_reached: {tsto_reached}, sto_reached: {sto_reached}, pto_reached: {pto_reached}")
-                print("Saving stats...")
-                # a_stats = [a.stats for a in cu_agents]
-                # stats_out = sim_task.stats.save(formatted_time, a_stats, sim_stats.to_dict())
-                stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
-                stats_out = StatManager.save(stat_managers, out_path)
-                with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
-                    yaml.dump(meta_cfg, f)
+                if meta_cfg["out"]["stats"]: # save states
+                    print("Saving stats...")
+                    stat_managers:list[StatManager] = [sim_task.stat_man, sim_stat_man, *[a.stat_man for a in cu_agents]] 
+                    stats_out = StatManager.save(stat_managers, out_path)
+                if meta_cfg["out"]["meta_cfg"]:
+                    with open(os.path.join(out_path, 'meta_cfg.yml'), 'w') as f:
+                        yaml.dump(meta_cfg, f)
+                
+                if should_capture_frames:
+                    frame_capturer.finish()
 
                 print(f"All Outputs saved to {out_path}")
                
@@ -3263,7 +3414,6 @@ if __name__ == "__main__":
     benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
     combo_cfg_path = "projects_root/experiments/benchmarks/cfgs/combo_cfg.yml" 
     
-    args = parser.parse_args()
 
     if not len(args.cfg): # using default meta cfg file
         print(f"Using default meta cfg file: {default_meta_cfg_path}")
@@ -3295,14 +3445,14 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     stop_simulation = False
-    stop_event = Event()      
+    stop_event = Event() # stop simapp completely
 
 
 
-    # for meta_cfg, out_name in zip(meta_cfgs, out_names):
+    for meta_cfg, out_name in zip(meta_cfgs, out_names):
 
-    #     formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-    #     out_path = os.path.join(meta_cfg["out_dir"], f'{formatted_time}_{out_name}')
-    #     keep_running = main(meta_cfg, out_path)
-    #     if not keep_running:
-    #         break
+        formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
+        keep_running = main(meta_cfg, out_path)
+        if not keep_running:
+            break

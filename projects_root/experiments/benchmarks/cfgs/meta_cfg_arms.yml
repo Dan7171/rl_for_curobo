@@ -1,7 +1,20 @@
-tstep_timeout: 20
-sec_timeout: 20
-physics_timeout: 200
-out_dir: '/home/dan/mr_mpc_logs'
+timeout:
+  tstep: 20 # world steps timeout
+  tsec: 20 # seconds timeout
+  physics_tsec: 200 # physics seconds (world time) timeout
+
+out:
+  out_dir: '/home/dan/mr_mpc_logs' # output directory
+  stats: True # save stats 
+  meta_cfg: True # save meta cfg
+  frame_cap: # frame capturing
+    is_on: True # capture and save frames to pngs
+    async: True # capture frames asynchronously
+    to_mp4: True # convert frames to mp4
+    video_fps: 30 # frames per second (for video)
+    
+  
+  
 
 default: # default values to fallback to if not specified in the agent cfg. Note: you can specify agent-specific values here for each of  the default values in this file (see below).
   # is_mobile: False
@@ -56,7 +69,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
       ts_delta: 2 # int
       color: viz_color
-      
+
     visualize_col_pred:
         own: True
         own_color: 'blue'

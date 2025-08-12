@@ -1,14 +1,23 @@
-env:
-  simulation: # todo
-    is_on: True
-    enable_gpu_dynamics: True
-    init_app_settings:
-      headless: null # set 'true' to run in headless mode
-      width: "1920"
-      height: "1080"
-      # physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-      # rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-      backend: "torch"
-  
-  real: # todo
-    is_on: False
+
+gui_mode:
+  enable_gpu_dynamics: True
+  init_app_settings:
+    headless: null # set 'true' to run in headless mode
+    width: "1920"
+    height: "1080"
+    # physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
+    # rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
+    backend: "torch"
+    
+livestream_mode:
+  enable_gpu_dynamics: True
+  init_app_settings:
+    width: 1280
+    height: 720
+    window_width: 1920
+    window_height: 1080
+    headless: True
+    hide_ui: False
+    renderer: "RaytracedLighting"
+    display_options: 3286
+
