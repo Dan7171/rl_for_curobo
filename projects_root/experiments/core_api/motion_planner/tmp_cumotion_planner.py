@@ -414,31 +414,7 @@ class SimTask:
         """
         pass
     
-    # def update_stats(self,t, spheres:Optional[list[list[list[float]]]]=None):
-    #     stat_names = []
-    #     stat_vals = []
-    #     # get the stats that need to be collected at this time step
-    #     for stat_name in self.stats.collect_list:
-    #         if t % self.stats.collect_dt[self.stats.collect_list.index(stat_name)] == 0:
-    #             match stat_name:
-    #                 case 'contact':
-    #                     contact_matrix = self.check_contact()
-    #                     stat_names.append(stat_name)
-    #                     stat_vals.append(contact_matrix)
-    #                 case 'goal_error':
-    #                     pass
-    #                     # link_name_to_error = self.goal_errors[-1][0]
-    #                     # stat_names.append(stat_name)
-    #                     # stat_vals.append(link_name_to_error)
-    #                 case 'spheres':
-    #                     stat_names.append(stat_name)
-    #                     stat_vals.append(spheres) 
-    #                 case _:
-    #                     raise ValueError(f"Invalid stat name: {stat_name}")
-        
-    #     # update the stats
-    #     for stat_name, stat_val in zip(stat_names, stat_vals):
-    #         self.stats.update(stat_name, stat_val, t)
+
             
     def _get_link_errors(self) -> tuple[list[dict[str,tuple[float,float]]], list[dict[str,tuple[np.ndarray, np.ndarray]]], list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         n_agents = len(self.agent_task_cfgs)
@@ -755,6 +731,17 @@ class CbsMp1Task(ManualTask):
         return contact_matrix
 class BinTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0],level=1):
+        """
+        all arms start with a behind-back goal. 
+        level:
+            1: 1-IN: one arm is allowed to go to the bin (1 bin goal at a time). 
+            2: 2-IN-UNQIUE: 2 arms are allowed to go to the bin but goals are unique.
+            3. ALL-IN-UNQIUE: all arms are allowed to go to the bin but goals are unique.
+            4. 2-IN-NOT-UNQIUE: 2 arms are allowed to go to the bin and goals may not be unique.
+            5. ALL-IN-NOT-UNQIUE: all arms are allowed to go to the bin and goals may not be unique.
+
+
+        """
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,level)
         self.pose_utils = pose_utils
         self._local_rng = random.Random(self.pose_utils.seed)
@@ -762,8 +749,8 @@ class BinTask(SimTask):
         self.robots_base_pose = base_pose
         self._is_initialized = False
         
-        self.link_name_to_placed_in_bin = [{} for _ in range(len(self.agent_task_cfgs))] # statistics
-        self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] # statistics
+        self.link_name_to_placed_in_bin = [{} for _ in range(len(self.agent_task_cfgs))] # statistics - num of placed items in bin
+        self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] # statistics - num of picked items from back
 
 
         # Spawn Bin:
@@ -851,16 +838,21 @@ class BinTask(SimTask):
             self.link_name_to_pick_pose[agent_idx][link_name] = behind_arm_goal_pose
             
      
-        self.force_unique_goals = self.level == 1
-        if self.force_unique_goals:
-            # self._free_bin_goals = set([0,1,2,3]) # all targets are free (not assigned to any agent)
-            self._link_name_to_cur_bingoal = [{} for _ in range(len(self.agent_task_cfgs))] # link name to current bin goal (index of the goal in self.bin_goal_poses)
-            for a_idx in range(len(self.agent_task_cfgs)):
-                for link_name in self.link_name_to_placed_in_bin[a_idx]:
-                    self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # no goals assigned yet (yet)
-                
-    
+        # setup tracking of bin goals taking by each link:
+        self._link_name_to_cur_bingoal = [{} for _ in range(len(self.agent_task_cfgs))] # link name to current bin goal (index of the goal in self.bin_goal_poses)
+        for a_idx in range(len(self.agent_task_cfgs)):
+            for link_name in self.link_name_to_placed_in_bin[a_idx]:
+                self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # no goals assigned yet (yet)
 
+        # setup max concurrent bin goals:
+        self.max_concurrent_bin_goals = None # num of links that can go to the bin at the same time
+        if self.level == 1:
+            self.max_concurrent_bin_goals = 1
+        elif self.level == 2 or self.level == 4:
+            self.max_concurrent_bin_goals = 2
+
+
+        self.force_unique_goals = self.level in [1,3,5] # if we want each link to have a unique goal (not the same as other links)
             
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
@@ -897,7 +889,7 @@ class BinTask(SimTask):
                     twin_exists = target_name in self._target_name_to_moving_twin_prim[a_idx] # target has a carried twin for visual effect
                     target_prim = self.target_path_to_prim[a_idx][self.target_name_to_path[a_idx][target_name]]
 
-                    reached_goal = err_p < 0.05 # and err_q < 5 
+                    reached_goal = err_p < 0.1 #0.05 # and err_q < 5 
                     if reached_goal: 
                         if cur_goal_type == 'bin': # agent "placed item" in bin, changing goal to "behind back"
                             goal_pose = self.link_name_to_pick_pose[a_idx][link_name]
@@ -906,9 +898,8 @@ class BinTask(SimTask):
                                 self.link_name_to_placed_in_bin[a_idx][link_name] = 0
                             self.link_name_to_placed_in_bin[a_idx][link_name] += 1
 
-                            if self.force_unique_goals:
-                                # free targets for other agents:
-                                self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
+                            # free targets for other agents:
+                            self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
 
                             if twin_exists: # visualization effect
                                 twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
@@ -919,34 +910,44 @@ class BinTask(SimTask):
                                 self._target_name_to_free_fall_count[a_idx][target_name] = 50 # retset to 10 steps to free fall
                                 
                                 
-                        else: # cur_goal_type == 'behind_arm'
-                            if self.force_unique_goals: # if we want each link to have a unique goal (not the same as other links)
-                                # pick target from free bin goals:
-                                taken_bin_goals = []
-                                free_bin_goals = []
-                                for a2_idx in range(len(self.agent_task_cfgs)):
-                                    if a2_idx == a_idx:
-                                        continue
-                                    for link_name2 in self._link_name_to_cur_bingoal[a2_idx]:
-                                        if self._link_name_to_cur_bingoal[a2_idx][link_name2] != -1: # if link is aiming to a bin goal
-                                            taken_bin_goals.append(self._link_name_to_cur_bingoal[a2_idx][link_name2]) # add the bin goal to taken bin goals
-                                
-                                free_bin_goals = [i for i in range(len(self.bin_goal_poses)) if i not in taken_bin_goals] # all bin goals that are not taken by other agents
-                                if len(free_bin_goals) > 0: # free bin goal exists
-                                    new_bin_goal_idx = self._local_rng.choice(free_bin_goals) # pick a random free goal from bin goals
-                                    self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
-                                    goal_pose = self.bin_goal_poses[new_bin_goal_idx] # get goal pose
-                                    # print(f"debug agent {a_idx} link {link_name} picked bin goal {new_bin_goal_idx}")
-                            
-            
-                            else:
-                                goal_pose = self._local_rng.choice(self.bin_goal_poses)
-                            # print(f'debug agent index: {a_idx}, goal pose: {goal_pose}')
+                        else: # current goal is behind arm, so we need to pick a new bin goal (if possible)
                             goal_type = 'bin'
+
+                            taken_bin_goals = []
+                            for a2_idx in range(len(self.agent_task_cfgs)): # including self for the centralized case
+                                for link_name2 in self._link_name_to_cur_bingoal[a2_idx]:
+                                    if self._link_name_to_cur_bingoal[a2_idx][link_name2] != -1: # if link is aiming to a bin goal
+                                        taken_bin_goals.append(self._link_name_to_cur_bingoal[a2_idx][link_name2]) # add the bin goal to taken bin goals
+                            free_bin_goals = [i for i in range(len(self.bin_goal_poses)) if i not in taken_bin_goals] # all bin goals that are not taken by other agents
+                            
+                            n_free_bin_goals = len(free_bin_goals)
+                            n_taken_bin_goals = len(taken_bin_goals)
+                            n_total_bin_goals = n_free_bin_goals + n_taken_bin_goals
+                            max_conc_bin_goals = self.max_concurrent_bin_goals if self.max_concurrent_bin_goals is not None else n_total_bin_goals
+                            if n_taken_bin_goals >= max_conc_bin_goals: # no more bin goals to take
+                                # no more bin goals to take, keeping the same goal for now
+                                continue
+                            print(f'debug link_to_bin_goal: {self._link_name_to_cur_bingoal}')
+                            print(f'link name to pose: {link_name_to_pose}')
+                            # pick next bin goal
+                            options = [] # list of bin goal indices to choose from
+                            if self.force_unique_goals: # if we want each link to have a unique goal (not the same as other links)
+                                if n_free_bin_goals > 0: # free bin goal exists
+                                    options = free_bin_goals # limit options to free bin goals
+                            else:
+                                options = list(range(len(self.bin_goal_poses))) # all bin goals are optional
+                            if len(options):
+                                new_bin_goal_idx = self._local_rng.choice(options) # index of free bin goal
+                                self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
+                                goal_pose = self.bin_goal_poses[new_bin_goal_idx] # get goal pose
+                           
+
+                            # uptdate stats
                             if link_name not in self.link_name_to_picked_from_back[a_idx]:
                                 self.link_name_to_picked_from_back[a_idx][link_name] = 0
                             self.link_name_to_picked_from_back[a_idx][link_name] += 1
                             
+                            # visual effects
                             if twin_exists: # if twin exists
                                 # show the twin (carried item)
                                 twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
@@ -959,6 +960,7 @@ class BinTask(SimTask):
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                         self._link_name_to_goal_type[a_idx][link_name] = goal_type
                     
+                    # visual effects:
                     else: # not yet in goal (still moving)
                         if cur_goal_type == 'bin': # carrying item to bin
                             target_path = self.target_name_to_path[a_idx][target_name]
@@ -1751,7 +1753,7 @@ class CumotionPlanner(CuPlanner):
         # print(f"max(abs(joint_velocities))={np.max(np.abs(joint_velocities))}")
         return np.max(np.abs(joint_velocities)) > 0.5
     
-    def yield_action(self, goals:dict[str, Pose], cu_js:JointState, joint_velocities:np.ndarray):
+    def yield_action(self, goals:dict[str, Pose], cu_js:JointState, joint_velocities:np.ndarray,stop_when_goal_changed:bool=False):
         """
         goals: dict of link names (both end effector link and extra links) and their updated goal poses.
         cu_js: current curobo joint state of the robot.
@@ -1764,21 +1766,24 @@ class CumotionPlanner(CuPlanner):
         STOP_IN_PLACE = 1 # SEND STOP COMMAND TO JOINT CONTROLLER (VELOCICY 0)
         CONSUME_FROM_PLAN = 2 # CONTINUE THE CURRENT ACTION SEQUENCE
 
-
         if self._outdated_plan_goals(goals):
+            print(f'debug outdated plan goals')
             if self._in_move(joint_velocities):
-                print(f"DEBUG in move, stopping in place...")
-                code = STOP_IN_PLACE
+                # print(f"DEBUG in move, stopping in place...")
+                code = STOP_IN_PLACE if stop_when_goal_changed else CONSUME_FROM_PLAN # STOP_IN_PLACE
+                print(f'debug: robot in move. a: {"consume" if code == CONSUME_FROM_PLAN else "stop"}')
             else:
-                print(f"DEBUG not in move, planning new...")
+                print(f"debug: robot stopped. a: plan new")
                 code = PLAN_NEW
             
         else:
+            print(f'valid plan goals, consuming from plan...')
             code = CONSUME_FROM_PLAN
         # print(f"DEBUG code: {code}")
         consume = True
         if code == PLAN_NEW:
             print(f'planning...')
+            print(f'debug: goals: {goals}')
             _success = self._plan_new(cu_js, goals)
             
         elif code == STOP_IN_PLACE:
@@ -3002,9 +3007,9 @@ def main(meta_cfg, out_path):
     physics_time_start = my_world.current_time # time in seconds in world clock (physics time)
     sim_time_start = time() # time in seconds in process clock (actual running start time)
     with Progress() as progress:
-        task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
-        task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
-        task3 = progress.add_task(f"Physics (simulated) Time (lim={pto} sec)", total=pto)
+        # task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
+        # task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
+        # task3 = progress.add_task(f"Physics (simulated) Time (lim={pto} sec)", total=pto)
         
         if not meta_cfg["async"]: # sync mode
             
@@ -3192,14 +3197,13 @@ def main(meta_cfg, out_path):
                 sim_task.stat_man.update(task_stats,t)
 
                 
-
                 # advance time
                 t += 1                
         
                 # visualize progress          
-                progress.update(task1, advance=1) # one time step
-                progress.update(task2, advance= time() - prog_bar_tsys_iter_start) # simulation time
-                progress.update(task3, advance=my_world.current_time - prog_bar_tphys_iter_start) # physics time
+                # progress.update(task1, advance=1) # one time step
+                # progress.update(task2, advance= time() - prog_bar_tsys_iter_start) # simulation time
+                # progress.update(task3, advance=my_world.current_time - prog_bar_tphys_iter_start) # physics time
 
                 # Check if reached any of the time limits or got a stop event (ctrl+c)
                 tsto_reached = t > tsto # stop due to time step limit
