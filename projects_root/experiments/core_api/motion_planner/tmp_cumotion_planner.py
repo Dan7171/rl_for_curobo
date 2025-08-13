@@ -351,8 +351,8 @@ class SimTask:
         world:World, 
         usd_help:UsdHelper,        
         tensor_args:TensorDeviceType,
+        level:int,
         stat_man_cfg:dict,
-        level:int=1,
         ):
         
         self.agent_task_cfgs = agent_task_cfgs
@@ -526,13 +526,13 @@ class FollowTask(SimTask):
                  world:World, 
                  usd_help:UsdHelper, 
                  tensor_args:TensorDeviceType, 
+                 level:int,
                  stats_cfg:dict,
                  pose_utils:PoseUtils,
                  timeout:float=3.0,
                  max_abs_axis_vel:float=0.1,    
-                 level:int=1,
                  ):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, level)
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
         self.timeout = timeout
         self._last_update_time = 0.0
         self._pose_utils = pose_utils
@@ -609,7 +609,7 @@ class FollowTask(SimTask):
 
 class ManualTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg)
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, 1, stats_cfg)
         
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         for a_idx in range(len(errors)):
@@ -625,15 +625,15 @@ class ManualTask(SimTask):
         return {}
             
 class ReachTask(FollowTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0, level:int=1):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg, pose_utils, timeout, 0.0, level)
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,stats_cfg, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level,stats_cfg, pose_utils, timeout, 0.0)
 
     
 
 
 class CbsMp1Task(ManualTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args,stats_cfg,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args,stats_cfg)
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args,stats_cfg,level,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args,level,stats_cfg)
 
         self._is_initialized = False
         self.start_poses = base_pose
@@ -730,7 +730,9 @@ class CbsMp1Task(ManualTask):
                     
         return contact_matrix
 class BinTask(SimTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), bin_pose=[0,0,0,1,0,0,0],level=1):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
+                 stats_cfg,pose_utils, base_pose, wall_dims_hwd=np.array([0.5,0.5,0.3]), 
+                 bin_pose=[0,0,0,1,0,0,0]):
         """
         all arms start with a behind-back goal. 
         level:
@@ -742,13 +744,14 @@ class BinTask(SimTask):
 
 
         """
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, stats_cfg,level)
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
         self.pose_utils = pose_utils
         self._local_rng = random.Random(self.pose_utils.seed)
         self.n_agents = len(self.agent_task_cfgs)
         self.robots_base_pose = base_pose
         self._is_initialized = False
         
+        # statistics:
         self.link_name_to_placed_in_bin = [{} for _ in range(len(self.agent_task_cfgs))] # statistics - num of placed items in bin
         self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] # statistics - num of picked items from back
 
@@ -773,7 +776,7 @@ class BinTask(SimTask):
         out_wall_scale = np.array([width,depth,height])
         in_wall_scale = np.array([width,depth/2,height])
         
-        # internal  bin walls:
+        # Spawn internal bin walls:
         in_wall_pos = bin_pos + np.array([0,0,dim2_step_size])
          
         rotated_walls_quat = self.pose_utils.rotate_quat(bin_pose[3:], [0,0,90], q_in_wxyz=True, q_out_wxyz=True)
@@ -802,7 +805,7 @@ class BinTask(SimTask):
         quarter2_pos = bin_pos + bin_to_out2_step / 2 + bin_to_out1_step /2
         quarter3_pos = bin_pos + bin_to_out2_step / 2 + bin_to_out3_step /2
         
-        # goals around the bin:
+        # Define bin goals (drop goals):
         self.bin_goal_poses = []
         for quarter_pos in [quarter0_pos, quarter1_pos, quarter2_pos, quarter3_pos]:
             goal_pos = copy(quarter_pos)
@@ -811,8 +814,7 @@ class BinTask(SimTask):
             pose = (goal_pos, goal_quat)
             self.bin_goal_poses.append(pose)
 
-        # poses behind the agent, assuming bin is in front of the agent
-        
+        # Define behind arm goals (pick goals):
         self.link_name_to_pick_pose = [{} for _ in range(self.n_agents)]
         is_centralized_planner = self.n_agents == 1
         bin_ground_pos = np.array(bin_pos[:3])
@@ -822,7 +824,7 @@ class BinTask(SimTask):
             
             robot_ground_pos = np.array(arm_base_pose[:3])
             robot_minus_bin =  robot_ground_pos - bin_ground_pos
-            behind_arm_goal_pos = robot_ground_pos + robot_minus_bin 
+            behind_arm_goal_pos = robot_ground_pos + 0.75 * robot_minus_bin 
             behind_arm_goal_pos[2] = behind_arm_goal_pos[2] + 0.7 # 0.5 m above the base
             behind_arm_goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
             behind_arm_goal_pose = (behind_arm_goal_pos, behind_arm_goal_quat)
@@ -852,7 +854,7 @@ class BinTask(SimTask):
             self.max_concurrent_bin_goals = 2
 
 
-        self.force_unique_goals = self.level in [1,3,5] # if we want each link to have a unique goal (not the same as other links)
+        self.force_unique_goals = self.level < 4 # if we want each link to have a unique goal (not the same as other links)
             
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
@@ -929,6 +931,10 @@ class BinTask(SimTask):
                                 continue
                             print(f'debug link_to_bin_goal: {self._link_name_to_cur_bingoal}')
                             print(f'link name to pose: {link_name_to_pose}')
+                            
+                            
+                            
+                            
                             # pick next bin goal
                             options = [] # list of bin goal indices to choose from
                             if self.force_unique_goals: # if we want each link to have a unique goal (not the same as other links)
@@ -936,11 +942,14 @@ class BinTask(SimTask):
                                     options = free_bin_goals # limit options to free bin goals
                             else:
                                 options = list(range(len(self.bin_goal_poses))) # all bin goals are optional
+                            
                             if len(options):
                                 new_bin_goal_idx = self._local_rng.choice(options) # index of free bin goal
                                 self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
                                 goal_pose = self.bin_goal_poses[new_bin_goal_idx] # get goal pose
-                           
+
+                            else:
+                                continue
 
                             # uptdate stats
                             if link_name not in self.link_name_to_picked_from_back[a_idx]:
@@ -973,7 +982,7 @@ class BinTask(SimTask):
                                 self._target_name_to_moving_twin_prim[a_idx][target_name].set_world_pose(position=link_pos, orientation=link_quat)
                         
                         # visual free fall for placed item if needed:
-                        else:
+                        else: # heading to behind arm goal
                             if target_name in self._target_name_to_free_fall_count[a_idx]:
                                 if self._target_name_to_free_fall_count[a_idx][target_name] > 0: 
                                     if twin_exists:
@@ -2954,17 +2963,18 @@ def main(meta_cfg, out_path):
         sim_task_type = meta_cfg["sim_task"]["task_type"]
         sim_task_cfg = meta_cfg["sim_task"]["task_cfgs"][sim_task_type]
         stat_man_cfg = meta_cfg["sim_task"]["stat_man_cfgs"][sim_task_type]
+        level = meta_cfg["sim_task"]["level"]
         if sim_task_type == 'reach':
-            sim_task = ReachTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils, **sim_task_cfg)
+            sim_task = ReachTask(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,pose_utils, **sim_task_cfg)
         elif sim_task_type == 'manual':
             sim_task = ManualTask(agents_task_cfgs, my_world, usd_help, tensor_args, stat_man_cfg)
         elif sim_task_type == 'follow':
-            sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils, **sim_task_cfg)
+            sim_task = FollowTask(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,pose_utils, **sim_task_cfg)
         elif sim_task_type == 'CBSMP1': # cbs multi-robot path planning paper: scenario 1
-            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,base_pose,**sim_task_cfg)
+            sim_task = CbsMp1Task(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,base_pose,**sim_task_cfg)
         elif sim_task_type == 'bin':
             arm_poses = meta_cfg["sim_task"]["arm_poses"] # must run in benchmark mode
-            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,stat_man_cfg,pose_utils,arm_poses,**sim_task_cfg)
+            sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,pose_utils,arm_poses,**sim_task_cfg)
         else:
             raise ValueError(f"Invalid task type: {sim_task_type}")
 

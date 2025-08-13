@@ -26,7 +26,7 @@ robot_cfg:
       'shoulder_link_2','upper_arm_link_2', 'forearm_link_2', 'wrist_1_link_2', 'wrist_2_link_2' ,'wrist_3_link_2', 'tool2',
       'shoulder_link_3','upper_arm_link_3', 'forearm_link_3', 'wrist_1_link_3', 'wrist_2_link_3' ,'wrist_3_link_3', 'tool3']
     collision_spheres: 'spheres/quad_ur5e.yml'
-    collision_sphere_buffer: 0.0
+    collision_sphere_buffer: 0.05 # 0.0
 
     self_collision_ignore: {
       "shoulder_link": ["tool0"],
