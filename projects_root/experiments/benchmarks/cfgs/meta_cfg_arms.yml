@@ -1,7 +1,7 @@
 timeout:
   tstep: 1000 # world steps timeout
-  tsec: 90 # seconds timeout
-  physics_tsec: 120 # physics seconds (world time) timeout
+  tsec: 500 # seconds timeout
+  physics_tsec: 10 # physics seconds (world time) timeout
 
 out:
   out_dir: '/home/dan/mr_mpc_logs' # output directory
@@ -38,9 +38,9 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_activation_distance: 0.025
       fixed_iters_trajopt: True
       maximum_trajectory_dt: 0.5
-      ik_opt_iters: 1000
-      num_ik_seeds: 256 # 128 # 32
-      position_threshold: 0.1 #0.05 # 0.005
+      ik_opt_iters: 500 # 1000
+      num_ik_seeds: 32 # 256 # 128 # 32
+      position_threshold: 0.05 #0.05 # 0.005
       rotation_threshold: 0.5 # 0.05
       cspace_threshold: 0.5 # 0.05
 
@@ -48,7 +48,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     motion_gen_plan_cfg:
       enable_graph: False
       enable_graph_attempt: 4
-      max_attempts: 60 # 10
+      max_attempts: 10 # 10
       time_dilation_factor: 0.5
       finetune_attempts: 30 # 5
       enable_finetune_trajopt: True  # True
@@ -69,7 +69,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: True # for debugging
+      plot_costs: False # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
@@ -138,9 +138,21 @@ pose_utils:
 
   
 sim_task:
-  # task_type: 'manual' # reach/follow/manual (for debugging)
+  
   task_type: bin # bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
-  level: 1 # 1: easy, 2: medium, 3: hard
+  level: 1 # 1: easy, 2: medium, 3: hard ...
+  
+  # task cfgs
+  task_cfgs:
+    manual: {}
+    follow:
+      jumpy_target_interval: 0.2 # physics dt to update target
+      abs_velocity: [0.1,0.1,0.1] # absolute velocity of the target (xyz in world frame), direction is determinated by the agent and level
+    reach: {}
+    bin:
+      wall_dims_hwd: [0.35,0.5,0.05] # height, width, depth of the bin walls
+  
+  # tasks stat managers    
   stat_man_cfgs:
     bin: 
       keys: ['tsys', 'tphysics', 'w_step']
@@ -155,14 +167,7 @@ sim_task:
     manual: 
       {}
 
-  task_cfgs:
-    manual: {}
-    follow: {}
-    reach: {}
-    bin:
-      wall_dims_hwd: [0.35,0.5,0.05] # height, width, depth of the bin walls
-      bin_pose: [0,0,0,1,0,0,0] # position and orientation of the bin (xyz, wxyz)
-      
+  
     
       
 sim_env:
