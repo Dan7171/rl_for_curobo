@@ -1757,9 +1757,9 @@ class CumotionPlanner(CuPlanner):
         """
         # print(f"joint_velocities={joint_velocities}")
         # print(f"max(abs(joint_velocities))={np.max(np.abs(joint_velocities))}")
-        return np.max(np.abs(joint_velocities)) > 0.5
+        return np.max(np.abs(joint_velocities)) > 0.1
     
-    def yield_action(self, goals:dict[str, Pose], cu_js:JointState, joint_velocities:np.ndarray,stop_when_goal_changed:bool=False):
+    def yield_action(self, goals:dict[str, Pose], cu_js:JointState, joint_velocities:np.ndarray,stop_when_goal_changed:bool=True):
         """
         goals: dict of link names (both end effector link and extra links) and their updated goal poses.
         cu_js: current curobo joint state of the robot.
@@ -1773,23 +1773,23 @@ class CumotionPlanner(CuPlanner):
         CONSUME_FROM_PLAN = 2 # CONTINUE THE CURRENT ACTION SEQUENCE
 
         if self._outdated_plan_goals(goals):
-            print(f'debug outdated plan goals')
+            # print(f'debug outdated plan goals')
             if self._in_move(joint_velocities):
                 # print(f"DEBUG in move, stopping in place...")
                 code = STOP_IN_PLACE if stop_when_goal_changed else CONSUME_FROM_PLAN # STOP_IN_PLACE
-                print(f'debug: robot in move. a: {"consume" if code == CONSUME_FROM_PLAN else "stop"}')
+                # print(f'debug: robot in move. a: {"consume" if code == CONSUME_FROM_PLAN else "stop"}')
             else:
-                print(f"debug: robot stopped. a: plan new")
+                # print(f"debug: robot stopped. a: plan new")
                 code = PLAN_NEW
             
         else:
-            print(f'valid plan goals, consuming from plan...')
+            # print(f'valid plan goals, consuming from plan...')
             code = CONSUME_FROM_PLAN
         # print(f"DEBUG code: {code}")
         consume = True
         if code == PLAN_NEW:
-            print(f'planning...')
-            print(f'debug: goals: {goals}')
+            # print(f'planning...')
+            # print(f'debug: goals: {goals}')
             _success = self._plan_new(cu_js, goals)
             
         elif code == STOP_IN_PLACE:
@@ -2572,7 +2572,7 @@ class FrameCapturer:
         # Get all frame files
         if result_path == '':
             result_path = f'{self.frames_dir}/simulation_video.mp4'
-        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
+        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --method auto --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
         shell = True 
         if in_background:
             subprocess.Popen(command, shell=shell)

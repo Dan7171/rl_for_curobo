@@ -4,7 +4,7 @@ alg: [CC]
 robot_fam: [ur5e]
 n_arms: [4]
 task_to_levels:
-  bin: [5]
+  bin: [1,2]
   # reach: [1]
   # follow: [1]
 

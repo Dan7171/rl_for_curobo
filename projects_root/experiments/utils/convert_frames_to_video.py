@@ -93,7 +93,7 @@ def frames_to_video_imageio(input_dir, output_video, fps=30):
         with imageio_v2.get_writer(output_video, fps=fps, codec='libx264', quality=8) as writer:
             for i, frame_file in enumerate(frame_files):
                 frame = imageio_v2.imread(frame_file)
-                writer.append_data(frame)
+                writer.append_data(frame)  # This is correct usage for imageio's writer object (see: https://imageio.readthedocs.io/en/stable/examples.html#writing-movies)
                 
                 if i % 50 == 0:
                     print(f"Processed {i}/{len(frame_files)} frames")
