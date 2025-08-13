@@ -1,6 +1,6 @@
 timeout:
   tstep: 1000 # world steps timeout
-  tsec: 500 # seconds timeout
+  tsec: 50 # seconds timeout
   physics_tsec: 10 # physics seconds (world time) timeout
 
 out:
@@ -39,7 +39,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       fixed_iters_trajopt: True
       maximum_trajectory_dt: 0.5
       ik_opt_iters: 500 # 1000
-      num_ik_seeds: 32 # 256 # 128 # 32
+      num_ik_seeds: 16 # 32 # 256 # 128 # 32
       position_threshold: 0.05 #0.05 # 0.005
       rotation_threshold: 0.5 # 0.05
       cspace_threshold: 0.5 # 0.05
@@ -147,8 +147,11 @@ sim_task:
     manual: {}
     follow:
       jumpy_target_interval: 0.2 # physics dt to update target
-      abs_velocity: [0.1,0.1,0.1] # absolute velocity of the target (xyz in world frame), direction is determinated by the agent and level
-    reach: {}
+      velocity_scale: 1.0 # scale factor for the target velocity
+      velocity_noise: True # noise for the target velocity
+    reach: 
+      targets_box_dim: 0.5
+      update_interval_tphys: 1.0
     bin:
       wall_dims_hwd: [0.35,0.5,0.05] # height, width, depth of the bin walls
   

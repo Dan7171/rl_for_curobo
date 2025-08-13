@@ -428,8 +428,16 @@ class SimTask:
         """
         pass
     
-
-            
+    
+    def _set_target_world_pose_by_target_name(self, a_idx:int, target_name:str, new_p_target:np.ndarray, new_q_target:np.ndarray):
+        target_path = self.target_name_to_path[a_idx][target_name]
+        target_prim = self.target_path_to_prim[a_idx][target_path]
+        target_prim.set_world_pose(position=new_p_target, orientation=new_q_target) # set_world_pose(position=new_p_target, orientation=new_q_target)
+    
+    def _set_target_world_pose_by_link_name(self, a_idx:int, link_name:str, new_p_target:np.ndarray, new_q_target:np.ndarray):
+        target_name = self.name_link_to_target[a_idx][link_name]
+        self._set_target_world_pose_by_target_name(a_idx, target_name, new_p_target, new_q_target)
+    
     def _get_link_errors(self) -> tuple[list[dict[str,tuple[float,float]]], list[dict[str,tuple[np.ndarray, np.ndarray]]], list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         n_agents = len(self.agent_task_cfgs)
         link_name_to_error = [{} for _ in range(n_agents)]
@@ -483,7 +491,16 @@ class SimTask:
                     self._last_update[a_idx][link_name] = link_name_to_next_target_pose[a_idx][link_name] # update link in task state
         
         return self._last_update # return updated task state
+    
+    
+    def _tup_to_pose(self, p:np.ndarray,q: np.ndarray)->Pose:
+        return Pose(position=self.tensor_args.to_device(p), quaternion=self.tensor_args.to_device(q))
+    
+    def _update_target(self, p:np.ndarray,q: np.ndarray, a_idx:int, link_name:str):
+        self._last_update[a_idx][link_name] = self._tup_to_pose(p,q)
 
+
+    
     def check_contact(self)->list[list[int]]:
         """
         return list of pairs of robot indices that are in contact.
@@ -543,7 +560,8 @@ class FollowTask(SimTask):
                  level:int,
                  stats_cfg:dict,
                  pose_utils:PoseUtils,
-                 abs_velocity:list[float]=[0.1,0.1,0.1],
+                 velocity_scale = 1.0, # scale factor for the target velocity
+                 velocity_noise = False, # noise for the target velocity
                  jumpy_target_interval:float=1.0, # physics dt to update target
                  ):
         
@@ -557,26 +575,42 @@ class FollowTask(SimTask):
             5: smooth-target, static obstacles
             6: smooth-target, dynamic obstacles
         
-        abs_velocity: [x,y,z] target linear velocity
+        jumpy_target_interval: physics dt to update target
         """
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
         self._pose_utils = pose_utils
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
-        self.abs_velocity = abs_velocity
+        self.velocity_scale = velocity_scale
+        self.velocity_noise = velocity_noise
         self.jumpy_target_interval = jumpy_target_interval if level < 4 else 0.0
     
 
 
         # Setup targets:
-        robots_center = self.get_arms_bases_center_pos()
+        self.link_name_to_target_vel = [{} for _ in range(self.n_agents)]
+        
         link_name_to_target_pose_np = [{} for _ in range(self.n_agents)]
+        robots_center = self.get_arms_bases_center_pos()
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
-                halfway_to_center = robot_base_pos + 0.5 * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
-                halfway_to_center[2] += 0.5 # m above the base
-                link_name_to_target_pose_np[a_idx][link_name] = (halfway_to_center, np.array([0,1,0,0]))
-                self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(halfway_to_center), quaternion=self.tensor_args.to_device(np.array([0,1,0,0])))
+                init_target_pos = robot_base_pos + 0.5 * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                init_target_pos[2] += 0.5 # m above the base
+                init_target_quat = np.array([0,1,0,0])
+                link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
+                tar_vel_direction = (init_target_pos - robot_base_pos) # direction of the target velocity, towards the center
+                tar_vel_direction = np.array([tar_vel_direction[0], tar_vel_direction[1], 0])
+                scaled_vel = tar_vel_direction * self.velocity_scale 
+                if self.velocity_noise:
+                    for axis in range(3):
+                        # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
+                        vel_norm = np.linalg.norm(scaled_vel)
+                        noise_range = np.arange(-vel_norm/2, vel_norm/2, vel_norm/10)
+                        noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+                        scaled_vel[axis] += noise_axis
+                        # print(f'noise_axis: {noise_axis}, scaled_vel: {scaled_vel}')
+                self.link_name_to_target_vel[a_idx][link_name] = scaled_vel 
+                self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(init_target_pos), quaternion=self.tensor_args.to_device(init_target_quat))
         self._set_targets_world_pose(link_name_to_target_pose_np)
         
         self._is_initialized = False
@@ -603,24 +637,14 @@ class FollowTask(SimTask):
                 for link_name in self.link_name_to_path[a_idx].keys():
                     target_name = self.name_link_to_target[a_idx][link_name]     
                     p_target, q_target = target_name_to_pose[a_idx][target_name]
-                    target_lin_vel = self.abs_velocity
+                    target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
                     p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
-                    target_path = self.target_name_to_path[a_idx][target_name]
-                    target_prim = self.target_path_to_prim[a_idx][target_path]
-                    target_prim.set_world_pose(position=p_target_new, orientation=q_target)
-                    self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target_new), quaternion=self.tensor_args.to_device(q_target))
+                    self._update_target(p_target_new, q_target, a_idx, link_name)
+                    self._set_target_world_pose_by_link_name(a_idx, link_name, p_target_new, q_target)
+                    
         return None
 
-    # def _select_targets_vel_random(self):
-    #     """
-    #     sample new target lin vel from a cubic volume around 0,0,0 for each target and stores it in dict.
-    #     """
-    
-    #     for a_idx in range(len(self.target_name_to_path)):
-    #         for target_name in self.target_name_to_path[a_idx].keys():
-    #             new_target_lin_vel = self._pose_utils.sample_pos_in_box([0,0,0], self.max_abs_axis_vel)
-    #             self.target_name_to_target_lin_vel[a_idx][target_name] = new_target_lin_vel
-    
+ 
 class ManualTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg):
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, 1, stats_cfg)
@@ -632,15 +656,89 @@ class ManualTask(SimTask):
                 target_name = self.name_link_to_target[a_idx][link_name]
                 p_target, q_target = target_name_to_pose[a_idx][target_name]
                 self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
-                # print(f'{target_name} p_err: {p_err}, q_err: {q_err}')    
-                # print(f'p_target: {p_target}, q_target: {q_target}')
+    
     
     def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
         return {}
             
-class ReachTask(FollowTask):
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,stats_cfg, pose_utils, timeout:float=3.0, max_abs_axis_vel:float=0.0):
-        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level,stats_cfg, pose_utils, timeout, 0.0)
+class ReachTask(SimTask):
+    """
+    level:
+        1: non-overlapping target boxes (centered around robots bases), no obstacles
+        2. non-overlapping target boxes (centered around robots bases), static obstacles
+        3. non-overlapping target boxes (centered around robots bases), dynamic obstacles
+        4. overlapping target boxes (centered around robots middle), no obstacles
+        5. overlapping target boxes (centered around robots middle), static obstacles
+        6. overlapping target boxes (centered around robots middle), dynamic obstacles
+        
+        
+
+    """
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg,pose_utils, targets_box_dim=0.5, update_interval_tphys=1.0):
+        
+        super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
+        self._pose_utils = pose_utils
+        self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
+        self.targets_box_dim = targets_box_dim # the greater, the more spread out the targets are
+        robots_center = self.get_arms_bases_center_pos()
+        self.link_name_to_target_box_center = [{} for _ in range(self.n_agents)]
+        target_box_h = targets_box_dim/2 + 0.15
+        overlap_mode_box_center = robots_center + np.array([0,0,target_box_h])
+        self.overlapping_target_boxes = level < 4
+        
+        for a_idx in range(self.n_agents):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                if not self.overlapping_target_boxes: # non-overlapping target boxes
+                    robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
+                    target_box_center = robot_base_pos + np.array([0,0,target_box_h]) # robot_base_pos + 0.5 * (robots_center - robot_base_pos)  
+                    # target_box_center[2] = target_box_h
+                else: # overlapping target boxes
+                    target_box_center = overlap_mode_box_center
+                self.link_name_to_target_box_center[a_idx][link_name] = target_box_center
+
+
+        # Initialize targets:
+        link_name_to_target_pose_np = [{} for _ in range(self.n_agents)]
+        for a_idx in range(self.n_agents):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                target = self._sample_target_from_box(a_idx, link_name)
+                link_name_to_target_pose_np[a_idx][link_name] = target
+                self._update_target(target[0], target[1], a_idx, link_name)
+                self._set_target_world_pose_by_link_name(a_idx, link_name, target[0], target[1])
+        
+
+        # Set initial state for time-based updates:
+        self._is_initialized = False
+        self._tphysics_at_last_update = -1.0 
+        self.update_interval_tphys = update_interval_tphys
+
+
+    def _sample_target_from_box(self, a_idx:int, link_name:str):
+        init_target_pos = self._pose_utils.sample_pos_in_box(self.link_name_to_target_box_center[a_idx][link_name], self.targets_box_dim)
+        init_target_quat = np.array([0,1,0,0])
+        target = (init_target_pos, init_target_quat)
+        return target
+    
+            
+ 
+    def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose) -> List[Dict[str, Tuple[np.ndarray]]] | None:
+        if not self._is_initialized:
+            self._is_initialized = True
+            self._tphysics_at_last_update = self.world.current_time
+            
+        tphysics_cur = self.world.current_time
+
+        # update target pose in sim according to target lin vel
+        tphysics_since_update = tphysics_cur - self._tphysics_at_last_update
+        if tphysics_since_update > self.update_interval_tphys:
+            self._tphysics_at_last_update = tphysics_cur
+            for a_idx in range(len(self.target_name_to_target_lin_vel)):
+                for link_name in self.link_name_to_path[a_idx].keys():
+                    new_p, new_q = self._sample_target_from_box(a_idx, link_name)
+                    self._update_target(new_p, new_q, a_idx, link_name)
+                    self._set_target_world_pose_by_link_name(a_idx, link_name, new_p, new_q)
+        
+        return None
 
     
 
@@ -2578,7 +2676,7 @@ class FrameCapturer:
             return
         # Get all frame files
         if result_path == '':
-            result_path = f'{self.frames_dir}/simulation_video.mp4'
+            result_path = f'{self.frames_dir}/as_video_{video_fps}fps.mp4'
         command = f'python projects_root/experiments/utils/convert_frames_to_video.py --method auto --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
         shell = True 
         if in_background:
