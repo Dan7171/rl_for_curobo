@@ -2786,11 +2786,11 @@ def modify_to_benchmark_mode(combo_cfg_path):
     combo_cfg = load_yaml(combo_cfg_path)
     print(f'debug: combo_cfg: {combo_cfg}')
 
-    base_options = combo_cfg["base"]
-    n_arms_options = combo_cfg["n_arms"]
-    robot_fam_options = combo_cfg["robot_fam"]
-    alg_options = combo_cfg["alg"]
-    task_to_levels_options = combo_cfg["task_to_levels"]
+    base_options = combo_cfg["base"] # meta cfg templates
+    n_arms_options = combo_cfg["n_arms"] # number of arms
+    robot_fam_options = combo_cfg["robot_fam"] # robot family
+    alg_options = combo_cfg["alg"] # algorithm 
+    task_to_levels_options = combo_cfg["task_to_levels"] # task to levels
     
     out_names = []
     meta_cfgs = []
@@ -2829,6 +2829,8 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             ret_root = ret_pose_cfg[robot_fam][n_arms]["retract"]
                             pose_root = ret_pose_cfg[robot_fam][n_arms]["pose"]
 
+                            
+                            # Set cu_agents
                             meta_cfg["cu_agents"] = []
                             for a_idx in range(n_cfgs):
                                 if cent: # n_cfgs = 1 (centralized planner)
@@ -2848,11 +2850,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                     "retract_cfg": ret_cfg,
                                 })
 
-                            
-                            meta_cfg["sim_task"]["task_type"] = task
-                            meta_cfg["sim_task"]["level"] = level
-
-
+                            # Set arm poses (base poses of arms, independent of cent/dec)
                             meta_cfg["sim_task"]["arm_poses"] = []
                             for arm_idx in range(n_arms):
                                 arm_position = pose_root["dec"][arm_idx][:3]
@@ -2860,11 +2858,48 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                 arm_pose = [*arm_position, *arm_quat]
                                 meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
                             
+                            
+                            
+                            # Set sim_task
+                            meta_cfg["sim_task"]["task_type"] = task
+                            meta_cfg["sim_task"]["level"] = level
+                            
+                            # Set static and dynamic obstacles depending on the level
+                            
+                            
+                            # center base pose of arms
+                            static_obstacles = False
+                            dynamic_obstacles = False
+                            
+                            if task in ['reach', 'follow']:
+                                if level in [2,5]:
+                                    static_obstacles = True
+                                elif level in [3,6]:
+                                    dynamic_obstacles = True
+                            if static_obstacles or dynamic_obstacles:
+                                
+                                # get center of arms
+                                arms_center = np.array([0.0,0.0,0.0])
+                                for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
+                                    arms_center += np.array(arm_pose[:3])
+                                arms_center /= n_arms
+                                
+                                # set obstacles
+                                env_cfg = meta_cfg["sim_env"]["cfg"] 
+                                env_cfg["n_obs"] = 5
+                                volume_center_pos = arms_center + np.array([0,0,0.5])
+                                env_cfg["volume_center_pos"] = volume_center_pos.tolist()
+                                if dynamic_obstacles:
+                                    # env_cfg["obj_rigid_body_enabled"] = True
+                                    env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
+
+
+                            # Output fodler name
                             out_name = f'{robot_fam}{n_arms}{alg}_{task}{level}'
                             
+
                             meta_cfgs.append(meta_cfg)
                             out_names.append(out_name)
-                            print(f'debug: out_name: {out_name}')
                             
     return meta_cfgs, out_names
 
