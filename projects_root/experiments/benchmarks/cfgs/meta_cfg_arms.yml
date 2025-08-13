@@ -69,7 +69,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: False # for debugging
+      plot_costs: True # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)

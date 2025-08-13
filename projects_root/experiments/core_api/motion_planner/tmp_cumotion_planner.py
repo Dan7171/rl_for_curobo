@@ -855,7 +855,17 @@ class BinTask(SimTask):
 
 
         self.force_unique_goals = self.level < 4 # if we want each link to have a unique goal (not the same as other links)
-            
+    
+    def _increase_picked_count(self, link_name:str, a_idx:int):
+        if link_name not in self.link_name_to_picked_from_back[a_idx]:
+            self.link_name_to_picked_from_back[a_idx][link_name] = 0
+        self.link_name_to_picked_from_back[a_idx][link_name] += 1
+
+    def _increase_placed_count(self, link_name:str, a_idx:int):
+        if link_name not in self.link_name_to_placed_in_bin[a_idx]:
+            self.link_name_to_placed_in_bin[a_idx][link_name] = 0
+        self.link_name_to_placed_in_bin[a_idx][link_name] += 1
+
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
         
@@ -891,72 +901,59 @@ class BinTask(SimTask):
                     twin_exists = target_name in self._target_name_to_moving_twin_prim[a_idx] # target has a carried twin for visual effect
                     target_prim = self.target_path_to_prim[a_idx][self.target_name_to_path[a_idx][target_name]]
 
-                    reached_goal = err_p < 0.1 #0.05 # and err_q < 5 
+                    reached_goal = err_p < 0.05 #0.05 # and err_q < 5 
                     if reached_goal: 
-                        if cur_goal_type == 'bin': # agent "placed item" in bin, changing goal to "behind back"
-                            goal_pose = self.link_name_to_pick_pose[a_idx][link_name]
-                            goal_type = 'behind_arm'    
-                            if link_name not in self.link_name_to_placed_in_bin[a_idx]:
-                                self.link_name_to_placed_in_bin[a_idx][link_name] = 0
-                            self.link_name_to_placed_in_bin[a_idx][link_name] += 1
+                        if cur_goal_type == 'bin': # PLACED
 
-                            # free targets for other agents:
+                            goal_pose = self.link_name_to_pick_pose[a_idx][link_name] # next goal pose
+                            goal_type = 'behind_arm' # next goal type
+                            self._increase_placed_count(link_name, a_idx) # update stats
+                            
+                            # mark link as not having bin goal (it's status is now picking, not placing)
                             self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
-
-                            if twin_exists: # visualization effect
+                            
+                            # post-place visualization effect
+                            if twin_exists: 
                                 twin = self._target_name_to_moving_twin_prim[a_idx][target_name]
                                 # reset target color to original
                                 target_prim.get_applied_visual_material().set_color(twin.get_applied_visual_material().get_color()) # set target to white (to differentiate from the moving twin)                          
-                                
                                 # hide the twin (we just placed the item in the bin, we dont need to render until picked up again)
                                 self._target_name_to_free_fall_count[a_idx][target_name] = 50 # retset to 10 steps to free fall
                                 
-                                
-                        else: # current goal is behind arm, so we need to pick a new bin goal (if possible)
-                            goal_type = 'bin'
+                        else: # PICKED
+                            goal_type = 'bin' # next goal type
 
+                            # Check availablity to take a new bin goal:
                             taken_bin_goals = []
                             for a2_idx in range(len(self.agent_task_cfgs)): # including self for the centralized case
                                 for link_name2 in self._link_name_to_cur_bingoal[a2_idx]:
                                     if self._link_name_to_cur_bingoal[a2_idx][link_name2] != -1: # if link is aiming to a bin goal
                                         taken_bin_goals.append(self._link_name_to_cur_bingoal[a2_idx][link_name2]) # add the bin goal to taken bin goals
                             free_bin_goals = [i for i in range(len(self.bin_goal_poses)) if i not in taken_bin_goals] # all bin goals that are not taken by other agents
-                            
                             n_free_bin_goals = len(free_bin_goals)
                             n_taken_bin_goals = len(taken_bin_goals)
                             n_total_bin_goals = n_free_bin_goals + n_taken_bin_goals
                             max_conc_bin_goals = self.max_concurrent_bin_goals if self.max_concurrent_bin_goals is not None else n_total_bin_goals
                             if n_taken_bin_goals >= max_conc_bin_goals: # no more bin goals to take
-                                # no more bin goals to take, keeping the same goal for now
                                 continue
-                            print(f'debug link_to_bin_goal: {self._link_name_to_cur_bingoal}')
-                            print(f'link name to pose: {link_name_to_pose}')
-                            
-                            
-                            
-                            
-                            # pick next bin goal
+
+                            # Set new bin goal for the link (if possible)
                             options = [] # list of bin goal indices to choose from
                             if self.force_unique_goals: # if we want each link to have a unique goal (not the same as other links)
                                 if n_free_bin_goals > 0: # free bin goal exists
                                     options = free_bin_goals # limit options to free bin goals
+                                else: # no free bin goals, so we keep the same goal for now
+                                    continue
                             else:
                                 options = list(range(len(self.bin_goal_poses))) # all bin goals are optional
-                            
-                            if len(options):
-                                new_bin_goal_idx = self._local_rng.choice(options) # index of free bin goal
-                                self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
-                                goal_pose = self.bin_goal_poses[new_bin_goal_idx] # get goal pose
+                            new_bin_goal_idx = self._local_rng.choice(options) # index of free bin goal
+                            self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
+                            goal_pose = self.bin_goal_poses[new_bin_goal_idx] # New bin goal set
 
-                            else:
-                                continue
-
-                            # uptdate stats
-                            if link_name not in self.link_name_to_picked_from_back[a_idx]:
-                                self.link_name_to_picked_from_back[a_idx][link_name] = 0
-                            self.link_name_to_picked_from_back[a_idx][link_name] += 1
+                            # uptdate stats (note that its done only after we actually set the new bin goal, so we count only one pick for each change from behind goal to bin goal)
+                            self._increase_picked_count(link_name, a_idx) # update stats
                             
-                            # visual effects
+                            # post-pick visual effects
                             if twin_exists: # if twin exists
                                 # show the twin (carried item)
                                 twin = self._target_name_to_moving_twin_prim[a_idx][target_name]

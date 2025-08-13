@@ -608,7 +608,7 @@ class ArmBase(RolloutBase, ArmBaseConfig):
                 coll_cost = self.robot_self_collision_cost.forward(state.robot_spheres)
                 # cost += coll_cost
                 # cost_list.append(coll_cost)
-                cost_dict["primitive_collision"] = coll_cost
+                cost_dict["self_collision"] = coll_cost
         if (
             self.cost_cfg.primitive_collision_cfg is not None
             and self.primitive_collision_cost.enabled
