@@ -674,25 +674,27 @@ class ReachTask(SimTask):
         
 
     """
-    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg,pose_utils, targets_box_dim=0.5, update_interval_tphys=1.0):
+    def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg,pose_utils, targets_box_dim=0.5, update_interval_tphys=1.0,p_err_threh=0.05,q_err_threh=0.5):
         
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
+        
         self._pose_utils = pose_utils
+        self.p_err_threh = p_err_threh
+        self.q_err_threh = q_err_threh
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
         self.targets_box_dim = targets_box_dim # the greater, the more spread out the targets are
         robots_center = self.get_arms_bases_center_pos()
         self.link_name_to_target_box_center = [{} for _ in range(self.n_agents)]
-        target_box_h = targets_box_dim/2 + 0.15
+        target_box_h = targets_box_dim/2 + 0.2
         overlap_mode_box_center = robots_center + np.array([0,0,target_box_h])
-        self.overlapping_target_boxes = level < 4
+        self.overlapping_target_boxes = level > 3
         
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
-                if not self.overlapping_target_boxes: # non-overlapping target boxes
+                if not self.overlapping_target_boxes: # non-overlapping target boxes (easier)
                     robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
                     target_box_center = robot_base_pos + np.array([0,0,target_box_h]) # robot_base_pos + 0.5 * (robots_center - robot_base_pos)  
-                    # target_box_center[2] = target_box_h
-                else: # overlapping target boxes
+                else: # overlapping target boxes (harder)
                     target_box_center = overlap_mode_box_center
                 self.link_name_to_target_box_center[a_idx][link_name] = target_box_center
 
@@ -709,8 +711,12 @@ class ReachTask(SimTask):
 
         # Set initial state for time-based updates:
         self._is_initialized = False
-        self._tphysics_at_last_update = -1.0 
         self.update_interval_tphys = update_interval_tphys
+        self._link_name_to_last_update_tphys = [{} for _ in range(self.n_agents)]
+        for a_idx in range(self.n_agents):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                self._link_name_to_last_update_tphys[a_idx][link_name] = -1.0 
+
 
 
     def _sample_target_from_box(self, a_idx:int, link_name:str):
@@ -728,12 +734,26 @@ class ReachTask(SimTask):
             
         tphysics_cur = self.world.current_time
 
-        # update target pose in sim according to target lin vel
-        tphysics_since_update = tphysics_cur - self._tphysics_at_last_update
-        if tphysics_since_update > self.update_interval_tphys:
-            self._tphysics_at_last_update = tphysics_cur
-            for a_idx in range(len(self.target_name_to_target_lin_vel)):
-                for link_name in self.link_name_to_path[a_idx].keys():
+        # Check time limit (if passed, update all targets)
+        # tphysics_since_update = tphysics_cur - self._tphysics_at_last_update
+        # beyond_time_lim = tphysics_since_update > self.update_interval_tphys
+        # if beyond_time_lim:
+        #     self._tphysics_at_last_update = tphysics_cur
+        
+        for a_idx in range(len(self.target_name_to_target_lin_vel)):
+            for link_name in self.link_name_to_path[a_idx].keys():
+                reached_goal = False
+                last_update_tphys = self._link_name_to_last_update_tphys[a_idx][link_name]
+                tphysics_since_update = tphysics_cur - last_update_tphys
+                beyond_time_lim = tphysics_since_update > self.update_interval_tphys
+                
+                if not beyond_time_lim:
+                    p_err, q_err = errors[a_idx][link_name]
+                    reached_goal = p_err < self.p_err_threh and  q_err < self.q_err_threh
+                
+                update_goal = beyond_time_lim or reached_goal
+                if update_goal:
+                    self._link_name_to_last_update_tphys[a_idx][link_name] = tphysics_cur
                     new_p, new_q = self._sample_target_from_box(a_idx, link_name)
                     self._update_target(new_p, new_q, a_idx, link_name)
                     self._set_target_world_pose_by_link_name(a_idx, link_name, new_p, new_q)
