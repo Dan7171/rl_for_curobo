@@ -1,10 +1,10 @@
 timeout:
-  tstep: 1000 # world steps timeout
-  tsec: 50 # seconds timeout
-  physics_tsec: 10 # physics seconds (world time) timeout
+  tstep: 300 # world steps timeout
+  tsec: 200000 # seconds timeout
+  physics_tsec: 10000 # physics seconds (world time) timeout
 
 out:
-  out_dir: '/home/dan/mr_mpc_logs' # output directory
+  out_dir: '/home/dan/mr_mpc_logs/benchmarks1' # output directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
@@ -146,15 +146,19 @@ sim_task:
   task_cfgs:
     manual: {}
     follow:
-      jumpy_target_interval: 0.2 # physics dt to update target
+      update_interval_tphys: 0.2 # physics dt to update target
       velocity_scale: 1.0 # scale factor for the target velocity
       velocity_noise: True # noise for the target velocity
     reach: 
       targets_box_dim: 0.5
       update_interval_tphys: 1.0
+      p_err_threh: 0.05
+      q_err_threh: 300.0
     bin:
-      wall_dims_hwd: [0.35,0.5,0.05] # height, width, depth of the bin walls
-  
+      wall_dims_hwd: [0.4,0.5,0.05] # height, width, depth of the bin walls
+      p_err_threh: 0.05
+      q_err_threh: 300.0
+      
   # tasks stat managers    
   stat_man_cfgs:
     bin: 

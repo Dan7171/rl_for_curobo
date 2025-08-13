@@ -1,12 +1,13 @@
 base: [projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml]
 # alg: [SD, CC, O, SC, D, O-]
-alg: [O]
+alg: [O, O-,SD, SC]
 robot_fam: [ur5e]
 n_arms: [4]
 task_to_levels:
-  reach: [2,3,5,6]
-  # follow: [1,4]
   bin: [1,2,3,4,5]
+  reach: [1,2,3,4,5,6]
+  # follow: [1,2,3,4,5,6]
+  
   # reach: [1]
   
 

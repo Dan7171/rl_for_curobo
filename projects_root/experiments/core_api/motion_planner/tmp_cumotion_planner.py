@@ -562,27 +562,26 @@ class FollowTask(SimTask):
                  pose_utils:PoseUtils,
                  velocity_scale = 1.0, # scale factor for the target velocity
                  velocity_noise = False, # noise for the target velocity
-                 jumpy_target_interval:float=1.0, # physics dt to update target
+                 update_interval_tphys:float=1.0, # physics dt to update target
                  ):
         
         """
         level:
         
-            1: jumpy-target, no obstacles
-            2: jumpy-target static obstacles 
-            3: jumpy-target, dynamic obstacles
+            1: jumpy-target (translated every update_interval_tphys), no obstacles
+            2: jumpy-target (translated every update_interval_tphys), static obstacles 
+            3: jumpy-target (translated every update_interval_tphys), dynamic obstacles
             4: smooth-target, no obstacles
             5: smooth-target, static obstacles
             6: smooth-target, dynamic obstacles
         
-        jumpy_target_interval: physics dt to update target
         """
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
         self._pose_utils = pose_utils
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
         self.velocity_scale = velocity_scale
         self.velocity_noise = velocity_noise
-        self.jumpy_target_interval = jumpy_target_interval if level < 4 else 0.0
+        self.update_interval_tphys = update_interval_tphys if level < 4 else 0.0
     
 
 
@@ -631,7 +630,7 @@ class FollowTask(SimTask):
 
         # update target pose in sim according to target lin vel
         tphysics_since_update = tphysics_cur - self._tphysics_at_last_update
-        if tphysics_since_update > self.jumpy_target_interval:
+        if tphysics_since_update > self.update_interval_tphys:
             self._tphysics_at_last_update = tphysics_cur
             for a_idx in range(len(self.target_name_to_target_lin_vel)):
                 for link_name in self.link_name_to_path[a_idx].keys():
@@ -864,6 +863,7 @@ class CbsMp1Task(ManualTask):
 class BinTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
                  stats_cfg,pose_utils, wall_dims_hwd=np.array([0.5,0.5,0.3]), 
+                 p_err_threh=0.05,q_err_threh=0.5,
                  ):
         """
         all arms start with a behind-back goal. 
@@ -881,7 +881,8 @@ class BinTask(SimTask):
         self._local_rng = random.Random(self.pose_utils.seed)
         self.n_agents = len(self.agent_task_cfgs)
         self._is_initialized = False
-        
+        self.p_err_threh = p_err_threh
+        self.q_err_threh = q_err_threh
         # statistics:
         self.link_name_to_placed_in_bin = [{} for _ in range(len(self.agent_task_cfgs))] # statistics - num of placed items in bin
         self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] # statistics - num of picked items from back
@@ -910,7 +911,7 @@ class BinTask(SimTask):
         # Spawn internal bin walls:
         in_wall_pos = bin_pos + np.array([0,0,dim2_step_size])
          
-        rotated_walls_quat = self.pose_utils.rotate_quat(bin_pose[3:], [0,0,90], q_in_wxyz=True, q_out_wxyz=True)
+        rotated_walls_quat = self.pose_utils.rotate_quat([1,0,0,0], [0,0,90], q_in_wxyz=True, q_out_wxyz=True)
         out_wall_1_quat = rotated_walls_quat
         out_wall_3_quat = rotated_walls_quat
         in_wall_1_quat = rotated_walls_quat
@@ -1026,7 +1027,7 @@ class BinTask(SimTask):
                     twin_exists = target_name in self._target_name_to_moving_twin_prim[a_idx] # target has a carried twin for visual effect
                     target_prim = self.target_path_to_prim[a_idx][self.target_name_to_path[a_idx][target_name]]
 
-                    reached_goal = err_p < 0.05 #0.05 # and err_q < 5 
+                    reached_goal = err_p < self.p_err_threh and err_q < self.q_err_threh
                     if reached_goal: 
                         if cur_goal_type == 'bin': # PLACED
 
