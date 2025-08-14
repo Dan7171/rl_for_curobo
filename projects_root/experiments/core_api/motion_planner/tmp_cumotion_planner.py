@@ -2984,7 +2984,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                         1:f'ur10e.yml',
                         2:f'dual_ur10e.yml',
                         3: f'tri_ur10e.yml',
-                        4:'quad_ur10e.yml'
+                        '4_05' :'quad_ur10e.yml'
                         },
                     'ur5e': {
                         1:f'ur5e.yml',
@@ -3078,7 +3078,8 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             meta_cfg["sim_task"]["arm_poses"] = []
                             for arm_idx in range(n_arms):
                                 arm_position = pose_root["dec"][arm_idx][:3]
-                                arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_position, q_in_wxyz=True, q_out_wxyz=True)
+                                arm_euler = pose_root["dec"][arm_idx][3:]
+                                arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
                                 arm_pose = [*arm_position, *arm_quat]
                                 meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
                             
@@ -3356,6 +3357,7 @@ def main(meta_cfg, out_path):
     for a_idx, a_cfg in enumerate(agent_cfgs):
         usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
+        robot.set_world_pose(base_pose[a_idx][:3], base_pose[a_idx][3:])
         sim_robot_cfg = a_cfg["sim_robot_cfg"] # if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
         viz_color = a_cfg["viz_color"] # if "viz_color" in a_cfg else meta_cfg["default"]["viz_color"]
         sim_robot = SimRobot(robot, robot_prim_path, **sim_robot_cfg, viz_color=viz_color)

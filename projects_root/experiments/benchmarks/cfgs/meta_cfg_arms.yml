@@ -1,10 +1,10 @@
 timeout:
-  tstep: 3000 # world steps timeout
-  tsec: 200 # seconds timeout
-  physics_tsec: 10000 # physics seconds (world time) timeout
+  tstep: 900 # world steps timeout
+  tsec: 300 # seconds timeout
+  physics_tsec: 30 # physics seconds (world time) timeout
 
 out:
-  out_dir: '/home/dan/mr_mpc_logs/benchmarks1' # output directory
+  out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin' # output directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
@@ -212,10 +212,10 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
     
   sim_robot_cfg:
     visualize_col_pred:
-      own: True
-      obs: True
+      own: False # True
+      obs: False # True
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True # visualize collision spheres in world frame
+      is_on_world: False #True # visualize collision spheres in world frame
       ts_delta: 1 # int
 
     

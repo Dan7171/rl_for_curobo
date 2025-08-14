@@ -1,8 +1,8 @@
 base: [projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml]
 # alg: [SD, CC, O, SC, D, O-]
-alg: [CC, O]
-robot_fam: [ur5e]
-robot_type: ['4_045'] # ['2_05', '4_045']
+alg: [O, SC, SD, CC, O-]
+robot_fam: [ur5e] #[ ur5e]
+robot_type: ['2_05'] #['4_045', '2_05'] # ['2_05', '4_045']
 task_to_levels:
   # manual: [1]
   bin: [1,2,3,4,5]
