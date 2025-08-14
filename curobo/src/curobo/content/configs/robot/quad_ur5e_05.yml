@@ -12,7 +12,7 @@
 robot_cfg:
   kinematics:
     use_usd_kinematics: False
-    urdf_path: "robot/ur_description/quad_ur5e.urdf"
+    urdf_path: "robot/ur_description/quad_ur5e_05.urdf"
     asset_root_path: "robot/ur_description"
     # isaac_usd_path: "/Isaac/Robots/UR10/ur10_long_suction.usd"
     usd_robot_root: "/ur5"

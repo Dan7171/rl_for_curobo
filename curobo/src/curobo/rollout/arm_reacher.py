@@ -13,6 +13,8 @@ from dataclasses import dataclass
 import datetime
 import os
 from typing import Any, Dict, List, Optional
+import queue
+from threading import Thread, Event
 
 # Third Party
 import torch
@@ -353,6 +355,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # cost_list = list(cost_dict.values())
         ee_pos_batch, ee_quat_batch = state.ee_pos_seq, state.ee_quat_seq
         g_dist = None
+        robot_id = 0
         with profiler.record_function("cost/pose"):
             if (
                 self._goal_buffer.goal_pose.position is not None
@@ -413,6 +416,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 modified_dyn_obs_cost = False
                 #apply_upper_bound = False
                 # col_rollouts = None
+                
                 if 'dynamic_obs_cost' in self._custom_arm_base_costs.keys() and 'dynamic_obs_cost' in cost_dict:
                     dyn_cost = self._custom_arm_base_costs['dynamic_obs_cost']
 
@@ -457,9 +461,15 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                     
                                     pose_err_norm = dyn_cost.prior_pos_to_rot_ratio * pos_err_norm_clipped + (1 - dyn_cost.prior_pos_to_rot_ratio) * rot_err_norm_clipped # 0 <= pose_err_norm <= 1
                                     
-                                   
-                                    b = 0.5 
-                                    w = 1 - (1-pose_err_norm) ** b # 0 <= w <=1 (for any b > 0). b effects the shape of the function.
+                                    # w = the multiplier of the dynamic obs cost. 0 <= w <= 1. The lower the w, the lower the cost.
+                                    if dyn_cost.prior_weight_mode == 'linear':
+                                        w = pose_err_norm
+                                    elif dyn_cost.prior_weight_mode == 'exponential': # exponential
+                                        b = 0.5 
+                                        w = 1 - (1-pose_err_norm) ** b # 0 <= w <=1 (for any b > 0). b effects the shape of the function.
+                                    else:
+                                        raise ValueError(f"Invalid prior weight mode: {dyn_cost.prior_weight_mode}")
+                                    # print(f"debug: a_idx: {robot_id}, w: {w}")
                                     w = max(w, dyn_cost.prior_keep_lower_bound)
                                     assert w >= 0 and w <= 1
                                     new_dyn_obs_cost = w * old_dyn_obs_cost
@@ -471,7 +481,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                 # cost_dict['dynamic_obs_cost'] = torch.max(cost_dict['dynamic_obs_cost'], torch.ones_like(cost_dict['dynamic_obs_cost']) * 10_000)
                                 modified_dyn_obs_cost = True
                       
-                    if dyn_cost.a_select_mode == 'col_free': # THEORY BASED WAY
+                    if dyn_cost.a_select_mode == 'col_free': 
                         self.current_collision_mask = cost_dict['dynamic_obs_cost'] # safety_violation_mask
 
 
@@ -561,7 +571,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 if k not in dict_to_plot:
                     dict_to_plot[k] = v
             
-            self._update_live_plot(dict_to_plot)
+            self._schedule_live_plot(dict_to_plot, robot_id)
 
         
         cost_list = list(cost_dict.values())
@@ -571,8 +581,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             cost = cat_sum_reacher(cost_list)
     
  
-
-
+ 
         return cost
 
     def convergence_fn(
@@ -829,7 +838,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
     def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
         return self._dynamic_obs_coll_predictor
 
-    def _update_live_plot(self, cost_dict:dict[str, torch.Tensor]):
+    def _update_live_plot(self, cost_dict:dict[str, torch.Tensor],agent_id:int=0):
         """Update live plot of cost values in real-time"""
         
         
@@ -844,7 +853,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             # Set up the figure and axis
             plt.ion()  # Turn on interactive mode
             self._fig, self._ax = plt.subplots(1, 1, figsize=(16, 10))
-            self._fig.suptitle('Real-time Cost Monitoring - ArmReacher All Components')
+            self._fig.suptitle(f'Arm {agent_id} - Cost Monitoring (Goal + Reacher + Custom)')
             
             self._ax.set_title('All Cost Components Over Time (Base + Reacher + Custom)')
             self._ax.set_xlabel('Iteration')
@@ -855,6 +864,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             # Manually adjust subplot parameters to avoid stretched plot
             plt.subplots_adjust(right=0.84)
             plt.show(block=False)
+
         
         # Increment counter and check if we should plot this iteration
         self._plot_counter += 1
@@ -945,6 +955,37 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self._fig.savefig(os.path.join(self._cost_plots_dir, f'costs_iter_{self._plot_counter}.png'), dpi=150, bbox_inches='tight')
             print(f"Saved plot snapshot at iteration {self._plot_counter}")
 
+    def _schedule_live_plot(self, cost_dict: dict[str, torch.Tensor], agent_id: int = 0):
+        """Schedule a live plot update in a background thread (non-blocking)."""
+        if not hasattr(self, '_plot_queue') or self._plot_queue is None:
+            self._plot_queue = queue.Queue(maxsize=2)
+            self._plot_stop_event = Event()
+            self._plot_thread = Thread(target=self._plot_worker_loop, daemon=True)
+            self._plot_thread.start()
+        try:
+            # keep only latest items to avoid backlog
+            while self._plot_queue.full():
+                try:
+                    self._plot_queue.get_nowait()
+                except queue.Empty:
+                    break
+            self._plot_queue.put_nowait((cost_dict, agent_id))
+        except Exception:
+            pass
+
+    def _plot_worker_loop(self):
+        """Worker loop that processes plot updates asynchronously."""
+        while hasattr(self, '_plot_stop_event') and self._plot_stop_event is not None and not self._plot_stop_event.is_set():
+            try:
+                item = self._plot_queue.get(timeout=0.1)
+            except Exception:
+                continue
+            try:
+                cost_dict, agent_id = item
+                self._update_live_plot(cost_dict, agent_id)
+            except Exception:
+                pass
+
     def set_plot_frequency(self, k: int):
         """Set how often to update the live plot (every k iterations)
         
@@ -957,6 +998,35 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         else:
             print("Live plotting not initialized yet. This will take effect when plotting starts.")
 
+    def kill_live_plot(self): 
+        if hasattr(self, '_fig'):
+            try:
+                plt.close(self._fig)
+            except Exception as e:
+                print(f"Error closing plot: {e}")
+            try:
+                plt.close('all')
+            except Exception as e:
+                print(f"Error closing all plots: {e}")
+            self._plot_initialized = False
+            self._cost_histories = {}
+            self._cost_lines = {}
+            self._plot_counter = 0
+            self._plot_every_k = 5
+        # stop background plot thread if running
+        if hasattr(self, '_plot_stop_event') and self._plot_stop_event is not None:
+            try:
+                self._plot_stop_event.set()
+            except Exception:
+                pass
+        if hasattr(self, '_plot_thread') and self._plot_thread is not None:
+            try:
+                self._plot_thread.join(timeout=1.0)
+            except Exception:
+                pass
+        self._plot_thread = None
+        self._plot_stop_event = None
+        self._plot_queue = None
 
 @get_torch_jit_decorator()
 def cat_sum_reacher(tensor_list: List[torch.Tensor]):

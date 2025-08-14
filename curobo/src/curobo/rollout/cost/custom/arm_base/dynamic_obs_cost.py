@@ -24,6 +24,7 @@ class DynamicObsCostConfig(CostConfig):
     prior_p_err_impact_rad: float = 0.1 # if ee error is >= this, then the dynamic obs cost is not affected by the pose cost
     prior_rot_err_impact_angle: float = 180 # if ee error is >= this, then the dynamic obs cost is not affected by the pose cost
     prior_pos_to_rot_ratio: float = 0.9 # If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.
+    prior_weight_mode: str = "linear" # or exponential
     safety_margin: float = 0.1
     assert a_select_mode in ["normal", "col_free"], "Invalid action selection mode"
     assert prior_rot_err_impact_angle >= 0 and prior_rot_err_impact_angle <= 180, "Rotation error affection angle must be between 0 and 180"
@@ -55,6 +56,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             print("ERROR: Runtime topics not initialized - disabling dynamic obstacle cost")
             self.col_pred = None
             self.disable_cost()
+            raise RuntimeError("Runtime topics not initialized - disabling dynamic obstacle cost")
             return
         
         # Find robot context using simple assignment counter
@@ -91,8 +93,10 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         for key in required_keys:
             if key not in robot_context:
                 print(f"ERROR: Required key '{key}' missing from robot context for robot {self.robot_id}")
+                print(f'********\n'*10)
                 self.col_pred = None
                 self.disable_cost()
+                print(f'********\n'*10)
                 return
         
         X = robot_context['robot_pose']
@@ -106,6 +110,9 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             # If no obstacle spheres, disable this cost and set col_pred to None
             self.col_pred = None
             self.disable_cost()
+            print(f'********\n'*10)
+            print(f'Warning: No obstacle spheres - disabling dynamic obstacle cost')
+            print(f'********\n'*10)
             return
         
         # Extract sparse sphere filtering configuration
@@ -123,6 +130,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                     print(f"ERROR: Required sparse key '{key}' missing from robot context for robot {self.robot_id}")
                     self.col_pred = None
                     self.disable_cost()
+                    raise RuntimeError("Required sparse key missing from robot context - disabling dynamic obstacle cost")
                     return
             
             mpc_config_paths = robot_context['mpc_config_paths']

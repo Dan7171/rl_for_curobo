@@ -10,6 +10,7 @@ from rich.progress import Progress
 
 
 parser = argparse.ArgumentParser()
+# combo
 parser.add_argument("--cfg", type=str, required=False, default="combo", help="path to meta config file") # --cfg combo for benchmark mode
 parser.add_argument("--livestream", action="store_true", help="run in livestream mode")
 args = parser.parse_args()
@@ -874,7 +875,6 @@ class BinTask(SimTask):
             4. 2-IN-NOT-UNQIUE: 2 arms are allowed to go to the bin and goals may not be unique.
             5. ALL-IN-NOT-UNQIUE: all arms are allowed to go to the bin and goals may not be unique.
 
-
         """
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
         self.pose_utils = pose_utils
@@ -1365,7 +1365,8 @@ class CuPlanner:
 
         return d    
 
-
+    def kill_cost_plots(self):
+        pass
 
 class MpcPlanner(CuPlanner):
 
@@ -1734,12 +1735,18 @@ class MpcPlanner(CuPlanner):
     def _get_custom_arm_reacher_costs(self) -> dict:
         return self._get_wrap_mpc_optimizer().rollout_fn._custom_arm_reacher_costs
     
+    def _get_arm_reacher(self)->ArmReacher:
+        return self._get_wrap_mpc_optimizer().rollout_fn
+    
     def get_col_pred(self)->Optional[DynamicObsCollPredictor]:
         for instance in self._get_custom_arm_base_costs().values():
             if isinstance(instance, DynamicObsCost):
                 return instance.col_pred
         raise ValueError("No col_pred found in the rollout_fn")
 
+    
+    def kill_cost_plots(self):
+        self._get_arm_reacher().kill_live_plot()
 
     def update_col_pred(self, plans_board, idx, col_pred_with,plans_lock:Optional[Lock]=None):
         
@@ -2773,13 +2780,13 @@ def modify_to_benchmark_mode(combo_cfg_path):
                         },
                     'ur5e': {
                         1:f'ur5e.yml',
-                        2:f'dual_ur5e.yml',
-                        3: f'tri_ur5e.yml',
-                        4:'quad_ur5e.yml'
+                        '2_05':f'dual_ur5e.yml',
+                        '3_05': f'tri_ur5e.yml',
+                        '4_05':'quad_ur5e_05.yml',
+                        '4_045':'quad_ur5e_045.yml'
                         }
                     }
     
-    ret_pose_cfg = load_yaml(benchmarks_ret_cfg)
     
     # take retract cfg of benchmarks
     alg_to_planner = {
@@ -2803,12 +2810,12 @@ def modify_to_benchmark_mode(combo_cfg_path):
         'O-':[True,True], # ours minus priority - same as O (publish full policy, and subscribe to others)
     }
 
-
+    ret_pose_cfg = load_yaml(benchmarks_ret_cfg)
     combo_cfg = load_yaml(combo_cfg_path)
     print(f'debug: combo_cfg: {combo_cfg}')
 
     base_options = combo_cfg["base"] # meta cfg templates
-    n_arms_options = combo_cfg["n_arms"] # number of arms
+    robot_type = combo_cfg["robot_type"] # number of arms
     robot_fam_options = combo_cfg["robot_fam"] # robot family
     alg_options = combo_cfg["alg"] # algorithm 
     task_to_levels_options = combo_cfg["task_to_levels"] # task to levels
@@ -2817,28 +2824,38 @@ def modify_to_benchmark_mode(combo_cfg_path):
     meta_cfgs = []
 
     for base_cfg_path in base_options:
-        for n_arms in n_arms_options: # list
-            for robot_fam in robot_fam_options: # list
+        for robot_fam in robot_fam_options: # list
+            for robot_type in robot_type: # list
                 for alg in alg_options: # list
                     for task in task_to_levels_options: # dict
                         for level in task_to_levels_options[task]: # list
                             meta_cfg = load_yaml(base_cfg_path)
 
+                            # set pub sub config by alg type
                             is_pub = alg_to_pub_sub[alg][0]
                             is_sub = alg_to_pub_sub[alg][1]
                             meta_cfg["default"]["plan_pub_sub"] = {
                                 'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
                                 'sub':{'is_on':is_sub,'to':'all'}
                             }
-                        
-                            if alg == 'O-': # In priority ablation- same as O but using a particle config with a small change (the changing priority mode)
-                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
-                            else:
-                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
-                            cent = alg in ['CC', 'SC','D'] # centralized planner        
-                            planner_type = alg_to_planner[alg]
-
                             
+                            # set default particle file by alg type 
+                            if alg != 'O-':
+                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
+                            else:
+                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
+                            
+                            # Override for bin task
+                            if task == 'bin':
+                                if alg != 'O-':
+                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_bin.yml'
+                                else:
+                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_bin_priority_ablation.yml'
+
+                            # get num of arms and num of agents (n_cfgs) by alg type    
+                            cent = alg in ['CC', 'SC','D'] # is centralized planner        
+                            planner_type = alg_to_planner[alg]
+                            n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
                             if cent:
                                 robot_cfg_path =  cent_robot_cfgs[robot_fam][n_arms]
                                 n_cfgs = 1
@@ -2846,30 +2863,9 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                 robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
                                 n_cfgs = n_arms
                             
-                            robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path)
-                            ret_root = ret_pose_cfg[robot_fam][n_arms]["retract"]
-                            pose_root = ret_pose_cfg[robot_fam][n_arms]["pose"]
-
-                            
-                            # Set cu_agents
-                            meta_cfg["cu_agents"] = []
-                            for a_idx in range(n_cfgs):
-                                if cent: # n_cfgs = 1 (centralized planner)
-                                    # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
-                                    ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
-                                    base_pose = pose_root["cent"]
-                                else:
-                                    ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
-                                    base_pose = pose_root["dec"][a_idx] # arm base pose   
-                            
-                                
-                                meta_cfg["cu_agents"].append({
-                                    "robot": robot_cfg_path,
-                                    "planner": planner_type,
-                                    "base_pose": base_pose,
-                                    "viz_color": colors[a_idx%n_arms],
-                                    "retract_cfg": ret_cfg,
-                                })
+                            robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path) # get robot cfg path
+                            ret_root = ret_pose_cfg[robot_fam][robot_type]["retract"] # get retract cfg for all arms
+                            pose_root = ret_pose_cfg[robot_fam][robot_type]["pose"] # get pose cfg for all arms
 
                             # Set arm poses (base poses of arms, independent of cent/dec)
                             meta_cfg["sim_task"]["arm_poses"] = []
@@ -2915,6 +2911,90 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                     env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
 
 
+                            # Set cu_agents
+                            cu_agent_cfgs = []
+                            base_cu_agent_cfgs = meta_cfg["cu_agents"] if "cu_agents" in meta_cfg else []
+
+                            for a_idx in range(n_cfgs):
+                                if cent: # n_cfgs = 1 (centralized planner)
+                                    # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
+                                    ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
+                                    base_pose = pose_root["cent"]
+                                else:
+                                    ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
+                                    base_pose = pose_root["dec"][a_idx] # arm base pose   
+                            
+                                if a_idx < len(base_cu_agent_cfgs):
+                                    print(f'warning: reading specifications for agent{a_idx} from meta cfg')
+                                    agent_cfg = base_cu_agent_cfgs[a_idx]
+                                    # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
+                                else:
+                                    agent_cfg = {}
+                                
+                                # Override base values with new values
+                                agent_cfg["robot"] = robot_cfg_path
+                                agent_cfg["planner"] = planner_type
+                                agent_cfg["base_pose"] = base_pose
+                                agent_cfg["viz_color"] = colors[a_idx%n_arms]
+                                agent_cfg["retract_cfg"] = ret_cfg
+                                cu_agent_cfgs.append(agent_cfg)
+
+                            meta_cfg["cu_agents"] = cu_agent_cfgs
+                                # meta_cfg["cu_agents"].append(agent_cfg)
+
+
+                                # meta_cfg["cu_agents"].append({
+                                #     "robot": robot_cfg_path,
+                                #     "planner": planner_type,
+                                #     "base_pose": base_pose,
+                                #     "viz_color": colors[a_idx%n_arms],
+                                #     "retract_cfg": ret_cfg,
+                                # })
+
+                            # # Set arm poses (base poses of arms, independent of cent/dec)
+                            # meta_cfg["sim_task"]["arm_poses"] = []
+                            # for arm_idx in range(n_arms):
+                            #     arm_position = pose_root["dec"][arm_idx][:3]
+                            #     arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_position, q_in_wxyz=True, q_out_wxyz=True)
+                            #     arm_pose = [*arm_position, *arm_quat]
+                            #     meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
+                            
+                            
+                            
+                            # # Set sim_task
+                            # meta_cfg["sim_task"]["task_type"] = task
+                            # meta_cfg["sim_task"]["level"] = level
+                            
+                            # # Set static and dynamic obstacles depending on the level
+                            
+                            
+                            # # center base pose of arms
+                            # static_obstacles = False
+                            # dynamic_obstacles = False
+                            
+                            # if task in ['reach', 'follow']:
+                            #     if level in [2,5]:
+                            #         static_obstacles = True
+                            #     elif level in [3,6]:
+                            #         dynamic_obstacles = True
+                            # if static_obstacles or dynamic_obstacles:
+                                
+                            #     # get center of arms
+                            #     arms_center = np.array([0.0,0.0,0.0])
+                            #     for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
+                            #         arms_center += np.array(arm_pose[:3])
+                            #     arms_center /= n_arms
+                                
+                            #     # set obstacles
+                            #     env_cfg = meta_cfg["sim_env"]["cfg"] 
+                            #     env_cfg["n_obs"] = 5
+                            #     volume_center_pos = arms_center + np.array([0,0,0.5])
+                            #     env_cfg["volume_center_pos"] = volume_center_pos.tolist()
+                            #     if dynamic_obstacles:
+                            #         # env_cfg["obj_rigid_body_enabled"] = True
+                            #         env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
+
+
                             # Output fodler name
                             out_name = f'{robot_fam}{n_arms}{alg}_{task}{level}'
                             
@@ -2941,8 +3021,14 @@ def get_simulation_timeouts(meta_cfg):
     
     return tstep_timeout, sec_timeout, physics_timeout
 
-
-
+def recursive_fill_from_default(a_cfg, default_cfg,use_deepcopy=False):
+    for key in default_cfg:
+        if key not in a_cfg:
+            a_cfg[key] = deepcopy(default_cfg[key]) if use_deepcopy else default_cfg[key]
+        elif isinstance(a_cfg[key], dict):
+            recursive_fill_from_default(a_cfg[key], default_cfg[key],use_deepcopy=use_deepcopy)
+    return a_cfg
+    
 def main(meta_cfg, out_path):
     
     
@@ -3012,37 +3098,48 @@ def main(meta_cfg, out_path):
             raise ValueError(f"Invalid base pose type: {type(base_pose[a_idx][0])}")
 
 
-        planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
+        # planner_type[a_idx] = a_cfg["planner"] if "planner" in a_cfg else meta_cfg["default"]["planner"]
+        # sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
+        # sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
+ 
+        # fill missing values from default
+        recursive_fill_from_default(a_cfg, meta_cfg["default"],use_deepcopy=True)
+        # if "plan_pub_sub" in a_cfg and "sub" in a_cfg["plan_pub_sub"]:
+        #     pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
+        # else:
+        #     pub_sub_cfgs[a_idx]["sub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["sub"])
+        pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
+        pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
+
+        # parse sub to
+        if pub_sub_cfgs[a_idx]["sub"]["to"] == "all":
+            subto = [i for i in range(len(agent_cfgs)) if i != a_idx] # subscribe to plans from all robots (except itself)    
+        else:
+            subto = a_cfg["plan_pub_sub"]["sub"]["to"]
+        pub_sub_cfgs[a_idx]["sub"]["to"] = subto
+        col_pred_with[a_idx] = subto
+
+        # else:
+        #     col_pred_with[a_idx] = pub_sub_cfgs[a_idx]["sub"]["to"]
+        # # pub_sub_cfgs[a_idx]["sub"]["to"] = col_pred_with[a_idx]
+        # if "plan_pub_sub" in a_cfg and "pub" in a_cfg["plan_pub_sub"] and a_cfg["plan_pub_sub"]["pub"]:
+        #     pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
+        # else:
+        #     pub_sub_cfgs[a_idx]["pub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["pub"])
+        
+        planner_type[a_idx] = a_cfg["planner"]
+        if planner_type[a_idx] == 'mpc':
+            solver_cfgs[a_idx] = a_cfg["mpc"]["mpc_solver_cfg"] # if "mpc" in a_cfg and "mpc_solver_cfg" in a_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]
+            mpc_particle_file_paths[a_idx] = solver_cfgs[a_idx]["override_particle_file"] # if "override_particle_file" in solver_cfgs[a_idx] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]    
+            mpc_particle_cfgs[a_idx] = load_yaml(mpc_particle_file_paths[a_idx])   
+        else: # cumotion
+            solver_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_cfg"] # if "cumotion" in a_cfg and "motion_gen_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_cfg"]
+            cumotion_plan_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_plan_cfg"] # if "cumotion" in a_cfg and "motion_gen_plan_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"]
+            cumotion_warmup_cfgs[a_idx] = a_cfg["cumotion"]["warmup_cfg"] # if "cumotion" in a_cfg and "warmup_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"]
+
         sphere_counts_splits[a_idx] = calculate_robot_sphere_count(robot_cfgs[a_idx])
         sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
  
-
-        if "plan_pub_sub" in a_cfg and "sub" in a_cfg["plan_pub_sub"]:
-            pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
-        else:
-            pub_sub_cfgs[a_idx]["sub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["sub"])
-        
-        if pub_sub_cfgs[a_idx]["sub"]["to"] == "all":
-            col_pred_with[a_idx] = [i for i in range(len(agent_cfgs)) if i != a_idx] # subscribe to plans from all robots (except itself)    
-        else:
-            col_pred_with[a_idx] = pub_sub_cfgs[a_idx]["sub"]["to"]
-        pub_sub_cfgs[a_idx]["sub"]["to"] = col_pred_with[a_idx]
-        if "plan_pub_sub" in a_cfg and "pub" in a_cfg["plan_pub_sub"] and a_cfg["plan_pub_sub"]["pub"]:
-            pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
-        else:
-            pub_sub_cfgs[a_idx]["pub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["pub"])
-        
-
-        if planner_type[a_idx] == 'mpc':
-            solver_cfgs[a_idx] = a_cfg["mpc"]["mpc_solver_cfg"] if "mpc" in a_cfg and "mpc_solver_cfg" in a_cfg["mpc"] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]
-            mpc_particle_file_paths[a_idx] = solver_cfgs[a_idx]["override_particle_file"] if "override_particle_file" in solver_cfgs[a_idx] else meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]    
-            mpc_particle_cfgs[a_idx] = load_yaml(mpc_particle_file_paths[a_idx])   
-        else:
-            solver_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_cfg"] if "cumotion" in a_cfg and "motion_gen_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_cfg"]
-            cumotion_plan_cfgs[a_idx] = a_cfg["cumotion"]["motion_gen_plan_cfg"] if "cumotion" in a_cfg and "motion_gen_plan_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["motion_gen_plan_cfg"]
-            cumotion_warmup_cfgs[a_idx] = a_cfg["cumotion"]["warmup_cfg"] if "cumotion" in a_cfg and "warmup_cfg" in a_cfg["cumotion"] else meta_cfg["default"]["cumotion"]["warmup_cfg"]
-
-        
     for a_idx, a_cfg in enumerate(agent_cfgs):
         if a_cfg["planner"] == 'mpc':
             n_obstacle_spheres = sum(sphere_counts_total[other_idx] for other_idx in col_pred_with[a_idx])
@@ -3052,8 +3149,8 @@ def main(meta_cfg, out_path):
     for a_idx, a_cfg in enumerate(agent_cfgs):
         usd_help.add_subroot('/World', f'/World/robot_{a_idx}', Pose.from_list(base_pose[a_idx]))
         robot, robot_prim_path = add_robot_to_scene(robot_cfgs[a_idx], my_world, subroot=f'/World/robot_{a_idx}', robot_name=f'robot_{a_idx}', position=base_pose[a_idx][:3], orientation=base_pose[a_idx][3:], initialize_world=False) # add_robot_to_scene(self.robot_cfg, self.world, robot_name=self.robot_name, position=self.p_R)
-        sim_robot_cfg = a_cfg["sim_robot_cfg"] if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
-        viz_color = a_cfg["viz_color"] if "viz_color" in a_cfg else meta_cfg["default"]["viz_color"]
+        sim_robot_cfg = a_cfg["sim_robot_cfg"] # if "sim_robot_cfg" in a_cfg else meta_cfg["default"]["sim_robot_cfg"]
+        viz_color = a_cfg["viz_color"] # if "viz_color" in a_cfg else meta_cfg["default"]["viz_color"]
         sim_robot = SimRobot(robot, robot_prim_path, **sim_robot_cfg, viz_color=viz_color)
         world_cfg = WorldConfig()
         pose_utils = PoseUtils(meta_cfg["pose_utils"]["seed"])
@@ -3076,13 +3173,13 @@ def main(meta_cfg, out_path):
             raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
         
-        a_stat_man_cfg = deepcopy(a_cfg["stat_man_cfg"]) if "stat_man_cfg" in a_cfg else deepcopy(meta_cfg["default"]["stat_man_cfg"])
+        a_stat_man_cfg = deepcopy(a_cfg["stat_man_cfg"]) # if "stat_man_cfg" in a_cfg else deepcopy(meta_cfg["default"]["stat_man_cfg"])
         a_stat_man_cfg["unique_name"] = f'agent_{a_idx}'
         a = CuAgent(
             a_idx,
             tensor_args,
             planner, 
-            cu_world_wrapper_cfg=a_cfg["cu_world_wrapper"] if "cu_world_wrapper" in a_cfg else meta_cfg["default"]["cu_world_wrapper"],
+            cu_world_wrapper_cfg=a_cfg["cu_world_wrapper"], # if "cu_world_wrapper" in a_cfg else meta_cfg["default"]["cu_world_wrapper"],
             robot_cfg_path=robot_cfgs_paths[a_idx],
             robot_cfg=robot_cfgs[a_idx],
             sim_robot=sim_robot, # optional, when using simulation
@@ -3101,7 +3198,7 @@ def main(meta_cfg, out_path):
     agents_task_cfgs = []
     target_colors = ['red', 'green', 'blue', 'yellow', 'purple', 'orange', 'pink', 'brown', 'gray', 'black']
     color_cnt = 0
-    arm_poses = meta_cfg["sim_task"]["arm_poses"] # arms base poses
+    arm_poses = meta_cfg["sim_task"]["arm_poses"] if "arm_poses" in meta_cfg["sim_task"] else [[] for _ in range(len(cu_agents))] # arms base poses
     centrealized = len(cu_agents) == 1
     for a_idx, a in enumerate(cu_agents):
         if a.sim_robot is not None:
@@ -3401,7 +3498,7 @@ def main(meta_cfg, out_path):
                     
                     print(f"All Outputs saved to {out_path}")
                 
-                    
+                    a.planner.kill_cost_plots()
                     if stop_event.is_set():
                         simulation_app.close()
                         return False
@@ -3420,6 +3517,7 @@ def main(meta_cfg, out_path):
                 sim_lock = Lock()
                 plans_lock = Lock()
                 plans_board = [None for _ in range(len(cu_agents))]
+                debug_time = time()
 
                 while simulation_app.is_running():
                     #lw.on()
@@ -3439,17 +3537,19 @@ def main(meta_cfg, out_path):
 
                     #lw.off()
                     my_world.step(render=True)
-                    sim_task.update_stats(t)
+                    # sim_task.update_stats(t)
                     
                     t += 1
                     print(f"t: {t}")
-                    
+                    print(f"async iter time: {time() - debug_time}")
+                    debug_time = time()
+
                     if stop_simulation:
                         print("Saving stats...")
-                        a_stats = [a.stats for a in cu_agents]
-                        stats_out = sim_task.stats.save(formatted_time,a_stats,{})
+                        # a_stats = [a.stats for a in cu_agents]
+                        # stats_out = sim_task.stats.save(formatted_time,a_stats,{})
                         
-                        print(f"Stats saved to {stats_out}")
+                        # print(f"Stats saved to {stats_out}")
                         simulation_app.close()
                         break
                             
