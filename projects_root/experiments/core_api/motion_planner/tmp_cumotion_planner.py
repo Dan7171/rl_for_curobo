@@ -46,7 +46,7 @@ from copy import copy, deepcopy
 import dataclasses
 from time import time, sleep
 import subprocess
-from threading import Lock, Event, Thread
+from threading import Event, Thread
 from typing import Optional, Tuple, Dict, Union, Callable
 from queue import Queue, Empty
 from typing_extensions import List
@@ -2253,7 +2253,7 @@ class CuAgent:
             except Exception:
                 # swallow to keep worker alive
                 pass
-
+        
     def reset_col_model_from_isaac_sim(self, usd_help:UsdHelper, robot_prim_path:str, ignore_substrings:List[str]):
 
         # Get world config from simulation
@@ -2366,8 +2366,8 @@ class CuAgent:
         psw = self.planning_stopwatch
         
         while not stop_event.is_set():
-
-            if self.sim_robot is not None:
+            
+            if self.sim_robot is not None:    
 
                 ctrl_dof_names = self.sim_robot.robot.dof_names
                 ctrl_dof_indices = self.sim_robot.robot.get_dof_index
@@ -2556,16 +2556,16 @@ class CuAgent:
 
             # 2) Sense obstacles and joints (single-threaded via Kit runloop)
             self.update_col_model_from_isaac_sim(
-                self.sim_robot.path,
-                usd_help,
-                ignore_list=self.cu_world_wrapper_update_policy["never_add"] + self.cu_world_wrapper_update_policy["never_update"],
+                self.sim_robot.path, 
+                usd_help, 
+                ignore_list=self.cu_world_wrapper_update_policy["never_add"] + self.cu_world_wrapper_update_policy["never_update"], 
                 paths_to_search_obs_under=["/World"],
             )
-            js = self.sim_robot.get_js(sync_new=True)
+            js = self.sim_robot.get_js(sync_new=True) 
             if js is None:
                 self._last_t = t
                 continue
-
+                    
             # 3) Prepare current curobo state and update planner
             _0 = self.tensor_args.to_device(js.positions) * 0.0
             cu_js = JointState(
@@ -2574,21 +2574,21 @@ class CuAgent:
                 _0,
                 ctrl_dof_names,
                 _0,
-            ).get_ordered_joint_state(self.planner.ordered_j_names)
-
+            ).get_ordered_joint_state(self.planner.ordered_joint_names)
+                    
             if isinstance(self.planner, MpcPlanner):
                 self.planner.update_state(cu_js)
-
+                    
             # Optional: build data for collision metric/stats
             task_space_state_R = self.planner.get_state_in_task_space(cu_js, frame='R')
             spheres_R = task_space_state_R['spheres']
             p_R, r_R = spheres_R['p'], spheres_R['r']
             pr_R = torch.cat((p_R.squeeze(0), r_R.T), dim=1)
-
+                    
             # 4) Update collision predictor from plans if subscribing
             if self.is_plan_subscriber():
                 self.update_col_pred(plans_board)
-
+                                    
             # 5) Read latest goals snapshot and update robot context
             current_goals = {ln: goals[ln] for ln in list(goals.keys())}
             robot_context = get_topics().get_default_env()[self.idx]
@@ -2612,7 +2612,7 @@ class CuAgent:
                     raise ValueError(f"Invalid planner type: {type(self.planner).__name__}")
             finally:
                 psw.off()
-
+                    
             # 7) Act - apply articulation action (single-threaded via Kit runloop)
             if action is not None:
                 isaac_action = self.planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
@@ -2636,7 +2636,7 @@ class CuAgent:
                             pass
 
             self._last_t = t
-
+        
     def async_control_step_sim(self,sim_lock,plans_lock,plans_board,goals,sim_task,usd_help):
         """
         like async_control_loop_sim, but only for one step
@@ -3774,79 +3774,89 @@ def main(meta_cfg, out_path):
                 # Shared debug store and per-agent goals
                 pts_debug = []
                 link_name_to_target_pose = [{} for _ in range(len(cu_agents))]
-
+                    
                 # Board of published plans (for subscriptions)
                 plans_board = [None for _ in range(len(cu_agents))]
-
-                while simulation_app.is_running():
-                    iter_start_time = time()
-                    # update targets/goals once per frame
-                    _link_name_to_target_pose = sim_task.step()
-                    for i, a in enumerate(cu_agents):
-                        link_name_to_target_pose[i].update(_link_name_to_target_pose[i])
+                
+                # Define the main async simulation loop
+                async def async_simulation_loop():
+                    t = 0
+                    while simulation_app.is_running():
+                        iter_start_time = time()
                         
-                    # environment step and advance Kit one frame
-                    sim_env.step()
-                    my_world.step(render=True)
+                        # update targets/goals once per frame
+                        _link_name_to_target_pose = sim_task.step()     
+                        for i, a in enumerate(cu_agents):
+                            link_name_to_target_pose[i].update(_link_name_to_target_pose[i])
 
-                    # plan publishing (sync parity): publish last-step estimated plan if configured
-                    for i, a in enumerate(cu_agents):
-                        if a.plan_pub_sub is not None and a.plan_pub_sub.should_pub_now(t):
-                            js_prev = a.sim_robot.get_js(sync_new=False)
-                            if js_prev is not None:
-                                share_full_plan = a.is_plan_publisher()
-                                plan = a.planner.get_estimated_plan(
-                                    a.sim_robot.robot.dof_names,
-                                    a.plan_pub_sub.valid_spheres,
-                                    js_prev,
-                                    valid_spheres_only=False,
-                                    naive=not share_full_plan,
-                                )
-                                if plan is not None:
-                                    plans_board[i] = plan
+                        # environment step and advance Kit one frame
+                        sim_env.step()
+                        my_world.step(render=True)
 
-                    # post latest state to agent workers
-                    for i, a in enumerate(cu_agents):
-                        js = a.sim_robot.get_js(sync_new=True)
-                        if js is None:
-                            continue
-                        _0 = tensor_args.to_device(js.positions) * 0.0
-                        cu_js = JointState(
-                            tensor_args.to_device(js.positions),
-                            tensor_args.to_device(js.velocities),
-                            _0,
-                            a.sim_robot.robot.dof_names,
-                            _0,
-                        ).get_ordered_joint_state(a.planner.ordered_j_names)
-                        # pass current goals and let worker plan independently
-                        a.post_frame_state(cu_js, link_name_to_target_pose[i], joint_velocities=js.velocities)
+                        # plan publishing (sync parity): publish last-step estimated plan if configured
+                        for i, a in enumerate(cu_agents):
+                            if a.plan_pub_sub is not None and a.plan_pub_sub.should_pub_now(t):
+                                js_prev = a.sim_robot.get_js(sync_new=False)
+                                if js_prev is not None:
+                                    share_full_plan = a.is_plan_publisher()
+                                    plan = a.planner.get_estimated_plan(
+                                        a.sim_robot.robot.dof_names,
+                                        a.plan_pub_sub.valid_spheres,
+                                        js_prev,
+                                        valid_spheres_only=False,
+                                        naive=not share_full_plan,
+                                    )
+                                    if plan is not None:
+                                        plans_board[i] = plan
 
-                    # apply actions if ready and update collision predictors for subscribers
-                    for i, a in enumerate(cu_agents):
-                        if a.is_plan_subscriber():
-                            a.update_col_pred(plans_board)
-                        action = a.try_get_action()
-                        if action is not None:
-                            isaac_action = a.planner.convert_action_to_isaac(
-                                action,
+                        # post latest state to agent workers
+                        for i, a in enumerate(cu_agents):
+                            js = a.sim_robot.get_js(sync_new=True)
+                            if js is None:
+                                continue
+                            _0 = tensor_args.to_device(js.positions) * 0.0
+                            cu_js = JointState(
+                                tensor_args.to_device(js.positions),
+                                tensor_args.to_device(js.velocities),
+                                _0,
                                 a.sim_robot.robot.dof_names,
-                                a.sim_robot.robot.get_dof_index,
-                            )
-                            a.sim_robot.articulation_controller.apply_action(isaac_action)
-                            a.step_count += 1
+                                _0,
+                            ).get_ordered_joint_state(a.planner.ordered_j_names)
+                            # pass current goals and let worker plan independently
+                            a.post_frame_state(cu_js, link_name_to_target_pose[i], joint_velocities=js.velocities)
 
-                    # keep external t if you still use it elsewhere
-                    t += 1
-                    print(f"debug t: {t}")
-                    print(f"debug async iter time: {time() - iter_start_time}")
-                    for i, a in enumerate(cu_agents):
-                        print(f'debug a{i} steps:{a.step_count}')
+                        # apply actions if ready and update collision predictors for subscribers
+                        for i, a in enumerate(cu_agents):
+                            if a.is_plan_subscriber():
+                                a.update_col_pred(plans_board)
+                            action = a.try_get_action()
+                            if action is not None:
+                                isaac_action = a.planner.convert_action_to_isaac(
+                                    action,
+                                    a.sim_robot.robot.dof_names,
+                                    a.sim_robot.robot.get_dof_index,
+                                )
+                                a.sim_robot.articulation_controller.apply_action(isaac_action)
+                                a.step_count += 1
 
+                        # keep external t if you still use it elsewhere
+                        t += 1
+                        print(f"debug t: {t}")
+                        print(f"debug async iter time: {time() - iter_start_time}")
+                        for i, a in enumerate(cu_agents):
+                            print(f'debug a{i} steps:{a.step_count}')
+                        
+                        # Update the simulation app (like in the Isaac Sim example)
+                        simulation_app.update()
+
+                # Run the async simulation loop using Isaac Sim's coroutine system
+                simulation_app.run_coroutine(async_simulation_loop())
+                
                 # shutdown
                 stop_event.set()
                 for a in cu_agents:
                     a.stop_worker()
-                simulation_app.close() 
+                simulation_app.close()
 
 def reset_stage(my_world):
     """

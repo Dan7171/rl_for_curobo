@@ -129,7 +129,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     save: True
                 
   
-async: True
+async: False
 async_type: "loop" # "step" or "loop"
 
 pose_utils:
@@ -192,7 +192,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
 - mpc:
     mpc_solver_cfg:
-      plot_costs: True # True
+      plot_costs: False # True
     
   sim_robot_cfg:
     visualize_col_pred:
