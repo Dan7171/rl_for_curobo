@@ -72,7 +72,7 @@ collision_spheres:
       radius: 0.043
   tool0:
     - center: [0.001, 0.001, 0.05]
-      radius: 0.01 #-0.01
+      radius: 0.03 #-0.01
 
   shoulder_link_1:
     - center: [0.0, 0.0, 0.0]
@@ -136,5 +136,5 @@ collision_spheres:
       radius: 0.043
   tool1:
     - center: [0.001, 0.001, 0.05]
-      radius: 0.01 # -0.01
+      radius: 0.03 # -0.01
 

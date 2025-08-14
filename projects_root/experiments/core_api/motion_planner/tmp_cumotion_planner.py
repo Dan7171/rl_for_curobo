@@ -942,7 +942,7 @@ class BinTask(SimTask):
         for quarter_pos in [quarter0_pos, quarter1_pos, quarter2_pos, quarter3_pos]:
             goal_pos = copy(quarter_pos)
             goal_pos[2] = height + 0.15 # drop 15 cm above the bin
-            goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
+            goal_quat = PoseUtils.rotate_quat([0,1,0,0], [0,0,180.0], q_in_wxyz=True, q_out_wxyz=True) # np.array([0,1,0,0]) # facing down (grasp rotation)
             pose = (goal_pos, goal_quat)
             self.bin_goal_poses.append(pose)
 
@@ -1349,14 +1349,6 @@ class CuPlanner:
         # We first convert the poses to world frame
         if frame == 'W':
             for key in d.keys():
-                # pKey = 
-                
-                # if 'q' not in d[key].keys(): # spheres
-                #     qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
-                #     qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
-                # else: # links and ee
-                #     qKey = d[key]['q']
-
                 # OPTIMIZED VERSION: Use ultra-fast specialized function
                 X_world = transform_poses_batched_optimized_for_spheres(torch.cat([d[key]['p'], d[key]['q']], dim=-1), robot_base_pose)
                 d[key]['p'] = X_world[...,:3]
@@ -1891,7 +1883,7 @@ class CumotionPlanner(CuPlanner):
         """
         # print(f"joint_velocities={joint_velocities}")
         # print(f"max(abs(joint_velocities))={np.max(np.abs(joint_velocities))}")
-        return np.max(np.abs(joint_velocities)) > 0.1
+        return np.max(np.abs(joint_velocities)) > 0.5
     
     def yield_action(self, goals:dict[str, Pose], cu_js:JointState, joint_velocities:np.ndarray,stop_when_goal_changed:bool=True):
         """
@@ -1907,23 +1899,23 @@ class CumotionPlanner(CuPlanner):
         CONSUME_FROM_PLAN = 2 # CONTINUE THE CURRENT ACTION SEQUENCE
 
         if self._outdated_plan_goals(goals):
-            # print(f'debug outdated plan goals')
+            print(f'debug outdated plan goals')
             if self._in_move(joint_velocities):
-                # print(f"DEBUG in move, stopping in place...")
+                print(f"DEBUG in move, stopping in place...")
                 code = STOP_IN_PLACE if stop_when_goal_changed else CONSUME_FROM_PLAN # STOP_IN_PLACE
-                # print(f'debug: robot in move. a: {"consume" if code == CONSUME_FROM_PLAN else "stop"}')
+                print(f'debug: robot in move. a: {"consume" if code == CONSUME_FROM_PLAN else "stop"}')
             else:
-                # print(f"debug: robot stopped. a: plan new")
+                print(f"debug: robot stopped. a: plan new")
                 code = PLAN_NEW
             
         else:
-            # print(f'valid plan goals, consuming from plan...')
+            print(f'valid plan goals, consuming from plan...')
             code = CONSUME_FROM_PLAN
-        # print(f"DEBUG code: {code}")
+        print(f"DEBUG code: {code}")
         consume = True
         if code == PLAN_NEW:
-            # print(f'planning...')
-            # print(f'debug: goals: {goals}')
+            print(f'planning...')
+            print(f'debug: goals: {goals}')
             _success = self._plan_new(cu_js, goals)
             
         elif code == STOP_IN_PLACE:
@@ -1932,11 +1924,11 @@ class CumotionPlanner(CuPlanner):
                 velocity=cu_js.velocity * 0.0,
                 joint_names=cu_js.joint_names,
             )
-            # print(f'stopping robot...')
+            print(f'stopping robot...')
             consume = False
 
         elif code == CONSUME_FROM_PLAN:
-            # print(f'consuming current plan...')
+            print(f'consuming current plan...')
             pass
         else:
             raise ValueError(f"Invalid code: {code}")

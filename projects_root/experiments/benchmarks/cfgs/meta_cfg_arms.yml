@@ -38,24 +38,40 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_activation_distance: 0.025
       fixed_iters_trajopt: True
       maximum_trajectory_dt: 0.5
+      ik_opt_iters: 500
+      # use_cuda_graph: True 
+      # self_collision_check: True
+      # collision_checker_type: MESH
+      # collision_cache: {"obb": 15, "mesh": 15}
+      # interpolation_dt: 0.03
+      # collision_activation_distance: 0.025
+      # fixed_iters_trajopt: True
+      # maximum_trajectory_dt: 0.5
       # ik_opt_iters: 500 # 1000
-      num_ik_seeds: 16 # 32 # 256 # 128 # 32
-      position_threshold: 0.05 #0.05 # 0.005
-      rotation_threshold: 0.5 # 0.05
-      cspace_threshold: 0.5 # 0.05
+      # num_ik_seeds: 32 # 256 # 128 # 32
+      # position_threshold: 0.05 #0.05 # 0.005
+      # rotation_threshold: 0.5 # 0.05
 
-    
     motion_gen_plan_cfg:
       enable_graph: False
       enable_graph_attempt: 4
-      max_attempts: 10 # 10
+      max_attempts: 10
       time_dilation_factor: 0.5
-      finetune_attempts: 30 # 5
-      enable_finetune_trajopt: True  # True
     
     warmup_cfg:
       enable_graph: True
       warmup_js_trajopt: False
+    # motion_gen_plan_cfg:
+    #   enable_graph: False
+    #   enable_graph_attempt: 4
+    #   max_attempts: 10 # 10
+    #   time_dilation_factor: 0.5
+    #   finetune_attempts: 30 # 5
+    #   enable_finetune_trajopt: False # True  # True
+    
+    # warmup_cfg:
+    #   enable_graph: True
+    #   warmup_js_trajopt: False
     
   
   mpc: # mpc related default values (if not specified in the agent)
