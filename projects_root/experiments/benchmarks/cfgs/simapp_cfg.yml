@@ -3,14 +3,14 @@ gui_mode:
   enable_gpu_dynamics: True
   init_app_settings:
     headless: null # set 'true' to run in headless mode
-    width: 1280
-    height: 720
+    width: 800 # 280
+    height: 600 # 720
     window_width: 1920
     window_height: 1080
     # width: "1920"
     # height: "1080"
-    physics_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
-    rendering_dt: 0.03 # 0.016666666666666666 # 0.016666666666666666
+    physics_dt: 0.05 # 0.03 # 0.016666666666666666 # 0.016666666666666666
+    rendering_dt: 0.05 # 0.03 # 0.016666666666666666 # 0.016666666666666666
     backend: "torch"
     
 livestream_mode:

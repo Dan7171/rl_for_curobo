@@ -2988,8 +2988,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                         },
                     'ur5e': {
                         1:f'ur5e.yml',
-                        '2_05':f'dual_ur5e.yml',
-                        '3_05': f'tri_ur5e.yml',
+                        '2_05':f'dual_ur5e_b.yml',
                         '4_05':'quad_ur5e_05.yml',
                         '4_045':'quad_ur5e_045.yml'
                         }
@@ -3065,7 +3064,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             planner_type = alg_to_planner[alg]
                             n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
                             if cent:
-                                robot_cfg_path =  cent_robot_cfgs[robot_fam][n_arms]
+                                robot_cfg_path =  cent_robot_cfgs[robot_fam][robot_type] #[n_arms]
                                 n_cfgs = 1
                             else:
                                 robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
