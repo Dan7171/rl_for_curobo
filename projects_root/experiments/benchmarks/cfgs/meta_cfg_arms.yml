@@ -49,8 +49,8 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       # maximum_trajectory_dt: 0.5
       # ik_opt_iters: 500 # 1000
       # num_ik_seeds: 32 # 256 # 128 # 32
-      # position_threshold: 0.05 #0.05 # 0.005
-      # rotation_threshold: 0.5 # 0.05
+      position_threshold: 0.05 #0.05 # 0.005
+      rotation_threshold: 100.0 # very high to disable rotation threshold (original 0.05)
 
     motion_gen_plan_cfg:
       enable_graph: False
@@ -171,7 +171,7 @@ sim_task:
     bin:
       wall_dims_hwd: [0.3,0.4,0.05] # height, width, depth of the bin walls
       p_err_threh: 0.05
-      q_err_threh: 300.0
+      q_err_threh: 400.0
       
   # tasks stat managers    
   stat_man_cfgs:

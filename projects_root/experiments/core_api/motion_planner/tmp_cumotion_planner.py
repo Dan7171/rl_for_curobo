@@ -1897,16 +1897,24 @@ class CumotionPlanner(CuPlanner):
         PLAN_NEW = 0 # REPLAN NEXT ACTION SEQUENCE (JOINT POSITIONS)
         STOP_IN_PLACE = 1 # SEND STOP COMMAND TO JOINT CONTROLLER (VELOCICY 0)
         CONSUME_FROM_PLAN = 2 # CONTINUE THE CURRENT ACTION SEQUENCE
-
+        
         if self._outdated_plan_goals(goals):
             print(f'debug outdated plan goals')
             if self._in_move(joint_velocities):
                 print(f"DEBUG in move, stopping in place...")
                 code = STOP_IN_PLACE if stop_when_goal_changed else CONSUME_FROM_PLAN # STOP_IN_PLACE
+                if code == STOP_IN_PLACE:
+                    if not hasattr(self, "_js_at_stop_cmd"):
+                        self._js_at_stop_cmd = None  
+                    if self._js_at_stop_cmd is None:
+                        self._js_at_stop_cmd = deepcopy(cu_js.position)
+
                 print(f'debug: robot in move. a: {"consume" if code == CONSUME_FROM_PLAN else "stop"}')
             else:
                 print(f"debug: robot stopped. a: plan new")
+                self._js_at_stop_cmd = None # reset the js at stop cmd
                 code = PLAN_NEW
+                
             
         else:
             print(f'valid plan goals, consuming from plan...')
@@ -1920,8 +1928,8 @@ class CumotionPlanner(CuPlanner):
             
         elif code == STOP_IN_PLACE:
             action = JointState(
-                position=cu_js.position,
-                velocity=cu_js.velocity * 0.0,
+                position=self._js_at_stop_cmd, # cu_js.position,
+                # velocity=cu_js.velocity * 0.0,
                 joint_names=cu_js.joint_names,
             )
             print(f'stopping robot...')
