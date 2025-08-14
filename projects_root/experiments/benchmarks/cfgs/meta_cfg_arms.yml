@@ -129,8 +129,8 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     save: True
                 
   
-async: False
-async_type: "step" # "step" or "loop"
+async: True
+async_type: "loop" # "step" or "loop"
 
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
@@ -198,6 +198,10 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
     visualize_col_pred:
       own: True
       obs: True
+    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+      is_on_world: True # visualize collision spheres in world frame
+      ts_delta: 1 # int
+
     
 
 # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
