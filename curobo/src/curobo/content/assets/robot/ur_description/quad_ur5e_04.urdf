@@ -73,7 +73,7 @@
   <joint name="base_fixture_j_base_link" type="fixed">
     <parent link="base_fixture_link"/>
     <child link="base_link"/>
-    <origin rpy="0 0 0" xyz="0.4 0.4 0"/>
+    <origin rpy="0 0 2.355" xyz="0.4 0.4 0"/>
   </joint>
 
 
@@ -81,21 +81,21 @@
   <joint name="base_fixture_j_base_link_1" type="fixed">
     <parent link="base_fixture_link"/>
     <child link="base_link_1"/>
-    <origin rpy="0 0 0.0" xyz="-0.4 0.4 0"/>
+    <origin rpy="0 0 0.785" xyz="-0.4 0.4 0"/>
   </joint>
 
     <!-- joints: main serial chain -->
   <joint name="base_fixture_j_base_link_2" type="fixed">
     <parent link="base_fixture_link"/>
     <child link="base_link_2"/>
-    <origin rpy="0 0 3.14" xyz="0.4 -0.4 0"/>
+    <origin rpy="0 0 3.925" xyz="0.4 -0.4 0"/>
   </joint>
 
     <!-- joints: main serial chain -->
   <joint name="base_fixture_j_base_link_3" type="fixed">
     <parent link="base_fixture_link"/>
     <child link="base_link_3"/>
-    <origin rpy="0 0 3.14" xyz="-0.4 -0.4 0"/>
+    <origin rpy="0 0 5.495" xyz="-0.4 -0.4 0"/>
   </joint>
 
 

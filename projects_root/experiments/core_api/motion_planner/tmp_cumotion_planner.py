@@ -2990,7 +2990,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                         1:f'ur5e.yml',
                         '2_05':f'dual_ur5e_b.yml',
                         '4_05':'quad_ur5e_05.yml',
-                        '4_045':'quad_ur5e_045.yml'
+                        '4_04':'quad_ur5e_04.yml'
                         }
                     }
     
