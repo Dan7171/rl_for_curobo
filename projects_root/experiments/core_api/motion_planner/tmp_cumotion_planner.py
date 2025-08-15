@@ -3779,7 +3779,7 @@ def main(meta_cfg, out_path):
                                     
                                     for other_idx in range(len(collisions)):
                                         for k,l in collisions[other_idx]:
-                                            print(f"debug collisions: spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                            print(f"debug COLLISIONS!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                     
                                     val = len(collisions) > 0
                                     # for i in range(len(collisions)):

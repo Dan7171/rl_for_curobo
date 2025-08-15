@@ -26,6 +26,7 @@ class DynamicObsCostConfig(CostConfig):
     prior_pos_to_rot_ratio: float = 0.9 # If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.
     prior_weight_mode: str = "linear" # or exponential
     safety_margin: float = 0.1
+    wta_trust: float = 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
     assert a_select_mode in ["normal", "col_free"], "Invalid action selection mode"
     assert prior_rot_err_impact_angle >= 0 and prior_rot_err_impact_angle <= 180, "Rotation error affection angle must be between 0 and 180"
     assert prior_p_err_impact_rad >= 0 , "Position error affection radius must be positive (its recommended to set it small, like 0.3 or below)"
@@ -198,7 +199,8 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             },
             col_with_idx_map,
             self.safety_margin,
-            self.prior_rule
+            self.prior_rule,
+            self.wta_trust
         )
         print(f"DynamicObsCost successfully initialized for robot {self.robot_id} with {n_obstacle_spheres} obstacle spheres")
     

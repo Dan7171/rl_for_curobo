@@ -44,6 +44,7 @@ class DynamicObsCollPredictor:
                  col_with_idx_map=None, # mapping from robot IDs to their index ranges in concatenated tensor
                  safety_margin=0.1,
                  prior_rule='none',
+                 wta_trust=1.0,
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -66,6 +67,7 @@ class DynamicObsCollPredictor:
         self.safety_margin = safety_margin
         self.n_rollouts = n_rollouts
         self.n_own_spheres = n_own_spheres
+        self.wta_trust = wta_trust
         
         # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
@@ -332,7 +334,16 @@ class DynamicObsCollPredictor:
                     start_idx_subto = robot_map['start_idx']
                     end_idx_subto = robot_map['end_idx']
                     # We now set self.pairwise_surface_dist_buf to a very high distance for the subto spheres (to ignore them in collision check and prioritize ourselves on top of them)
-                    self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :] = 10000 # very high fake norm 
+                    err_ratio = (p_err_subto / p_own_err) 
+                    # make distances to the other robot spheres higher, trusting it to handle collisions (since it's ratio < 1 therefore it's inferior)
+                    self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :] *= (err_ratio ** self.wta_trust) # = 10000 # very high fake norm 
+                
+                    
+                    # superiority = err_ratio > 1
+                    # if superiority:
+                    #     # make distances to the other robot spheres higher, trusting it to handle collisions (since it's ratio < 1 therefore it's inferior)
+                    #     self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :] *= (err_ratio ** self.wta_trust) # = 10000 # very high fake norm 
+                   
 
                 
         

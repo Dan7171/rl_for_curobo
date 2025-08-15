@@ -1,5 +1,5 @@
 timeout:
-  tstep: 3000 # world steps timeout
+  tstep: 500 # world steps timeout
   tsec: 3000 # seconds timeout
   physics_tsec: 3000 # physics seconds (world time) timeout
 
@@ -10,7 +10,7 @@ out:
   frame_cap: # frame capturing
     is_on: True # capture and save frames to pngs
     to_mp4_cfg:
-      is_on: False # convert frames to mp4
+      is_on: True # convert frames to mp4
       result_path: '' # result path for the mp4 video. If '', will be saved in the frames directory under the name 'simulation_video.mp4'
       in_background: True # convert frames to mp4 in background
       video_fps: 15 # frames per second (for video)
@@ -170,8 +170,8 @@ sim_task:
       p_err_threh: 0.05
       q_err_threh: 300.0
     bin:
-      wall_dims_hwd: [0.25,0.4,0.05] # height, width, depth of the bin walls
-      p_err_threh: 0.1
+      wall_dims_hwd: [0.20,0.40,0.05] # height, width, depth of the bin walls
+      p_err_threh: 0.05
       q_err_threh: 300.0
       # bin_pos: [0.0,0.0,0.0] # set only in one arm case (for debugging)
 
@@ -211,14 +211,14 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
 - mpc:
     mpc_solver_cfg:
-      plot_costs: True # True
+      plot_costs: False # True
     
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True
       obs: False # True
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True #True # visualize collision spheres in world frame
+      is_on_world: False #True # visualize collision spheres in world frame
       ts_delta: 1 # int
 - mpc:
 
@@ -230,7 +230,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       own: False # True
       obs: False # True
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True # True # visualize collision spheres in world frame
+      is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int
 
 
