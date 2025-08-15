@@ -1,7 +1,7 @@
 timeout:
-  tstep: 900 # world steps timeout
-  tsec: 300 # seconds timeout
-  physics_tsec: 30 # physics seconds (world time) timeout
+  tstep: 3000 # world steps timeout
+  tsec: 3000 # seconds timeout
+  physics_tsec: 3000 # physics seconds (world time) timeout
 
 out:
   out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin' # output directory
@@ -10,7 +10,7 @@ out:
   frame_cap: # frame capturing
     is_on: True # capture and save frames to pngs
     to_mp4_cfg:
-      is_on: True # convert frames to mp4
+      is_on: False # convert frames to mp4
       result_path: '' # result path for the mp4 video. If '', will be saved in the frames directory under the name 'simulation_video.mp4'
       in_background: True # convert frames to mp4 in background
       video_fps: 15 # frames per second (for video)
@@ -61,6 +61,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     warmup_cfg:
       enable_graph: True
       warmup_js_trajopt: False
+    
     # motion_gen_plan_cfg:
     #   enable_graph: False
     #   enable_graph_attempt: 4
@@ -78,7 +79,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     mpc_solver_cfg:
       override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
       use_cuda_graph: False 
-      step_dt: 0.02
+      step_dt: 0.0333
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
@@ -92,7 +93,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
       is_on_world: False # visualize collision spheres in world frame
       is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
-      ts_delta: 2 # int
+      ts_delta: 5 # int
       color: viz_color
 
     visualize_col_pred:
@@ -139,7 +140,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   stat_man_cfg:
     dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
     keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
-    stat_names: ['rec', 'link_target_poses', 'spheres', 'total_planning_time']
+    stat_names: ['rec', 'link_target_poses', 'rrc', 'total_planning_time']
     collect_dt: [1,1,1,5,10,5] # dt for each stat
     verbose: False # [False,False,False,False,False,True]
     save: True
@@ -169,9 +170,11 @@ sim_task:
       p_err_threh: 0.05
       q_err_threh: 300.0
     bin:
-      wall_dims_hwd: [0.3,0.4,0.05] # height, width, depth of the bin walls
-      p_err_threh: 0.05
-      q_err_threh: 400.0
+      wall_dims_hwd: [0.25,0.4,0.05] # height, width, depth of the bin walls
+      p_err_threh: 0.1
+      q_err_threh: 300.0
+      # bin_pos: [0.0,0.0,0.0] # set only in one arm case (for debugging)
+
       
   # tasks stat managers    
   stat_man_cfgs:
@@ -208,16 +211,35 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
 - mpc:
     mpc_solver_cfg:
-      plot_costs: False # True
+      plot_costs: True # True
     
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True
       obs: False # True
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: False #True # visualize collision spheres in world frame
+      is_on_world: True #True # visualize collision spheres in world frame
+      ts_delta: 1 # int
+- mpc:
+
+    mpc_solver_cfg:
+      plot_costs: True # True
+    
+  sim_robot_cfg:
+    visualize_col_pred:
+      own: False # True
+      obs: False # True
+    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+      is_on_world: True # True # visualize collision spheres in world frame
       ts_delta: 1 # int
 
+
+- mpc:
+    mpc_solver_cfg:
+      plot_costs: False #True # True
+- mpc:
+    mpc_solver_cfg:
+      plot_costs: False #True # True
     
 
 # - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml

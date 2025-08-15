@@ -754,7 +754,12 @@ class ColCheckWrapper:
 
         esdf = esdf.view(-1)           # signed: +inside, −outside
         d_outside_pos = (-esdf)        # outside positive
-        return float(d_outside_pos.min().item() - wc.max_distance) # < 0 # 0.0 no collision, negative = collison
+        collision_penetration_depth = float(d_outside_pos.min().item() - wc.max_distance) # < 0 # 0.0 no collision, negative = collison
+        dist_to_col = collision_penetration_depth + wc.max_distance 
+        if dist_to_col < 0.01:
+            print(f"debug: collision penetration depth: {collision_penetration_depth}")
+            print(f"debug: sphere in col: {d_outside_pos.argmin()}")
+        return dist_to_col  
         # return float(d_outside_pos.min().item()) 
     # def get_min_esdf_distance(self, spheres: torch.Tensor) -> float:
     #     """

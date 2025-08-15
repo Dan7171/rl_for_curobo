@@ -43,6 +43,7 @@ class DynamicObsCollPredictor:
                  sparse_spheres:dict={'exclude_self': [], 'exclude_others': []}, # list of ints, each int is the index of the sphere to exclude from the collision check.
                  col_with_idx_map=None, # mapping from robot IDs to their index ranges in concatenated tensor
                  safety_margin=0.1,
+                 prior_rule='none',
                  ):
         """ Initialize H dynamic obstacle collision checker, for each time step in the horizon, 
         as well as setting the cost function parameters for the dynamic obstacle cost function.
@@ -65,11 +66,21 @@ class DynamicObsCollPredictor:
         self.safety_margin = safety_margin
         self.n_rollouts = n_rollouts
         self.n_own_spheres = n_own_spheres
-
+        
         # control sparsity over horizon (for efficiency)
         self.sparse_steps = sparse_steps
         self._window_ranges = [] 
         self._debug = {'p_own':np.ndarray([]), 'p_obs':np.ndarray([])}
+        
+        # pose wta conflict resolution
+        self.prior_rule = prior_rule
+        assert self.prior_rule in ['none', 'pose', 'random', 'pose_wta'], "Invalid prior rule"
+        if self.prior_rule == 'pose_wta': # "winner takes it all" 
+            self.pose_wta_conflict_resolution = {} # {robot_id: (p_err, q_err)}
+
+
+        
+        
         if self.sparse_steps['use']:
             assert self.sparse_steps['ratio'] > 0 and self.sparse_steps['ratio'] <= 1, "Error: The ratio must be between 0 and 1"
 
@@ -307,6 +318,23 @@ class DynamicObsCollPredictor:
 
         # Compute L2 norm (distance between sphere centers)
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_surface_dist_buf)
+        
+        
+        if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
+            # Winner takes all conflict resolution is used
+            p_own_err, q_own_err = self.pose_wta_conflict_resolution['own_errors']
+            subto_goal_errs = self.pose_wta_conflict_resolution['subto_errors']
+            for st_idx in subto_goal_errs.keys():
+                p_err_subto, q_err_subto = subto_goal_errs[st_idx]
+                if p_err_subto > p_own_err: # self has lower error than subto, so self is the winner. Self will set subto's distance to a very high distance to ignore it in action
+                    subto_indices = self.col_with_idx_map[st_idx]['valid_indices']
+                    robot_map = self.col_with_idx_map[st_idx]
+                    start_idx_subto = robot_map['start_idx']
+                    end_idx_subto = robot_map['end_idx']
+                    # We now set self.pairwise_surface_dist_buf to a very high distance for the subto spheres (to ignore them in collision check and prioritize ourselves on top of them)
+                    self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :] = 10000 # very high fake norm 
+
+                
         
         # Subtract radius sums to get surface-to-surface distance
         self.pairwise_surface_dist_buf.sub_(self.pairwise_radsum_broadcast)

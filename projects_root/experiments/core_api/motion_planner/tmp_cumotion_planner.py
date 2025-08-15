@@ -394,7 +394,7 @@ class SimTask:
                 self.name_target_to_link[a_idx][target_name] = link_name
                 self.target_name_to_path[a_idx][target_name] = target_path
                 self.target_path_to_prim[a_idx][target_path] = target_prim
-                self.goal_errors[a_idx][link_name] = []
+                self.goal_errors[a_idx][link_name] = (-1,-1)
                 self._last_update[a_idx][link_name] = l_retract_pose
                 self.link_name_to_arm_base[a_idx][link_name] = np.ravel(arm_base_pose)
         
@@ -417,11 +417,10 @@ class SimTask:
     def get_target_name_to_pose(self)->list[dict[str,tuple[np.ndarray, np.ndarray]]]:
         return self._target_name_to_pose
     
-    def _update_err_log(self, link_name_to_error):
-        now = time()
+    def _update_err(self, link_name_to_error):
         for a_idx in range(len(self.agent_task_cfgs)):
             for link_name, error in link_name_to_error[a_idx].items():
-                self.goal_errors[a_idx][link_name].append((error, now))
+                self.goal_errors[a_idx][link_name] = error
     @abstractmethod
     def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
         """
@@ -478,7 +477,7 @@ class SimTask:
         errors, target_name_to_pose, link_name_to_pose  = self._get_link_errors()
         self._link_name_to_pose = link_name_to_pose
         self._target_name_to_pose = target_name_to_pose
-        self._update_err_log(errors)
+        self._update_err(errors)
 
 
         # Update targets in sim if required, based on the custom task logic
@@ -865,6 +864,7 @@ class BinTask(SimTask):
     def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
                  stats_cfg,pose_utils, wall_dims_hwd=np.array([0.5,0.5,0.3]), 
                  p_err_threh=0.05,q_err_threh=0.5,
+                 bin_pos=None,
                  ):
         """
         all arms start with a behind-back goal. 
@@ -890,7 +890,9 @@ class BinTask(SimTask):
 
         # Spawn Bin:
         height, width, depth = wall_dims_hwd
-        bin_pos = self.get_arms_bases_center_pos().tolist()
+        if bin_pos is None:
+            bin_pos = self.get_arms_bases_center_pos().tolist()
+
         dim0_step_size = width/2 +depth/2
         dim1_step_size = width/2 +depth/2
         dim2_step_size = height/2
@@ -941,8 +943,8 @@ class BinTask(SimTask):
         self.bin_goal_poses = []
         for quarter_pos in [quarter0_pos, quarter1_pos, quarter2_pos, quarter3_pos]:
             goal_pos = copy(quarter_pos)
-            goal_pos[2] = height + 0.15 # drop 15 cm above the bin
-            goal_quat = PoseUtils.rotate_quat([0,1,0,0], [0,0,180.0], q_in_wxyz=True, q_out_wxyz=True) # np.array([0,1,0,0]) # facing down (grasp rotation)
+            goal_pos[2] = height + 0.3 # drop x cm above the bin
+            goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
             pose = (goal_pos, goal_quat)
             self.bin_goal_poses.append(pose)
 
@@ -959,7 +961,7 @@ class BinTask(SimTask):
                 robot_minus_bin =  robot_ground_pos - bin_ground_pos
                 behind_arm_goal_pos = robot_ground_pos + 0.75 * robot_minus_bin 
                 behind_arm_goal_pos[2] = behind_arm_goal_pos[2] + 0.7 # 0.5 m above the base
-                behind_arm_goal_quat = PoseUtils.rotate_quat([0,1,0,0], [0,0,180.0], q_in_wxyz=True, q_out_wxyz=True)# np.array([0,1,0,0]) # facing down (grasp rotation)
+                behind_arm_goal_quat = np.array([0,1,0,0]) # PoseUtils.rotate_quat([0,1,0,0], [0,0,180.0], q_in_wxyz=True, q_out_wxyz=True)# np.array([0,1,0,0]) # facing down (grasp rotation)
                 behind_arm_goal_pose = (behind_arm_goal_pos, behind_arm_goal_quat)
                 self.link_name_to_pick_pose[agent_idx][link_name] = behind_arm_goal_pose
 
@@ -992,6 +994,14 @@ class BinTask(SimTask):
             self.link_name_to_placed_in_bin[a_idx][link_name] = 0
         self.link_name_to_placed_in_bin[a_idx][link_name] += 1
 
+    def _rotate_bin_goal_for_robot(self, link_name:str, a_idx:int,bin_goal:tuple[np.ndarray, np.ndarray])->tuple[np.ndarray, np.ndarray]:
+        original_goal_pos, original_goal_quat = bin_goal
+        arm_base = self.link_name_to_arm_base[a_idx][link_name]
+        arm_base_quat = arm_base[3:]
+        arm_base_quat = PoseUtils.rotate_quat(arm_base_quat, [-180,0, 0], q_in_wxyz=True, q_out_wxyz=True) # udpside down
+        new_goal = (original_goal_pos, np.array(arm_base_quat))
+        return new_goal
+    
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
         
@@ -1010,7 +1020,7 @@ class BinTask(SimTask):
                     self._link_name_to_goal_type[a_idx][link_name] = goal_type
                     if goal_type == 'bin':
                         goal_pose = self._local_rng.choice(self.bin_goal_poses)
-                        _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
+                        _link_name_to_target_pose_np[a_idx][link_name] = self._rotate_bin_goal_for_robot(link_name, a_idx, goal_pose) # goal_pose
                     else: # behind arm
                         _link_name_to_target_pose_np[a_idx][link_name] = self.link_name_to_pick_pose[a_idx][link_name]
                         
@@ -1028,7 +1038,7 @@ class BinTask(SimTask):
                     target_prim = self.target_path_to_prim[a_idx][self.target_name_to_path[a_idx][target_name]]
 
                     reached_goal = err_p < self.p_err_threh and err_q < self.q_err_threh
-                    print(f'debug err_p: {err_p}, err_q: {err_q}, reached_goal: {reached_goal}')
+                    # print(f'debug err_p: {err_p}, err_q: {err_q}, reached_goal: {reached_goal}')
                     if reached_goal: 
                         if cur_goal_type == 'bin': # PLACED
 
@@ -1075,7 +1085,7 @@ class BinTask(SimTask):
                                 options = list(range(len(self.bin_goal_poses))) # all bin goals are optional
                             new_bin_goal_idx = self._local_rng.choice(options) # index of free bin goal
                             self._link_name_to_cur_bingoal[a_idx][link_name] = new_bin_goal_idx # # occupy goal (mark as taken by this agent)
-                            goal_pose = self.bin_goal_poses[new_bin_goal_idx] # New bin goal set
+                            goal_pose = self._rotate_bin_goal_for_robot(link_name, a_idx, self.bin_goal_poses[new_bin_goal_idx]) # self.bin_goal_poses[new_bin_goal_idx] # New bin goal set
 
                             # uptdate stats (note that its done only after we actually set the new bin goal, so we count only one pick for each change from behind goal to bin goal)
                             self._increase_picked_count(link_name, a_idx) # update stats
@@ -1299,7 +1309,7 @@ class CuPlanner:
         return None
     
     @abstractmethod
-    def update_col_pred(self, plans_board, idx, col_pred_with):
+    def update_col_pred(self, plans_board, idx, col_pred_with, goal_errors=None):
         pass
     
     def get_col_pred_debug(self)->Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
@@ -1741,7 +1751,7 @@ class MpcPlanner(CuPlanner):
     def kill_cost_plots(self):
         self._get_arm_reacher().kill_live_plot()
 
-    def update_col_pred(self, plans_board, idx, col_pred_with,plans_lock:Optional[Lock]=None):
+    def update_col_pred(self, plans_board, idx, col_pred_with, goal_errors, plans_lock:Optional[Lock]=None):
         
         def _get_rads_own():
             return plans_board[idx]['task_space']['spheres']['r'][0]
@@ -1753,6 +1763,7 @@ class MpcPlanner(CuPlanner):
             return plans_board[j]['task_space']['spheres']
         
         col_pred = self.get_col_pred()
+
         if col_pred is None:
             return
         if not self.is_cpred_initialized:
@@ -1776,7 +1787,20 @@ class MpcPlanner(CuPlanner):
                 plan_robot_j = _get_plan_robotj(j) 
                 plan_robot_j_horizon = plan_robot_j['p'][:H]
                 col_pred.update_robot_spheres(j, plan_robot_j_horizon)
-    
+                
+                
+                if goal_errors[idx] is not None:
+                    
+                    subto_to_err = {}
+                    for subto in col_pred.col_with_idx_map.keys(): # all agents colliding with
+                        if goal_errors[subto] is not None:
+                            p_err_subto, q_err_subto = goal_errors[subto]
+                            subto_to_err[subto] = (p_err_subto, q_err_subto)
+                    
+                    col_pred.pose_wta_conflict_resolution['own_errors'] = goal_errors[idx] 
+                    col_pred.pose_wta_conflict_resolution['subto_errors'] = subto_to_err
+                
+                
     def get_rollouts_in_world_frame(self):
         """
         Get visual rollouts transformed to world frame for visualization.
@@ -2012,8 +2036,9 @@ class SimRobot:
                 sp = sphere.VisualSphere(
                     prim_path=f"{subroot}/R{a_idx}S{si}",
                     position=np.ravel(s[:3].cpu().numpy()),
-                    orientation=np.ravel(s[3:7].cpu().numpy()),
-                    radius=float(s[7].cpu().item()),
+                    orientation=np.array([1,0,0,0]),# np.ravel(s[3:7].cpu().numpy()),
+                    # radius=float(s[7].cpu().item()),
+                    radius=float(s[3].cpu().item()),
                     color=np.array([0, 0.8, 0.2]),
                 )
                 self._vis_spheres.append(sp)
@@ -2025,10 +2050,10 @@ class SimRobot:
                 if not np.isnan(s[0].item()):
                     self._vis_spheres[si].set_world_pose(
                         position=np.ravel(s[:3].cpu().numpy()),
-                        orientation=np.ravel(s[3:7].cpu().numpy()),
+                        orientation=np.array([1,0,0,0]),# np.ravel(s[3:7].cpu().numpy()),
                         )
-                    self._vis_spheres[si].set_radius(float(s[7].cpu().item()))
-
+                    # self._vis_spheres[si].set_radius(float(s[7].cpu().item()))
+                    self._vis_spheres[si].set_radius(float(s[3].cpu().item()))
     @staticmethod
     def parse_viz_color(color:str)->list[float]:
         match color:
@@ -2354,11 +2379,17 @@ class CuAgent:
     def get_spheres_from_solkin(self,to_world_frame:bool=True)->torch.Tensor:
         return self.planner.get_spheres_from_solkin(to_world_frame)
 
-    def update_col_pred(self, plans_board, plans_lock:Optional[Lock]=None):
-        sub_to = self.plan_pub_sub.sub_cfg["to"] if isinstance(self.planner, MpcPlanner) else []
-        self.planner.update_col_pred(plans_board, self.idx, sub_to)
+    def update_col_pred(self, plans_board, mean_goal_err, plans_lock:Optional[Lock]=None):
+        sub_to = self.plan_pub_sub.sub_cfg["to"] if isinstance(self.planner, MpcPlanner) else []    
+        self.planner.update_col_pred(plans_board, self.idx, sub_to, mean_goal_err)
     
-
+    def get_sphere_tensor_W(self, cu_js:JointState)->torch.Tensor:
+        task_space_state_W = self.planner.get_state_in_task_space(cu_js, frame='W')                    
+        spheres_W = task_space_state_W['spheres']
+        #p_W, q_W, r_W = spheres_W['p'], spheres_W['q'], spheres_W['r']
+        p_W, r_W = spheres_W['p'], spheres_W['r']
+        sphere_tensor_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
+        return sphere_tensor_W
     
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
@@ -2718,6 +2749,59 @@ class CuAgent:
     def is_plan_publisher(self):
         return self.plan_pub_sub.pub_cfg["is_on"]
 
+    @staticmethod
+    def check_collisions_between_agents(agents_spheres:list[torch.Tensor])->list[list[list[tuple[int,int]]]]:
+        """
+        In - list of length N (num of agents) where each element is a tensor of shape Six8 (Si (num of spheres aegent i) x 8 (p, q, r)) 
+        Out - list of length N where each element is a matrix in shape NxN (num of agents ^ 2) where out[i][j] = list of tuples (k,l) if agent i sphere k is in collision with agent j sphere l
+        """
+        ans = [[[] for _ in range(len(agents_spheres))] for _ in range(len(agents_spheres))]
+        for i in range(len(agents_spheres)):
+            if len(agents_spheres[i]) == 0:
+                continue
+            for j in range(i+1, len(agents_spheres)):
+                if len(agents_spheres[j]) == 0:
+                    continue
+                # sphere_tensor_i = agents_spheres[i]
+                # sphere_tensor_j = agents_spheres[j]
+                # # check if spheres are in collision
+                # sphere_tensor_i_expanded = sphere_tensor_i.unsqueeze(0).expand(sphere_tensor_j.shape[0], -1, -1)
+                # sphere_tensor_j_expanded = sphere_tensor_j.unsqueeze(1).expand(-1, sphere_tensor_i.shape[0], -1)
+                # sphere_centers_dist = torch.norm(sphere_tensor_i_expanded[:,:,:3] - sphere_tensor_j_expanded[:,:,:3], dim=2)
+                # sphere_radii_sum = sphere_tensor_i_expanded[:,:,3] + sphere_tensor_j_expanded[:,:,3]
+                # in_collision = sphere_centers_dist <= sphere_radii_sum
+                # collision_indices_agent_i  = torch.where(in_collision)[0]
+                # collision_indices_agent_j  = torch.where(in_collision)[1]
+                ans[i][j] = CuAgent.agent_to_agent_colcheck(agents_spheres[i], agents_spheres[j]) # [(k,l) for k,l in zip(collision_indices_agent_i.tolist(), collision_indices_agent_j.tolist())]
+        return ans
+
+    @staticmethod
+    def agent_to_agent_colcheck(ai:torch.Tensor, aj:torch.Tensor):
+        if len(ai) == 0 or len(aj) == 0:
+            return []
+        sphere_tensor_i = ai
+        sphere_tensor_j = aj
+        # check if spheres are in collision
+        sphere_tensor_i_expanded = sphere_tensor_i.unsqueeze(0).expand(sphere_tensor_j.shape[0], -1, -1)
+        sphere_tensor_j_expanded = sphere_tensor_j.unsqueeze(1).expand(-1, sphere_tensor_i.shape[0], -1)
+        sphere_centers_dist = torch.norm(sphere_tensor_i_expanded[:,:,:3] - sphere_tensor_j_expanded[:,:,:3], dim=2)
+        sphere_radii_sum = sphere_tensor_i_expanded[:,:,3] + sphere_tensor_j_expanded[:,:,3]
+        in_collision = sphere_centers_dist <= sphere_radii_sum
+        collision_indices_agent_i  = torch.where(in_collision)[0]
+        collision_indices_agent_j  = torch.where(in_collision)[1]
+        return [(k,l) for k,l in zip(collision_indices_agent_i.tolist(), collision_indices_agent_j.tolist())]
+    
+    def check_col_with_others(self,agents_spheres:list[torch.Tensor]):
+        own_spheres = agents_spheres[self.idx]
+        ans = []
+        for j in range(len(agents_spheres)):
+            if j == self.idx:
+                ans.append([])
+            else:
+                cols_with_j = CuAgent.agent_to_agent_colcheck(own_spheres, agents_spheres[j])
+                ans.append(cols_with_j)
+        return ans
+        
 
 class StatManager:
     """
@@ -2989,6 +3073,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                     'ur5e': {
                         1:f'ur5e.yml',
                         '2_05':f'dual_ur5e_b.yml',
+                        '2_05b':f'dual_ur5e_b05b.yml',
                         '4_05':'quad_ur5e_05.yml',
                         '4_04':'quad_ur5e_04.yml'
                         }
@@ -3052,12 +3137,12 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             else:
                                 meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
                             
-                            # Override for bin task
-                            if task == 'bin':
-                                if alg != 'O-':
-                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_bin.yml'
-                                else:
-                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_bin_priority_ablation.yml'
+                            # # Override for bin task
+                            # if task == 'bin':
+                            #     if alg != 'O-':
+                            #         meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml'
+                            #     else:
+                            #         meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_bin_priority_ablation.yml'
 
                             # get num of arms and num of agents (n_cfgs) by alg type    
                             cent = alg in ['CC', 'SC','D'] # is centralized planner        
@@ -3292,6 +3377,7 @@ def main(meta_cfg, out_path):
         # sleep(2)
         robot_cfgs_paths[a_idx] = a_cfg["robot"]
         robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
+        # robot_cfgs[a_idx]["kinematics"]["collision_sphere_buffer"] += 0.02
 
         # if retract cfg specificed for robot, uue it. Else will take default from ["kinematics"]["cspace"]["retract_config"]
         if "retract_cfg" in a_cfg: 
@@ -3489,6 +3575,9 @@ def main(meta_cfg, out_path):
     t = 0  # tstep     
     physics_time_start = my_world.current_time # time in seconds in world clock (physics time)
     sim_time_start = time() # time in seconds in process clock (actual running start time)
+    agents_spheres = [torch.tensor([]) for _ in range(len(cu_agents))] # for agent-to-agent collision check
+    mean_goal_err:List[Optional[tuple[float, float]]] = [None for _ in range(len(cu_agents))] # used for pose wta conflict resolution
+
     with Progress() as progress:
         task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
         task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
@@ -3504,7 +3593,8 @@ def main(meta_cfg, out_path):
                 pts_debug = []
 
                 # Updating targets. Updating targets in sim and return new target poses so planners can react
-                link_name_to_target_pose = sim_task.step() 
+                link_name_to_target_pose = sim_task.step()
+                l_name_to_goal_err = sim_task.goal_errors # link name to goal error (p,q) 
                 
                 # Updating obstacles. Updating obstacles in sim so they can be sensed by robots
                 sim_env.step()
@@ -3579,7 +3669,17 @@ def main(meta_cfg, out_path):
                         psw.on()
                         # sense plans
                         if a.is_plan_subscriber():
-                            a.update_col_pred(plans_board)
+                            
+                            # read goal errors for wta conflict resolution
+                            a_n_links = len(l_name_to_goal_err[a.idx])
+                            a_goal_errors = l_name_to_goal_err[a.idx]
+                            p_err, q_err = 0.0, 0.0
+                            for p_err_link, q_err_link in a_goal_errors.values():
+                                p_err += p_err_link
+                                q_err += q_err_link
+                            mean_goal_err[a.idx] = (p_err / a_n_links, q_err / a_n_links)
+
+                        a.update_col_pred(plans_board, mean_goal_err)
                                         
                         # sense goals
                         goals = link_name_to_target_pose[a.idx]
@@ -3610,20 +3710,23 @@ def main(meta_cfg, out_path):
                             a.step_count += 1
                         
                         # debug
+                        sphere_tensor_W = torch.tensor([])
                         if t % viz_col_spheres_dt == 0:
                             if viz_col_spheres_world:
-                                task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
-                                spheres_W = task_space_state_W['spheres']
-                                p_W, q_W, r_W = spheres_W['p'], spheres_W['q'], spheres_W['r']
-                                sphere_viz_tensor_W = torch.cat((p_W.squeeze(0), q_W.squeeze(0), r_W.T),dim=1)
+                                # task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
+                                # spheres_W = task_space_state_W['spheres']
+                                # p_W, q_W, r_W = spheres_W['p'], spheres_W['q'], spheres_W['r']
+                                # sphere_tensor_W = torch.cat((p_W.squeeze(0), q_W.squeeze(0), r_W.T),dim=1)
+                                sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
                             if viz_col_spheres_robot:
                                 spheres_R = task_space_state_R['spheres']
-                                p_R, q_R, r_R = spheres_R['p'], spheres_R['q'], spheres_R['r']
-                                sphere_viz_tensor_R = torch.cat((p_R.squeeze(0), q_R.squeeze(0), r_R.T),dim=1)
+                                # p_R, q_R, r_R = spheres_R['p'], spheres_R['q'], spheres_R['r']
+                                p_R, r_R = spheres_R['p'], spheres_R['r']
+                                sphere_viz_tensor_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1)
                             if viz_col_spheres_world and viz_col_spheres_robot:
-                                sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_viz_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
+                                sphere_viz_tensor = torch.cat((sphere_viz_tensor_R, sphere_tensor_W),dim=0)                    # spheres_tensor_R2 = torch.cat((task_space_state_R2['spheres']['p'].squeeze(0), task_space_state_R2['spheres']['r'].T),dim=1)
                             elif viz_col_spheres_world:
-                                sphere_viz_tensor = sphere_viz_tensor_W
+                                sphere_viz_tensor = sphere_tensor_W
                             elif viz_col_spheres_robot:
                                 sphere_viz_tensor = sphere_viz_tensor_R
                             else:
@@ -3653,23 +3756,54 @@ def main(meta_cfg, out_path):
                                 case 'a_step': # agent step (control iteration)
                                     val = a.step_count
                                 case 'rec': # robot env collision
-                                    in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0
+                                    in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
+                                    if in_col:
+                                        print(f"debug: warning robot {a.idx} in col with obstacle!!!")
                                     val = in_col  
                                 case 'link_target_poses': # link and target poses
                                     val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
-                                case 'spheres': # spheres pos and radius (in world frame)
-                                    task_space_state_W = a.planner.get_state_in_task_space(cu_js, frame='W')                    
-                                    spheres_W = task_space_state_W['spheres']
-                                    p_W, r_W = spheres_W['p'], spheres_W['r']
-                                    spheres_pr_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
-                                    val = spheres_pr_W
+                                # case 'spheres': # spheres pos and radius (in world frame)
+                                #     if not len(sphere_tensor_W):
+                                #         sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                                #     val = sphere_tensor_W
+                                #     agents_spheres[a.idx] = sphere_tensor_W
                                 case 'total_planning_time': # total planning time
                                     val = psw.total 
+                                case 'rrc': # robot-robot collisions
+                                    if not len(sphere_tensor_W):
+                                        sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                                    
+                                    # val = sphere_tensor_W
+                                    agents_spheres[a.idx] = sphere_tensor_W                                    
+                                    collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
+                                    
+                                    for other_idx in range(len(collisions)):
+                                        for k,l in collisions[other_idx]:
+                                            print(f"debug collisions: spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                    
+                                    val = len(collisions) > 0
+                                    # for i in range(len(collisions)):
+                                    #     for j in range(len(collisions[i])):
+                                    #         if i != j:
+                                    #             if len(collisions[i][j]):
+                                    #                 # print(f"debug: robot {i} in col with robot {j}")
+                                    #                 for k,l in collisions[i][j]:
+                                    #                     print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
                                 case _:
                                     raise ValueError(f"Invalid stat name: {stat_name}")
                             stats[stat_name] = val
                         a.stat_man.update(stats, t, a.step_count)
 
+                    # if t % 10 == 0:
+                    #    collisions = CuAgent.check_collisions_between_agents(agents_spheres)
+                    #    for i in range(len(collisions)):
+                    #        for j in range(len(collisions[i])):
+                    #            if i != j:
+                    #                if len(collisions[i][j]):
+                    #                    # print(f"debug: robot {i} in col with robot {j}")
+                    #                    for k,l in collisions[i][j]:
+                    #                        print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
+                       # print(f"debug: collisions: {collisions}")
 
                     if len(pts_debug):
                         draw_points(pts_debug)

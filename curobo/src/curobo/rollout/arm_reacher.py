@@ -425,6 +425,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                         old_dyn_obs_cost = cost_dict['dynamic_obs_cost']
                         robot_id = dyn_cost.robot_id
                         robot_context = get_topics().get_default_env()[robot_id]
+
                         if dyn_cost.prior_rule == 'random':
                             raise NotImplementedError("Random prioritization rule not implemented")
                         else:
@@ -480,7 +481,9 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                                 # set upper bound to 10_000 to avoid numerical issues        
                                 # cost_dict['dynamic_obs_cost'] = torch.max(cost_dict['dynamic_obs_cost'], torch.ones_like(cost_dict['dynamic_obs_cost']) * 10_000)
                                 modified_dyn_obs_cost = True
-                      
+                            
+                            
+                                
                     if dyn_cost.a_select_mode == 'col_free': 
                         self.current_collision_mask = cost_dict['dynamic_obs_cost'] # safety_violation_mask
 

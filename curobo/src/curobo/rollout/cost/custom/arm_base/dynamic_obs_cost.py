@@ -29,7 +29,7 @@ class DynamicObsCostConfig(CostConfig):
     assert a_select_mode in ["normal", "col_free"], "Invalid action selection mode"
     assert prior_rot_err_impact_angle >= 0 and prior_rot_err_impact_angle <= 180, "Rotation error affection angle must be between 0 and 180"
     assert prior_p_err_impact_rad >= 0 , "Position error affection radius must be positive (its recommended to set it small, like 0.3 or below)"
-    assert prior_rule in ["none", "pose", "random"], "Invalid prioritization rule"
+    assert prior_rule in ["none", "pose", "random", "pose_wta"], "Invalid prioritization rule"
     assert prior_keep_lower_bound >= 0 and prior_keep_lower_bound <= 1, "Keep lower bound must be between 0 and 1"
     assert prior_pos_to_rot_ratio >= 0 and prior_pos_to_rot_ratio <= 1, "Pos to rot ratio must be between 0 and 1"
     def __post_init__(self):
@@ -197,7 +197,8 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 'exclude_others': []  # Not used anymore - handled by col_with_idx_map
             },
             col_with_idx_map,
-            self.safety_margin
+            self.safety_margin,
+            self.prior_rule
         )
         print(f"DynamicObsCost successfully initialized for robot {self.robot_id} with {n_obstacle_spheres} obstacle spheres")
     
