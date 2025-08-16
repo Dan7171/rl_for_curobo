@@ -30,8 +30,9 @@ else:
     simapp_cfg = simapp_cfg["gui_mode"]
 
 simulation_app = SimulationApp({**simapp_cfg["init_app_settings"]})
-from projects_root.examples.helper import add_extensions
-add_extensions(simulation_app, headless_mode=simapp_cfg["init_app_settings"]["headless"])
+
+from projects_root.utils.helper import add_extensions 
+add_extensions(simulation_app, headless_mode=simapp_cfg["init_app_settings"]["headless"],init_livestream_on_healdess=False)
 
 from isaacsim.core.utils.extensions import enable_extension
 if args.livestream:
