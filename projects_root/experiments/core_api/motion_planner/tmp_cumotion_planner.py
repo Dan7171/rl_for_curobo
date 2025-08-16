@@ -2840,7 +2840,7 @@ class StatManager:
                 ans.append(t_step)
             elif self.keys[i] == 'a_step':  
                 ans.append(agent_step_count)
-            case _:
+            else:
                 raise ValueError(f"Invalid key: {self.keys[i]}")
 
         return ans
