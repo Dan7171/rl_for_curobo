@@ -72,7 +72,7 @@ cost:
         weight: 7000.0  # 100  
         terminal: False
         safety_margin: 0.3 # 0.05
-        prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
+        prior_rule: none # rule of prioratization: none/pose/pose_wta/random 
         wta_trust: 2.0 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
         prior_p_err_impact_rad: 0.1 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_rot_err_impact_angle: 180 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost

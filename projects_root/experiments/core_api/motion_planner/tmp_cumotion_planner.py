@@ -1792,9 +1792,7 @@ class MpcPlanner(CuPlanner):
                 plan_robot_j_horizon = plan_robot_j['p'][:H]
                 col_pred.update_robot_spheres(j, plan_robot_j_horizon)
                 
-                
-                if goal_errors[idx] is not None:
-                    
+                if col_pred.prior_rule == 'pose_wta' and goal_errors[idx] is not None:
                     subto_to_err = {}
                     for subto in col_pred.col_with_idx_map.keys(): # all agents colliding with
                         if goal_errors[subto] is not None:
@@ -3135,18 +3133,13 @@ def modify_to_benchmark_mode(combo_cfg_path):
                             }
                             
                             # set default particle file by alg type 
-                            if alg != 'O-':
-                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
-                            else:
-                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_priority_ablation.yml'
-                            
-                            # # Override for bin task
-                            # if task == 'bin':
-                            #     if alg != 'O-':
-                            #         meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml'
-                            #     else:
-                            #         meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = 'projects_root/experiments/benchmarks/cfgs/particle_file_arms_bin_priority_ablation.yml'
+                            particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
+                            if alg in ['O', 'SD', 'O-','SC']:
+                                particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
+                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
 
+
+                 
                             # get num of arms and num of agents (n_cfgs) by alg type    
                             cent = alg in ['CC', 'SC','D'] # is centralized planner        
                             planner_type = alg_to_planner[alg]
@@ -3416,13 +3409,6 @@ def main(meta_cfg, out_path):
         pub_sub_cfgs[a_idx]["sub"]["to"] = subto
         col_pred_with[a_idx] = subto
 
-        # else:
-        #     col_pred_with[a_idx] = pub_sub_cfgs[a_idx]["sub"]["to"]
-        # # pub_sub_cfgs[a_idx]["sub"]["to"] = col_pred_with[a_idx]
-        # if "plan_pub_sub" in a_cfg and "pub" in a_cfg["plan_pub_sub"] and a_cfg["plan_pub_sub"]["pub"]:
-        #     pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
-        # else:
-        #     pub_sub_cfgs[a_idx]["pub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["pub"])
         
         planner_type[a_idx] = a_cfg["planner"]
         if planner_type[a_idx] == 'mpc':
