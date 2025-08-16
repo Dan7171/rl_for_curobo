@@ -3292,7 +3292,8 @@ def modify_to_benchmark_mode(combo_cfg_path):
 
 
                             # Output fodler name
-                            out_name = f'{robot_fam}{n_arms}{alg}_{task}{level}'
+                            task_seed = meta_cfg["pose_utils"]["seed"]
+                            out_name = f'R_{robot_fam}_N{n_arms}_A{alg}_T{task}_s{task_seed}_l{level}'
                             
 
                             meta_cfgs.append(meta_cfg)
