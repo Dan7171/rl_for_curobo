@@ -211,20 +211,18 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
 - mpc:
     mpc_solver_cfg:
-      plot_costs: False # True
-    
+      plot_costs: True # True
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True
       obs: False # True
-    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: False #True # visualize collision spheres in world frame
-      ts_delta: 1 # int
+    visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
+        is_on: True    
+ 
 - mpc:
-
     mpc_solver_cfg:
-      plot_costs: True # True
-    
+      plot_costs: False # True
+  
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True
@@ -233,33 +231,10 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int
 
-
 - mpc:
     mpc_solver_cfg:
       plot_costs: False #True # True
 - mpc:
     mpc_solver_cfg:
       plot_costs: False #True # True
-    
-
-# - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-#   planner: mpc # 'mpc' # mpc or cumotion 
-#   base_pose: [0.5, 0.0, 0.0,0,0,180.0]
-#   retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-#   viz_color: 'orange'
-#   cu_world_wrapper: # curoboworld collision wrapper
-#     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-#     never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-#     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-
-
-# - robot:  curobo/src/curobo/content/configs/robot/ur5e.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-#   planner: mpc # 'mpc' # mpc or cumotion 
-#   base_pose: [-0.5, 0.0, 0.0, 1, 0, 0, 0]
-#   retract_cfg: [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
-#   viz_color: 'blue'
-#   cu_world_wrapper: # curoboworld collision wrapper
-#     verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-#     never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-#     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-  
+     

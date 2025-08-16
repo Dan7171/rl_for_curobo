@@ -943,7 +943,7 @@ class BinTask(SimTask):
         self.bin_goal_poses = []
         for quarter_pos in [quarter0_pos, quarter1_pos, quarter2_pos, quarter3_pos]:
             goal_pos = copy(quarter_pos)
-            goal_pos[2] = height + 0.3 # drop x cm above the bin
+            goal_pos[2] = height + 0.35 # drop x cm above the bin
             goal_quat = np.array([0,1,0,0]) # facing down (grasp rotation)
             pose = (goal_pos, goal_quat)
             self.bin_goal_poses.append(pose)
