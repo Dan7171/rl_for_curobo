@@ -3112,6 +3112,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
     robot_fam_options = combo_cfg["robot_fam"] # robot family
     alg_options = combo_cfg["alg"] # algorithm 
     task_to_levels_options = combo_cfg["task_to_levels"] # task to levels
+    seed_options = combo_cfg["task_seed"] # seed
     
     out_names = []
     meta_cfgs = []
@@ -3122,174 +3123,126 @@ def modify_to_benchmark_mode(combo_cfg_path):
                 for alg in alg_options: # list
                     for task in task_to_levels_options: # dict
                         for level in task_to_levels_options[task]: # list
-                            meta_cfg = load_yaml(base_cfg_path)
+                            for task_seed in seed_options: # list
+                                meta_cfg = load_yaml(base_cfg_path)
 
-                            # set pub sub config by alg type
-                            is_pub = alg_to_pub_sub[alg][0]
-                            is_sub = alg_to_pub_sub[alg][1]
-                            meta_cfg["default"]["plan_pub_sub"] = {
-                                'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
-                                'sub':{'is_on':is_sub,'to':'all'}
-                            }
-                            
-                            # set default particle file by alg type 
-                            particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
-                            if alg in ['O', 'SD', 'O-','SC']:
-                                particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
-                                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
-
-
-                 
-                            # get num of arms and num of agents (n_cfgs) by alg type    
-                            cent = alg in ['CC', 'SC','D'] # is centralized planner        
-                            planner_type = alg_to_planner[alg]
-                            n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
-                            if cent:
-                                robot_cfg_path =  cent_robot_cfgs[robot_fam][robot_type] #[n_arms]
-                                n_cfgs = 1
-                            else:
-                                robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
-                                n_cfgs = n_arms
-                            
-                            robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path) # get robot cfg path
-                            ret_root = ret_pose_cfg[robot_fam][robot_type]["retract"] # get retract cfg for all arms
-                            pose_root = ret_pose_cfg[robot_fam][robot_type]["pose"] # get pose cfg for all arms
-
-                            # Set arm poses (base poses of arms, independent of cent/dec)
-                            meta_cfg["sim_task"]["arm_poses"] = []
-                            for arm_idx in range(n_arms):
-                                arm_position = pose_root["dec"][arm_idx][:3]
-                                arm_euler = pose_root["dec"][arm_idx][3:]
-                                arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
-                                arm_pose = [*arm_position, *arm_quat]
-                                meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
-                            
-                            
-                            
-                            # Set sim_task
-                            meta_cfg["sim_task"]["task_type"] = task
-                            meta_cfg["sim_task"]["level"] = level
-                            
-                            # Set static and dynamic obstacles depending on the level
-                            
-                            
-                            # center base pose of arms
-                            static_obstacles = False
-                            dynamic_obstacles = False
-                            
-                            if task in ['reach', 'follow']:
-                                if level in [2,5]:
-                                    static_obstacles = True
-                                elif level in [3,6]:
-                                    dynamic_obstacles = True
-                            if static_obstacles or dynamic_obstacles:
+                                # set pub sub config by alg type
+                                is_pub = alg_to_pub_sub[alg][0]
+                                is_sub = alg_to_pub_sub[alg][1]
+                                meta_cfg["default"]["plan_pub_sub"] = {
+                                    'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
+                                    'sub':{'is_on':is_sub,'to':'all'}
+                                }
                                 
-                                # get center of arms
-                                arms_center = np.array([0.0,0.0,0.0])
-                                for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
-                                    arms_center += np.array(arm_pose[:3])
-                                arms_center /= n_arms
-                                
-                                # set obstacles
-                                env_cfg = meta_cfg["sim_env"]["cfg"] 
-                                env_cfg["n_obs"] = 5
-                                volume_center_pos = arms_center + np.array([0,0,0.5])
-                                env_cfg["volume_center_pos"] = volume_center_pos.tolist()
-                                if dynamic_obstacles:
-                                    # env_cfg["obj_rigid_body_enabled"] = True
-                                    env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
+                                # set default particle file by alg type 
+                                particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
+                                if alg in ['O', 'SD', 'O-','SC']:
+                                    particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
+                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
 
 
-                            # Set cu_agents
-                            cu_agent_cfgs = []
-                            base_cu_agent_cfgs = meta_cfg["cu_agents"] if "cu_agents" in meta_cfg else []
-
-                            for a_idx in range(n_cfgs):
-                                if cent: # n_cfgs = 1 (centralized planner)
-                                    # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
-                                    ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
-                                    base_pose = pose_root["cent"]
+                    
+                                # get num of arms and num of agents (n_cfgs) by alg type    
+                                cent = alg in ['CC', 'SC','D'] # is centralized planner        
+                                planner_type = alg_to_planner[alg]
+                                n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
+                                if cent:
+                                    robot_cfg_path =  cent_robot_cfgs[robot_fam][robot_type] #[n_arms]
+                                    n_cfgs = 1
                                 else:
-                                    ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
-                                    base_pose = pose_root["dec"][a_idx] # arm base pose   
-                            
-                                if a_idx < len(base_cu_agent_cfgs):
-                                    print(f'warning: reading specifications for agent{a_idx} from meta cfg')
-                                    agent_cfg = base_cu_agent_cfgs[a_idx]
-                                    # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
-                                else:
-                                    agent_cfg = {}
+                                    robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
+                                    n_cfgs = n_arms
                                 
-                                # Override base values with new values
-                                agent_cfg["robot"] = robot_cfg_path
-                                agent_cfg["planner"] = planner_type
-                                agent_cfg["base_pose"] = base_pose
-                                agent_cfg["viz_color"] = colors[a_idx%n_arms]
-                                agent_cfg["retract_cfg"] = ret_cfg
-                                cu_agent_cfgs.append(agent_cfg)
+                                robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path) # get robot cfg path
+                                ret_root = ret_pose_cfg[robot_fam][robot_type]["retract"] # get retract cfg for all arms
+                                pose_root = ret_pose_cfg[robot_fam][robot_type]["pose"] # get pose cfg for all arms
 
-                            meta_cfg["cu_agents"] = cu_agent_cfgs
-                                # meta_cfg["cu_agents"].append(agent_cfg)
-
-
-                                # meta_cfg["cu_agents"].append({
-                                #     "robot": robot_cfg_path,
-                                #     "planner": planner_type,
-                                #     "base_pose": base_pose,
-                                #     "viz_color": colors[a_idx%n_arms],
-                                #     "retract_cfg": ret_cfg,
-                                # })
-
-                            # # Set arm poses (base poses of arms, independent of cent/dec)
-                            # meta_cfg["sim_task"]["arm_poses"] = []
-                            # for arm_idx in range(n_arms):
-                            #     arm_position = pose_root["dec"][arm_idx][:3]
-                            #     arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_position, q_in_wxyz=True, q_out_wxyz=True)
-                            #     arm_pose = [*arm_position, *arm_quat]
-                            #     meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
-                            
-                            
-                            
-                            # # Set sim_task
-                            # meta_cfg["sim_task"]["task_type"] = task
-                            # meta_cfg["sim_task"]["level"] = level
-                            
-                            # # Set static and dynamic obstacles depending on the level
-                            
-                            
-                            # # center base pose of arms
-                            # static_obstacles = False
-                            # dynamic_obstacles = False
-                            
-                            # if task in ['reach', 'follow']:
-                            #     if level in [2,5]:
-                            #         static_obstacles = True
-                            #     elif level in [3,6]:
-                            #         dynamic_obstacles = True
-                            # if static_obstacles or dynamic_obstacles:
+                                # Set arm poses (base poses of arms, independent of cent/dec)
+                                meta_cfg["sim_task"]["arm_poses"] = []
+                                for arm_idx in range(n_arms):
+                                    arm_position = pose_root["dec"][arm_idx][:3]
+                                    arm_euler = pose_root["dec"][arm_idx][3:]
+                                    arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
+                                    arm_pose = [*arm_position, *arm_quat]
+                                    meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
                                 
-                            #     # get center of arms
-                            #     arms_center = np.array([0.0,0.0,0.0])
-                            #     for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
-                            #         arms_center += np.array(arm_pose[:3])
-                            #     arms_center /= n_arms
                                 
-                            #     # set obstacles
-                            #     env_cfg = meta_cfg["sim_env"]["cfg"] 
-                            #     env_cfg["n_obs"] = 5
-                            #     volume_center_pos = arms_center + np.array([0,0,0.5])
-                            #     env_cfg["volume_center_pos"] = volume_center_pos.tolist()
-                            #     if dynamic_obstacles:
-                            #         # env_cfg["obj_rigid_body_enabled"] = True
-                            #         env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
+                                
+                                # Set sim_task
+                                meta_cfg["sim_task"]["task_type"] = task
+                                meta_cfg["sim_task"]["level"] = level
+                                
+                                # Set static and dynamic obstacles depending on the level
+                                
+                                
+                                # center base pose of arms
+                                static_obstacles = False
+                                dynamic_obstacles = False
+                                
+                                if task in ['reach', 'follow']:
+                                    if level in [2,5]:
+                                        static_obstacles = True
+                                    elif level in [3,6]:
+                                        dynamic_obstacles = True
+                                if static_obstacles or dynamic_obstacles:
+                                    
+                                    # get center of arms
+                                    arms_center = np.array([0.0,0.0,0.0])
+                                    for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
+                                        arms_center += np.array(arm_pose[:3])
+                                    arms_center /= n_arms
+                                    
+                                    # set obstacles
+                                    env_cfg = meta_cfg["sim_env"]["cfg"] 
+                                    env_cfg["n_obs"] = 5
+                                    volume_center_pos = arms_center + np.array([0,0,0.5])
+                                    env_cfg["volume_center_pos"] = volume_center_pos.tolist()
+                                    if dynamic_obstacles:
+                                        # env_cfg["obj_rigid_body_enabled"] = True
+                                        env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
 
 
-                            # Output fodler name
-                            out_name = f'{robot_fam}{n_arms}{alg}_{task}{level}'
+                                # Set cu_agents
+                                cu_agent_cfgs = []
+                                base_cu_agent_cfgs = meta_cfg["cu_agents"] if "cu_agents" in meta_cfg else []
+
+                                for a_idx in range(n_cfgs):
+                                    if cent: # n_cfgs = 1 (centralized planner)
+                                        # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
+                                        ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
+                                        base_pose = pose_root["cent"]
+                                    else:
+                                        ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
+                                        base_pose = pose_root["dec"][a_idx] # arm base pose   
+                                
+                                    if a_idx < len(base_cu_agent_cfgs):
+                                        print(f'warning: reading specifications for agent{a_idx} from meta cfg')
+                                        agent_cfg = base_cu_agent_cfgs[a_idx]
+                                        # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
+                                    else:
+                                        agent_cfg = {}
+                                    
+                                    # Override base values with new values
+                                    agent_cfg["robot"] = robot_cfg_path
+                                    agent_cfg["planner"] = planner_type
+                                    agent_cfg["base_pose"] = base_pose
+                                    agent_cfg["viz_color"] = colors[a_idx%n_arms]
+                                    agent_cfg["retract_cfg"] = ret_cfg
+                                    cu_agent_cfgs.append(agent_cfg)
+
+                                meta_cfg["cu_agents"] = cu_agent_cfgs
+                                    # meta_cfg["cu_agents"].append(agent_cfg)
+
+
                             
+                                meta_cfg["pose_utils"]["seed"] = task_seed
+                                
 
-                            meta_cfgs.append(meta_cfg)
-                            out_names.append(out_name)
+                                out_name = f'R_{robot_fam}_N{n_arms}_A{alg}_T{task}_s{task_seed}_l{level}'
+                                
+
+                                meta_cfgs.append(meta_cfg)
+                                out_names.append(out_name)
                             
     return meta_cfgs, out_names
 
