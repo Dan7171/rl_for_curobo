@@ -1141,13 +1141,12 @@ class BinTask(SimTask):
         
         stats = {}
         for stat_name in stat_names:
-            match stat_name:
-                case 'n_picks':
-                    val = self.link_name_to_picked_from_back
-                case 'n_drops':
-                    val = self.link_name_to_placed_in_bin
-                case _:
-                    raise ValueError(f"Invalid stat name: {stat_name}")
+            if stat_name == 'n_picks':
+                val = self.link_name_to_picked_from_back
+            elif stat_name == 'n_drops':
+                val = self.link_name_to_placed_in_bin
+            else:
+                raise ValueError(f"Invalid stat name: {stat_name}")
             stats[stat_name] = val
         return stats
     
@@ -2056,21 +2055,20 @@ class SimRobot:
                     self._vis_spheres[si].set_radius(float(s[3].cpu().item()))
     @staticmethod
     def parse_viz_color(color:str)->list[float]:
-        match color:
-            case 'green':
-                return [0, 1, 0]
-            case 'red':
-                return [1, 0, 0]
-            case 'blue':
-                return [0, 0, 1]
-            case 'yellow':
-                return [1, 1, 0]
-            case 'purple':
-                return [1, 0, 1]
-            case 'orange':
-                return [1, 0.5, 0]
-            case _:
-                raise ValueError(f"Invalid color: {color}")
+        if color == 'green':
+            return [0, 1, 0]
+        elif color == 'red':
+            return [1, 0, 0]
+        elif color == 'blue':
+            return [0, 0, 1]
+        elif color == 'yellow':
+            return [1, 1, 0]
+        elif color == 'purple':
+            return [1, 0, 1]
+        elif color == 'orange':
+            return [1, 0.5, 0]
+        else:
+            raise ValueError(f"Invalid color: {color}")
 
 
 # class CumotionPlanPublisher(PlanPublisher):
@@ -2834,17 +2832,16 @@ class StatManager:
     def _get_updated_keys(self, t_step, agent_step_count:int=-1):
         ans = []
         for i in range(len(self.keys)):
-            match self.keys[i]:
-                case 'tsys':
-                    ans.append(time())
-                case 'tphysics':
-                    ans.append(self.my_world.current_time)
-                case 'w_step':
-                    ans.append(t_step)
-                case 'a_step':  
-                    ans.append(agent_step_count)
-                case _:
-                    raise ValueError(f"Invalid key: {self.keys[i]}")
+            if self.keys[i] == 'tsys':
+                ans.append(time())
+            elif self.keys[i] == 'tphysics':
+                ans.append(self.my_world.current_time)
+            elif self.keys[i] == 'w_step':
+                ans.append(t_step)
+            elif self.keys[i] == 'a_step':  
+                ans.append(agent_step_count)
+            case _:
+                raise ValueError(f"Invalid key: {self.keys[i]}")
 
         return ans
 
@@ -3750,47 +3747,46 @@ def main(meta_cfg, out_path):
                         stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
                         stats = {}
                         for stat_name in stats_to_update_now:
-                            match stat_name:
-                                case 'w_step': # world step
-                                    val = t
-                                case 'a_step': # agent step (control iteration)
-                                    val = a.step_count
-                                case 'rec': # robot env collision
-                                    in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
-                                    if in_col:
-                                        print(f"debug: warning robot {a.idx} in col with obstacle!!!")
-                                    val = in_col  
-                                case 'link_target_poses': # link and target poses
-                                    val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
-                                # case 'spheres': # spheres pos and radius (in world frame)
-                                #     if not len(sphere_tensor_W):
-                                #         sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                                #     val = sphere_tensor_W
-                                #     agents_spheres[a.idx] = sphere_tensor_W
-                                case 'total_planning_time': # total planning time
-                                    val = psw.total 
-                                case 'rrc': # robot-robot collisions
-                                    if not len(sphere_tensor_W):
-                                        sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                                    
-                                    # val = sphere_tensor_W
-                                    agents_spheres[a.idx] = sphere_tensor_W                                    
-                                    collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
-                                    
-                                    for other_idx in range(len(collisions)):
-                                        for k,l in collisions[other_idx]:
-                                            print(f"debug COLLISIONS!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
-                                    
-                                    val = len(collisions) > 0
-                                    # for i in range(len(collisions)):
-                                    #     for j in range(len(collisions[i])):
-                                    #         if i != j:
-                                    #             if len(collisions[i][j]):
-                                    #                 # print(f"debug: robot {i} in col with robot {j}")
-                                    #                 for k,l in collisions[i][j]:
-                                    #                     print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
-                                case _:
-                                    raise ValueError(f"Invalid stat name: {stat_name}")
+                            if stat_name == 'w_step': # world step
+                                val = t
+                            elif stat_name == 'a_step': # agent step (control iteration)
+                                val = a.step_count
+                            elif stat_name == 'rec': # robot env collision
+                                in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
+                                if in_col:
+                                    print(f"debug: warning robot {a.idx} in col with obstacle!!!")
+                                val = in_col  
+                            elif stat_name == 'link_target_poses': # link and target poses
+                                val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
+                            # case 'spheres': # spheres pos and radius (in world frame)
+                            #     if not len(sphere_tensor_W):
+                            #         sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                            #     val = sphere_tensor_W
+                            #     agents_spheres[a.idx] = sphere_tensor_W
+                            elif stat_name == 'total_planning_time': # total planning time
+                                val = psw.total 
+                            elif stat_name == 'rrc': # robot-robot collisions
+                                if not len(sphere_tensor_W):
+                                    sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                                
+                                # val = sphere_tensor_W
+                                agents_spheres[a.idx] = sphere_tensor_W                                    
+                                collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
+                                
+                                for other_idx in range(len(collisions)):
+                                    for k,l in collisions[other_idx]:
+                                        print(f"debug COLLISIONS!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                
+                                val = len(collisions) > 0
+                                # for i in range(len(collisions)):
+                                #     for j in range(len(collisions[i])):
+                                #         if i != j:
+                                #             if len(collisions[i][j]):
+                                #                 # print(f"debug: robot {i} in col with robot {j}")
+                                #                 for k,l in collisions[i][j]:
+                                #                     print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
+                            else:
+                                raise ValueError(f"Invalid stat name: {stat_name}")
                             stats[stat_name] = val
                         a.stat_man.update(stats, t, a.step_count)
 
@@ -4078,7 +4074,13 @@ if __name__ == "__main__":
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
 
         formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        
+        if args.livestream:
+            meta_cfg["out"]["out_dir"] = '/mnt/new_home/evrond/mr_mpc_logs'
+            print(f'warning-livestream mode')
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
+        print(f'out_path: {out_path}')
+        sleep(3)
         keep_running = main(meta_cfg, out_path)
         if not keep_running:
             break
