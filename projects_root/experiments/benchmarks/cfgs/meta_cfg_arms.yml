@@ -211,7 +211,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
 - mpc:
     mpc_solver_cfg:
-      plot_costs: True # True
+      plot_costs: False # True
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True

@@ -1,5 +1,5 @@
 model:
-  horizon: 40 # 40 # 30 # 30 # 30
+  horizon: 60 # 40 # 30 # 30 # 30
   state_filter_cfg:
     filter_coeff:
       position: 0.1
@@ -96,7 +96,7 @@ mppi:
   step_size_cov     : 0.01
   beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
-  num_particles     : 400 # 200 #10000
+  num_particles     : 800 # 200 #10000
   update_cov        : True
   cov_type          : "DIAG_A" #
   kappa             : 0.0001

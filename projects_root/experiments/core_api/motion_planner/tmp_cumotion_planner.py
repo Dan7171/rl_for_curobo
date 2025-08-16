@@ -32,13 +32,17 @@ else:
 simulation_app = SimulationApp({**simapp_cfg["init_app_settings"]})
 
 from projects_root.utils.helper import add_extensions 
-add_extensions(simulation_app, headless_mode=simapp_cfg["init_app_settings"]["headless"],init_livestream_on_healdess=False)
 
 from isaacsim.core.utils.extensions import enable_extension
 if args.livestream:
     # Default Livestream settings, enable Livestream extension
     simulation_app.set_setting("/app/window/drawMouse", True)
-    enable_extension("omni.kit.livestream.webrtc")
+    # _headless_mode = 'webrtc'
+    _headless_mode = 'webrtc'
+    # enable_extension("omni.kit.livestream.webrtc")
+else:
+    _headless_mode = None
+add_extensions(simulation_app, headless_mode=_headless_mode)
 
 import os
 from abc import abstractmethod
@@ -3054,28 +3058,29 @@ def modify_to_benchmark_mode(combo_cfg_path):
     
     colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
     dec_robot_fam_to_cfg = {'franka': 'franka.yml', 'franka_mobile': 'franka_mobile.yml', 'ur5e': 'ur5e.yml', 'ur10e': 'ur10e.yml', 'iiwa': 'iiwa.yml', 'kinova_gen3': 'kinova_gen3.yml', 'jaco7': 'jaco7.yml'}
-    cent_robot_cfgs = {'franka':
-                    {
-                        1:'franka.yml',
-                        2:f'franka_dual_arm.yml',
-                        3:f'franka_3_arm.yml',
-                        4:f'franka_4_arm.yml',
-                    },
-                          
-                    'ur10e': {
-                        1:f'ur10e.yml',
-                        2:f'dual_ur10e.yml',
-                        3: f'tri_ur10e.yml',
-                        '4_05' :'quad_ur10e.yml'
-                        },
-                    'ur5e': {
-                        1:f'ur5e.yml',
-                        '2_05':f'dual_ur5e_b.yml',
-                        '2_05b':f'dual_ur5e_b05b.yml',
-                        '4_05':'quad_ur5e_05.yml',
-                        '4_04':'quad_ur5e_04.yml'
-                        }
-                    }
+    cent_robot_cfgs = {
+        'franka':
+            {
+                '1':'franka.yml',
+                2:f'franka_dual_arm.yml',
+                3:f'franka_3_arm.yml',
+                4:f'franka_4_arm.yml',
+            },
+                    
+            'ur10e': {
+                1:f'ur10e.yml',
+                2:f'dual_ur10e.yml',
+                3: f'tri_ur10e.yml',
+                '4_05' :'quad_ur10e.yml'
+                },
+            'ur5e': {
+                1:f'ur5e.yml',
+                '2_05':f'dual_ur5e_b.yml',
+                '2_05b':f'dual_ur5e_b05b.yml',
+                '4_05':'quad_ur5e_05.yml',
+                '4_04':'quad_ur5e_04.yml'
+                }
+            }
     
     
     # take retract cfg of benchmarks
