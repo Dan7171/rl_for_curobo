@@ -2488,6 +2488,10 @@ class CuAgent:
         spheres_per_arm = sphere_tensor_W.shape[0] // n_arms
         for i in range(n_arms):
             ans.append(sphere_tensor_W[i*spheres_per_arm:(i+1)*spheres_per_arm])
+            print(f'debug')
+            print(f'i = {i}')
+            print(i*spheres_per_arm)
+            print((i+1)*spheres_per_arm)
         return ans
 
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
@@ -3816,11 +3820,14 @@ def main(meta_cfg, out_path):
                                 val = psw.total 
 
                             elif stat_name == 'arm_cols': # collisions between arms
+                                print(f'debug arm_cols')
+                                print(f'n_arms = {n_arms}')
+
                                 if not len(sphere_tensor_W):
                                     sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
                         
                                 # val = sphere_tensor_W
-                                if n_arms > 1: # decentralized
+                                if len(cu_agents) > 1: # decentralized
                                     agents_spheres[a.idx] = sphere_tensor_W                                    
                                     collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
                                     val = len(collisions) > 0
@@ -3840,6 +3847,7 @@ def main(meta_cfg, out_path):
                                                 if len(collisions):
                                                     val = True
                                                     break
+                                print(f'arm_cols = {val}')
                                         
             
                                 # val = len(collisions) > 0

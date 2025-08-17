@@ -1,7 +1,7 @@
 timeout:
-  tstep: 500 # 500 # world steps timeout
-  tsec: 3000 # seconds timeout
-  physics_tsec: 3000 # physics seconds (world time) timeout
+  tstep: 30000 # 500 # world steps timeout
+  tsec: 30000 # seconds timeout
+  physics_tsec: 30000 # physics seconds (world time) timeout
 
 out:
   out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin_test_aug17' # output directory
@@ -231,6 +231,9 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       obs: False # True
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
         is_on: True    
+    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+      is_on_world: True # True # visualize collision spheres in world frame
+      ts_delta: 1 # int
  
 - mpc:
     mpc_solver_cfg:
