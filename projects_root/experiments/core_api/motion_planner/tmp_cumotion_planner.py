@@ -617,8 +617,20 @@ class FollowTask(SimTask):
         self._pose_utils = pose_utils
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
         self.velocity_scale = velocity_scale
-        self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
-        self.update_interval_tphys = update_interval_tphys if level < 4 else 0.0
+        # self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
+        
+        self.update_interval_tphys = update_interval_tphys if level in [1,2,3,7,8,9,13,14,15] else 0.0
+        self.add_velocity_noise = add_velocity_noise
+
+        if 1<=self.level<=6:
+            self.initial_targets_density = 0.0
+        elif 7<=self.level<=12:
+            self.density = 0.5
+        elif 13<=self.level<=18:
+            self.density = 1.0
+        else:
+            raise ValueError(f"Invalid level: {self.level}")
+
         self.initial_vel_direction = initial_vel_direction # 'center' or 'none'
         self.target_vel_noise = vel_noise
         # Setup targets:

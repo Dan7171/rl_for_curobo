@@ -3,9 +3,9 @@ base: [projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml]
 alg: [O, SC, SD, CC, O-] # [O, SC, SD, CC, O-]
 robot_fam: ['ur5e'] #  #[ ur5e]
 robot_type: ['4_05'] # ['4_05'] # ['2_05b'] # ['2_05'] # ['2_05', '4_04']
-task_seed: [0,1,2,3,4,5,6,7,8]
+task_seed: [0,1,2]
 task_to_levels:
   bin: [1,2,3,4,5]
   reach: [1,2,3,4,5,6]
-  follow: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]
+  follow: [4,5,6,10,11,12,16,17,18]
   
