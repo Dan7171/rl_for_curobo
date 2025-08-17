@@ -625,9 +625,9 @@ class FollowTask(SimTask):
         if 1<=self.level<=6:
             self.initial_targets_density = 0.0
         elif 7<=self.level<=12:
-            self.density = 0.5
+            self.initial_targets_density = 0.5
         elif 13<=self.level<=18:
-            self.density = 1.0
+            self.initial_targets_density = 1.0
         else:
             raise ValueError(f"Invalid level: {self.level}")
 
@@ -641,7 +641,7 @@ class FollowTask(SimTask):
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
-                init_target_pos = robot_base_pos + initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                init_target_pos = robot_base_pos + self.initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
                 init_target_pos[2] += 0.75 # m above the base
                 init_target_quat = np.array([0,1,0,0])
                 link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
