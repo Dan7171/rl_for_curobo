@@ -1,12 +1,12 @@
 from __future__ import annotations
 import argparse
 import os
-from curobo.util_file import load_yaml
 import numpy as np
 from torch.utils.checkpoint import Any
 import yaml
 from tqdm import tqdm
 from rich.progress import Progress
+from curobo.util_file import load_yaml
 
 
 parser = argparse.ArgumentParser()
@@ -3820,8 +3820,8 @@ def main(meta_cfg, out_path):
                                 val = psw.total 
 
                             elif stat_name == 'arm_cols': # collisions between arms
-                                print(f'debug arm_cols')
-                                print(f'n_arms = {n_arms}')
+                                # print(f'debug arm_cols')
+                                # print(f'n_arms = {n_arms}')
 
                                 if not len(sphere_tensor_W):
                                     sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
@@ -3847,7 +3847,7 @@ def main(meta_cfg, out_path):
                                                 if len(collisions):
                                                     val = True
                                                     break
-                                print(f'arm_cols = {val}')
+                                # print(f'arm_cols = {val}')
                                         
             
                                 # val = len(collisions) > 0
@@ -4132,7 +4132,7 @@ if __name__ == "__main__":
         formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         
         if args.livestream:
-            meta_cfg["out"]["out_dir"] = '/mnt/new_home/evrond/mr_mpc_logs'
+            meta_cfg["out"]["out_dir"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
             print(f'warning-livestream mode')
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
