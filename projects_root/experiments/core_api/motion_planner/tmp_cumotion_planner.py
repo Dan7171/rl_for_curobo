@@ -568,17 +568,23 @@ class FollowTask(SimTask):
                  velocity_scale = 1.0, # scale factor for the target velocity
                  velocity_noise = False, # noise for the target velocity
                  update_interval_tphys:float=1.0, # physics dt to update target
+                 target_rand_vel=False,
+                 obs_rand_vel=False,
+                 initial_target_vel='center',
+                 target_vel_noise=0.1,
                  ):
         
         """
         level:
-        
-            1: jumpy-target (translated every update_interval_tphys), no obstacles
-            2: jumpy-target (translated every update_interval_tphys), static obstacles 
-            3: jumpy-target (translated every update_interval_tphys), dynamic obstacles
+
+            1. jumpy-target, (moving target - not smoothly, but every update_interval_tphys), no obstacles
+            2. jumpy-target, static obstacles 
+            3. jumpy-target, dynamic obstacles
             4: smooth-target, no obstacles
             5: smooth-target, static obstacles
             6: smooth-target, dynamic obstacles
+
+        
         
         """
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
@@ -587,9 +593,10 @@ class FollowTask(SimTask):
         self.velocity_scale = velocity_scale
         self.velocity_noise = velocity_noise
         self.update_interval_tphys = update_interval_tphys if level < 4 else 0.0
-    
-
-
+        self.initial_target_vel = initial_target_vel # 'center' or 'none'
+        self.target_rand_vel = target_rand_vel 
+        self.obs_rand_vel = obs_rand_vel # for dynamic obstacles only
+        self.target_vel_noise = target_vel_noise
         # Setup targets:
         self.link_name_to_target_vel = [{} for _ in range(self.n_agents)]
         
@@ -599,17 +606,19 @@ class FollowTask(SimTask):
             for link_name in self.link_name_to_path[a_idx].keys():
                 robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
                 init_target_pos = robot_base_pos + 0.5 * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
-                init_target_pos[2] += 0.5 # m above the base
+                init_target_pos[2] += 0.75 # m above the base
                 init_target_quat = np.array([0,1,0,0])
                 link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
-                tar_vel_direction = (init_target_pos - robot_base_pos) # direction of the target velocity, towards the center
+                if self.initial_target_vel == 'center':
+                    tar_vel_direction = (init_target_pos - robot_base_pos) # getting away from the robot base
+                else:
+                    tar_vel_direction = np.array([0,0,0])
                 tar_vel_direction = np.array([tar_vel_direction[0], tar_vel_direction[1], 0])
                 scaled_vel = tar_vel_direction * self.velocity_scale 
                 if self.velocity_noise:
                     for axis in range(3):
                         # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
-                        vel_norm = np.linalg.norm(scaled_vel)
-                        noise_range = np.arange(-vel_norm/2, vel_norm/2, vel_norm/10)
+                        noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
                         noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
                         scaled_vel[axis] += noise_axis
                         # print(f'noise_axis: {noise_axis}, scaled_vel: {scaled_vel}')
@@ -641,6 +650,13 @@ class FollowTask(SimTask):
                 for link_name in self.link_name_to_path[a_idx].keys():
                     target_name = self.name_link_to_target[a_idx][link_name]     
                     p_target, q_target = target_name_to_pose[a_idx][target_name]
+
+                    if self.target_rand_vel: # nudge the target velocity by a small amount                        
+                        noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
+                        for axis in range(3):
+                            noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+                            self.link_name_to_target_vel[a_idx][link_name][axis] += noise_axis
+                    
                     target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
                     p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
                     self._update_target(p_target_new, q_target, a_idx, link_name)
@@ -1009,7 +1025,9 @@ class BinTask(SimTask):
     
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
-        
+        self._last_step_picks = [[] for _ in range(len(self.agent_task_cfgs))]
+        self._last_step_drops = [[] for _ in range(len(self.agent_task_cfgs))]
+
         _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
         if not self._is_initialized: # Initialize the targets
             self._is_initialized = True
@@ -1049,7 +1067,8 @@ class BinTask(SimTask):
 
                             goal_pose = self.link_name_to_pick_pose[a_idx][link_name] # next goal pose
                             goal_type = 'behind_arm' # next goal type
-                            self._increase_placed_count(link_name, a_idx) # update stats
+                            # self._increase_placed_count(link_name, a_idx) # update stats
+                            self._last_step_drops[a_idx].append(link_name)
                             
                             # mark link as not having bin goal (it's status is now picking, not placing)
                             self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
@@ -1093,8 +1112,9 @@ class BinTask(SimTask):
                             goal_pose = self._rotate_bin_goal_for_robot(link_name, a_idx, self.bin_goal_poses[new_bin_goal_idx]) # self.bin_goal_poses[new_bin_goal_idx] # New bin goal set
 
                             # uptdate stats (note that its done only after we actually set the new bin goal, so we count only one pick for each change from behind goal to bin goal)
-                            self._increase_picked_count(link_name, a_idx) # update stats
-                            
+                            # self._increase_picked_count(link_name, a_idx) # update stats
+                            self._last_step_picks[a_idx].append(link_name)
+
                             # post-pick visual effects
                             if twin_exists: # if twin exists
                                 # show the twin (carried item)
@@ -1146,10 +1166,10 @@ class BinTask(SimTask):
         
         stats = {}
         for stat_name in stat_names:
-            if stat_name == 'n_picks':
-                val = self.link_name_to_picked_from_back
-            elif stat_name == 'n_drops':
-                val = self.link_name_to_placed_in_bin
+            if stat_name == 'w_step_picks':
+                val = self._last_step_picks
+            elif stat_name == 'w_step_drops':
+                val = self._last_step_drops
             else:
                 raise ValueError(f"Invalid stat name: {stat_name}")
             stats[stat_name] = val
@@ -3199,7 +3219,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                     env_cfg["volume_center_pos"] = volume_center_pos.tolist()
                                     if dynamic_obstacles:
                                         # env_cfg["obj_rigid_body_enabled"] = True
-                                        env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
+                                        env_cfg["obj_lin_vel"] = [0.15,0.15,0.15]
 
 
                                 # Set cu_agents

@@ -67,7 +67,12 @@ def add_extensions(simulation_app, headless_mode: Optional[str] = None,init_live
         if headless_mode is not None:
             log_warn("Running in headless mode: " + headless_mode)
             ext_list += ["omni.kit.livestream." + headless_mode]
-    [enable_extension(x) for x in ext_list]
+    for ext in ext_list:
+        try:
+            enable_extension(ext)
+        except Exception as e:
+            log_warn(f"Failed to enable extension {ext}: {e}")
+    # [enable_extension(x) for x in ext_list]
     simulation_app.update()
 
     return True
