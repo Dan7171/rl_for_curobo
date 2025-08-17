@@ -1,10 +1,10 @@
 timeout:
-  tstep: 100 # 500 # world steps timeout
+  tstep: 500 # 500 # world steps timeout
   tsec: 3000 # seconds timeout
   physics_tsec: 3000 # physics seconds (world time) timeout
 
 out:
-  out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin' # output directory
+  out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin_test_aug17' # output directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
@@ -140,8 +140,8 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   stat_man_cfg:
     dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
     keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
-    stat_names: ['rec', 'link_target_poses', 'rrc', 'total_planning_time']
-    collect_dt: [1,1,1,5,10,5] # dt for each stat
+    stat_names: ['env_cols', 'link_target_poses', 'arm_cols', 'total_planning_time', 'spheres']
+    collect_dt: [1,1,1,1,10] # dt for each stat
     verbose: False # [False,False,False,False,False,True]
     save: True
                 
@@ -182,16 +182,22 @@ sim_task:
   stat_man_cfgs:
     bin: 
       keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['w_step_picks', 'w_step_drops']
+      stat_names: ['arm_err', 'arm_picks', 'arm_drops'] # for each robot, a list with the link names that were picked/ placed at each step
       collect_dt: 1
       dt_key_type: 'tstep'
       save: True
     reach: # link and target poses will be available by agent stats (and no other stats needed)
       # keys: ['tsys', 'tphysics', 'w_step']
-      {}
+      keys: ['tsys', 'tphysics', 'w_step']
+      stat_names: ['arm_err', 'arm_changed', 'arm_reached']
+
+      collect_dt: 1
+      dt_key_type: 'tstep'
+      save: True
+      
     follow: # link and target poses will be available by agent stats (and no other stats needed)
       keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['err']
+      stat_names: ['arm_err']
       collect_dt: 1
       dt_key_type: 'tstep'
       save: True

@@ -554,8 +554,16 @@ class SimTask:
                 target_prim.set_world_pose(position=p_target, orientation=q_target)
 
 
-
-
+    def get_goal_err_by_arm(self)->list[tuple[float,float]]:
+        errors = []
+        # arm_idx = 0
+        for a_idx in range(len(self.goal_errors)):
+            for link_name in self.goal_errors[a_idx].keys():
+                p_err, q_err = self.goal_errors[a_idx][link_name]
+                errors.append((p_err, q_err))
+                # arm_idx += 1
+        return errors
+    
 class FollowTask(SimTask):
     def __init__(self, 
                  agents_task_cfgs:list[dict], 
@@ -685,6 +693,18 @@ class FollowTask(SimTask):
                     self._set_target_world_pose_by_link_name(a_idx, link_name, p_target_new, q_target)
                     
         return None
+    
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        
+        stats = {}
+        for stat_name in stat_names:
+            if stat_name == 'arm_err':
+                val = self.get_goal_err_by_arm()
+                # val = deepcopy(self.goal_errors)
+            else:
+                raise ValueError(f"Invalid stat name: {stat_name}")
+            stats[stat_name] = val
+        return stats
 
  
 class ManualTask(SimTask):
@@ -730,7 +750,10 @@ class ReachTask(SimTask):
         target_box_h = targets_box_dim/2 + 0.2
         overlap_mode_box_center = robots_center + np.array([0,0,target_box_h])
         self.overlapping_target_boxes = level > 3
+
         
+        
+
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 if not self.overlapping_target_boxes: # non-overlapping target boxes (easier)
@@ -781,9 +804,13 @@ class ReachTask(SimTask):
         # beyond_time_lim = tphysics_since_update > self.update_interval_tphys
         # if beyond_time_lim:
         #     self._tphysics_at_last_update = tphysics_cur
-        
+        self._arm_reached_goal_cur_iter = []
+        self._arm_goal_update_cur_iter = []
+
+        arm_idx = 0
         for a_idx in range(len(self.target_name_to_target_lin_vel)):
             for link_name in self.link_name_to_path[a_idx].keys():
+                
                 reached_goal = False
                 last_update_tphys = self._link_name_to_last_update_tphys[a_idx][link_name]
                 tphysics_since_update = tphysics_cur - last_update_tphys
@@ -792,6 +819,8 @@ class ReachTask(SimTask):
                 if not beyond_time_lim:
                     p_err, q_err = errors[a_idx][link_name]
                     reached_goal = p_err < self.p_err_threh and  q_err < self.q_err_threh
+                    if reached_goal:
+                        self._arm_reached_goal_cur_iter.append(arm_idx)
                 
                 update_goal = beyond_time_lim or reached_goal
                 if update_goal:
@@ -799,9 +828,25 @@ class ReachTask(SimTask):
                     new_p, new_q = self._sample_target_from_box(a_idx, link_name)
                     self._update_target(new_p, new_q, a_idx, link_name)
                     self._set_target_world_pose_by_link_name(a_idx, link_name, new_p, new_q)
-        
+                    self._arm_goal_update_cur_iter.append(arm_idx)
+                
+                arm_idx += 1
         return None
 
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        stats = {}
+        for stat_name in stat_names:
+            if stat_name == 'arm_err':
+                val = self.get_goal_err_by_arm()
+            elif stat_name == 'arm_changed':
+                val = self._arm_goal_update_cur_iter
+                # val = self.get_n_reached_by_arm()
+            elif stat_name == 'arm_reached': 
+                val = self._arm_reached_goal_cur_iter
+            else:
+                raise ValueError(f"Invalid stat name: {stat_name}")
+            stats[stat_name] = val
+        return stats
     
 
 
@@ -1188,9 +1233,11 @@ class BinTask(SimTask):
         
         stats = {}
         for stat_name in stat_names:
-            if stat_name == 'w_step_picks':
+            if stat_name == 'arm_err':
+                val = self.get_goal_err_by_arm()
+            elif stat_name == 'arm_picks':
                 val = self._last_step_picks
-            elif stat_name == 'w_step_drops':
+            elif stat_name == 'arm_drops':
                 val = self._last_step_drops
             else:
                 raise ValueError(f"Invalid stat name: {stat_name}")
@@ -2434,6 +2481,13 @@ class CuAgent:
         sphere_tensor_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
         return sphere_tensor_W
     
+    def split_sphere_tensor_W_into_arms(self, sphere_tensor_W:torch.Tensor, n_arms:int)->list[torch.Tensor]:
+        ans = []
+        spheres_per_arm = sphere_tensor_W.shape[0] // n_arms
+        for i in range(n_arms):
+            ans.append(sphere_tensor_W[i*spheres_per_arm:(i+1)*spheres_per_arm])
+        return ans
+
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
         self._last_t = -1
@@ -3561,7 +3615,8 @@ def main(meta_cfg, out_path):
     sim_time_start = time() # time in seconds in process clock (actual running start time)
     agents_spheres = [torch.tensor([]) for _ in range(len(cu_agents))] # for agent-to-agent collision check
     mean_goal_err:List[Optional[tuple[float, float]]] = [None for _ in range(len(cu_agents))] # used for pose wta conflict resolution
-
+    n_arms = len(meta_cfg["sim_task"]["arm_poses"])
+    
     with Progress() as progress:
         task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
         task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
@@ -3734,59 +3789,60 @@ def main(meta_cfg, out_path):
                         stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
                         stats = {}
                         for stat_name in stats_to_update_now:
-                            if stat_name == 'w_step': # world step
-                                val = t
-                            elif stat_name == 'a_step': # agent step (control iteration)
-                                val = a.step_count
-                            elif stat_name == 'rec': # robot env collision
+                            # if stat_name == 'w_step': # world step
+                            #     val = t
+                            # elif stat_name == 'a_step': # agent step (control iteration)
+                            #     val = a.step_count
+                            # elif stat_name == 'rec': # robot env collision
+
+                            if stat_name == 'env_cols':
                                 in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
                                 if in_col:
                                     print(f"debug: warning robot {a.idx} in col with obstacle!!!")
                                 val = in_col  
                             elif stat_name == 'link_target_poses': # link and target poses
                                 val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
-                            # case 'spheres': # spheres pos and radius (in world frame)
-                            #     if not len(sphere_tensor_W):
-                            #         sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                            #     val = sphere_tensor_W
-                            #     agents_spheres[a.idx] = sphere_tensor_W
-                            elif stat_name == 'total_planning_time': # total planning time
-                                val = psw.total 
-                            elif stat_name == 'rrc': # robot-robot collisions
+                            elif stat_name == 'spheres': # spheres pos and radius (in world frame)
                                 if not len(sphere_tensor_W):
                                     sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                                
+                                val = sphere_tensor_W
+                                # agents_spheres[a.idx] = sphere_tensor_W
+                            elif stat_name == 'total_planning_time': # total planning time
+                                val = psw.total 
+
+                            elif stat_name == 'arm_cols': # collisions between arms
+                                if not len(sphere_tensor_W):
+                                    sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                        
                                 # val = sphere_tensor_W
-                                agents_spheres[a.idx] = sphere_tensor_W                                    
-                                collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
+                                if n_arms > 1: # decentralized
+                                    agents_spheres[a.idx] = sphere_tensor_W                                    
+                                    collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
+                                    val = len(collisions) > 0
+                                    for other_idx in range(len(collisions)):
+                                        for k,l in collisions[other_idx]:
+                                            print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                 
-                                for other_idx in range(len(collisions)):
-                                    for k,l in collisions[other_idx]:
-                                        print(f"debug COLLISIONS!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
-                                
-                                val = len(collisions) > 0
-                                # for i in range(len(collisions)):
-                                #     for j in range(len(collisions[i])):
-                                #         if i != j:
-                                #             if len(collisions[i][j]):
-                                #                 # print(f"debug: robot {i} in col with robot {j}")
-                                #                 for k,l in collisions[i][j]:
-                                #                     print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
+                                else: # centralized 
+                                    arm_tensors_W = a.split_sphere_tensor_W_into_arms(sphere_tensor_W,n_arms)
+                                    val = False
+                                    for arm_i in range(n_arms):
+                                        if val:
+                                            break
+                                        for arm_j in range(arm_i+1, n_arms):
+                                            if arm_i != arm_j:
+                                                collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
+                                                if len(collisions):
+                                                    val = True
+                                                    break
+                                        
+            
+                                # val = len(collisions) > 0
+                
                             else:
                                 raise ValueError(f"Invalid stat name: {stat_name}")
                             stats[stat_name] = val
                         a.stat_man.update(stats, t, a.step_count)
-
-                    # if t % 10 == 0:
-                    #    collisions = CuAgent.check_collisions_between_agents(agents_spheres)
-                    #    for i in range(len(collisions)):
-                    #        for j in range(len(collisions[i])):
-                    #            if i != j:
-                    #                if len(collisions[i][j]):
-                    #                    # print(f"debug: robot {i} in col with robot {j}")
-                    #                    for k,l in collisions[i][j]:
-                    #                        print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
-                       # print(f"debug: collisions: {collisions}")
 
                     if len(pts_debug):
                         draw_points(pts_debug)
