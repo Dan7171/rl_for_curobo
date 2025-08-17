@@ -3820,24 +3820,24 @@ def main(meta_cfg, out_path):
                                 val = psw.total 
 
                             elif stat_name == 'arm_cols': # collisions between arms
-                                # print(f'debug arm_cols')
-                                # print(f'n_arms = {n_arms}')
-
+  
                                 if not len(sphere_tensor_W):
                                     sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                        
+                                val = False
                                 # val = sphere_tensor_W
                                 if len(cu_agents) > 1: # decentralized
                                     agents_spheres[a.idx] = sphere_tensor_W                                    
                                     collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
-                                    val = len(collisions) > 0
+                                    
                                     for other_idx in range(len(collisions)):
-                                        for k,l in collisions[other_idx]:
-                                            print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
-                                
+                                        if len(collisions[other_idx]):
+                                            for k,l in collisions[other_idx]:
+                                                print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                            val = True
+                                            break
+                                    
                                 else: # centralized 
                                     arm_tensors_W = a.split_sphere_tensor_W_into_arms(sphere_tensor_W,n_arms)
-                                    val = False
                                     for arm_i in range(n_arms):
                                         if val:
                                             break
@@ -3846,11 +3846,10 @@ def main(meta_cfg, out_path):
                                                 collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
                                                 if len(collisions):
                                                     val = True
+                                                    for k,l in collisions:
+                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                                     break
-                                # print(f'arm_cols = {val}')
-                                        
-            
-                                # val = len(collisions) > 0
+
                 
                             else:
                                 raise ValueError(f"Invalid stat name: {stat_name}")
