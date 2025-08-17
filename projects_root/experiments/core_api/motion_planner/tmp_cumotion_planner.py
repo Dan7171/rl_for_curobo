@@ -3291,11 +3291,14 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                     # set obstacles
                                     env_cfg = meta_cfg["sim_env"]["cfg"] 
                                     env_cfg["n_obs"] = 5
-                                    volume_center_pos = arms_center + np.array([0,0,0.5])
+                                    if static_obstacles:
+                                        volume_center_pos = arms_center + np.array([0,0,0.5])
+                                    else:
+                                        volume_center_pos = arms_center + np.array([-1.0,-1.0,0.5])
                                     env_cfg["volume_center_pos"] = volume_center_pos.tolist()
                                     if dynamic_obstacles:
                                         # env_cfg["obj_rigid_body_enabled"] = True
-                                        env_cfg["obj_lin_vel"] = [0.15,0.15,0.15]
+                                        env_cfg["obj_lin_vel"] = [0.15,0.15,0.0]
 
 
                                 # Set cu_agents
