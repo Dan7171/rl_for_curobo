@@ -1,10 +1,10 @@
 timeout:
-  tstep: 500 # world steps timeout
-  tsec: 3000 # seconds timeout
-  physics_tsec: 3000 # physics seconds (world time) timeout
+  tstep: 30000 # 500 # world steps timeout
+  tsec: 30000 # seconds timeout
+  physics_tsec: 30000 # physics seconds (world time) timeout
 
 out:
-  out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin' # output directory
+  out_dir: '/home/dan/mr_mpc_logs/benchmarks_bin_test_aug17' # output directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
@@ -140,8 +140,8 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   stat_man_cfg:
     dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
     keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
-    stat_names: ['rec', 'link_target_poses', 'rrc', 'total_planning_time']
-    collect_dt: [1,1,1,5,10,5] # dt for each stat
+    stat_names: ['env_cols', 'link_target_poses', 'arm_cols', 'total_planning_time', 'spheres']
+    collect_dt: [1,1,1,1,10] # dt for each stat
     verbose: False # [False,False,False,False,False,True]
     save: True
                 
@@ -161,9 +161,11 @@ sim_task:
   task_cfgs:
     manual: {}
     follow:
-      update_interval_tphys: 0.2 # physics dt to update target
-      velocity_scale: 1.0 # scale factor for the target velocity
-      velocity_noise: True # noise for the target velocity
+      # update_interval_tphys: 0.2 # physics dt to update target
+      add_velocity_noise: True # add noise for the target velocity
+      initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
+      vel_noise: 0.3 # size of noise interval to add to the target velocity on each axis
+      initial_targets_density: 0.0 # a valud between 0 and 1 where 0 means no density and 1 means full density
     reach: 
       targets_box_dim: 0.5
       update_interval_tphys: 1.0
@@ -180,14 +182,25 @@ sim_task:
   stat_man_cfgs:
     bin: 
       keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['n_picks', 'n_drops']
+      stat_names: ['arm_err', 'arm_picks', 'arm_drops'] # for each robot, a list with the link names that were picked/ placed at each step
       collect_dt: 1
       dt_key_type: 'tstep'
       save: True
     reach: # link and target poses will be available by agent stats (and no other stats needed)
-      {}
+      # keys: ['tsys', 'tphysics', 'w_step']
+      keys: ['tsys', 'tphysics', 'w_step']
+      stat_names: ['arm_err', 'arm_changed', 'arm_reached']
+
+      collect_dt: 1
+      dt_key_type: 'tstep'
+      save: True
+      
     follow: # link and target poses will be available by agent stats (and no other stats needed)
-      {}
+      keys: ['tsys', 'tphysics', 'w_step']
+      stat_names: ['arm_err']
+      collect_dt: 1
+      dt_key_type: 'tstep'
+      save: True
     manual: 
       {}
 
@@ -218,6 +231,9 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       obs: False # True
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
         is_on: True    
+    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+      is_on_world: True # True # visualize collision spheres in world frame
+      ts_delta: 1 # int
  
 - mpc:
     mpc_solver_cfg:

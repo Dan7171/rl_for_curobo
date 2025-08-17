@@ -554,8 +554,16 @@ class SimTask:
                 target_prim.set_world_pose(position=p_target, orientation=q_target)
 
 
-
-
+    def get_goal_err_by_arm(self)->list[tuple[float,float]]:
+        errors = []
+        # arm_idx = 0
+        for a_idx in range(len(self.goal_errors)):
+            for link_name in self.goal_errors[a_idx].keys():
+                p_err, q_err = self.goal_errors[a_idx][link_name]
+                errors.append((p_err, q_err))
+                # arm_idx += 1
+        return errors
+    
 class FollowTask(SimTask):
     def __init__(self, 
                  agents_task_cfgs:list[dict], 
@@ -566,30 +574,53 @@ class FollowTask(SimTask):
                  stats_cfg:dict,
                  pose_utils:PoseUtils,
                  velocity_scale = 1.0, # scale factor for the target velocity
-                 velocity_noise = False, # noise for the target velocity
-                 update_interval_tphys:float=1.0, # physics dt to update target
+                 add_velocity_noise = False, # noise for the target velocity
+                 update_interval_tphys:float=0.2, # physics dt to update target
+                 initial_vel_direction='center',
+                 initial_targets_density=0.5,
+                 vel_noise=0.2,
                  ):
         
         """
         level:
+
+            1. jumpy-target, no obstacles,  density: 1.0
+            2. jumpy-target, static obstacles,  ,density = 1.0
+            3. jumpy-target, dynamic obstacles,  , density = 1.0
+            4: smooth-target, no obstacles,  ,density = 1.0
+            5: smooth-target, static obstacles, .density = 1.0
+            6: smooth-target, dynamic obstacles, ,density = 1.0    
+
+            7. jumpy-target, no obstacles,  ,density = 0.5
+            8. jumpy-target, static obstacles,   density = 0.5
+            9. jumpy-target, dynamic obstacles,  ,density = 0.5
+            10: smooth-target, no obstacles,  ,density = 0.5
+            11: smooth-target, static obstacles, . density = 0.5
+            12: smooth-target, dynamic obstacles, , density = 0.5
+
+            13. jumpy-target, no obstacles,  , noise: 0.1,density = 0.0
+            14. jumpy-target, static obstacles,  , noise: 0.1 density = 0.0
+            15. jumpy-target, dynamic obstacles,  ,density = 0.0
+            16: smooth-target, no obstacles,  ,density = 0.0
+            17: smooth-target, static obstacles, . density = 0.0
+            18: smooth-target, dynamic obstacles, , density = 0.0
+
+            
+
+
+
+
         
-            1: jumpy-target (translated every update_interval_tphys), no obstacles
-            2: jumpy-target (translated every update_interval_tphys), static obstacles 
-            3: jumpy-target (translated every update_interval_tphys), dynamic obstacles
-            4: smooth-target, no obstacles
-            5: smooth-target, static obstacles
-            6: smooth-target, dynamic obstacles
         
         """
         super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
         self._pose_utils = pose_utils
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
         self.velocity_scale = velocity_scale
-        self.velocity_noise = velocity_noise
+        self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
         self.update_interval_tphys = update_interval_tphys if level < 4 else 0.0
-    
-
-
+        self.initial_vel_direction = initial_vel_direction # 'center' or 'none'
+        self.target_vel_noise = vel_noise
         # Setup targets:
         self.link_name_to_target_vel = [{} for _ in range(self.n_agents)]
         
@@ -598,20 +629,24 @@ class FollowTask(SimTask):
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
-                init_target_pos = robot_base_pos + 0.5 * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
-                init_target_pos[2] += 0.5 # m above the base
+                init_target_pos = robot_base_pos + initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                init_target_pos[2] += 0.75 # m above the base
                 init_target_quat = np.array([0,1,0,0])
                 link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
-                tar_vel_direction = (init_target_pos - robot_base_pos) # direction of the target velocity, towards the center
+                if self.initial_vel_direction == 'center':
+                    tar_vel_direction = (init_target_pos - robot_base_pos) # getting away from the robot base
+                else:
+                    tar_vel_direction = np.array([0,0,0])
                 tar_vel_direction = np.array([tar_vel_direction[0], tar_vel_direction[1], 0])
                 scaled_vel = tar_vel_direction * self.velocity_scale 
-                if self.velocity_noise:
-                    for axis in range(3):
-                        # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
-                        vel_norm = np.linalg.norm(scaled_vel)
-                        noise_range = np.arange(-vel_norm/2, vel_norm/2, vel_norm/10)
-                        noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
-                        scaled_vel[axis] += noise_axis
+                if self.add_velocity_noise:
+                    scaled_vel += self._add_noise_to_target_vel()
+                    
+                    # for axis in range(3):
+                    #     # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
+                    #     noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
+                    #     noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+                    #     scaled_vel[axis] += noise_axis
                         # print(f'noise_axis: {noise_axis}, scaled_vel: {scaled_vel}')
                 self.link_name_to_target_vel[a_idx][link_name] = scaled_vel 
                 self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(init_target_pos), quaternion=self.tensor_args.to_device(init_target_quat))
@@ -624,7 +659,13 @@ class FollowTask(SimTask):
 
         
     
-            
+    def _add_noise_to_target_vel(self):
+        noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
+        noise = np.zeros(3)
+        for axis in range(3):
+            noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+            noise[axis] = noise_axis
+        return noise
  
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose) -> List[Dict[str, Tuple[np.ndarray]]] | None:
         if not self._is_initialized:
@@ -641,12 +682,29 @@ class FollowTask(SimTask):
                 for link_name in self.link_name_to_path[a_idx].keys():
                     target_name = self.name_link_to_target[a_idx][link_name]     
                     p_target, q_target = target_name_to_pose[a_idx][target_name]
+
+                    if self.add_velocity_noise: # nudge the target velocity by a small amount                        
+                        noise = self._add_noise_to_target_vel()
+                        self.link_name_to_target_vel[a_idx][link_name] += noise
+                    
                     target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
                     p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
                     self._update_target(p_target_new, q_target, a_idx, link_name)
                     self._set_target_world_pose_by_link_name(a_idx, link_name, p_target_new, q_target)
                     
         return None
+    
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        
+        stats = {}
+        for stat_name in stat_names:
+            if stat_name == 'arm_err':
+                val = self.get_goal_err_by_arm()
+                # val = deepcopy(self.goal_errors)
+            else:
+                raise ValueError(f"Invalid stat name: {stat_name}")
+            stats[stat_name] = val
+        return stats
 
  
 class ManualTask(SimTask):
@@ -692,7 +750,10 @@ class ReachTask(SimTask):
         target_box_h = targets_box_dim/2 + 0.2
         overlap_mode_box_center = robots_center + np.array([0,0,target_box_h])
         self.overlapping_target_boxes = level > 3
+
         
+        
+
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 if not self.overlapping_target_boxes: # non-overlapping target boxes (easier)
@@ -743,9 +804,13 @@ class ReachTask(SimTask):
         # beyond_time_lim = tphysics_since_update > self.update_interval_tphys
         # if beyond_time_lim:
         #     self._tphysics_at_last_update = tphysics_cur
-        
+        self._arm_reached_goal_cur_iter = []
+        self._arm_goal_update_cur_iter = []
+
+        arm_idx = 0
         for a_idx in range(len(self.target_name_to_target_lin_vel)):
             for link_name in self.link_name_to_path[a_idx].keys():
+                
                 reached_goal = False
                 last_update_tphys = self._link_name_to_last_update_tphys[a_idx][link_name]
                 tphysics_since_update = tphysics_cur - last_update_tphys
@@ -754,6 +819,8 @@ class ReachTask(SimTask):
                 if not beyond_time_lim:
                     p_err, q_err = errors[a_idx][link_name]
                     reached_goal = p_err < self.p_err_threh and  q_err < self.q_err_threh
+                    if reached_goal:
+                        self._arm_reached_goal_cur_iter.append(arm_idx)
                 
                 update_goal = beyond_time_lim or reached_goal
                 if update_goal:
@@ -761,9 +828,25 @@ class ReachTask(SimTask):
                     new_p, new_q = self._sample_target_from_box(a_idx, link_name)
                     self._update_target(new_p, new_q, a_idx, link_name)
                     self._set_target_world_pose_by_link_name(a_idx, link_name, new_p, new_q)
-        
+                    self._arm_goal_update_cur_iter.append(arm_idx)
+                
+                arm_idx += 1
         return None
 
+    def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+        stats = {}
+        for stat_name in stat_names:
+            if stat_name == 'arm_err':
+                val = self.get_goal_err_by_arm()
+            elif stat_name == 'arm_changed':
+                val = self._arm_goal_update_cur_iter
+                # val = self.get_n_reached_by_arm()
+            elif stat_name == 'arm_reached': 
+                val = self._arm_reached_goal_cur_iter
+            else:
+                raise ValueError(f"Invalid stat name: {stat_name}")
+            stats[stat_name] = val
+        return stats
     
 
 
@@ -1009,7 +1092,9 @@ class BinTask(SimTask):
     
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
-        
+        self._last_step_picks = []
+        self._last_step_drops = []
+
         _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
         if not self._is_initialized: # Initialize the targets
             self._is_initialized = True
@@ -1028,10 +1113,12 @@ class BinTask(SimTask):
                         _link_name_to_target_pose_np[a_idx][link_name] = self._rotate_bin_goal_for_robot(link_name, a_idx, goal_pose) # goal_pose
                     else: # behind arm
                         _link_name_to_target_pose_np[a_idx][link_name] = self.link_name_to_pick_pose[a_idx][link_name]
-                        
+                
+            
 
         
         else: # check which agents reached their goal, and update the goal type for them (other agents keep their goal type)
+            arm_idx = 0
             for a_idx in range(len(self.agent_task_cfgs)):
                 
                 for link_name in link_name_to_pose[a_idx]:
@@ -1049,7 +1136,8 @@ class BinTask(SimTask):
 
                             goal_pose = self.link_name_to_pick_pose[a_idx][link_name] # next goal pose
                             goal_type = 'behind_arm' # next goal type
-                            self._increase_placed_count(link_name, a_idx) # update stats
+                            # self._increase_placed_count(link_name, a_idx) # update stats
+                            self._last_step_drops.append(arm_idx)
                             
                             # mark link as not having bin goal (it's status is now picking, not placing)
                             self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
@@ -1093,7 +1181,8 @@ class BinTask(SimTask):
                             goal_pose = self._rotate_bin_goal_for_robot(link_name, a_idx, self.bin_goal_poses[new_bin_goal_idx]) # self.bin_goal_poses[new_bin_goal_idx] # New bin goal set
 
                             # uptdate stats (note that its done only after we actually set the new bin goal, so we count only one pick for each change from behind goal to bin goal)
-                            self._increase_picked_count(link_name, a_idx) # update stats
+                            # self._increase_picked_count(link_name, a_idx) # update stats
+                            self._last_step_picks.append(arm_idx)
                             
                             # post-pick visual effects
                             if twin_exists: # if twin exists
@@ -1107,7 +1196,7 @@ class BinTask(SimTask):
 
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                         self._link_name_to_goal_type[a_idx][link_name] = goal_type
-                    
+                        
                     # visual effects:
                     else: # not yet in goal (still moving)
                         if cur_goal_type == 'bin': # carrying item to bin
@@ -1136,7 +1225,7 @@ class BinTask(SimTask):
                                         if self._target_name_to_free_fall_count[a_idx][target_name] == 0:
                                             twin.set_visibility(False)
                                         
-
+                    arm_idx += 1
 
         # update the targets in sim
         self._set_targets_world_pose(_link_name_to_target_pose_np)
@@ -1146,10 +1235,12 @@ class BinTask(SimTask):
         
         stats = {}
         for stat_name in stat_names:
-            if stat_name == 'n_picks':
-                val = self.link_name_to_picked_from_back
-            elif stat_name == 'n_drops':
-                val = self.link_name_to_placed_in_bin
+            if stat_name == 'arm_err':
+                val = self.get_goal_err_by_arm()
+            elif stat_name == 'arm_picks':
+                val = self._last_step_picks
+            elif stat_name == 'arm_drops':
+                val = self._last_step_drops
             else:
                 raise ValueError(f"Invalid stat name: {stat_name}")
             stats[stat_name] = val
@@ -2392,6 +2483,17 @@ class CuAgent:
         sphere_tensor_W = torch.cat((p_W.squeeze(0), r_W.T),dim=1)
         return sphere_tensor_W
     
+    def split_sphere_tensor_W_into_arms(self, sphere_tensor_W:torch.Tensor, n_arms:int)->list[torch.Tensor]:
+        ans = []
+        spheres_per_arm = sphere_tensor_W.shape[0] // n_arms
+        for i in range(n_arms):
+            ans.append(sphere_tensor_W[i*spheres_per_arm:(i+1)*spheres_per_arm])
+            print(f'debug')
+            print(f'i = {i}')
+            print(i*spheres_per_arm)
+            print((i+1)*spheres_per_arm)
+        return ans
+
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
                                goals:Dict[str, Pose],sim_env:SimEnv,sim_task:SimTask):
         self._last_t = -1
@@ -3195,11 +3297,14 @@ def modify_to_benchmark_mode(combo_cfg_path):
                                     # set obstacles
                                     env_cfg = meta_cfg["sim_env"]["cfg"] 
                                     env_cfg["n_obs"] = 5
-                                    volume_center_pos = arms_center + np.array([0,0,0.5])
+                                    if static_obstacles:
+                                        volume_center_pos = arms_center + np.array([0,0,0.5])
+                                    else:
+                                        volume_center_pos = arms_center + np.array([-1.0,-1.0,0.5])
                                     env_cfg["volume_center_pos"] = volume_center_pos.tolist()
                                     if dynamic_obstacles:
                                         # env_cfg["obj_rigid_body_enabled"] = True
-                                        env_cfg["obj_lin_vel"] = [0.1,0.1,0.1]
+                                        env_cfg["obj_lin_vel"] = [0.15,0.15,0.0]
 
 
                                 # Set cu_agents
@@ -3519,7 +3624,8 @@ def main(meta_cfg, out_path):
     sim_time_start = time() # time in seconds in process clock (actual running start time)
     agents_spheres = [torch.tensor([]) for _ in range(len(cu_agents))] # for agent-to-agent collision check
     mean_goal_err:List[Optional[tuple[float, float]]] = [None for _ in range(len(cu_agents))] # used for pose wta conflict resolution
-
+    n_arms = len(meta_cfg["sim_task"]["arm_poses"])
+    
     with Progress() as progress:
         task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
         task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
@@ -3692,59 +3798,64 @@ def main(meta_cfg, out_path):
                         stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
                         stats = {}
                         for stat_name in stats_to_update_now:
-                            if stat_name == 'w_step': # world step
-                                val = t
-                            elif stat_name == 'a_step': # agent step (control iteration)
-                                val = a.step_count
-                            elif stat_name == 'rec': # robot env collision
+                            # if stat_name == 'w_step': # world step
+                            #     val = t
+                            # elif stat_name == 'a_step': # agent step (control iteration)
+                            #     val = a.step_count
+                            # elif stat_name == 'rec': # robot env collision
+
+                            if stat_name == 'env_cols':
                                 in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
                                 if in_col:
                                     print(f"debug: warning robot {a.idx} in col with obstacle!!!")
                                 val = in_col  
                             elif stat_name == 'link_target_poses': # link and target poses
                                 val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
-                            # case 'spheres': # spheres pos and radius (in world frame)
-                            #     if not len(sphere_tensor_W):
-                            #         sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                            #     val = sphere_tensor_W
-                            #     agents_spheres[a.idx] = sphere_tensor_W
-                            elif stat_name == 'total_planning_time': # total planning time
-                                val = psw.total 
-                            elif stat_name == 'rrc': # robot-robot collisions
+                            elif stat_name == 'spheres': # spheres pos and radius (in world frame)
                                 if not len(sphere_tensor_W):
                                     sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                                
+                                val = sphere_tensor_W
+                                # agents_spheres[a.idx] = sphere_tensor_W
+                            elif stat_name == 'total_planning_time': # total planning time
+                                val = psw.total 
+
+                            elif stat_name == 'arm_cols': # collisions between arms
+                                print(f'debug arm_cols')
+                                print(f'n_arms = {n_arms}')
+
+                                if not len(sphere_tensor_W):
+                                    sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                        
                                 # val = sphere_tensor_W
-                                agents_spheres[a.idx] = sphere_tensor_W                                    
-                                collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
+                                if len(cu_agents) > 1: # decentralized
+                                    agents_spheres[a.idx] = sphere_tensor_W                                    
+                                    collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
+                                    val = len(collisions) > 0
+                                    for other_idx in range(len(collisions)):
+                                        for k,l in collisions[other_idx]:
+                                            print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                 
-                                for other_idx in range(len(collisions)):
-                                    for k,l in collisions[other_idx]:
-                                        print(f"debug COLLISIONS!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
-                                
-                                val = len(collisions) > 0
-                                # for i in range(len(collisions)):
-                                #     for j in range(len(collisions[i])):
-                                #         if i != j:
-                                #             if len(collisions[i][j]):
-                                #                 # print(f"debug: robot {i} in col with robot {j}")
-                                #                 for k,l in collisions[i][j]:
-                                #                     print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
+                                else: # centralized 
+                                    arm_tensors_W = a.split_sphere_tensor_W_into_arms(sphere_tensor_W,n_arms)
+                                    val = False
+                                    for arm_i in range(n_arms):
+                                        if val:
+                                            break
+                                        for arm_j in range(arm_i+1, n_arms):
+                                            if arm_i != arm_j:
+                                                collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
+                                                if len(collisions):
+                                                    val = True
+                                                    break
+                                print(f'arm_cols = {val}')
+                                        
+            
+                                # val = len(collisions) > 0
+                
                             else:
                                 raise ValueError(f"Invalid stat name: {stat_name}")
                             stats[stat_name] = val
                         a.stat_man.update(stats, t, a.step_count)
-
-                    # if t % 10 == 0:
-                    #    collisions = CuAgent.check_collisions_between_agents(agents_spheres)
-                    #    for i in range(len(collisions)):
-                    #        for j in range(len(collisions[i])):
-                    #            if i != j:
-                    #                if len(collisions[i][j]):
-                    #                    # print(f"debug: robot {i} in col with robot {j}")
-                    #                    for k,l in collisions[i][j]:
-                    #                        print(f"debug collisions: spheres: r{i} s{k} with r{j} s{l}")
-                       # print(f"debug: collisions: {collisions}")
 
                     if len(pts_debug):
                         draw_points(pts_debug)
