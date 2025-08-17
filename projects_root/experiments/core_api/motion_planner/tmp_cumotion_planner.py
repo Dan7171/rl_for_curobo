@@ -1092,8 +1092,8 @@ class BinTask(SimTask):
     
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
         
-        self._last_step_picks = [[] for _ in range(len(self.agent_task_cfgs))]
-        self._last_step_drops = [[] for _ in range(len(self.agent_task_cfgs))]
+        self._last_step_picks = []
+        self._last_step_drops = []
 
         _link_name_to_target_pose_np = [{} for _ in range(len(self.bin_goal_poses))]
         if not self._is_initialized: # Initialize the targets
@@ -1113,10 +1113,12 @@ class BinTask(SimTask):
                         _link_name_to_target_pose_np[a_idx][link_name] = self._rotate_bin_goal_for_robot(link_name, a_idx, goal_pose) # goal_pose
                     else: # behind arm
                         _link_name_to_target_pose_np[a_idx][link_name] = self.link_name_to_pick_pose[a_idx][link_name]
-                        
+                
+            
 
         
         else: # check which agents reached their goal, and update the goal type for them (other agents keep their goal type)
+            arm_idx = 0
             for a_idx in range(len(self.agent_task_cfgs)):
                 
                 for link_name in link_name_to_pose[a_idx]:
@@ -1135,7 +1137,7 @@ class BinTask(SimTask):
                             goal_pose = self.link_name_to_pick_pose[a_idx][link_name] # next goal pose
                             goal_type = 'behind_arm' # next goal type
                             # self._increase_placed_count(link_name, a_idx) # update stats
-                            self._last_step_drops[a_idx].append(link_name)
+                            self._last_step_drops.append(arm_idx)
                             
                             # mark link as not having bin goal (it's status is now picking, not placing)
                             self._link_name_to_cur_bingoal[a_idx][link_name] = -1 # makrk link as not having bin goal
@@ -1180,8 +1182,8 @@ class BinTask(SimTask):
 
                             # uptdate stats (note that its done only after we actually set the new bin goal, so we count only one pick for each change from behind goal to bin goal)
                             # self._increase_picked_count(link_name, a_idx) # update stats
-                            self._last_step_picks[a_idx].append(link_name)
-
+                            self._last_step_picks.append(arm_idx)
+                            
                             # post-pick visual effects
                             if twin_exists: # if twin exists
                                 # show the twin (carried item)
@@ -1194,7 +1196,7 @@ class BinTask(SimTask):
 
                         _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                         self._link_name_to_goal_type[a_idx][link_name] = goal_type
-                    
+                        
                     # visual effects:
                     else: # not yet in goal (still moving)
                         if cur_goal_type == 'bin': # carrying item to bin
@@ -1223,7 +1225,7 @@ class BinTask(SimTask):
                                         if self._target_name_to_free_fall_count[a_idx][target_name] == 0:
                                             twin.set_visibility(False)
                                         
-
+                    arm_idx += 1
 
         # update the targets in sim
         self._set_targets_world_pose(_link_name_to_target_pose_np)
