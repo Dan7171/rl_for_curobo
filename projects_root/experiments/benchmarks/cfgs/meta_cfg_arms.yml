@@ -161,12 +161,11 @@ sim_task:
   task_cfgs:
     manual: {}
     follow:
-      update_interval_tphys: 0.2 # physics dt to update target
-      velocity_scale: 0.01 # scale factor for the target velocity
-      velocity_noise: True # noise for the target velocity
-      target_rand_vel: True # add noise to the target velocity
-      initial_target_vel: 'center' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
-      target_vel_noise: 0.3 # size of noise interval to add to the target velocity on each axis
+      # update_interval_tphys: 0.2 # physics dt to update target
+      add_velocity_noise: True # add noise for the target velocity
+      initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
+      vel_noise: 0.3 # size of noise interval to add to the target velocity on each axis
+      initial_targets_density: 0.0 # a valud between 0 and 1 where 0 means no density and 1 means full density
     reach: 
       targets_box_dim: 0.5
       update_interval_tphys: 1.0

@@ -566,23 +566,41 @@ class FollowTask(SimTask):
                  stats_cfg:dict,
                  pose_utils:PoseUtils,
                  velocity_scale = 1.0, # scale factor for the target velocity
-                 velocity_noise = False, # noise for the target velocity
-                 update_interval_tphys:float=1.0, # physics dt to update target
-                 target_rand_vel=False,
-                 obs_rand_vel=False,
-                 initial_target_vel='center',
-                 target_vel_noise=0.1,
+                 add_velocity_noise = False, # noise for the target velocity
+                 update_interval_tphys:float=0.2, # physics dt to update target
+                 initial_vel_direction='center',
+                 initial_targets_density=0.5,
+                 vel_noise=0.2,
                  ):
         
         """
         level:
 
-            1. jumpy-target, (moving target - not smoothly, but every update_interval_tphys), no obstacles
-            2. jumpy-target, static obstacles 
-            3. jumpy-target, dynamic obstacles
-            4: smooth-target, no obstacles
-            5: smooth-target, static obstacles
-            6: smooth-target, dynamic obstacles
+            1. jumpy-target, no obstacles,  density: 1.0
+            2. jumpy-target, static obstacles,  ,density = 1.0
+            3. jumpy-target, dynamic obstacles,  , density = 1.0
+            4: smooth-target, no obstacles,  ,density = 1.0
+            5: smooth-target, static obstacles, .density = 1.0
+            6: smooth-target, dynamic obstacles, ,density = 1.0    
+
+            7. jumpy-target, no obstacles,  ,density = 0.5
+            8. jumpy-target, static obstacles,   density = 0.5
+            9. jumpy-target, dynamic obstacles,  ,density = 0.5
+            10: smooth-target, no obstacles,  ,density = 0.5
+            11: smooth-target, static obstacles, . density = 0.5
+            12: smooth-target, dynamic obstacles, , density = 0.5
+
+            13. jumpy-target, no obstacles,  , noise: 0.1,density = 0.0
+            14. jumpy-target, static obstacles,  , noise: 0.1 density = 0.0
+            15. jumpy-target, dynamic obstacles,  ,density = 0.0
+            16: smooth-target, no obstacles,  ,density = 0.0
+            17: smooth-target, static obstacles, . density = 0.0
+            18: smooth-target, dynamic obstacles, , density = 0.0
+
+            
+
+
+
 
         
         
@@ -591,12 +609,10 @@ class FollowTask(SimTask):
         self._pose_utils = pose_utils
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
         self.velocity_scale = velocity_scale
-        self.velocity_noise = velocity_noise
+        self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
         self.update_interval_tphys = update_interval_tphys if level < 4 else 0.0
-        self.initial_target_vel = initial_target_vel # 'center' or 'none'
-        self.target_rand_vel = target_rand_vel 
-        self.obs_rand_vel = obs_rand_vel # for dynamic obstacles only
-        self.target_vel_noise = target_vel_noise
+        self.initial_vel_direction = initial_vel_direction # 'center' or 'none'
+        self.target_vel_noise = vel_noise
         # Setup targets:
         self.link_name_to_target_vel = [{} for _ in range(self.n_agents)]
         
@@ -605,22 +621,24 @@ class FollowTask(SimTask):
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
-                init_target_pos = robot_base_pos + 0.5 * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                init_target_pos = robot_base_pos + initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
                 init_target_pos[2] += 0.75 # m above the base
                 init_target_quat = np.array([0,1,0,0])
                 link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
-                if self.initial_target_vel == 'center':
+                if self.initial_vel_direction == 'center':
                     tar_vel_direction = (init_target_pos - robot_base_pos) # getting away from the robot base
                 else:
                     tar_vel_direction = np.array([0,0,0])
                 tar_vel_direction = np.array([tar_vel_direction[0], tar_vel_direction[1], 0])
                 scaled_vel = tar_vel_direction * self.velocity_scale 
-                if self.velocity_noise:
-                    for axis in range(3):
-                        # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
-                        noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
-                        noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
-                        scaled_vel[axis] += noise_axis
+                if self.add_velocity_noise:
+                    scaled_vel += self._add_noise_to_target_vel()
+                    
+                    # for axis in range(3):
+                    #     # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
+                    #     noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
+                    #     noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+                    #     scaled_vel[axis] += noise_axis
                         # print(f'noise_axis: {noise_axis}, scaled_vel: {scaled_vel}')
                 self.link_name_to_target_vel[a_idx][link_name] = scaled_vel 
                 self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(init_target_pos), quaternion=self.tensor_args.to_device(init_target_quat))
@@ -633,7 +651,13 @@ class FollowTask(SimTask):
 
         
     
-            
+    def _add_noise_to_target_vel(self):
+        noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
+        noise = np.zeros(3)
+        for axis in range(3):
+            noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+            noise[axis] = noise_axis
+        return noise
  
     def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose) -> List[Dict[str, Tuple[np.ndarray]]] | None:
         if not self._is_initialized:
@@ -651,11 +675,9 @@ class FollowTask(SimTask):
                     target_name = self.name_link_to_target[a_idx][link_name]     
                     p_target, q_target = target_name_to_pose[a_idx][target_name]
 
-                    if self.target_rand_vel: # nudge the target velocity by a small amount                        
-                        noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
-                        for axis in range(3):
-                            noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
-                            self.link_name_to_target_vel[a_idx][link_name][axis] += noise_axis
+                    if self.add_velocity_noise: # nudge the target velocity by a small amount                        
+                        noise = self._add_noise_to_target_vel()
+                        self.link_name_to_target_vel[a_idx][link_name] += noise
                     
                     target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
                     p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
