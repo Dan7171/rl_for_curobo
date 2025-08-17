@@ -182,7 +182,8 @@ def main():
                        help="Frames per second for output video")
     parser.add_argument("--method", choices=['opencv', 'imageio', 'ffmpeg', 'auto'], default='auto',
                        help="Method to use for video conversion (auto=imageio->ffmpeg->opencv)")
-    
+    parser.add_argument("--remove_frames", action="store_true",
+                       help="Remove frames after conversion")
     args = parser.parse_args()
     if args.output == "":
         args.output = f"{args.input_dir}/run.mp4"
@@ -209,9 +210,22 @@ def main():
     else:
         print("Video conversion failed!")
 
-
+    try:
+        if args.remove_frames:
+            for f in glob.glob(os.path.join(args.input_dir, "rgb", "rgb_*.png")):
+                os.remove(f)
+            for f in glob.glob(os.path.join(args.input_dir, "*.png")):
+                os.remove(f)
+            for f in glob.glob(os.path.join(args.input_dir, "*.jpg")):
+                os.remove(f)
+                for f in glob.glob(os.path.join(args.input_dir, "*.jpeg")):
+                    os.remove(f)
+    except Exception as e:
+        print(f"Error removing frames: {e}")
+    
 if __name__ == "__main__":
     main()
+    
     
     # (env_isaacsim) [evrond@cs-4090-07 rl_for_curobo]$ python projects_root/experiments/core_api/motion_planner/convert_frames_to_video.py --input_dir /cs_storage/evrond/_out_sdrec
     # python projects_root/experiments/core_api/motion_planner/convert_frames_to_video.py --input_dir /cs_storage/evrond/_out_sdrec --method auto

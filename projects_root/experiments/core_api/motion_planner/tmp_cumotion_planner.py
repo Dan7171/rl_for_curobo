@@ -3099,7 +3099,7 @@ class FrameCapturer:
         # Get all frame files
         if result_path == '':
             result_path = f'{self.frames_dir}/as_video_{video_fps}fps.mp4'
-        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --method auto --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
+        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --method auto --input_dir {self.frames_dir} --output {result_path} --fps {video_fps} --remove_frames'
         shell = True 
         if in_background:
             subprocess.Popen(command, shell=shell)
