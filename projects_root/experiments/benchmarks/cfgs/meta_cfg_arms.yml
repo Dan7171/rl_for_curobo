@@ -1,5 +1,5 @@
 timeout:
-  tstep: 500 # 500 # world steps timeout
+  tstep: 50 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -224,7 +224,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 
 - mpc:
     mpc_solver_cfg:
-      plot_costs: False # True
+      plot_costs: True #False # True
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True

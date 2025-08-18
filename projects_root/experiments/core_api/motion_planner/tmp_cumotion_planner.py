@@ -1846,7 +1846,16 @@ class MpcPlanner(CuPlanner):
         return self._get_wrap_mpc_optimizer().rollout_fn._custom_arm_reacher_costs
     
     def _get_arm_reacher(self)->ArmReacher:
-        return self._get_wrap_mpc_optimizer().rollout_fn
+        try:
+            optimizer = self._get_wrap_mpc_optimizer()
+            if optimizer is not None and hasattr(optimizer, 'rollout_fn'):
+                return optimizer.rollout_fn
+            else:
+                print("Warning: optimizer is None or doesn't have rollout_fn")
+                return None
+        except Exception as e:
+            print(f"Error getting arm reacher: {e}")
+            return None
     
     def get_col_pred(self)->Optional[DynamicObsCollPredictor]:
         for instance in self._get_custom_arm_base_costs().values():
@@ -1856,7 +1865,82 @@ class MpcPlanner(CuPlanner):
 
     
     def kill_cost_plots(self):
-        self._get_arm_reacher().kill_live_plot()
+        """Aggressively close all matplotlib figures and threads"""
+        # First try the standard method
+        try:
+            arm_reacher = self._get_arm_reacher()
+            if arm_reacher is not None and hasattr(arm_reacher, 'kill_live_plot'):
+                arm_reacher.kill_live_plot()
+                print("Called arm_reacher.kill_live_plot()")
+            else:
+                print("Warning: arm_reacher is None or doesn't have kill_live_plot method")
+        except Exception as e:
+            print(f"Error in standard kill_live_plot: {e}")
+        
+        # Aggressive matplotlib cleanup
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            
+            # Get all figure numbers
+            fig_nums = plt.get_fignums()
+            print(f"Found {len(fig_nums)} matplotlib figures: {fig_nums}")
+            
+            # Close each figure individually
+            for fig_num in fig_nums:
+                try:
+                    plt.figure(fig_num)
+                    plt.close(fig_num)
+                    print(f"Closed figure {fig_num}")
+                except Exception as e:
+                    print(f"Error closing figure {fig_num}: {e}")
+            
+            # Close all figures
+            plt.close('all')
+            
+            # Turn off interactive mode
+            plt.ioff()
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            # Additional cleanup for Qt backend
+            try:
+                if hasattr(plt, 'show'):
+                    plt.show(block=False)  # Flush any pending operations
+                backend = matplotlib.get_backend()
+                print(f"Matplotlib backend: {backend}")
+                
+                if 'Qt' in backend:
+                    try:
+                        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+                        # Try to close Qt application if it exists
+                        import matplotlib.backends.backend_qt5agg as qt_backend
+                        if hasattr(qt_backend, 'qApp') and qt_backend.qApp is not None:
+                            qt_backend.qApp.processEvents()
+                            print("Processed Qt events")
+                    except ImportError:
+                        pass
+                        
+            except Exception as qt_error:
+                print(f"Qt cleanup error: {qt_error}")
+                
+            print("Aggressive matplotlib cleanup completed")
+            
+        except Exception as cleanup_error:
+            print(f"Error in aggressive cleanup: {cleanup_error}")
+            
+        # Final check
+        try:
+            import matplotlib.pyplot as plt
+            remaining_figs = plt.get_fignums()
+            if remaining_figs:
+                print(f"Warning: {len(remaining_figs)} figures still remain: {remaining_figs}")
+            else:
+                print("All figures successfully closed")
+        except Exception as check_error:
+            print(f"Error checking remaining figures: {check_error}")
 
     def update_col_pred(self, plans_board, idx, col_pred_with, goal_errors, plans_lock:Optional[Lock]=None):
         
@@ -3859,7 +3943,7 @@ def main(meta_cfg, out_path):
                                                 if len(collisions):
                                                     val = True
                                                     for k,l in collisions:
-                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
                                                     break
 
                 
@@ -4138,7 +4222,107 @@ if __name__ == "__main__":
 
 
 
+    def aggressive_matplotlib_cleanup():
+        """System-level matplotlib cleanup between simulations"""
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            import gc
+            import threading
+            
+            print("=== STARTING AGGRESSIVE MATPLOTLIB CLEANUP ===")
+            
+            # Get all figure numbers before cleanup
+            fig_nums = plt.get_fignums()
+            print(f"Found {len(fig_nums)} matplotlib figures: {fig_nums}")
+            
+            # Close each figure individually with force
+            for fig_num in fig_nums:
+                try:
+                    fig = plt.figure(fig_num)
+                    plt.figure(fig_num)  # Make it current
+                    plt.clf()  # Clear the figure
+                    plt.close(fig_num)
+                    print(f"Force closed figure {fig_num}")
+                except Exception as e:
+                    print(f"Error force closing figure {fig_num}: {e}")
+            
+            # Multiple attempts at closing all
+            for attempt in range(3):
+                plt.close('all')
+                plt.clf()
+                print(f"plt.close('all') attempt {attempt + 1}")
+            
+            # Turn off interactive mode
+            plt.ioff()
+            
+            # Clear matplotlib's internal state
+            try:
+                plt.rcdefaults()  # Reset matplotlib settings
+                matplotlib.pyplot.close('all')
+                print("Reset matplotlib defaults")
+            except Exception as e:
+                print(f"Error resetting matplotlib: {e}")
+            
+            # Backend-specific cleanup
+            try:
+                backend = matplotlib.get_backend()
+                print(f"Matplotlib backend: {backend}")
+                
+                if 'Qt' in backend:
+                    try:
+                        import matplotlib.backends.backend_qt5agg as qt_backend
+                        if hasattr(qt_backend, 'qApp') and qt_backend.qApp is not None:
+                            # Process all pending Qt events
+                            qt_backend.qApp.processEvents()
+                            qt_backend.qApp.sync()
+                            print("Processed and synced Qt events")
+                            
+                            # Try to close Qt windows more aggressively
+                            try:
+                                from PyQt5.QtWidgets import QApplication
+                                app = QApplication.instance()
+                                if app:
+                                    app.closeAllWindows()
+                                    app.processEvents()
+                                    print("Closed all Qt windows")
+                            except ImportError:
+                                pass
+                    except Exception as qt_error:
+                        print(f"Qt-specific cleanup error: {qt_error}")
+                        
+            except Exception as backend_error:
+                print(f"Backend cleanup error: {backend_error}")
+            
+            # Force garbage collection multiple times
+            for i in range(3):
+                gc.collect()
+                
+            # Final verification
+            remaining_figs = plt.get_fignums()
+            if remaining_figs:
+                print(f"WARNING: {len(remaining_figs)} figures still remain: {remaining_figs}")
+                # Last resort: try to kill them with del
+                for fig_num in remaining_figs:
+                    try:
+                        fig = plt.figure(fig_num)
+                        del fig
+                        plt.close(fig_num)
+                    except:
+                        pass
+            else:
+                print("✓ All matplotlib figures successfully closed")
+                
+            print("=== MATPLOTLIB CLEANUP COMPLETED ===")
+            
+        except Exception as cleanup_error:
+            print(f"Error in aggressive_matplotlib_cleanup: {cleanup_error}")
+
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
+        
+        # Clean up before starting new simulation
+        print(f"\n=== STARTING NEW SIMULATION: {out_name} ===")
+        aggressive_matplotlib_cleanup()
 
         formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         
@@ -4149,5 +4333,14 @@ if __name__ == "__main__":
         print(f'out_path: {out_path}')
         sleep(3)
         keep_running = main(meta_cfg, out_path)
+        
+        # Clean up after simulation completes
+        print(f"\n=== SIMULATION {out_name} COMPLETED ===")
+        aggressive_matplotlib_cleanup()
+        
         if not keep_running:
             break
+    
+    # Final cleanup when all simulations are done
+    print("\n=== ALL SIMULATIONS COMPLETED - FINAL CLEANUP ===")
+    aggressive_matplotlib_cleanup()
