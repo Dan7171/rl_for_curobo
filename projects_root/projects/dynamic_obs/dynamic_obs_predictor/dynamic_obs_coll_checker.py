@@ -337,7 +337,7 @@ class DynamicObsCollPredictor:
                     err_ratio = (p_err_subto / p_own_err) 
                     # make distances to the other robot spheres higher, trusting it to handle collisions (since it's ratio < 1 therefore it's inferior)
                     self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :] *= (err_ratio ** self.wta_trust) # = 10000 # very high fake norm 
-                
+                    # print(f'debug err_ratio = {err_ratio}')
                     
                     # superiority = err_ratio > 1
                     # if superiority:

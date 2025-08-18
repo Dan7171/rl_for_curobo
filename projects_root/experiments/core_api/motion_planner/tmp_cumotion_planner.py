@@ -2584,10 +2584,6 @@ class CuAgent:
         spheres_per_arm = sphere_tensor_W.shape[0] // n_arms
         for i in range(n_arms):
             ans.append(sphere_tensor_W[i*spheres_per_arm:(i+1)*spheres_per_arm])
-            print(f'debug')
-            print(f'i = {i}')
-            print(i*spheres_per_arm)
-            print((i+1)*spheres_per_arm)
         return ans
 
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
@@ -4222,113 +4218,22 @@ if __name__ == "__main__":
 
 
 
-    def aggressive_matplotlib_cleanup():
-        """System-level matplotlib cleanup between simulations"""
-        try:
-            import matplotlib.pyplot as plt
-            import matplotlib
-            import gc
-            import threading
-            
-            print("=== STARTING AGGRESSIVE MATPLOTLIB CLEANUP ===")
-            
-            # Get all figure numbers before cleanup
-            fig_nums = plt.get_fignums()
-            print(f"Found {len(fig_nums)} matplotlib figures: {fig_nums}")
-            
-            # Close each figure individually with force
-            for fig_num in fig_nums:
-                try:
-                    fig = plt.figure(fig_num)
-                    plt.figure(fig_num)  # Make it current
-                    plt.clf()  # Clear the figure
-                    plt.close(fig_num)
-                    print(f"Force closed figure {fig_num}")
-                except Exception as e:
-                    print(f"Error force closing figure {fig_num}: {e}")
-            
-            # Multiple attempts at closing all
-            for attempt in range(3):
-                plt.close('all')
-                plt.clf()
-                print(f"plt.close('all') attempt {attempt + 1}")
-            
-            # Turn off interactive mode
-            plt.ioff()
-            
-            # Clear matplotlib's internal state
-            try:
-                plt.rcdefaults()  # Reset matplotlib settings
-                matplotlib.pyplot.close('all')
-                print("Reset matplotlib defaults")
-            except Exception as e:
-                print(f"Error resetting matplotlib: {e}")
-            
-            # Backend-specific cleanup
-            try:
-                backend = matplotlib.get_backend()
-                print(f"Matplotlib backend: {backend}")
-                
-                if 'Qt' in backend:
-                    try:
-                        import matplotlib.backends.backend_qt5agg as qt_backend
-                        if hasattr(qt_backend, 'qApp') and qt_backend.qApp is not None:
-                            # Process all pending Qt events
-                            qt_backend.qApp.processEvents()
-                            qt_backend.qApp.sync()
-                            print("Processed and synced Qt events")
-                            
-                            # Try to close Qt windows more aggressively
-                            try:
-                                from PyQt5.QtWidgets import QApplication
-                                app = QApplication.instance()
-                                if app:
-                                    app.closeAllWindows()
-                                    app.processEvents()
-                                    print("Closed all Qt windows")
-                            except ImportError:
-                                pass
-                    except Exception as qt_error:
-                        print(f"Qt-specific cleanup error: {qt_error}")
-                        
-            except Exception as backend_error:
-                print(f"Backend cleanup error: {backend_error}")
-            
-            # Force garbage collection multiple times
-            for i in range(3):
-                gc.collect()
-                
-            # Final verification
-            remaining_figs = plt.get_fignums()
-            if remaining_figs:
-                print(f"WARNING: {len(remaining_figs)} figures still remain: {remaining_figs}")
-                # Last resort: try to kill them with del
-                for fig_num in remaining_figs:
-                    try:
-                        fig = plt.figure(fig_num)
-                        del fig
-                        plt.close(fig_num)
-                    except:
-                        pass
-            else:
-                print("✓ All matplotlib figures successfully closed")
-                
-            print("=== MATPLOTLIB CLEANUP COMPLETED ===")
-            
-        except Exception as cleanup_error:
-            print(f"Error in aggressive_matplotlib_cleanup: {cleanup_error}")
+    
 
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
         
-        # Clean up before starting new simulation
-        print(f"\n=== STARTING NEW SIMULATION: {out_name} ===")
-        aggressive_matplotlib_cleanup()
+
 
         formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        
         if args.livestream:
-            meta_cfg["out"]["out_dir"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+            meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+        
+        if len(meta_cfg["out"]["batch_dir_name"]):
+            meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
             print(f'warning-livestream mode')
+        else:
+            meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
+        
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
         sleep(3)
@@ -4336,11 +4241,9 @@ if __name__ == "__main__":
         
         # Clean up after simulation completes
         print(f"\n=== SIMULATION {out_name} COMPLETED ===")
-        aggressive_matplotlib_cleanup()
         
         if not keep_running:
             break
     
     # Final cleanup when all simulations are done
     print("\n=== ALL SIMULATIONS COMPLETED - FINAL CLEANUP ===")
-    aggressive_matplotlib_cleanup()

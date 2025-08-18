@@ -1002,34 +1002,188 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             print("Live plotting not initialized yet. This will take effect when plotting starts.")
 
     def kill_live_plot(self): 
-        if hasattr(self, '_fig'):
+        """Aggressively terminate plotting threads and close all matplotlib figures"""
+        print("=== STARTING AGGRESSIVE PLOT CLEANUP ===")
+        
+        # STEP 1: Stop the background thread FIRST (most important)
+        if hasattr(self, '_plot_stop_event') and self._plot_stop_event is not None:
             try:
-                plt.close(self._fig)
+                print("Setting stop event for plot thread...")
+                self._plot_stop_event.set()
             except Exception as e:
-                print(f"Error closing plot: {e}")
+                print(f"Error setting stop event: {e}")
+        
+        # STEP 2: Force thread termination with multiple attempts
+        if hasattr(self, '_plot_thread') and self._plot_thread is not None:
+            print(f"Attempting to join plot thread (alive: {self._plot_thread.is_alive()})...")
             try:
-                plt.close('all')
+                # First attempt with short timeout
+                self._plot_thread.join(timeout=0.5)
+                if self._plot_thread.is_alive():
+                    print("Thread still alive after 0.5s, trying longer timeout...")
+                    self._plot_thread.join(timeout=2.0)
+                    
+                if self._plot_thread.is_alive():
+                    print("WARNING: Thread still alive after 2.5s total!")
+                    # Note: Python doesn't have thread.kill(), but the daemon flag should help
+                else:
+                    print("✓ Plot thread successfully terminated")
             except Exception as e:
-                print(f"Error closing all plots: {e}")
+                print(f"Error joining thread: {e}")
+        
+        # STEP 3: Clear thread references
+        self._plot_thread = None
+        self._plot_stop_event = None
+        if hasattr(self, '_plot_queue'):
+            try:
+                # Clear any remaining items in queue
+                while not self._plot_queue.empty():
+                    try:
+                        self._plot_queue.get_nowait()
+                    except:
+                        break
+            except:
+                pass
+        self._plot_queue = None
+        
+        # STEP 4: Aggressive matplotlib cleanup
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            import gc
+            
+            # Get figure info before cleanup
+            fig_nums = plt.get_fignums()
+            print(f"Found {len(fig_nums)} matplotlib figures: {fig_nums}")
+            
+            # Close specific figure if we have reference
+            if hasattr(self, '_fig') and self._fig is not None:
+                try:
+                    plt.figure(self._fig.number)  # Make it current
+                    plt.close(self._fig)
+                    print(f"Closed specific figure: {self._fig}")
+                except Exception as e:
+                    print(f"Error closing specific figure: {e}")
+            
+            # Force close all figures multiple ways
+            for attempt in range(3):
+                try:
+                    # Method 1: Close each figure by number
+                    current_figs = plt.get_fignums()
+                    for fig_num in current_figs:
+                        try:
+                            fig = plt.figure(fig_num)
+                            plt.close(fig)
+                            print(f"Closed figure {fig_num}")
+                        except Exception as e:
+                            print(f"Error closing figure {fig_num}: {e}")
+                    
+                    # Method 2: Close all
+                    plt.close('all')
+                    print(f"plt.close('all') attempt {attempt + 1}")
+                    
+                    # Method 3: Clear current figure
+                    try:
+                        plt.clf()
+                        plt.cla()
+                    except:
+                        pass
+                        
+                except Exception as e:
+                    print(f"Error in cleanup attempt {attempt + 1}: {e}")
+            
+            # Turn off interactive mode
+            try:
+                plt.ioff()
+                print("Turned off interactive mode")
+            except Exception as e:
+                print(f"Error turning off interactive mode: {e}")
+            
+            # Backend-specific aggressive cleanup
+            try:
+                backend = matplotlib.get_backend()
+                print(f"Matplotlib backend: {backend}")
+                
+                if 'Qt' in backend:
+                    try:
+                        # Qt-specific cleanup
+                        import matplotlib.backends.backend_qt5agg as qt_backend
+                        if hasattr(qt_backend, 'qApp') and qt_backend.qApp is not None:
+                            qt_backend.qApp.processEvents()
+                            qt_backend.qApp.sync()
+                            print("Processed Qt events")
+                            
+                            # Try PyQt5 specific cleanup
+                            try:
+                                from PyQt5.QtWidgets import QApplication
+                                app = QApplication.instance()
+                                if app:
+                                    app.closeAllWindows()
+                                    app.processEvents()
+                                    print("Closed all Qt windows")
+                            except ImportError:
+                                try:
+                                    # Try PyQt6 if PyQt5 not available
+                                    from PyQt6.QtWidgets import QApplication
+                                    app = QApplication.instance()
+                                    if app:
+                                        app.closeAllWindows()
+                                        app.processEvents()
+                                        print("Closed all Qt6 windows")
+                                except ImportError:
+                                    pass
+                    except Exception as qt_error:
+                        print(f"Qt cleanup error: {qt_error}")
+                        
+            except Exception as backend_error:
+                print(f"Backend cleanup error: {backend_error}")
+            
+            # Force garbage collection
+            for i in range(3):
+                gc.collect()
+            
+            # Final verification
+            remaining_figs = plt.get_fignums()
+            if remaining_figs:
+                print(f"WARNING: {len(remaining_figs)} figures still remain: {remaining_figs}")
+                # Last resort cleanup
+                for fig_num in remaining_figs:
+                    try:
+                        fig = plt.figure(fig_num)
+                        fig.clear()
+                        plt.close(fig)
+                        del fig
+                    except:
+                        pass
+            else:
+                print("✓ All matplotlib figures successfully closed")
+                
+        except Exception as cleanup_error:
+            print(f"Error in matplotlib cleanup: {cleanup_error}")
+        
+        # STEP 5: Reset all internal state
+        try:
             self._plot_initialized = False
             self._cost_histories = {}
             self._cost_lines = {}
             self._plot_counter = 0
             self._plot_every_k = 5
-        # stop background plot thread if running
-        if hasattr(self, '_plot_stop_event') and self._plot_stop_event is not None:
-            try:
-                self._plot_stop_event.set()
-            except Exception:
-                pass
+            if hasattr(self, '_fig'):
+                self._fig = None
+            if hasattr(self, '_ax'):
+                self._ax = None
+            print("Reset internal plotting state")
+        except Exception as state_error:
+            print(f"Error resetting state: {state_error}")
+        
+        print("=== PLOT CLEANUP COMPLETED ===")
+        
+        # Final thread check
         if hasattr(self, '_plot_thread') and self._plot_thread is not None:
-            try:
-                self._plot_thread.join(timeout=1.0)
-            except Exception:
-                pass
-        self._plot_thread = None
-        self._plot_stop_event = None
-        self._plot_queue = None
+            if self._plot_thread.is_alive():
+                print("WARNING: Plot thread is still alive after cleanup!")
+            else:
+                print("✓ Confirmed plot thread is terminated")
 
 @get_torch_jit_decorator()
 def cat_sum_reacher(tensor_list: List[torch.Tensor]):
