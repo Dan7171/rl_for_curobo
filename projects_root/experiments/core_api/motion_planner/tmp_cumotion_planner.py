@@ -4143,7 +4143,8 @@ if __name__ == "__main__":
         formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         
         if args.livestream:
-            meta_cfg["out"]["out_dir"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+            meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+            meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["out_dir_sub"]}')
             print(f'warning-livestream mode')
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
