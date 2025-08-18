@@ -1,12 +1,12 @@
 from __future__ import annotations
 import argparse
 import os
-from curobo.util_file import load_yaml
 import numpy as np
 from torch.utils.checkpoint import Any
 import yaml
 from tqdm import tqdm
 from rich.progress import Progress
+from curobo.util_file import load_yaml
 
 
 parser = argparse.ArgumentParser()
@@ -617,8 +617,20 @@ class FollowTask(SimTask):
         self._pose_utils = pose_utils
         self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
         self.velocity_scale = velocity_scale
-        self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
-        self.update_interval_tphys = update_interval_tphys if level < 4 else 0.0
+        # self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
+        
+        self.update_interval_tphys = update_interval_tphys if level in [1,2,3,7,8,9,13,14,15] else 0.0
+        self.add_velocity_noise = add_velocity_noise
+
+        if 1<=self.level<=6:
+            self.initial_targets_density = 0.0
+        elif 7<=self.level<=12:
+            self.initial_targets_density = 0.5
+        elif 13<=self.level<=18:
+            self.initial_targets_density = 1.0
+        else:
+            raise ValueError(f"Invalid level: {self.level}")
+
         self.initial_vel_direction = initial_vel_direction # 'center' or 'none'
         self.target_vel_noise = vel_noise
         # Setup targets:
@@ -629,7 +641,7 @@ class FollowTask(SimTask):
         for a_idx in range(self.n_agents):
             for link_name in self.link_name_to_path[a_idx].keys():
                 robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
-                init_target_pos = robot_base_pos + initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                init_target_pos = robot_base_pos + self.initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
                 init_target_pos[2] += 0.75 # m above the base
                 init_target_quat = np.array([0,1,0,0])
                 link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
@@ -3099,7 +3111,7 @@ class FrameCapturer:
         # Get all frame files
         if result_path == '':
             result_path = f'{self.frames_dir}/as_video_{video_fps}fps.mp4'
-        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --method auto --input_dir {self.frames_dir} --output {result_path} --fps {video_fps}'
+        command = f'python projects_root/experiments/utils/convert_frames_to_video.py --method auto --input_dir {self.frames_dir} --output {result_path} --fps {video_fps} --remove_frames'
         shell = True 
         if in_background:
             subprocess.Popen(command, shell=shell)
@@ -3820,24 +3832,24 @@ def main(meta_cfg, out_path):
                                 val = psw.total 
 
                             elif stat_name == 'arm_cols': # collisions between arms
-                                print(f'debug arm_cols')
-                                print(f'n_arms = {n_arms}')
-
+  
                                 if not len(sphere_tensor_W):
                                     sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
-                        
+                                val = False
                                 # val = sphere_tensor_W
                                 if len(cu_agents) > 1: # decentralized
                                     agents_spheres[a.idx] = sphere_tensor_W                                    
                                     collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
-                                    val = len(collisions) > 0
+                                    
                                     for other_idx in range(len(collisions)):
-                                        for k,l in collisions[other_idx]:
-                                            print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
-                                
+                                        if len(collisions[other_idx]):
+                                            for k,l in collisions[other_idx]:
+                                                print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                            val = True
+                                            break
+                                    
                                 else: # centralized 
                                     arm_tensors_W = a.split_sphere_tensor_W_into_arms(sphere_tensor_W,n_arms)
-                                    val = False
                                     for arm_i in range(n_arms):
                                         if val:
                                             break
@@ -3846,11 +3858,10 @@ def main(meta_cfg, out_path):
                                                 collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
                                                 if len(collisions):
                                                     val = True
+                                                    for k,l in collisions:
+                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                                     break
-                                print(f'arm_cols = {val}')
-                                        
-            
-                                # val = len(collisions) > 0
+
                 
                             else:
                                 raise ValueError(f"Invalid stat name: {stat_name}")
@@ -4132,7 +4143,7 @@ if __name__ == "__main__":
         formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         
         if args.livestream:
-            meta_cfg["out"]["out_dir"] = '/mnt/new_home/evrond/mr_mpc_logs'
+            meta_cfg["out"]["out_dir"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
             print(f'warning-livestream mode')
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
