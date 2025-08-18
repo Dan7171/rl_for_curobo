@@ -3859,7 +3859,7 @@ def main(meta_cfg, out_path):
                                                 if len(collisions):
                                                     val = True
                                                     for k,l in collisions:
-                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
                                                     break
 
                 
