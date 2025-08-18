@@ -4144,8 +4144,12 @@ if __name__ == "__main__":
         
         if args.livestream:
             meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
-            meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["out_dir_sub"]}')
+        
+        if len(meta_cfg["out"]["batch_dir_name"]):
+            meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
             print(f'warning-livestream mode')
+        else:
+            meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
         sleep(3)
