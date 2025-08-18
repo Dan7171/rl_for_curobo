@@ -2500,10 +2500,10 @@ class CuAgent:
         spheres_per_arm = sphere_tensor_W.shape[0] // n_arms
         for i in range(n_arms):
             ans.append(sphere_tensor_W[i*spheres_per_arm:(i+1)*spheres_per_arm])
-            print(f'debug')
-            print(f'i = {i}')
-            print(i*spheres_per_arm)
-            print((i+1)*spheres_per_arm)
+            # print(f'debug')
+            # print(f'i = {i}')
+            # print(i*spheres_per_arm)
+            # print((i+1)*spheres_per_arm)
         return ans
 
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
