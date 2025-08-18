@@ -21,7 +21,7 @@ def plotting_server_process(data_queue, shutdown_event, max_agents: int = 4):
     Receives data from the main process and updates plots.
     """
     
-    print(f"🔵 Plotting server starting with max_agents={max_agents}")
+    print(f"Plotting server starting with max_agents={max_agents}")
     
     try:
         # Import matplotlib and set up the backend
@@ -33,7 +33,6 @@ def plotting_server_process(data_queue, shutdown_event, max_agents: int = 4):
         
         for backend in backends_to_try:
             try:
-                print(f"🔵 DEBUG: Trying matplotlib backend: {backend}")
                 matplotlib.use(backend)
                 import matplotlib.pyplot as plt
                 
@@ -41,44 +40,26 @@ def plotting_server_process(data_queue, shutdown_event, max_agents: int = 4):
                 fig = plt.figure()
                 plt.close(fig)
                 
-                print(f"✓ DEBUG: Successfully set matplotlib backend to: {backend}")
                 backend_set = True
                 break
-            except Exception as e:
-                print(f"⚠ DEBUG: Backend {backend} failed: {e}")
+            except Exception:
                 continue
         
         if not backend_set:
-            print(f"🔴 DEBUG: All backends failed, using default")
             import matplotlib.pyplot as plt
-        
-        print(f"🔵 DEBUG: Final matplotlib backend: {matplotlib.get_backend()}")
-        print(f"🔵 DEBUG: Interactive mode: {plt.isinteractive()}")
         
         # Force interactive mode
         plt.ion()
         
         # Import and create the centralized plotter
         from curobo.rollout.arm_reacher import CentralizedLivePlotter
-        print(f"🔵 DEBUG: Creating CentralizedLivePlotter...")
         plotter = CentralizedLivePlotter()
-        print(f"🔵 DEBUG: Enabling plotting with max_agents={max_agents}")
         plotter.enable_plotting(max_agents=max_agents)
         
         print(f"✓ Plotting server initialized successfully")
-        print(f"🔵 DEBUG: Figure numbers: {plt.get_fignums()}")
-        
-        # Force show the window
-        if plotter.fig:
-            print(f"🔵 DEBUG: Showing figure {plotter.fig.number}")
-            plt.figure(plotter.fig.number)
-            plt.show(block=False)
-            plt.draw()
-            print(f"🔵 DEBUG: Figure should be visible now")
         
         # Set up graceful shutdown
         def signal_handler(signum, frame):
-            print("🔶 Plotting server received shutdown signal")
             shutdown_event.set()
         
         signal.signal(signal.SIGTERM, signal_handler)
@@ -87,22 +68,8 @@ def plotting_server_process(data_queue, shutdown_event, max_agents: int = 4):
         # Main loop: process data and update plots
         last_update = time.time()
         update_frequency = 0.1  # Update every 100ms
-        loop_count = 0
-        last_heartbeat = time.time()
-        
-        print(f"🔵 DEBUG: Starting main data processing loop...")
         
         while not shutdown_event.is_set():
-            loop_count += 1
-            current_time = time.time()
-            
-            # Heartbeat every 5 seconds
-            if current_time - last_heartbeat >= 5.0:
-                print(f"💓 PLOTTING SERVER HEARTBEAT: Loop {loop_count}, queue size: {data_queue.qsize()}")
-                last_heartbeat = current_time
-            
-            if loop_count % 10000 == 0:  # Every 10000 iterations
-                print(f"🔵 DEBUG: Plotting server loop iteration {loop_count}, queue size: {data_queue.qsize()}")
             try:
                 # Process all available data from queue
                 data_processed = False
@@ -116,41 +83,36 @@ def plotting_server_process(data_queue, shutdown_event, max_agents: int = 4):
                             break
                             
                         # Add data to plotter
-                        print(f"🟡 PLOTTER SERVER DEBUG: Raw queue data: {data}")
                         agent_id = data.get('agent_id', 0)
                         cost_dict = data.get('costs', {})
-                        print(f"🟡 PLOTTER SERVER DEBUG: Got data for agent {agent_id}, costs: {list(cost_dict.keys())}")
-                        print(f"🟡 PLOTTER SERVER DEBUG: cost_dict contents: {cost_dict}")
                         plotter.add_data(agent_id, cost_dict)
                         data_processed = True
                         
                     except Exception as e:
-                        print(f"🔴 PLOTTER SERVER DEBUG: Error processing data: {e}")
+                        # Skip problematic data
                         continue
                 
                 # Update plots if we got new data and enough time has passed
+                current_time = time.time()
                 if data_processed and (current_time - last_update) >= update_frequency:
-                    print(f"🔵 DEBUG: Updating plots...")
                     plotter.update_plots()
                     last_update = current_time
-                    print(f"🔵 DEBUG: Plots updated")
                 
                 # Small sleep to prevent busy waiting
                 time.sleep(0.01)
                 
             except KeyboardInterrupt:
-                print("🔶 Plotting server interrupted")
                 break
             except Exception as e:
-                print(f"🔴 Error in plotting server: {e}")
+                print(f"Error in plotting server: {e}")
                 continue
     
     except Exception as e:
-        print(f"🔴 Fatal error in plotting server: {e}")
+        print(f"Fatal error in plotting server: {e}")
         traceback.print_exc()
     
     finally:
-        print("🔵 Plotting server shutting down...")
+        print("Plotting server shutting down...")
         try:
             # Clean shutdown
             if 'plotter' in locals():
@@ -201,7 +163,7 @@ class PlottingServerManager:
             time.sleep(0.5)
             
         except Exception as e:
-            print(f"🔴 Failed to start plotting server: {e}")
+            print(f"Failed to start plotting server: {e}")
             self.is_running = False
     
     def send_data(self, agent_id: int, cost_dict: dict):
@@ -212,35 +174,16 @@ class PlottingServerManager:
         try:
             # Convert tensors to plain values
             cost_data = {}
-            print(f"🔧 PLOT SERVER DEBUG: Converting {len(cost_dict)} costs for agent {agent_id}: {list(cost_dict.keys())}")
             
             for cost_name, cost_value in cost_dict.items():
                 try:
-                    print(f"🔧 PLOT SERVER DEBUG: Processing cost {cost_name}, type: {type(cost_value)}, hasattr cpu: {hasattr(cost_value, 'cpu')}")
-                    
                     # Handle torch tensors
                     if hasattr(cost_value, 'cpu'):
                         import torch
-                        print(f"🔧 PLOT SERVER DEBUG: {cost_name} is torch tensor, shape: {cost_value.shape}, value: {cost_value}")
-                        mean_val = torch.mean(cost_value)
-                        print(f"🔧 PLOT SERVER DEBUG: {cost_name} mean: {mean_val}")
-                        cpu_val = mean_val.cpu()
-                        print(f"🔧 PLOT SERVER DEBUG: {cost_name} cpu: {cpu_val}")
-                        numpy_val = cpu_val.numpy()
-                        print(f"🔧 PLOT SERVER DEBUG: {cost_name} numpy: {numpy_val}")
-                        final_val = numpy_val.item()
-                        print(f"🔧 PLOT SERVER DEBUG: {cost_name} final: {final_val}")
-                        cost_data[cost_name] = final_val
+                        cost_data[cost_name] = torch.mean(cost_value).cpu().numpy().item()
                     else:
-                        print(f"🔧 PLOT SERVER DEBUG: {cost_name} converting to float: {cost_value}")
                         cost_data[cost_name] = float(cost_value)
-                    
-                    print(f"✅ PLOT SERVER DEBUG: Successfully converted {cost_name} = {cost_data[cost_name]}")
-                    
-                except Exception as e:
-                    print(f"🔴 PLOT SERVER DEBUG: Failed to convert {cost_name}: {e}, type: {type(cost_value)}")
-                    import traceback
-                    traceback.print_exc()
+                except Exception:
                     continue  # Skip problematic values
             
             # Send data (non-blocking)
@@ -256,7 +199,7 @@ class PlottingServerManager:
                 # Queue full, skip this data point
                 pass
                 
-        except Exception as e:
+        except Exception:
             # Don't let plotting errors break the simulation
             pass
     
@@ -265,7 +208,7 @@ class PlottingServerManager:
         if not self.is_running:
             return
         
-        print("🔵 Stopping plotting server...")
+        print("Stopping plotting server...")
         
         try:
             # Signal shutdown

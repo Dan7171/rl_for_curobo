@@ -142,7 +142,6 @@ class CentralizedLivePlotter:
     def add_data(self, agent_id: int, cost_dict: Dict[str, torch.Tensor]):
         """Add cost data for an agent (called from ArmReacher instances)."""
         if not self.enabled:
-            print(f"🔴 PLOTTER DEBUG: Not enabled, skipping data for agent {agent_id}")
             return
             
         # Convert torch tensors to float values (or use existing float values)
@@ -158,11 +157,8 @@ class CentralizedLivePlotter:
                 else:
                     # Try to convert to float
                     cost_data[cost_name] = float(cost_value)
-            except Exception as e:
-                print(f"🔴 PLOTTER DEBUG: Failed to process cost '{cost_name}': {e}, type: {type(cost_value)}")
+            except Exception:
                 continue  # Skip problematic values
-        
-        print(f"🔵 PLOTTER DEBUG: Adding data for agent {agent_id}, queue size: {self.data_queue.qsize()}")
         
         # Add to queue (non-blocking)
         try:
@@ -186,7 +182,6 @@ class CentralizedLivePlotter:
     def update_plots(self):
         """Update all plots (call this periodically from main thread)."""
         if not self.enabled or self.fig is None:
-            print("🔴 PLOTTER DEBUG: Not enabled or no figure")
             return
             
         current_time = time.time()
@@ -195,7 +190,7 @@ class CentralizedLivePlotter:
         
         self._last_update = current_time
         
-        print(f"🟡 PLOTTER DEBUG: Processing queue, size: {self.data_queue.qsize()}")
+
         
         # Process all queued data
         updated_agents = set()
@@ -205,7 +200,7 @@ class CentralizedLivePlotter:
                 agent_id = data['agent_id']
                 costs = data['costs']
                 
-                print(f"🟢 PLOTTER DEBUG: Processing data for agent {agent_id}")
+
                 
                 # Register agent if not already done
                 if agent_id not in self.agents:
