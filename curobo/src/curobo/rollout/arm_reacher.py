@@ -15,6 +15,7 @@ import os
 from typing import Any, Dict, List, Optional
 import queue
 from threading import Thread, Event
+import time
 
 # Third Party
 import torch
@@ -46,6 +47,328 @@ from projects_root.projects.dynamic_obs.dynamic_obs_predictor.dynamic_obs_coll_c
 # Local Folder
 from .arm_base import ArmBase, ArmBaseConfig, ArmCostConfig
 from scipy.spatial.transform import Rotation as R
+
+
+class CentralizedLivePlotter:
+    """
+    Centralized live plotter that runs in the main thread and handles plotting for multiple ArmReacher instances.
+    Each agent gets its own subplot in a single window.
+    """
+    
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(CentralizedLivePlotter, cls).__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+            
+        self.data_queue = queue.Queue(maxsize=100)  # Prevent memory buildup
+        self.agents = {}  # agent_id -> subplot info
+        self.fig = None
+        self.enabled = False
+        self._cost_histories = {}  # agent_id -> cost_name -> deque
+        self._last_update = time.time()
+        self._update_frequency = 0.1  # Update plot every 100ms
+        self._initialized = True
+        
+        print("CentralizedLivePlotter initialized (singleton)")
+    
+    def enable_plotting(self, max_agents: int = 4):
+        """Enable plotting and create the figure with subplots for agents."""
+        if self.enabled:
+            return
+            
+        self.enabled = True
+        
+        # Create figure with subplots for multiple agents
+        rows = 2 if max_agents > 2 else 1
+        cols = min(max_agents, 2) if max_agents > 1 else 1
+        
+        plt.ion()  # Enable interactive mode
+        self.fig, self.axes = plt.subplots(rows, cols, figsize=(16, 10))
+        
+        # Handle single subplot case
+        if max_agents == 1:
+            self.axes = [self.axes]
+        elif rows == 1:
+            self.axes = list(self.axes) if hasattr(self.axes, '__iter__') else [self.axes]
+        else:
+            self.axes = self.axes.flatten()
+        
+        self.fig.suptitle('Multi-Agent Cost Monitoring')
+        plt.tight_layout()
+        
+        # Explicitly show and draw the figure
+        plt.figure(self.fig.number)
+        plt.show(block=False)
+        plt.draw()
+        
+        print(f"CentralizedLivePlotter enabled with {max_agents} agent slots")
+        print(f"Figure {self.fig.number} created and displayed")
+    
+    def register_agent(self, agent_id: int):
+        """Register a new agent for plotting."""
+        if not self.enabled:
+            return
+            
+        if agent_id in self.agents:
+            return  # Already registered
+        
+        if agent_id >= len(self.axes):
+            print(f"Warning: Agent {agent_id} exceeds available subplot slots")
+            return
+        
+        ax = self.axes[agent_id]
+        ax.set_title(f'Agent {agent_id} - Cost Monitoring')
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Cost Value')
+        ax.grid(True)
+        
+        self.agents[agent_id] = {
+            'ax': ax,
+            'lines': {},  # cost_name -> line object
+            'colors': ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        }
+        
+        self._cost_histories[agent_id] = {}
+        
+        print(f"Registered agent {agent_id} for plotting")
+    
+    def add_data(self, agent_id: int, cost_dict: Dict[str, torch.Tensor]):
+        """Add cost data for an agent (called from ArmReacher instances)."""
+        if not self.enabled:
+            print(f"🔴 PLOTTER DEBUG: Not enabled, skipping data for agent {agent_id}")
+            return
+            
+        # Convert torch tensors to float values (or use existing float values)
+        cost_data = {}
+        for cost_name, cost_value in cost_dict.items():
+            try:
+                # Check if it's already a float/number
+                if isinstance(cost_value, (int, float)):
+                    cost_data[cost_name] = float(cost_value)
+                # If it's a torch tensor, convert it
+                elif hasattr(cost_value, 'cpu'):
+                    cost_data[cost_name] = torch.mean(cost_value).cpu().numpy().item()
+                else:
+                    # Try to convert to float
+                    cost_data[cost_name] = float(cost_value)
+            except Exception as e:
+                print(f"🔴 PLOTTER DEBUG: Failed to process cost '{cost_name}': {e}, type: {type(cost_value)}")
+                continue  # Skip problematic values
+        
+        print(f"🔵 PLOTTER DEBUG: Adding data for agent {agent_id}, queue size: {self.data_queue.qsize()}")
+        
+        # Add to queue (non-blocking)
+        try:
+            self.data_queue.put_nowait({
+                'agent_id': agent_id,
+                'timestamp': time.time(),
+                'costs': cost_data
+            })
+        except queue.Full:
+            # Queue full, remove oldest item and add new one
+            try:
+                self.data_queue.get_nowait()
+                self.data_queue.put_nowait({
+                    'agent_id': agent_id,
+                    'timestamp': time.time(),
+                    'costs': cost_data
+                })
+            except queue.Empty:
+                pass
+    
+    def update_plots(self):
+        """Update all plots (call this periodically from main thread)."""
+        if not self.enabled or self.fig is None:
+            print("🔴 PLOTTER DEBUG: Not enabled or no figure")
+            return
+            
+        current_time = time.time()
+        if current_time - self._last_update < self._update_frequency:
+            return  # Too frequent updates
+        
+        self._last_update = current_time
+        
+        print(f"🟡 PLOTTER DEBUG: Processing queue, size: {self.data_queue.qsize()}")
+        
+        # Process all queued data
+        updated_agents = set()
+        while not self.data_queue.empty():
+            try:
+                data = self.data_queue.get_nowait()
+                agent_id = data['agent_id']
+                costs = data['costs']
+                
+                print(f"🟢 PLOTTER DEBUG: Processing data for agent {agent_id}")
+                
+                # Register agent if not already done
+                if agent_id not in self.agents:
+                    self.register_agent(agent_id)
+                    
+                if agent_id not in self.agents:
+                    continue  # Failed to register
+                
+                # Update cost histories
+                if agent_id not in self._cost_histories:
+                    self._cost_histories[agent_id] = {}
+                    print(f"🔧 PLOT DEBUG: Created cost histories for agent {agent_id}")
+                
+                print(f"🔧 PLOT DEBUG: Processing {len(costs)} costs for agent {agent_id}: {list(costs.keys())}")
+                
+                for cost_name, cost_value in costs.items():
+                    if cost_name not in self._cost_histories[agent_id]:
+                        self._cost_histories[agent_id][cost_name] = deque(maxlen=200)
+                        print(f"🔧 PLOT DEBUG: Created history for cost '{cost_name}' for agent {agent_id}")
+                    
+                    self._cost_histories[agent_id][cost_name].append(cost_value)
+                    print(f"🔧 PLOT DEBUG: Added {cost_value} to '{cost_name}' history (now {len(self._cost_histories[agent_id][cost_name])} points)")
+                
+                print(f"🔧 PLOT DEBUG: Agent {agent_id} now has {len(self._cost_histories[agent_id])} cost types")
+                
+                updated_agents.add(agent_id)
+                
+            except queue.Empty:
+                break
+            except Exception as e:
+                continue  # Skip problematic data
+        
+        print(f"🟠 PLOTTER DEBUG: Updated agents: {updated_agents}")
+        
+        # Update plots for agents that have new data
+        for agent_id in updated_agents:
+            self._update_agent_plot(agent_id)
+        
+        # Refresh the figure
+        if updated_agents:
+            try:
+                print(f"🟡 PLOT DEBUG: About to draw figure {self.fig.number}")
+                # Force figure to front and redraw
+                plt.figure(self.fig.number)
+                print("🟡 PLOT DEBUG: Set current figure")
+                self.fig.canvas.draw()
+                print("🟡 PLOT DEBUG: Canvas draw complete")
+                self.fig.canvas.flush_events()
+                print("🟡 PLOT DEBUG: Canvas flush events complete")
+                plt.draw()
+                print("🟢 PLOTTER DEBUG: Figure updated and drawn")
+            except Exception as e:
+                print(f"🔴 PLOT DEBUG: Error drawing figure: {e}")
+                pass  # Handle cases where canvas is destroyed
+    
+    def _update_agent_plot(self, agent_id: int):
+        """Update the plot for a specific agent."""
+        if agent_id not in self.agents or agent_id not in self._cost_histories:
+            print(f"🔴 PLOT DEBUG: Agent {agent_id} not in agents or histories")
+            return
+        
+        print(f"🔵 PLOT DEBUG: Updating plot for agent {agent_id}")
+        
+        # Debug cost histories
+        agent_histories = self._cost_histories[agent_id]
+        print(f"🔍 PLOT DEBUG: Agent {agent_id} has {len(agent_histories)} cost types: {list(agent_histories.keys())}")
+        for cost_name, history in agent_histories.items():
+            print(f"🔍 PLOT DEBUG: Agent {agent_id} cost '{cost_name}' has {len(history)} data points")
+        
+        agent_info = self.agents[agent_id]
+        ax = agent_info['ax']
+        lines = agent_info['lines']
+        colors = agent_info['colors']
+        
+        # Clear and redraw
+        ax.clear()
+        ax.set_title(f'Agent {agent_id} - Cost Monitoring')
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Cost Value')
+        ax.grid(True)
+        
+        # Plot all cost histories for this agent
+        plot_count = 0
+        for i, (cost_name, history) in enumerate(self._cost_histories[agent_id].items()):
+            print(f"🔍 PLOT DEBUG: Processing cost '{cost_name}' with {len(history)} points")
+            if len(history) > 0:
+                x_data = list(range(len(history)))
+                y_data = list(history)
+                color = colors[i % len(colors)]
+                
+                print(f"🔍 PLOT DEBUG: Plotting {cost_name}: x={len(x_data)}, y={len(y_data)}, first_y={y_data[0] if y_data else 'none'}")
+                
+                # Special styling for different cost types
+                if 'total' in cost_name.lower() or 'goal' in cost_name.lower():
+                    linewidth = 3
+                    marker = 'o'
+                    markersize = 4
+                else:
+                    linewidth = 2
+                    marker = 'o'
+                    markersize = 2
+                
+                ax.plot(x_data, y_data, color=color, label=cost_name, 
+                       linewidth=linewidth, marker=marker, markersize=markersize)
+                plot_count += 1
+            else:
+                print(f"🔴 PLOT DEBUG: Skipping empty history for cost '{cost_name}'")
+        
+        print(f"🟢 PLOT DEBUG: Agent {agent_id} plotted {plot_count} cost curves")
+        # Update legend
+        ax.legend(loc='upper right', fontsize=8)
+    
+    def shutdown(self):
+        """Shutdown the plotter and close all windows."""
+        if not self.enabled:
+            return
+            
+        print("Shutting down CentralizedLivePlotter...")
+        
+        # Clear the queue
+        while not self.data_queue.empty():
+            try:
+                self.data_queue.get_nowait()
+            except queue.Empty:
+                break
+        
+        # Close matplotlib figure
+        if self.fig is not None:
+            try:
+                plt.close(self.fig)
+                print("✓ Closed matplotlib figure")
+            except Exception as e:
+                print(f"Error closing figure: {e}")
+            self.fig = None
+        
+        # Turn off interactive mode
+        try:
+            plt.ioff()
+        except Exception:
+            pass
+        
+        # Close all remaining figures
+        try:
+            plt.close('all')
+        except Exception:
+            pass
+        
+        # Reset state
+        self.enabled = False
+        self.agents.clear()
+        self._cost_histories.clear()
+        
+        print("✓ CentralizedLivePlotter shutdown complete")
+
+# Global plotter instance
+_global_plotter = None
+
+def get_global_plotter() -> CentralizedLivePlotter:
+    """Get the global plotter instance."""
+    global _global_plotter
+    if _global_plotter is None:
+        _global_plotter = CentralizedLivePlotter()
+    return _global_plotter
 
 
 @dataclass
@@ -355,7 +678,20 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         # cost_list = list(cost_dict.values())
         ee_pos_batch, ee_quat_batch = state.ee_pos_seq, state.ee_quat_seq
         g_dist = None
+        
+        # Get robot_id from runtime topics for plotting
         robot_id = 0
+        try:
+            topics = get_topics()
+            if topics is not None:
+                env_topics = topics.get_default_env()
+                # Find this robot's ID by checking which topic has matching data
+                for potential_id, topic in enumerate(env_topics):
+                    if topic is not None and 'robot_id' in topic:
+                        robot_id = topic['robot_id']
+                        break
+        except Exception:
+            robot_id = 0  # Fallback to 0
         with profiler.record_function("cost/pose"):
             if (
                 self._goal_buffer.goal_pose.position is not None
@@ -574,7 +910,20 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 if k not in dict_to_plot:
                     dict_to_plot[k] = v
             
-            self._schedule_live_plot(dict_to_plot, robot_id)
+            # Send data to plotting subprocess instead of in-process plotter
+            try:
+                from projects_root.utils.plotting_server import send_plot_data
+                send_plot_data(robot_id, dict_to_plot)
+                
+                # Debug output (only occasionally)
+                if not hasattr(self, '_plot_debug_count'):
+                    self._plot_debug_count = 0
+                self._plot_debug_count += 1
+                if self._plot_debug_count % 100 == 0:  # Every 100 calls
+                    print(f"🎯 PLOTTING DEBUG: Sent data to subprocess for robot_id={robot_id}, costs: {list(dict_to_plot.keys())}")
+                
+            except Exception as e:
+                pass  # Don't break simulation if plotting fails
 
         
         cost_list = list(cost_dict.values())
@@ -841,153 +1190,17 @@ class ArmReacher(ArmBase, ArmReacherConfig):
     def get_dynamic_obs_coll_predictor(self) -> Optional[DynamicObsCollPredictor]:
         return self._dynamic_obs_coll_predictor
 
-    def _update_live_plot(self, cost_dict:dict[str, torch.Tensor],agent_id:int=0):
-        """Update live plot of cost values in real-time"""
-        
-        
-        # Initialize plotting components if not already done
-        if not hasattr(self, '_plot_initialized'):
-            self._plot_initialized = True
-            self._cost_histories = {}  # Dictionary to store history for each cost component
-            self._cost_lines = {}  # Dictionary to store plot lines for each cost component
-            self._plot_counter = 0  # Counter for plotting frequency
-            self._plot_every_k = 5  # Plot every 5 iterations to save resources
-            
-            # Set up the figure and axis
-            plt.ion()  # Turn on interactive mode
-            self._fig, self._ax = plt.subplots(1, 1, figsize=(16, 10))
-            self._fig.suptitle(f'Arm {agent_id} - Cost Monitoring (Goal + Reacher + Custom)')
-            
-            self._ax.set_title('All Cost Components Over Time (Base + Reacher + Custom)')
-            self._ax.set_xlabel('Iteration')
-            self._ax.set_ylabel('Cost Value')
-            self._ax.grid(True)
-            
-            plt.tight_layout()
-            # Manually adjust subplot parameters to avoid stretched plot
-            plt.subplots_adjust(right=0.84)
-            plt.show(block=False)
-
-        
-        # Increment counter and check if we should plot this iteration
-        self._plot_counter += 1
-        if self._plot_counter % self._plot_every_k != 0:
-            return  # Skip this iteration
-        
+    def _update_live_plot(self, cost_dict: dict[str, torch.Tensor], agent_id: int = 0):
+        """Deprecated: Use centralized plotter instead."""
+        pass
     
-        # Colors for plotting
-        colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta', 'yellow', 'black', 'darkred', 'darkgreen', 'darkblue']
-        
-        # Process each cost component
-        active_costs = []
-        for i,label in enumerate(cost_dict.keys()):        
-                # Calculate mean of this cost component
-                cost_mean = torch.mean(cost_dict[label]).cpu().numpy().item()
-                
-                # Track all costs, even very small ones, but highlight significant ones
-                active_costs.append((label, cost_mean, i))
-                    
-                # Initialize history for this component if not exists
-                if label not in self._cost_histories:
-                    self._cost_histories[label] = deque(maxlen=200)  # Keep last 200 plot points
-                    color = colors[i % len(colors)]
-                    
-                    # Special styling for different cost types
-                    if 'Goal' in label or 'Pose' in label:
-                        linewidth = 3
-                        marker = 'o'
-                        markersize = 4
-                    elif 'Custom' in label:
-                        linewidth = 2.5
-                        marker = 's'  # Square markers for custom costs
-                        markersize = 4
-                    else:
-                        linewidth = 2
-                        marker = 'o'
-                        markersize = 3
-                    
-                    self._cost_lines[label], = self._ax.plot([], [], color=color, label=label, 
-                                                           linewidth=linewidth, marker=marker, markersize=markersize)
-                
-                # Add current value to history
-                self._cost_histories[label].append(cost_mean)
-        
-      
-        # Update all plot lines
-        for label, history in self._cost_histories.items():
-            if len(history) > 0:
-                x_data = list(range(len(history)))
-                y_data = list(history)
-                self._cost_lines[label].set_data(x_data, y_data)
-        
-        # Update plot limits and legend
-        if self._cost_histories:
-            # Get all x and y data for proper scaling
-            all_x_data = []
-            all_y_data = []
-            for history in self._cost_histories.values():
-                if len(history) > 0:
-                    all_x_data.extend(range(len(history)))
-                    all_y_data.extend(history)
-            
-            if all_x_data and all_y_data:
-                self._ax.set_xlim(0, max(all_x_data) + 1)
-                y_min, y_max = min(all_y_data), max(all_y_data)
-                y_range = y_max - y_min
-                if y_range > 0:
-                    self._ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
-                else:
-                    self._ax.set_ylim(y_min - 0.1, y_max + 0.1)
-        
-        # Update legend (only when new components are added)
-        if not hasattr(self, '_legend_updated') or len(self._cost_lines) != getattr(self, '_last_legend_count', 0):
-            self._ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=9)
-            self._legend_updated = True
-            self._last_legend_count = len(self._cost_lines)
-        
-        # Refresh the plot
-        self._fig.canvas.draw()
-        self._fig.canvas.flush_events()
-        
-        # Optional: Save periodic snapshots (less frequent)
-        if self._save_plots and self._plot_counter % (self._plot_every_k * 20) == 0:  # Every 100 actual iterations
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            if not hasattr(self, '_cost_plots_dir'):
-                self._cost_plots_dir = os.path.join(os.getcwd(),'tmp_artifacts', 'cost_plots', timestamp)
-                os.makedirs(self._cost_plots_dir, exist_ok=False)
-            self._fig.savefig(os.path.join(self._cost_plots_dir, f'costs_iter_{self._plot_counter}.png'), dpi=150, bbox_inches='tight')
-            print(f"Saved plot snapshot at iteration {self._plot_counter}")
-
     def _schedule_live_plot(self, cost_dict: dict[str, torch.Tensor], agent_id: int = 0):
-        """Schedule a live plot update in a background thread (non-blocking)."""
-        if not hasattr(self, '_plot_queue') or self._plot_queue is None:
-            self._plot_queue = queue.Queue(maxsize=2)
-            self._plot_stop_event = Event()
-            self._plot_thread = Thread(target=self._plot_worker_loop, daemon=True)
-            self._plot_thread.start()
-        try:
-            # keep only latest items to avoid backlog
-            while self._plot_queue.full():
-                try:
-                    self._plot_queue.get_nowait()
-                except queue.Empty:
-                    break
-            self._plot_queue.put_nowait((cost_dict, agent_id))
-        except Exception:
-            pass
-
+        """Deprecated: Use centralized plotter instead."""
+        pass
+    
     def _plot_worker_loop(self):
-        """Worker loop that processes plot updates asynchronously."""
-        while hasattr(self, '_plot_stop_event') and self._plot_stop_event is not None and not self._plot_stop_event.is_set():
-            try:
-                item = self._plot_queue.get(timeout=0.1)
-            except Exception:
-                continue
-            try:
-                cost_dict, agent_id = item
-                self._update_live_plot(cost_dict, agent_id)
-            except Exception:
-                pass
+        """Deprecated: Use centralized plotter instead."""
+        pass
 
     def set_plot_frequency(self, k: int):
         """Set how often to update the live plot (every k iterations)
@@ -1002,188 +1215,17 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             print("Live plotting not initialized yet. This will take effect when plotting starts.")
 
     def kill_live_plot(self): 
-        """Aggressively terminate plotting threads and close all matplotlib figures"""
-        print("=== STARTING AGGRESSIVE PLOT CLEANUP ===")
-        
-        # STEP 1: Stop the background thread FIRST (most important)
-        if hasattr(self, '_plot_stop_event') and self._plot_stop_event is not None:
-            try:
-                print("Setting stop event for plot thread...")
-                self._plot_stop_event.set()
-            except Exception as e:
-                print(f"Error setting stop event: {e}")
-        
-        # STEP 2: Force thread termination with multiple attempts
-        if hasattr(self, '_plot_thread') and self._plot_thread is not None:
-            print(f"Attempting to join plot thread (alive: {self._plot_thread.is_alive()})...")
-            try:
-                # First attempt with short timeout
-                self._plot_thread.join(timeout=0.5)
-                if self._plot_thread.is_alive():
-                    print("Thread still alive after 0.5s, trying longer timeout...")
-                    self._plot_thread.join(timeout=2.0)
-                    
-                if self._plot_thread.is_alive():
-                    print("WARNING: Thread still alive after 2.5s total!")
-                    # Note: Python doesn't have thread.kill(), but the daemon flag should help
-                else:
-                    print("✓ Plot thread successfully terminated")
-            except Exception as e:
-                print(f"Error joining thread: {e}")
-        
-        # STEP 3: Clear thread references
-        self._plot_thread = None
-        self._plot_stop_event = None
-        if hasattr(self, '_plot_queue'):
-            try:
-                # Clear any remaining items in queue
-                while not self._plot_queue.empty():
-                    try:
-                        self._plot_queue.get_nowait()
-                    except:
-                        break
-            except:
-                pass
-        self._plot_queue = None
-        
-        # STEP 4: Aggressive matplotlib cleanup
+        """Shutdown plotting subprocess (if running)."""
         try:
-            import matplotlib.pyplot as plt
-            import matplotlib
-            import gc
-            
-            # Get figure info before cleanup
-            fig_nums = plt.get_fignums()
-            print(f"Found {len(fig_nums)} matplotlib figures: {fig_nums}")
-            
-            # Close specific figure if we have reference
-            if hasattr(self, '_fig') and self._fig is not None:
-                try:
-                    plt.figure(self._fig.number)  # Make it current
-                    plt.close(self._fig)
-                    print(f"Closed specific figure: {self._fig}")
-                except Exception as e:
-                    print(f"Error closing specific figure: {e}")
-            
-            # Force close all figures multiple ways
-            for attempt in range(3):
-                try:
-                    # Method 1: Close each figure by number
-                    current_figs = plt.get_fignums()
-                    for fig_num in current_figs:
-                        try:
-                            fig = plt.figure(fig_num)
-                            plt.close(fig)
-                            print(f"Closed figure {fig_num}")
-                        except Exception as e:
-                            print(f"Error closing figure {fig_num}: {e}")
-                    
-                    # Method 2: Close all
-                    plt.close('all')
-                    print(f"plt.close('all') attempt {attempt + 1}")
-                    
-                    # Method 3: Clear current figure
-                    try:
-                        plt.clf()
-                        plt.cla()
-                    except:
-                        pass
-                        
-                except Exception as e:
-                    print(f"Error in cleanup attempt {attempt + 1}: {e}")
-            
-            # Turn off interactive mode
-            try:
-                plt.ioff()
-                print("Turned off interactive mode")
-            except Exception as e:
-                print(f"Error turning off interactive mode: {e}")
-            
-            # Backend-specific aggressive cleanup
-            try:
-                backend = matplotlib.get_backend()
-                print(f"Matplotlib backend: {backend}")
-                
-                if 'Qt' in backend:
-                    try:
-                        # Qt-specific cleanup
-                        import matplotlib.backends.backend_qt5agg as qt_backend
-                        if hasattr(qt_backend, 'qApp') and qt_backend.qApp is not None:
-                            qt_backend.qApp.processEvents()
-                            qt_backend.qApp.sync()
-                            print("Processed Qt events")
-                            
-                            # Try PyQt5 specific cleanup
-                            try:
-                                from PyQt5.QtWidgets import QApplication
-                                app = QApplication.instance()
-                                if app:
-                                    app.closeAllWindows()
-                                    app.processEvents()
-                                    print("Closed all Qt windows")
-                            except ImportError:
-                                try:
-                                    # Try PyQt6 if PyQt5 not available
-                                    from PyQt6.QtWidgets import QApplication
-                                    app = QApplication.instance()
-                                    if app:
-                                        app.closeAllWindows()
-                                        app.processEvents()
-                                        print("Closed all Qt6 windows")
-                                except ImportError:
-                                    pass
-                    except Exception as qt_error:
-                        print(f"Qt cleanup error: {qt_error}")
-                        
-            except Exception as backend_error:
-                print(f"Backend cleanup error: {backend_error}")
-            
-            # Force garbage collection
-            for i in range(3):
-                gc.collect()
-            
-            # Final verification
-            remaining_figs = plt.get_fignums()
-            if remaining_figs:
-                print(f"WARNING: {len(remaining_figs)} figures still remain: {remaining_figs}")
-                # Last resort cleanup
-                for fig_num in remaining_figs:
-                    try:
-                        fig = plt.figure(fig_num)
-                        fig.clear()
-                        plt.close(fig)
-                        del fig
-                    except:
-                        pass
-            else:
-                print("✓ All matplotlib figures successfully closed")
-                
-        except Exception as cleanup_error:
-            print(f"Error in matplotlib cleanup: {cleanup_error}")
-        
-        # STEP 5: Reset all internal state
-        try:
-            self._plot_initialized = False
-            self._cost_histories = {}
-            self._cost_lines = {}
-            self._plot_counter = 0
-            self._plot_every_k = 5
-            if hasattr(self, '_fig'):
-                self._fig = None
-            if hasattr(self, '_ax'):
-                self._ax = None
-            print("Reset internal plotting state")
-        except Exception as state_error:
-            print(f"Error resetting state: {state_error}")
-        
-        print("=== PLOT CLEANUP COMPLETED ===")
-        
-        # Final thread check
-        if hasattr(self, '_plot_thread') and self._plot_thread is not None:
-            if self._plot_thread.is_alive():
-                print("WARNING: Plot thread is still alive after cleanup!")
-            else:
-                print("✓ Confirmed plot thread is terminated")
+            from projects_root.utils.plotting_server import stop_plotting_server
+            stop_plotting_server()
+            print("Plotting subprocess shutdown called")
+        except Exception as e:
+            print(f"Error shutting down plotting subprocess: {e}")
+    
+    def stop_live_plot(self):
+        """Alias for kill_live_plot for backward compatibility."""
+        self.kill_live_plot()
 
 @get_torch_jit_decorator()
 def cat_sum_reacher(tensor_list: List[torch.Tensor]):

@@ -56,6 +56,7 @@ from typing import Optional, Tuple, Dict, Union, Callable
 from queue import Queue, Empty
 from typing_extensions import List
 import pickle
+import threading
 import torch
 import pandas as pd
 import random
@@ -1877,70 +1878,7 @@ class MpcPlanner(CuPlanner):
         except Exception as e:
             print(f"Error in standard kill_live_plot: {e}")
         
-        # Aggressive matplotlib cleanup
-        try:
-            import matplotlib.pyplot as plt
-            import matplotlib
-            
-            # Get all figure numbers
-            fig_nums = plt.get_fignums()
-            print(f"Found {len(fig_nums)} matplotlib figures: {fig_nums}")
-            
-            # Close each figure individually
-            for fig_num in fig_nums:
-                try:
-                    plt.figure(fig_num)
-                    plt.close(fig_num)
-                    print(f"Closed figure {fig_num}")
-                except Exception as e:
-                    print(f"Error closing figure {fig_num}: {e}")
-            
-            # Close all figures
-            plt.close('all')
-            
-            # Turn off interactive mode
-            plt.ioff()
-            
-            # Force garbage collection
-            import gc
-            gc.collect()
-            
-            # Additional cleanup for Qt backend
-            try:
-                if hasattr(plt, 'show'):
-                    plt.show(block=False)  # Flush any pending operations
-                backend = matplotlib.get_backend()
-                print(f"Matplotlib backend: {backend}")
-                
-                if 'Qt' in backend:
-                    try:
-                        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-                        # Try to close Qt application if it exists
-                        import matplotlib.backends.backend_qt5agg as qt_backend
-                        if hasattr(qt_backend, 'qApp') and qt_backend.qApp is not None:
-                            qt_backend.qApp.processEvents()
-                            print("Processed Qt events")
-                    except ImportError:
-                        pass
-                        
-            except Exception as qt_error:
-                print(f"Qt cleanup error: {qt_error}")
-                
-            print("Aggressive matplotlib cleanup completed")
-            
-        except Exception as cleanup_error:
-            print(f"Error in aggressive cleanup: {cleanup_error}")
-            
-        # Final check
-        try:
-            import matplotlib.pyplot as plt
-            remaining_figs = plt.get_fignums()
-            if remaining_figs:
-                print(f"Warning: {len(remaining_figs)} figures still remain: {remaining_figs}")
-            else:
-                print("All figures successfully closed")
-        except Exception as check_error:
-            print(f"Error checking remaining figures: {check_error}")
+        
 
     def update_col_pred(self, plans_board, idx, col_pred_with, goal_errors, plans_lock:Optional[Lock]=None):
         
@@ -3603,6 +3541,16 @@ def main(meta_cfg, out_path):
         
         elif planner_type[a_idx] == 'mpc':
             planner = MpcPlanner(base_pose[a_idx], solver_cfgs[a_idx], robot_cfgs[a_idx], world_cfg, mpc_particle_file_paths[a_idx])
+            # Enable live plotting for the centralized plotter
+            try:
+                arm_reacher = planner._get_arm_reacher()
+                if arm_reacher is not None:
+                    arm_reacher.enable_live_plotting(True)
+                    print(f"✓ Enabled live plotting for agent {a_idx}")
+                else:
+                    print(f"⚠ Could not get arm_reacher for agent {a_idx}")
+            except Exception as e:
+                print(f"⚠ Failed to enable live plotting for agent {a_idx}: {e}")
         else:
             raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
@@ -4216,9 +4164,57 @@ if __name__ == "__main__":
     stop_simulation = False
     stop_event = Event() # stop simapp completely
 
-
-
+    # Check if any agent has plot_costs enabled
+    plotting_enabled = False
+    agents_with_plotting = []
     
+    for i, meta_cfg in enumerate(meta_cfgs):
+        try:
+            cu_agents = meta_cfg.get('cu_agents', [])
+            print(f"🔍 DEBUG: Checking meta_cfg {i}, found {len(cu_agents)} agents")
+            
+            for agent_idx, agent_cfg in enumerate(cu_agents):
+                print(f"🔍 DEBUG: Agent {agent_idx} config keys: {list(agent_cfg.keys())}")
+                
+                mpc_cfg = agent_cfg.get('mpc', {})
+                print(f"🔍 DEBUG: Agent {agent_idx} mpc config: {mpc_cfg}")
+                
+                mpc_solver_cfg = mpc_cfg.get('mpc_solver_cfg', {})
+                print(f"🔍 DEBUG: Agent {agent_idx} mpc_solver_cfg: {mpc_solver_cfg}")
+                
+                plot_costs = mpc_solver_cfg.get('plot_costs', False)
+                print(f"🔍 DEBUG: Agent {agent_idx} plot_costs = {plot_costs}")
+                
+                if plot_costs:
+                    plotting_enabled = True
+                    agents_with_plotting.append(f"cfg_{i}_agent_{agent_idx}")
+                    print(f"✓ DEBUG: Found plotting enabled for agent {agent_idx}")
+                    
+        except Exception as e:
+            print(f"Error checking plot_costs in meta_cfg {i}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    print(f"🔍 DEBUG: Final plotting_enabled = {plotting_enabled}")
+    print(f"🔍 DEBUG: Agents with plotting = {agents_with_plotting}")
+
+    # Start plotting server if any agent has plotting enabled
+    plotting_server = None
+    if plotting_enabled:
+        try:
+            from projects_root.utils.plotting_server import start_plotting_server, get_plotting_server
+            
+            max_total_agents = sum(len(meta_cfg.get('cu_agents', [])) for meta_cfg in meta_cfgs)
+            start_plotting_server(max_agents=max_total_agents)
+            plotting_server = get_plotting_server()
+            
+            print(f"✓ Plotting server started for agents: {agents_with_plotting}")
+            print(f"✓ Supporting up to {max_total_agents} agents")
+            
+        except Exception as e:
+            print(f"Failed to start plotting server: {e}")
+    else:
+        print("ℹ No agents have plot_costs enabled, skipping plotting server")
 
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
         
@@ -4239,6 +4235,8 @@ if __name__ == "__main__":
         sleep(3)
         keep_running = main(meta_cfg, out_path)
         
+        # No need to manually update plots - subprocess handles it automatically
+        
         # Clean up after simulation completes
         print(f"\n=== SIMULATION {out_name} COMPLETED ===")
         
@@ -4247,3 +4245,12 @@ if __name__ == "__main__":
     
     # Final cleanup when all simulations are done
     print("\n=== ALL SIMULATIONS COMPLETED - FINAL CLEANUP ===")
+    
+    # Stop plotting server
+    if plotting_server:
+        try:
+            from projects_root.utils.plotting_server import stop_plotting_server
+            stop_plotting_server()
+            print("✓ Plotting server stopped")
+        except Exception as e:
+            print(f"Error stopping plotting server: {e}")
