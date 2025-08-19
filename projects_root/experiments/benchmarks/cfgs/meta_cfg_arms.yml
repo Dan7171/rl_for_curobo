@@ -1,5 +1,5 @@
 timeout:
-  tstep: 20 # 500 # world steps timeout
+  tstep: 5000 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -142,7 +142,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
     keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
     stat_names: ['env_cols', 'link_target_poses', 'arm_cols', 'total_planning_time', 'spheres']
-    collect_dt: [1,1,1,1,10] # dt for each stat
+    collect_dt: [1,1,1,1,100] # dt for each stat
     verbose: False # [False,False,False,False,False,True]
     save: True
                 

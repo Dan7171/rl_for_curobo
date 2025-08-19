@@ -11,6 +11,7 @@ import signal
 import multiprocessing as mp
 from multiprocessing import Queue, Process, Event
 import traceback
+import os
 
 # Add the curobo path
 sys.path.append('/home/dan/rl_for_curobo/curobo/src')
@@ -224,8 +225,9 @@ class PlottingServerManager:
             
             # Wait for process to finish
             if self.process and self.process.is_alive():
-                self.process.join(timeout=5.0)
-                
+                # print(f"debug: plotting server is alive, joining...")
+                # self.process.join(timeout=5.0)
+                self.process.join(timeout=0.01)
                 if self.process.is_alive():
                     print("⚠ Plotting server didn't shut down gracefully, terminating...")
                     self.process.terminate()
@@ -235,7 +237,12 @@ class PlottingServerManager:
                         print("⚠ Force killing plotting server...")
                         self.process.kill()
                         self.process.join()
-            
+
+
+
+
+                             
+
             self.is_running = False
             print("✓ Plotting server stopped")
             

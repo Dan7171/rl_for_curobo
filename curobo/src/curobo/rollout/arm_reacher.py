@@ -212,19 +212,19 @@ class CentralizedLivePlotter:
                 # Update cost histories
                 if agent_id not in self._cost_histories:
                     self._cost_histories[agent_id] = {}
-                    print(f"🔧 PLOT DEBUG: Created cost histories for agent {agent_id}")
+                    # print(f"🔧 PLOT DEBUG: Created cost histories for agent {agent_id}")
                 
-                print(f"🔧 PLOT DEBUG: Processing {len(costs)} costs for agent {agent_id}: {list(costs.keys())}")
+                # print(f"🔧 PLOT DEBUG: Processing {len(costs)} costs for agent {agent_id}: {list(costs.keys())}")
                 
                 for cost_name, cost_value in costs.items():
                     if cost_name not in self._cost_histories[agent_id]:
                         self._cost_histories[agent_id][cost_name] = deque(maxlen=200)
-                        print(f"🔧 PLOT DEBUG: Created history for cost '{cost_name}' for agent {agent_id}")
+                        # print(f"🔧 PLOT DEBUG: Created history for cost '{cost_name}' for agent {agent_id}")
                     
                     self._cost_histories[agent_id][cost_name].append(cost_value)
-                    print(f"🔧 PLOT DEBUG: Added {cost_value} to '{cost_name}' history (now {len(self._cost_histories[agent_id][cost_name])} points)")
+                    # print(f"🔧 PLOT DEBUG: Added {cost_value} to '{cost_name}' history (now {len(self._cost_histories[agent_id][cost_name])} points)")
                 
-                print(f"🔧 PLOT DEBUG: Agent {agent_id} now has {len(self._cost_histories[agent_id])} cost types")
+                # print(f"🔧 PLOT DEBUG: Agent {agent_id} now has {len(self._cost_histories[agent_id])} cost types")
                 
                 updated_agents.add(agent_id)
                 
@@ -233,7 +233,7 @@ class CentralizedLivePlotter:
             except Exception as e:
                 continue  # Skip problematic data
         
-        print(f"🟠 PLOTTER DEBUG: Updated agents: {updated_agents}")
+        # print(f"🟠 PLOTTER DEBUG: Updated agents: {updated_agents}")
         
         # Update plots for agents that have new data
         for agent_id in updated_agents:
@@ -242,33 +242,33 @@ class CentralizedLivePlotter:
         # Refresh the figure
         if updated_agents:
             try:
-                print(f"🟡 PLOT DEBUG: About to draw figure {self.fig.number}")
+                # print(f"🟡 PLOT DEBUG: About to draw figure {self.fig.number}")
                 # Force figure to front and redraw
                 plt.figure(self.fig.number)
-                print("🟡 PLOT DEBUG: Set current figure")
+                # print("🟡 PLOT DEBUG: Set current figure")
                 self.fig.canvas.draw()
-                print("🟡 PLOT DEBUG: Canvas draw complete")
+                # print("🟡 PLOT DEBUG: Canvas draw complete")
                 self.fig.canvas.flush_events()
-                print("🟡 PLOT DEBUG: Canvas flush events complete")
+                # print("🟡 PLOT DEBUG: Canvas flush events complete")
                 plt.draw()
-                print("🟢 PLOTTER DEBUG: Figure updated and drawn")
+                # print("🟢 PLOTTER DEBUG: Figure updated and drawn")
             except Exception as e:
-                print(f"🔴 PLOT DEBUG: Error drawing figure: {e}")
+                # print(f"🔴 PLOT DEBUG: Error drawing figure: {e}")
                 pass  # Handle cases where canvas is destroyed
     
     def _update_agent_plot(self, agent_id: int):
         """Update the plot for a specific agent."""
         if agent_id not in self.agents or agent_id not in self._cost_histories:
-            print(f"🔴 PLOT DEBUG: Agent {agent_id} not in agents or histories")
+            # print(f"🔴 PLOT DEBUG: Agent {agent_id} not in agents or histories")
             return
         
-        print(f"🔵 PLOT DEBUG: Updating plot for agent {agent_id}")
+        # print(f"🔵 PLOT DEBUG: Updating plot for agent {agent_id}")
         
         # Debug cost histories
         agent_histories = self._cost_histories[agent_id]
-        print(f"🔍 PLOT DEBUG: Agent {agent_id} has {len(agent_histories)} cost types: {list(agent_histories.keys())}")
+        # print(f"🔍 PLOT DEBUG: Agent {agent_id} has {len(agent_histories)} cost types: {list(agent_histories.keys())}")
         for cost_name, history in agent_histories.items():
-            print(f"🔍 PLOT DEBUG: Agent {agent_id} cost '{cost_name}' has {len(history)} data points")
+            # print(f"🔍 PLOT DEBUG: Agent {agent_id} cost '{cost_name}' has {len(history)} data points")
         
         agent_info = self.agents[agent_id]
         ax = agent_info['ax']
@@ -285,13 +285,13 @@ class CentralizedLivePlotter:
         # Plot all cost histories for this agent
         plot_count = 0
         for i, (cost_name, history) in enumerate(self._cost_histories[agent_id].items()):
-            print(f"🔍 PLOT DEBUG: Processing cost '{cost_name}' with {len(history)} points")
+            # print(f"🔍 PLOT DEBUG: Processing cost '{cost_name}' with {len(history)} points")
             if len(history) > 0:
                 x_data = list(range(len(history)))
                 y_data = list(history)
                 color = colors[i % len(colors)]
                 
-                print(f"🔍 PLOT DEBUG: Plotting {cost_name}: x={len(x_data)}, y={len(y_data)}, first_y={y_data[0] if y_data else 'none'}")
+                # print(f"🔍 PLOT DEBUG: Plotting {cost_name}: x={len(x_data)}, y={len(y_data)}, first_y={y_data[0] if y_data else 'none'}")
                 
                 # Special styling for different cost types
                 if 'total' in cost_name.lower() or 'goal' in cost_name.lower():
@@ -307,9 +307,9 @@ class CentralizedLivePlotter:
                        linewidth=linewidth, marker=marker, markersize=markersize)
                 plot_count += 1
             else:
-                print(f"🔴 PLOT DEBUG: Skipping empty history for cost '{cost_name}'")
+                #print(f"🔴 PLOT DEBUG: Skipping empty history for cost '{cost_name}'")
         
-        print(f"🟢 PLOT DEBUG: Agent {agent_id} plotted {plot_count} cost curves")
+        # print(f"🟢 PLOT DEBUG: Agent {agent_id} plotted {plot_count} cost curves")
         # Update legend
         ax.legend(loc='upper right', fontsize=8)
     
@@ -914,8 +914,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                 if not hasattr(self, '_plot_debug_count'):
                     self._plot_debug_count = 0
                 self._plot_debug_count += 1
-                if self._plot_debug_count % 100 == 0:  # Every 100 calls
-                    print(f"🎯 PLOTTING DEBUG: Sent data to subprocess for robot_id={robot_id}, costs: {list(dict_to_plot.keys())}")
+                # if self._plot_debug_count % 100 == 0:  # Every 100 calls
+                #     print(f"🎯 PLOTTING DEBUG: Sent data to subprocess for robot_id={robot_id}, costs: {list(dict_to_plot.keys())}")
                 
             except Exception as e:
                 pass  # Don't break simulation if plotting fails

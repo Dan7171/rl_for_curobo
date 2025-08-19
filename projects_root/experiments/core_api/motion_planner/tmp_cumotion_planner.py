@@ -3595,6 +3595,7 @@ def main(meta_cfg, out_path):
     color_cnt = 0
     arm_poses = meta_cfg["sim_task"]["arm_poses"] if "arm_poses" in meta_cfg["sim_task"] else [[] for _ in range(len(cu_agents))] # arms base poses
     centrealized = len(cu_agents) == 1
+    
     for a_idx, a in enumerate(cu_agents):
         if a.sim_robot is not None:
             cfg = {}
@@ -3680,6 +3681,9 @@ def main(meta_cfg, out_path):
     agents_spheres = [torch.tensor([]) for _ in range(len(cu_agents))] # for agent-to-agent collision check
     mean_goal_err:List[Optional[tuple[float, float]]] = [None for _ in range(len(cu_agents))] # used for pose wta conflict resolution
     n_arms = len(meta_cfg["sim_task"]["arm_poses"])
+    
+    arm_to_arm_col_count = 0 # for debugging
+    arm_to_env_col_count = 0 # for debugging
     
     with Progress() as progress:
         task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
@@ -3853,16 +3857,13 @@ def main(meta_cfg, out_path):
                         stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
                         stats = {}
                         for stat_name in stats_to_update_now:
-                            # if stat_name == 'w_step': # world step
-                            #     val = t
-                            # elif stat_name == 'a_step': # agent step (control iteration)
-                            #     val = a.step_count
-                            # elif stat_name == 'rec': # robot env collision
+                            
 
                             if stat_name == 'env_cols':
                                 in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
                                 if in_col:
                                     print(f"debug: warning robot {a.idx} in col with obstacle!!!")
+                                    arm_to_env_col_count += 1
                                 val = in_col  
                             elif stat_name == 'link_target_poses': # link and target poses
                                 val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
@@ -3886,8 +3887,8 @@ def main(meta_cfg, out_path):
                                     
                                     for other_idx in range(len(collisions)):
                                         if len(collisions[other_idx]):
-                                            for k,l in collisions[other_idx]:
-                                                print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                            # for k,l in collisions[other_idx]:
+                                            #     print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                             val = True
                                             break
                                     
@@ -3901,9 +3902,13 @@ def main(meta_cfg, out_path):
                                                 collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
                                                 if len(collisions):
                                                     val = True
-                                                    for k,l in collisions:
-                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
+                                                    
+                                                    # for k,l in collisions:
+                                                    #     print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
                                                     break
+
+                                if val:
+                                    arm_to_arm_col_count += 1
 
                 
                             else:
@@ -3918,8 +3923,8 @@ def main(meta_cfg, out_path):
                 # update task stats
                 task_stats = sim_task.get_stat_vals(sim_task.stat_man.get_now_update_names(t))
                 sim_task.stat_man.update(task_stats,t)
-
-                
+                if t % 10 == 0:
+                    print(f"debug: arm_to_arm_col_count: {arm_to_arm_col_count}, arm_to_env_col_count: {arm_to_env_col_count}")
                 # advance time
                 t += 1                
         
