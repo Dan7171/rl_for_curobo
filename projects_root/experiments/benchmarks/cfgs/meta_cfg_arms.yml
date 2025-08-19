@@ -1,11 +1,11 @@
 timeout:
-  tstep: 30 # 500 # world steps timeout
+  tstep: 500 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
 out:
   out_dir_root: '/home/dan/mr_mpc_logs' # output directory
-  batch_dir_name: '' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
+  batch_dir_name: 'batch_2_1908_O_tuning' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
