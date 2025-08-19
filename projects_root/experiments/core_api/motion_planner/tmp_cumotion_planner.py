@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import os
+import shutil
 import numpy as np
 from torch.utils.checkpoint import Any
 import yaml
@@ -22,6 +23,7 @@ except ImportError:
     pass
 from omni.isaac.kit import SimulationApp
 
+TMP_PARTICLE_FILES_STORAGE = 'projects_root/experiments/benchmarks/cfgs/particle/.tmp'
 simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
 simapp_cfg = load_yaml(simapp_cfg_path)
 if args.livestream:
@@ -3199,6 +3201,41 @@ def fire_up_plotting_server(meta_cfg):
 
 def modify_to_benchmark_mode(combo_cfg_path):
     
+    def get_default_particle_file(alg='O'):
+        particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
+        particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
+        return particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
+        
+    def make_tmp_particle_options(particle_options,alg):
+        import yaml
+        ret = []
+        out_dir = TMP_PARTICLE_FILES_STORAGE
+        default_particle_file_path = get_default_particle_file(alg)
+
+        init_cov_options = particle_options["init_cov"] if "init_cov" in particle_options else [-1]
+        wta_trust_options = particle_options["wta_trust"] if "wta_trust" in particle_options else [-1]
+        wta_weight_options = particle_options["wta_weight"] if "wta_weight" in particle_options else [-1]
+
+        for i,init_cov in enumerate(init_cov_options):
+            for j,wta_trust in enumerate(wta_trust_options):
+                for k,wta_weight in enumerate(wta_weight_options):
+                    tmp_out_particle_file_path = f'{out_dir}/tmp_particle_file_{alg}_{i}_{j}_{k}.yml'
+                    if not os.path.exists(tmp_out_particle_file_path):
+                        shutil.copy(default_particle_file_path, tmp_out_particle_file_path)
+                        particle_cfg = load_yaml(tmp_out_particle_file_path)
+                        if init_cov != -1:
+                            particle_cfg["mppi"]["init_cov"] = init_cov
+                        if wta_trust != -1:
+                            particle_cfg["cost"]["custom"]["arm_base"]["dynamic_obs_cost"]["wta_trust"] = wta_trust
+                        if wta_weight != -1:
+                            particle_cfg["cost"]["custom"]["arm_base"]["dynamic_obs_cost"]["weight"] = wta_weight
+                        with open(tmp_out_particle_file_path, 'w') as f:
+                            yaml.dump(particle_cfg, f)
+                    ret.append(tmp_out_particle_file_path)
+
+            
+        return ret
+    
     colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
     dec_robot_fam_to_cfg = {'franka': 'franka.yml', 'franka_mobile': 'franka_mobile.yml', 'ur5e': 'ur5e.yml', 'ur10e': 'ur10e.yml', 'iiwa': 'iiwa.yml', 'kinova_gen3': 'kinova_gen3.yml', 'jaco7': 'jaco7.yml'}
     cent_robot_cfgs = {
@@ -3258,140 +3295,151 @@ def modify_to_benchmark_mode(combo_cfg_path):
     alg_options = combo_cfg["alg"] # algorithm 
     task_to_levels_options = combo_cfg["task_to_levels"] # task to levels
     seed_options = combo_cfg["task_seed"] # seed
-    
+    particle_options = combo_cfg["particle"] if "particle" in combo_cfg else {}
     out_names = []
     meta_cfgs = []
+
+    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
+    os.makedirs(TMP_PARTICLE_FILES_STORAGE, exist_ok=False)
 
     for base_cfg_path in base_options:
         for robot_fam in robot_fam_options: # list
             for robot_type in robot_type: # list
                 for alg in alg_options: # list
+                    if len(particle_options) > 0:
+                        particle_paths_alg_options = make_tmp_particle_options(combo_cfg["particle"],alg)
+                    else:
+                        particle_paths_alg_options =  [get_default_particle_file(alg)]
                     for task in task_to_levels_options: # dict
                         for level in task_to_levels_options[task]: # list
                             for task_seed in seed_options: # list
-                                meta_cfg = load_yaml(base_cfg_path)
-
-                                # set pub sub config by alg type
-                                is_pub = alg_to_pub_sub[alg][0]
-                                is_sub = alg_to_pub_sub[alg][1]
-                                meta_cfg["default"]["plan_pub_sub"] = {
-                                    'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
-                                    'sub':{'is_on':is_sub,'to':'all'}
-                                }
                                 
-                                # set default particle file by alg type 
-                                particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
-                                if alg in ['O', 'SD', 'O-','SC']:
-                                    particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
-                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
-
-
-                    
-                                # get num of arms and num of agents (n_cfgs) by alg type    
-                                cent = alg in ['CC', 'SC','D'] # is centralized planner        
-                                planner_type = alg_to_planner[alg]
-                                n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
-                                if cent:
-                                    robot_cfg_path =  cent_robot_cfgs[robot_fam][robot_type] #[n_arms]
-                                    n_cfgs = 1
-                                else:
-                                    robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
-                                    n_cfgs = n_arms
-                                
-                                robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path) # get robot cfg path
-                                ret_root = ret_pose_cfg[robot_fam][robot_type]["retract"] # get retract cfg for all arms
-                                pose_root = ret_pose_cfg[robot_fam][robot_type]["pose"] # get pose cfg for all arms
-
-                                # Set arm poses (base poses of arms, independent of cent/dec)
-                                meta_cfg["sim_task"]["arm_poses"] = []
-                                for arm_idx in range(n_arms):
-                                    arm_position = pose_root["dec"][arm_idx][:3]
-                                    arm_euler = pose_root["dec"][arm_idx][3:]
-                                    arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
-                                    arm_pose = [*arm_position, *arm_quat]
-                                    meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
-                                
-                                
-                                
-                                # Set sim_task
-                                meta_cfg["sim_task"]["task_type"] = task
-                                meta_cfg["sim_task"]["level"] = level
-                                
-                                # Set static and dynamic obstacles depending on the level
-                                
-                                
-                                # center base pose of arms
-                                static_obstacles = False
-                                dynamic_obstacles = False
-                                
-                                if task in ['reach', 'follow']:
-                                    if level in [2,5]:
-                                        static_obstacles = True
-                                    elif level in [3,6]:
-                                        dynamic_obstacles = True
-                                if static_obstacles or dynamic_obstacles:
+                                for particle_cfg_path in particle_paths_alg_options: # list
+                                    meta_cfg = load_yaml(base_cfg_path)
+                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_cfg_path
                                     
-                                    # get center of arms
-                                    arms_center = np.array([0.0,0.0,0.0])
-                                    for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
-                                        arms_center += np.array(arm_pose[:3])
-                                    arms_center /= n_arms
+                                    # set pub sub config by alg type
+                                    is_pub = alg_to_pub_sub[alg][0]
+                                    is_sub = alg_to_pub_sub[alg][1]
+                                    meta_cfg["default"]["plan_pub_sub"] = {
+                                        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
+                                        'sub':{'is_on':is_sub,'to':'all'}
+                                    }
                                     
-                                    # set obstacles
-                                    env_cfg = meta_cfg["sim_env"]["cfg"] 
-                                    env_cfg["n_obs"] = 5
-                                    if static_obstacles:
-                                        volume_center_pos = arms_center + np.array([0,0,0.5])
-                                    else:
-                                        volume_center_pos = arms_center + np.array([-1.0,-1.0,0.5])
-                                    env_cfg["volume_center_pos"] = volume_center_pos.tolist()
-                                    if dynamic_obstacles:
-                                        # env_cfg["obj_rigid_body_enabled"] = True
-                                        env_cfg["obj_lin_vel"] = [0.15,0.15,0.0]
-
-
-                                # Set cu_agents
-                                cu_agent_cfgs = []
-                                base_cu_agent_cfgs = meta_cfg["cu_agents"] if "cu_agents" in meta_cfg else []
-
-                                for a_idx in range(n_cfgs):
-                                    if cent: # n_cfgs = 1 (centralized planner)
-                                        # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
-                                        ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
-                                        base_pose = pose_root["cent"]
-                                    else:
-                                        ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
-                                        base_pose = pose_root["dec"][a_idx] # arm base pose   
-                                
-                                    if a_idx < len(base_cu_agent_cfgs):
-                                        print(f'warning: reading specifications for agent{a_idx} from meta cfg')
-                                        agent_cfg = base_cu_agent_cfgs[a_idx]
-                                        # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
-                                    else:
-                                        agent_cfg = {}
                                     
-                                    # Override base values with new values
-                                    agent_cfg["robot"] = robot_cfg_path
-                                    agent_cfg["planner"] = planner_type
-                                    agent_cfg["base_pose"] = base_pose
-                                    agent_cfg["viz_color"] = colors[a_idx%n_arms]
-                                    agent_cfg["retract_cfg"] = ret_cfg
-                                    cu_agent_cfgs.append(agent_cfg)
 
-                                meta_cfg["cu_agents"] = cu_agent_cfgs
-                                    # meta_cfg["cu_agents"].append(agent_cfg)
+                        
+                                    # get num of arms and num of agents (n_cfgs) by alg type    
+                                    cent = alg in ['CC', 'SC','D'] # is centralized planner        
+                                    planner_type = alg_to_planner[alg]
+                                    n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
+                                    if cent:
+                                        robot_cfg_path =  cent_robot_cfgs[robot_fam][robot_type] #[n_arms]
+                                        n_cfgs = 1
+                                    else:
+                                        robot_cfg_path =  dec_robot_fam_to_cfg[robot_fam]
+                                        n_cfgs = n_arms
+                                    
+                                    robot_cfg_path = os.path.join(robot_cfgs_dir, robot_cfg_path) # get robot cfg path
+                                    ret_root = ret_pose_cfg[robot_fam][robot_type]["retract"] # get retract cfg for all arms
+                                    pose_root = ret_pose_cfg[robot_fam][robot_type]["pose"] # get pose cfg for all arms
+
+                                    # Set arm poses (base poses of arms, independent of cent/dec)
+                                    meta_cfg["sim_task"]["arm_poses"] = []
+                                    for arm_idx in range(n_arms):
+                                        arm_position = pose_root["dec"][arm_idx][:3]
+                                        arm_euler = pose_root["dec"][arm_idx][3:]
+                                        arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
+                                        arm_pose = [*arm_position, *arm_quat]
+                                        meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
+                                    
+                                    
+                                    
+                                    # Set sim_task
+                                    meta_cfg["sim_task"]["task_type"] = task
+                                    meta_cfg["sim_task"]["level"] = level
+                                    
+                                    # Set static and dynamic obstacles depending on the level
+                                    
+                                    
+                                    # center base pose of arms
+                                    static_obstacles = False
+                                    dynamic_obstacles = False
+                                    
+                                    if task in ['reach', 'follow']:
+                                        if level in [2,5]:
+                                            static_obstacles = True
+                                        elif level in [3,6]:
+                                            dynamic_obstacles = True
+                                    if static_obstacles or dynamic_obstacles:
+                                        
+                                        # get center of arms
+                                        arms_center = np.array([0.0,0.0,0.0])
+                                        for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
+                                            arms_center += np.array(arm_pose[:3])
+                                        arms_center /= n_arms
+                                        
+                                        # set obstacles
+                                        env_cfg = meta_cfg["sim_env"]["cfg"] 
+                                        env_cfg["n_obs"] = 5
+                                        if static_obstacles:
+                                            volume_center_pos = arms_center + np.array([0,0,0.5])
+                                        else:
+                                            volume_center_pos = arms_center + np.array([-1.0,-1.0,0.5])
+                                        env_cfg["volume_center_pos"] = volume_center_pos.tolist()
+                                        if dynamic_obstacles:
+                                            # env_cfg["obj_rigid_body_enabled"] = True
+                                            env_cfg["obj_lin_vel"] = [0.15,0.15,0.0]
+
+                                    
+                                     
+
+                                    # Set cu_agents
+                                    cu_agent_cfgs = []
+                                    base_cu_agent_cfgs = meta_cfg["cu_agents"] if "cu_agents" in meta_cfg else []
+
+                                    for a_idx in range(n_cfgs):
+                                        if cent: # n_cfgs = 1 (centralized planner)
+                                            # ret_cfg = ret_pose_cfg[robot_fam][n_arms]["retract"] # list of lists - retract for each arm
+                                            ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
+                                            base_pose = pose_root["cent"]
+                                        else:
+                                            ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
+                                            base_pose = pose_root["dec"][a_idx] # arm base pose   
+                                    
+                                        if a_idx < len(base_cu_agent_cfgs):
+                                            print(f'warning: reading specifications for agent{a_idx} from meta cfg')
+                                            agent_cfg = base_cu_agent_cfgs[a_idx]
+                                            # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
+                                            
+                                        else:
+                                            agent_cfg = {}
+                                        
+                                        
+
+                                        # Override base values with new values
+                                        agent_cfg["robot"] = robot_cfg_path
+                                        agent_cfg["planner"] = planner_type
+                                        agent_cfg["base_pose"] = base_pose
+                                        agent_cfg["viz_color"] = colors[a_idx%n_arms]
+                                        agent_cfg["retract_cfg"] = ret_cfg
+                                        cu_agent_cfgs.append(agent_cfg)
+
+                                    meta_cfg["cu_agents"] = cu_agent_cfgs
+                                        # meta_cfg["cu_agents"].append(agent_cfg)
 
 
-                            
-                                meta_cfg["pose_utils"]["seed"] = task_seed
                                 
+                                    meta_cfg["pose_utils"]["seed"] = task_seed
+                                    
 
-                                out_name = f'R_{robot_fam}_N{n_arms}_A{alg}_T{task}_s{task_seed}_l{level}'
+                                    out_name = f'R_{robot_fam}_N{n_arms}_A{alg}_T{task}_s{task_seed}_l{level}'
+                                    
+
+                                    meta_cfgs.append(meta_cfg)
+                                    out_names.append(out_name)
+                                    
                                 
-
-                                meta_cfgs.append(meta_cfg)
-                                out_names.append(out_name)
-                            
     return meta_cfgs, out_names
 
 
@@ -3684,11 +3732,12 @@ def main(meta_cfg, out_path):
     
     arm_to_arm_col_count = 0 # for debugging
     arm_to_env_col_count = 0 # for debugging
-    
+    outdir_name = out_path.split('/')[-1]
     with Progress() as progress:
-        task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
-        task2 = progress.add_task(f"Simulation Time (lim={sto} sec)", total=sto)
-        task3 = progress.add_task(f"Physics (simulated) Time (lim={pto} sec)", total=pto)
+        task1 = progress.add_task(f"{outdir_name}", total=1000000000000000) # not a real progress bar, just for printing the name
+        task2 = progress.add_task(f"Sim Steps (lim={tsto})", total=tsto)
+        task3 = progress.add_task(f"Simulation Time [sec] (lim={sto} )", total=sto)
+        task4 = progress.add_task(f"Physics Time [sec] (lim={pto})", total=pto)
         
         if not meta_cfg["async"]: # sync mode
             
@@ -3929,9 +3978,10 @@ def main(meta_cfg, out_path):
                 t += 1                
         
                 # visualize progress          
-                progress.update(task1, advance=1) # one time step
-                progress.update(task2, advance= time() - prog_bar_tsys_iter_start) # simulation time
-                progress.update(task3, advance=my_world.current_time - prog_bar_tphys_iter_start) # physics time
+                progress.update(task1, advance=1) 
+                progress.update(task2, advance=1) # one time step
+                progress.update(task3, advance= time() - prog_bar_tsys_iter_start) # simulation time
+                progress.update(task4, advance=my_world.current_time - prog_bar_tphys_iter_start) # physics time
 
                 # Check if reached any of the time limits or got a stop event (ctrl+c)
                 tsto_reached = t > tsto # stop due to time step limit
@@ -4140,6 +4190,7 @@ def signal_handler(signum):
     print(f"\nReceived signal {signum} - shutting down gracefully...")
     stop_simulation = True
     stop_event.set()
+    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
     
 
 
@@ -4185,7 +4236,7 @@ if __name__ == "__main__":
     stop_event = Event() # stop simapp completely
 
 
-    
+
 
     
     plotting_alive = False
@@ -4202,6 +4253,13 @@ if __name__ == "__main__":
         
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
+        os.makedirs(out_path, exist_ok=False)
+        particle_cfg_path_old = meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]
+        if particle_cfg_path_old is not None and particle_cfg_path_old.endswith('ml'): # yaml or yml
+            particle_file_path_new = f'{out_path}/particle_cfg.yml'
+            meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_file_path_new
+            shutil.copy(particle_cfg_path_old, particle_file_path_new)
+
         keep_running = main(meta_cfg, out_path)
         
         # No need to manually update plots - subprocess handles it automatically

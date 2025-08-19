@@ -24,3 +24,4 @@ third_party
 *data
 *.pkl
 *NvStreamer*
+*/particle/.tmp*
