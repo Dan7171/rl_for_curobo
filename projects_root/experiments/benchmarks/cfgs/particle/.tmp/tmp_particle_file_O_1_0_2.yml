@@ -44,7 +44,7 @@ cost:
           ratio: 0.2
           use: false
         terminal: false
-        weight: 15000
+        weight: 5000
         wta_trust: 1.0
     published_info:
       spheres_to_exclude_in_sparse_mode: []
@@ -115,7 +115,7 @@ mppi:
     k: all
     visual_traj: ee_pos_seq
   gamma: 0.9999
-  init_cov: 0.5
+  init_cov: 0.2
   kappa: 0.0001
   n_iters: 5
   n_problems: 1

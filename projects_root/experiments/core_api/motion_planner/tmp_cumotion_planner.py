@@ -580,8 +580,8 @@ class FollowTask(SimTask):
                  add_velocity_noise = False, # noise for the target velocity
                  update_interval_tphys:float=0.2, # physics dt to update target
                  initial_vel_direction='center',
-                 initial_targets_density=0.5,
-                 vel_noise=0.2,
+                 # initial_targets_density=0.5,
+                 vel_noise=0.02,
                  ):
         
         """
