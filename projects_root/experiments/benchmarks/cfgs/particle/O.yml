@@ -69,11 +69,11 @@ cost:
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
         a_select_mode: normal # 'col_free' # col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
-        weight: 7000.0  # 100  
+        weight: 7000.0  # 7000.0  # 100  
         terminal: False
         safety_margin: 0.3 # 0.05
         prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
-        wta_trust: 2.0 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
+        wta_trust: 3.0 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
         prior_p_err_impact_rad: 0.1 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_rot_err_impact_angle: 180 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_keep_lower_bound: 0.0 # between 0 and 1.A lower bound on how much we keep from the origianl dynamic obs cost. 0 means no lower bound. 1 means keep all.
@@ -86,9 +86,10 @@ cost:
           use: True
 
 
-
+# cur best: init_cov: 0.2, update_cov: False
+# original:init_cov: 0.05, update_cov: True
 mppi:
-  init_cov          : 0.05 #.5 #.5
+  init_cov          : 0.5 # 0.2 # 0.05 #.5 #.5
   gamma             : 0.9999 # 0.98
   n_iters           : 5
   cold_start_n_iters: 5
@@ -97,7 +98,7 @@ mppi:
   beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
   num_particles     : 400 # 200 #10000
-  update_cov        : True
+  update_cov        : False
   cov_type          : "DIAG_A" #
   kappa             : 0.0001
   null_act_frac     : 0.05
@@ -120,3 +121,4 @@ mppi:
     n_knots: 5
   debug_info:
     visual_traj       : 'ee_pos_seq'
+    k: 'all'

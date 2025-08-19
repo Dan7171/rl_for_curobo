@@ -265,9 +265,9 @@ class CentralizedLivePlotter:
         # print(f"🔵 PLOT DEBUG: Updating plot for agent {agent_id}")
         
         # Debug cost histories
-        agent_histories = self._cost_histories[agent_id]
+        # agent_histories = self._cost_histories[agent_id]
         # print(f"🔍 PLOT DEBUG: Agent {agent_id} has {len(agent_histories)} cost types: {list(agent_histories.keys())}")
-        for cost_name, history in agent_histories.items():
+        # for cost_name, history in agent_histories.items():
             # print(f"🔍 PLOT DEBUG: Agent {agent_id} cost '{cost_name}' has {len(history)} data points")
         
         agent_info = self.agents[agent_id]
@@ -306,7 +306,7 @@ class CentralizedLivePlotter:
                 ax.plot(x_data, y_data, color=color, label=cost_name, 
                        linewidth=linewidth, marker=marker, markersize=markersize)
                 plot_count += 1
-            else:
+            # else:
                 #print(f"🔴 PLOT DEBUG: Skipping empty history for cost '{cost_name}'")
         
         # print(f"🟢 PLOT DEBUG: Agent {agent_id} plotted {plot_count} cost curves")
