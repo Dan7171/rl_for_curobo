@@ -1,11 +1,11 @@
 timeout:
-  tstep: 5000 # 500 # world steps timeout
+  tstep: 500 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
 out:
   out_dir_root: '/home/dan/mr_mpc_logs' # output directory
-  batch_dir_name: 'batch_1_part2_O_minus' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
+  batch_dir_name: '' # 'batch_1_1908_O_attempts' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
@@ -87,7 +87,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: True # for debugging
+      plot_costs: False # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
