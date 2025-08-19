@@ -5,7 +5,7 @@ timeout:
 
 out:
   out_dir_root: '/home/dan/mr_mpc_logs' # output directory
-  batch_dir_name: '' # 'batch_1_1908_O_attempts' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
+  batch_dir_name: 'batch_1_1908_O_attempts' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing

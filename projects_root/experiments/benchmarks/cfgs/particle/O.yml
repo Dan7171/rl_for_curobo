@@ -69,7 +69,7 @@ cost:
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
         a_select_mode: normal # 'col_free' # col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
-        weight: 7000.0  # 100  
+        weight: 20000.0 # 7000.0  # 100  
         terminal: False
         safety_margin: 0.3 # 0.05
         prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
