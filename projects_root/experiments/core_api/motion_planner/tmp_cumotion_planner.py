@@ -56,6 +56,7 @@ from typing import Optional, Tuple, Dict, Union, Callable
 from queue import Queue, Empty
 from typing_extensions import List
 import pickle
+import threading
 import torch
 import pandas as pd
 import random
@@ -1846,7 +1847,16 @@ class MpcPlanner(CuPlanner):
         return self._get_wrap_mpc_optimizer().rollout_fn._custom_arm_reacher_costs
     
     def _get_arm_reacher(self)->ArmReacher:
-        return self._get_wrap_mpc_optimizer().rollout_fn
+        try:
+            optimizer = self._get_wrap_mpc_optimizer()
+            if optimizer is not None and hasattr(optimizer, 'rollout_fn'):
+                return optimizer.rollout_fn
+            else:
+                print("Warning: optimizer is None or doesn't have rollout_fn")
+                return None
+        except Exception as e:
+            print(f"Error getting arm reacher: {e}")
+            return None
     
     def get_col_pred(self)->Optional[DynamicObsCollPredictor]:
         for instance in self._get_custom_arm_base_costs().values():
@@ -1856,7 +1866,19 @@ class MpcPlanner(CuPlanner):
 
     
     def kill_cost_plots(self):
-        self._get_arm_reacher().kill_live_plot()
+        """Aggressively close all matplotlib figures and threads"""
+        # First try the standard method
+        try:
+            arm_reacher = self._get_arm_reacher()
+            if arm_reacher is not None and hasattr(arm_reacher, 'kill_live_plot'):
+                arm_reacher.kill_live_plot()
+                print("Called arm_reacher.kill_live_plot()")
+            else:
+                print("Warning: arm_reacher is None or doesn't have kill_live_plot method")
+        except Exception as e:
+            print(f"Error in standard kill_live_plot: {e}")
+        
+        
 
     def update_col_pred(self, plans_board, idx, col_pred_with, goal_errors, plans_lock:Optional[Lock]=None):
         
@@ -2500,10 +2522,6 @@ class CuAgent:
         spheres_per_arm = sphere_tensor_W.shape[0] // n_arms
         for i in range(n_arms):
             ans.append(sphere_tensor_W[i*spheres_per_arm:(i+1)*spheres_per_arm])
-            # print(f'debug')
-            # print(f'i = {i}')
-            # print(i*spheres_per_arm)
-            # print((i+1)*spheres_per_arm)
         return ans
 
     def async_control_loop_sim(self, t_lock, sim_lock, plans_lock, goals_lock, debug_lock, stop_event, plans_board, get_t, pts_debug, usd_help:UsdHelper,
@@ -3164,7 +3182,20 @@ def simulation_startup(simulation_app, my_world, cu_agents):
 
 
 
+def fire_up_plotting_server(meta_cfg):
+    # agents_with_plotting = [False] * len(meta_cfg["cu_agents"])
+    for a_idx, a in enumerate(meta_cfg["cu_agents"]):
+        try:
+            plot_costs = a["mpc"]["mpc_solver_cfg"]["plot_costs"]
+            if plot_costs:
+                from projects_root.utils.plotting_server import start_plotting_server, get_plotting_server
+                start_plotting_server(max_agents=len(meta_cfg["cu_agents"]))
+                print(f"debug: plotting server started...")
+                return True
 
+        except:
+            continue
+    return False
 
 def modify_to_benchmark_mode(combo_cfg_path):
     
@@ -3523,6 +3554,16 @@ def main(meta_cfg, out_path):
         
         elif planner_type[a_idx] == 'mpc':
             planner = MpcPlanner(base_pose[a_idx], solver_cfgs[a_idx], robot_cfgs[a_idx], world_cfg, mpc_particle_file_paths[a_idx])
+            # # Enable live plotting for the centralized plotter
+            # try:
+            #     arm_reacher = planner._get_arm_reacher()
+            #     if arm_reacher is not None:
+            #         arm_reacher.enable_live_plotting(True)
+            #         print(f"✓ Enabled live plotting for agent {a_idx}")
+            #     else:
+            #         print(f"⚠ Could not get arm_reacher for agent {a_idx}")
+            # except Exception as e:
+            #     print(f"⚠ Failed to enable live plotting for agent {a_idx}: {e}")
         else:
             raise ValueError(f"Invalid planner type: {planner_type[a_idx]}")
         
@@ -3554,6 +3595,7 @@ def main(meta_cfg, out_path):
     color_cnt = 0
     arm_poses = meta_cfg["sim_task"]["arm_poses"] if "arm_poses" in meta_cfg["sim_task"] else [[] for _ in range(len(cu_agents))] # arms base poses
     centrealized = len(cu_agents) == 1
+    
     for a_idx, a in enumerate(cu_agents):
         if a.sim_robot is not None:
             cfg = {}
@@ -3607,6 +3649,8 @@ def main(meta_cfg, out_path):
             a.cu_world_wrapper_update_policy["never_add"] += never_add
             a.reset_col_model_from_isaac_sim(usd_help, a.sim_robot.path, ignore_substrings=a.cu_world_wrapper_update_policy["never_add"])
     
+    global plotting_alive
+    plotting_alive = fire_up_plotting_server(meta_cfg)
     
     my_world.reset()
     my_world.play()
@@ -3637,6 +3681,9 @@ def main(meta_cfg, out_path):
     agents_spheres = [torch.tensor([]) for _ in range(len(cu_agents))] # for agent-to-agent collision check
     mean_goal_err:List[Optional[tuple[float, float]]] = [None for _ in range(len(cu_agents))] # used for pose wta conflict resolution
     n_arms = len(meta_cfg["sim_task"]["arm_poses"])
+    
+    arm_to_arm_col_count = 0 # for debugging
+    arm_to_env_col_count = 0 # for debugging
     
     with Progress() as progress:
         task1 = progress.add_task(f"Sim Steps (lim={tsto} steps)", total=tsto)
@@ -3810,16 +3857,13 @@ def main(meta_cfg, out_path):
                         stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
                         stats = {}
                         for stat_name in stats_to_update_now:
-                            # if stat_name == 'w_step': # world step
-                            #     val = t
-                            # elif stat_name == 'a_step': # agent step (control iteration)
-                            #     val = a.step_count
-                            # elif stat_name == 'rec': # robot env collision
+                            
 
                             if stat_name == 'env_cols':
                                 in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
                                 if in_col:
                                     print(f"debug: warning robot {a.idx} in col with obstacle!!!")
+                                    arm_to_env_col_count += 1
                                 val = in_col  
                             elif stat_name == 'link_target_poses': # link and target poses
                                 val = (robot_context["link_name_to_pose"], robot_context["name_link_to_target"], robot_context["target_name_to_pose"])
@@ -3843,8 +3887,8 @@ def main(meta_cfg, out_path):
                                     
                                     for other_idx in range(len(collisions)):
                                         if len(collisions[other_idx]):
-                                            for k,l in collisions[other_idx]:
-                                                print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
+                                            # for k,l in collisions[other_idx]:
+                                            #     print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                             val = True
                                             break
                                     
@@ -3858,9 +3902,13 @@ def main(meta_cfg, out_path):
                                                 collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
                                                 if len(collisions):
                                                     val = True
-                                                    for k,l in collisions:
-                                                        print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
+                                                    
+                                                    # for k,l in collisions:
+                                                    #     print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
                                                     break
+
+                                if val:
+                                    arm_to_arm_col_count += 1
 
                 
                             else:
@@ -3875,8 +3923,8 @@ def main(meta_cfg, out_path):
                 # update task stats
                 task_stats = sim_task.get_stat_vals(sim_task.stat_man.get_now_update_names(t))
                 sim_task.stat_man.update(task_stats,t)
-
-                
+                if t % 10 == 0:
+                    print(f"debug: arm_to_arm_col_count: {arm_to_arm_col_count}, arm_to_env_col_count: {arm_to_env_col_count}")
                 # advance time
                 t += 1                
         
@@ -4137,22 +4185,41 @@ if __name__ == "__main__":
     stop_event = Event() # stop simapp completely
 
 
+    
 
+    
+    plotting_alive = False
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
-
-        formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         
+        formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         if args.livestream:
             meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
-        
         if len(meta_cfg["out"]["batch_dir_name"]):
             meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
             print(f'warning-livestream mode')
         else:
             meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
+        
         out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
         print(f'out_path: {out_path}')
-        sleep(3)
         keep_running = main(meta_cfg, out_path)
+        
+        # No need to manually update plots - subprocess handles it automatically
+        
+        # Clean up after simulation completes
+        print(f"\n=== SIMULATION {out_name} COMPLETED ===")
+        
         if not keep_running:
             break
+    
+    # Final cleanup when all simulations are done
+    print("\n=== ALL SIMULATIONS COMPLETED - FINAL CLEANUP ===")
+    
+    # Stop plotting server
+    if plotting_alive:
+        try:
+            from projects_root.utils.plotting_server import stop_plotting_server
+            stop_plotting_server()
+            print("✓ Plotting server stopped")
+        except Exception as e:
+            print(f"Error stopping plotting server: {e}")

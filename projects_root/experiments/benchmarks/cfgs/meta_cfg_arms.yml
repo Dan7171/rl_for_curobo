@@ -1,5 +1,5 @@
 timeout:
-  tstep: 500 # 500 # world steps timeout
+  tstep: 5000 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -87,7 +87,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: False # for debugging
+      plot_costs: True # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
@@ -142,7 +142,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
     keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
     stat_names: ['env_cols', 'link_target_poses', 'arm_cols', 'total_planning_time', 'spheres']
-    collect_dt: [1,1,1,1,10] # dt for each stat
+    collect_dt: [1,1,1,1,100] # dt for each stat
     verbose: False # [False,False,False,False,False,True]
     save: True
                 
@@ -223,9 +223,7 @@ sim_env:
 
 cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
-- mpc:
-    mpc_solver_cfg:
-      plot_costs: False # True
+- 
   sim_robot_cfg:
     visualize_col_pred:
       own: False # True
@@ -236,9 +234,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int
  
-- mpc:
-    mpc_solver_cfg:
-      plot_costs: False # True
+- 
   
   sim_robot_cfg:
     visualize_col_pred:
@@ -248,10 +244,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int
 
-- mpc:
-    mpc_solver_cfg:
-      plot_costs: False #True # True
-- mpc:
-    mpc_solver_cfg:
-      plot_costs: False #True # True
+# - mpc:
+#     {}
+# - mpc:
      
