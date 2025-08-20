@@ -20,7 +20,6 @@ def make_meta_cfgs(combo_cfg_path):
     def make_tmp_particle_options(particle_options,alg):
         import yaml
         ret = []
-        out_dir = TMP_PARTICLE_FILES_STORAGE
         default_particle_file_path = get_default_particle_file(alg)
 
         init_cov_options = particle_options["init_cov"] if "init_cov" in particle_options else [-1]
@@ -30,20 +29,22 @@ def make_meta_cfgs(combo_cfg_path):
         for i,init_cov in enumerate(init_cov_options):
             for j,wta_trust in enumerate(wta_trust_options):
                 for k,wta_weight in enumerate(wta_weight_options):
-                    tmp_out_particle_file_path = f'{out_dir}/tmp_particle_file_{alg}_{i}_{j}_{k}.yml'
-                    if not os.path.exists(tmp_out_particle_file_path):
-                        shutil.copy(default_particle_file_path, tmp_out_particle_file_path)
-                        particle_cfg = load_yaml(tmp_out_particle_file_path)
-                        if init_cov != -1:
-                            particle_cfg["mppi"]["init_cov"] = init_cov
-                        if wta_trust != -1:
-                            particle_cfg["cost"]["custom"]["arm_base"]["dynamic_obs_cost"]["wta_trust"] = wta_trust
-                        if wta_weight != -1:
-                            particle_cfg["cost"]["custom"]["arm_base"]["dynamic_obs_cost"]["weight"] = wta_weight
-                        with open(tmp_out_particle_file_path, 'w') as f:
-                            yaml.dump(particle_cfg, f)
-                    ret.append(tmp_out_particle_file_path)
-
+                    # tmp_out_particle_file_path = f'{out_dir}/tmp_particle_file_{alg}_{i}_{j}_{k}.yml'
+                    # if not os.path.exists(tmp_out_particle_file_path):
+                    #     shutil.copy(default_particle_file_path, tmp_out_particle_file_path)
+                    #     particle_cfg = load_yaml(tmp_out_particle_file_path)
+                    particle_cfg = load_yaml(default_particle_file_path)
+                    if init_cov != -1:
+                        particle_cfg["mppi"]["init_cov"] = init_cov
+                    if wta_trust != -1:
+                        particle_cfg["cost"]["custom"]["arm_base"]["dynamic_obs_cost"]["wta_trust"] = wta_trust
+                    if wta_weight != -1:
+                        particle_cfg["cost"]["custom"]["arm_base"]["dynamic_obs_cost"]["weight"] = wta_weight
+                    # with open(tmp_out_particle_file_path, 'w') as f:
+                    #     yaml.dump(particle_cfg, f)
+                    #ret.append(tmp_out_particle_file_path)
+                    ret.append(particle_cfg)
+                    # print(f'debug: particle_cfg: {particle_cfg}')
             
         return ret
     
@@ -109,9 +110,9 @@ def make_meta_cfgs(combo_cfg_path):
     particle_options = combo_cfg["particle"] if "particle" in combo_cfg else {}
     out_names = []
     meta_cfgs = []
+    particle_cfgs = []
 
-    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
-    os.makedirs(TMP_PARTICLE_FILES_STORAGE, exist_ok=False)
+
 
     for base_cfg_path in base_options:
         for robot_fam in robot_fam_options: # list
@@ -120,14 +121,20 @@ def make_meta_cfgs(combo_cfg_path):
                     if len(particle_options) > 0:
                         particle_paths_alg_options = make_tmp_particle_options(combo_cfg["particle"],alg)
                     else:
-                        particle_paths_alg_options =  [get_default_particle_file(alg)]
+                        default_particle_file_path = get_default_particle_file(alg)
+                        particle_cfg = load_yaml(default_particle_file_path)
+                        particle_paths_alg_options =  [particle_cfg]
                     for task in task_to_levels_options: # dict
                         for level in task_to_levels_options[task]: # list
                             for task_seed in seed_options: # list
-                                
-                                for particle_cfg_path in particle_paths_alg_options: # list
+                                for particle_cfg in particle_paths_alg_options:
+
+                                # for particle_cfg_path in particle_paths_alg_options: # list
+                                    
+                                    # particle_cfg = get_default_particle_file(alg)
+
                                     meta_cfg = load_yaml(base_cfg_path)
-                                    meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_cfg_path
+
                                     
                                     # set pub sub config by alg type
                                     is_pub = alg_to_pub_sub[alg][0]
@@ -242,16 +249,18 @@ def make_meta_cfgs(combo_cfg_path):
 
                                 
                                     meta_cfg["pose_utils"]["seed"] = task_seed
-                                    
 
+
+    
                                     out_name = f'R_{robot_fam}_N{n_arms}_A{alg}_T{task}_s{task_seed}_l{level}'
                                     
-
+                                    
+                                    
                                     meta_cfgs.append(meta_cfg)
                                     out_names.append(out_name)
-                                    
+                                    particle_cfgs.append(particle_cfg)
                                 
-    return meta_cfgs, out_names
+    return meta_cfgs, out_names, particle_cfgs
 
 
 
@@ -296,7 +305,7 @@ def free_memory(cu_agents, sim_task, sim_env, planner, my_world):
 def signal_handler(signum, _frame):
     """Handle Ctrl+C gracefully"""
     print(f"\nReceived signal {signum} - shutting down gracefully...")
-    stop_event.set()
+    stop_event.set() # tells sub process to stop
     
 
 if __name__ == "__main__":
@@ -311,20 +320,16 @@ if __name__ == "__main__":
     default_meta_cfg_path = "meta_cfg_arms.yml"
     robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
     benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
-    TMP_PARTICLE_FILES_STORAGE = 'projects_root/experiments/benchmarks/cfgs/particle/.tmp'
-    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=True)
-    os.makedirs(TMP_PARTICLE_FILES_STORAGE, exist_ok=False)
-    meta_cfgs, out_names = make_meta_cfgs(args.combo_cfg_path)
+    meta_cfgs, initial_out_names, particle_cfgs = make_meta_cfgs(args.combo_cfg_path)
             
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     # stop_simulation = False
     # stop_event = Event()
 
-    for meta_cfg, out_name in zip(meta_cfgs, out_names):
+    for meta_cfg, initial_out_name, particle_cfg in zip(meta_cfgs, initial_out_names, particle_cfgs):
         
-
-        formatted_time = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        # Rename output directory if livestream mode
         if args.livestream:
             meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
         if len(meta_cfg["out"]["batch_dir_name"]):
@@ -333,41 +338,47 @@ if __name__ == "__main__":
         else:
             meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
         
-        out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
+        
+        # Make output directory with timestamp and rename the initial out name
+        formatted_time_simstart = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        new_out_name = f'{formatted_time_simstart}_{initial_out_name}'
+        out_path = os.path.join(meta_cfg["out"]["out_dir"], new_out_name)
         print(f'out_path: {out_path}')
         os.makedirs(out_path, exist_ok=False)
-        particle_cfg_path_old = meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]
-            
-        if particle_cfg_path_old is not None and particle_cfg_path_old.endswith('ml'): # yaml or yml
-            particle_file_path_new = f'{out_path}/particle_cfg.yml'
-            meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_file_path_new
-            shutil.copy(particle_cfg_path_old, particle_file_path_new)
-            if TMP_PARTICLE_FILES_STORAGE in particle_cfg_path_old:
-                os.remove(particle_cfg_path_old)
+        
+        particle_cfg_path = os.path.join(out_path, 'particle_cfg.yml')
+        with open(particle_cfg_path, 'w') as f:
+            yaml.dump(particle_cfg, f)
+        meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_cfg_path
 
-        # meta_cfg_pickle_path = os.path.join(out_path, f'meta_cfg.pickle')
-        # with open(meta_cfg_pickle_path, 'wb') as f:
-        #     pickle.dump(meta_cfg, f)
 
+        as_subprocess = True
         stop_event = Event()
-        p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event, 'livestream':args.livestream})
-        p.start()
-        time.sleep(1)
+        if as_subprocess:
+            
+            p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event, 'livestream':args.livestream})
+            p.start()
         
 
-        try:
-            while not stop_event.is_set() and p.is_alive():
+            while p.is_alive():
                 # print(f'debug: stop_event.is_set(): {stop_event.is_set()}, p.is_alive(): {p.is_alive()}')
-                time.sleep(0.1)
-            if p.is_alive():      # e.g. killed by Ctrl-C
-                p.terminate()
-                shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
-                exit()
+                if not stop_event.is_set():
+                    time.sleep(0.1)
+                else:
+                    time.sleep(5)
+                    if p.is_alive():
+                        p.terminate()
+                        if p.is_alive():
+                            p.kill()
+                    exit()
+            if p.exitcode is not None:
+                if p.exitcode != 0:
+                    print(f'error: sim failed with exit code {p.exitcode}')
+                    exit()
+            
+        else:
+            benchmark_sim.root(meta_cfg, out_path, stop_event=stop_event, livestream=args.livestream)
+            
         
-        finally:
-            if p.is_alive():      # e.g. killed by Ctrl-C
-                p.terminate()
-                shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
-                exit()
     
     print(f'all sims done')
