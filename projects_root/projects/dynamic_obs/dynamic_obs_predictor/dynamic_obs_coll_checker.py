@@ -322,9 +322,9 @@ class DynamicObsCollPredictor:
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_surface_dist_buf)
         
         _debug_using_wta = self.prior_rule == 'pose_wta' 
-        print(f'DEBUG: using wta: {_debug_using_wta}')
-        print(f'trust: {self.wta_trust}')
-        print(f'weight: {self.cost_weight}')
+        # print(f'DEBUG: using wta: {_debug_using_wta}')
+        # print(f'trust: {self.wta_trust}')
+        # print(f'weight: {self.cost_weight}')
         
         
         if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
