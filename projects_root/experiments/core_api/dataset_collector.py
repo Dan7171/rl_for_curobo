@@ -219,7 +219,7 @@ def make_meta_cfgs(combo_cfg_path):
                                             base_pose = pose_root["dec"][a_idx] # arm base pose   
                                     
                                         if a_idx < len(base_cu_agent_cfgs):
-                                            print(f'warning: reading specifications for agent{a_idx} from meta cfg')
+                                            print(f'warning: reading               ecifications for agent{a_idx} from meta cfg')
                                             agent_cfg = base_cu_agent_cfgs[a_idx]
                                             # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
                                             

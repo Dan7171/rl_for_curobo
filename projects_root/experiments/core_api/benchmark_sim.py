@@ -2165,22 +2165,25 @@ def root(meta_cfg, out_path,stop_event):
     
             
         
-        def update_robot_sim_spheres(self, subroot:str, visible:bool,a_idx:int, spheres_tensor:torch.Tensor):
+        def update_robot_sim_spheres(self, subroot:str, visible:bool,a_idx:int, spheres_tensor:torch.Tensor,in_col:set[int]=set()):
             # if cu_js is None:
             #     return
             
             # spheres = solver.kinematics.get_robot_as_spheres(cu_js.position)[0]
+            green = np.array([0, 0.8, 0.2])
+            red = np.array([0.8, 0, 0])
 
             if not hasattr(self, "_vis_spheres"): # init visualization spheres
                 self._vis_spheres = []
                 for si, s in enumerate(spheres_tensor):
+                    
                     sp = sphere.VisualSphere(
                         prim_path=f"{subroot}/R{a_idx}S{si}",
                         position=np.ravel(s[:3].cpu().numpy()),
                         orientation=np.array([1,0,0,0]),# np.ravel(s[3:7].cpu().numpy()),
                         # radius=float(s[7].cpu().item()),
                         radius=float(s[3].cpu().item()),
-                        color=np.array([0, 0.8, 0.2]),
+                        color=green,
                     )
                     self._vis_spheres.append(sp)
                     if not visible:
@@ -2188,6 +2191,13 @@ def root(meta_cfg, out_path,stop_event):
 
             else: # update visualization spheres
                 for si, s in enumerate(spheres_tensor):
+                    if si in in_col:
+                        color = red
+                    else:
+                        color = green 
+                    
+                    self._vis_spheres[si].get_applied_visual_material().set_color(color)                           
+
                     if not np.isnan(s[0].item()):
                         self._vis_spheres[si].set_world_pose(
                             position=np.ravel(s[:3].cpu().numpy()),
@@ -3757,7 +3767,7 @@ def root(meta_cfg, out_path,stop_event):
         agents_spheres = [torch.tensor([]) for _ in range(len(cu_agents))] # for agent-to-agent collision check
         mean_goal_err:List[Optional[tuple[float, float]]] = [None for _ in range(len(cu_agents))] # used for pose wta conflict resolution
         n_arms = len(meta_cfg["sim_task"]["arm_poses"])
-        
+        viz_spheres_in_col = set() # visualize spheres in collision in red
         arm_to_arm_col_count = 0 # for debugging
         arm_to_env_col_count = 0 # for debugging
         outdir_name = out_path.split('/')[-1]
@@ -3917,7 +3927,7 @@ def root(meta_cfg, out_path,stop_event):
                                 else:
                                     sphere_viz_tensor = torch.zeros(0,4)
                                 
-                                a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor)
+                                a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor,viz_spheres_in_col)
 
                             if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
                                 if a.is_plan_publisher() and len(cu_agents) > 1:
@@ -3954,36 +3964,41 @@ def root(meta_cfg, out_path,stop_event):
                                     val = psw.total 
 
                                 elif stat_name == 'arm_cols': # collisions between arms
-    
+                                    viz_spheres_in_col = set()
                                     if not len(sphere_tensor_W):
                                         sphere_tensor_W = a.get_sphere_tensor_W(cu_js)
+                                    spheres_per_arm = sphere_tensor_W.shape[0] // n_arms # works only if all robots have same number of spheres
                                     val = False
                                     # val = sphere_tensor_W
                                     if len(cu_agents) > 1: # decentralized
                                         agents_spheres[a.idx] = sphere_tensor_W                                    
                                         collisions = a.check_col_with_others(agents_spheres) # CuAgent.check_collisions_between_agents(agents_spheres)
-                                        
+                                        arm_i_start_sphere = a.idx*spheres_per_arm
                                         for other_idx in range(len(collisions)):
+                                            arm_j_start_sphere = other_idx*spheres_per_arm
+
                                             if len(collisions[other_idx]):
-                                                # for k,l in collisions[other_idx]:
-                                                #     print(f"debug Robot-Robot-Col!: t = {t} spheres: r{a.idx} s{k} with r{other_idx} s{l}")
                                                 val = True
-                                                break
+                                                for k,l in collisions[other_idx]:
+                                                    viz_spheres_in_col.add(k+arm_i_start_sphere) # self sphere
+                                                    viz_spheres_in_col.add(l+arm_j_start_sphere) # other sphere
                                         
                                     else: # centralized 
-                                        arm_tensors_W = a.split_sphere_tensor_W_into_arms(sphere_tensor_W,n_arms)
+                                        arm_tensors_W = a.split_sphere_tensor_W_into_arms(sphere_tensor_W,n_arms) # for centralized robots
                                         for arm_i in range(n_arms):
+                                            arm_i_start_sphere = arm_i*spheres_per_arm
                                             if val:
                                                 break
                                             for arm_j in range(arm_i+1, n_arms):
                                                 if arm_i != arm_j:
+                                                    arm_j_start_sphere = arm_j*spheres_per_arm
                                                     collisions = CuAgent.agent_to_agent_colcheck(arm_tensors_W[arm_i], arm_tensors_W[arm_j])
                                                     if len(collisions):
                                                         val = True
-                                                        
-                                                        # for k,l in collisions:
-                                                        #     print(f"debug Arm-Arm-Col!: t = {t} spheres: r{arm_i} s{k} with r{arm_j} s{l}")
-                                                        break
+                                                        for k,l in collisions:
+                                                            print(f'debug kl {k+arm_i_start_sphere},{l+arm_j_start_sphere}')
+                                                            viz_spheres_in_col.add(k+arm_i_start_sphere)
+                                                            viz_spheres_in_col.add(l+arm_j_start_sphere)                                                        
 
                                     if val:
                                         arm_to_arm_col_count += 1
