@@ -96,7 +96,7 @@ class PoseUtils:
                 q_out = q_new
             return q_out
 
-def root(meta_cfg, out_path,stop_event):
+def root(meta_cfg, out_path,stop_event, livestream):
 
     import argparse
     import os
@@ -109,11 +109,11 @@ def root(meta_cfg, out_path,stop_event):
     from curobo.util_file import load_yaml
 
 
-    parser = argparse.ArgumentParser()
+    #parser = argparse.ArgumentParser()
     # combo
-    parser.add_argument("--cfg", type=str, required=False, default="combo", help="path to meta config file") # --cfg combo for benchmark mode
-    parser.add_argument("--livestream", action="store_true", help="run in livestream mode")
-    args = parser.parse_args()
+    # parser.add_argument("--cfg", type=str, required=False, default="combo", help="path to meta config file") # --cfg combo for benchmark mode
+    # parser.add_argument("--livestream", action="store_true", help="run in livestream mode")
+    #args = parser.parse_args()
 
     # Isaac Sim
     try:
@@ -125,17 +125,18 @@ def root(meta_cfg, out_path,stop_event):
     TMP_PARTICLE_FILES_STORAGE = 'projects_root/experiments/benchmarks/cfgs/particle/.tmp'
     simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
     simapp_cfg = load_yaml(simapp_cfg_path)
-    if args.livestream:
+    # if args.livestream:
+    if livestream:
         simapp_cfg = simapp_cfg["livestream_mode"]
     else:
-        simapp_cfg = simapp_cfg["gui_mode"]
+        simapp_cfg = simapp_cfg["gui_mode"] # simapp_cfg["headless_mode"]
 
     simulation_app = SimulationApp({**simapp_cfg["init_app_settings"]})
 
     from projects_root.utils.helper import add_extensions 
 
     from isaacsim.core.utils.extensions import enable_extension
-    if args.livestream:
+    if livestream:
         # Default Livestream settings, enable Livestream extension
         simulation_app.set_setting("/app/window/drawMouse", True)
         # _headless_mode = 'webrtc'

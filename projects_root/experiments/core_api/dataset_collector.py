@@ -350,7 +350,7 @@ if __name__ == "__main__":
         #     pickle.dump(meta_cfg, f)
 
         stop_event = Event()
-        p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event})
+        p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event, 'livestream':args.livestream})
         p.start()
         time.sleep(1)
         
