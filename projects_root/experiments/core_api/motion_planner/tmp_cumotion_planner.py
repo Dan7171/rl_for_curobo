@@ -580,7 +580,7 @@ class FollowTask(SimTask):
                  add_velocity_noise = False, # noise for the target velocity
                  update_interval_tphys:float=0.2, # physics dt to update target
                  initial_vel_direction='center',
-                 initial_targets_density=0.5,
+                 # initial_targets_density=0.5,
                  vel_noise=0.2,
                  ):
         
@@ -679,6 +679,7 @@ class FollowTask(SimTask):
         noise = np.zeros(3)
         for axis in range(3):
             noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+            print(f'noise_axis: {noise_axis}')
             noise[axis] = noise_axis
         return noise
  
@@ -3299,7 +3300,7 @@ def modify_to_benchmark_mode(combo_cfg_path):
     out_names = []
     meta_cfgs = []
 
-    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
+    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=True)
     os.makedirs(TMP_PARTICLE_FILES_STORAGE, exist_ok=False)
 
     for base_cfg_path in base_options:
@@ -3466,6 +3467,22 @@ def recursive_fill_from_default(a_cfg, default_cfg,use_deepcopy=False):
         elif isinstance(a_cfg[key], dict):
             recursive_fill_from_default(a_cfg[key], default_cfg[key],use_deepcopy=use_deepcopy)
     return a_cfg
+
+def free_memory(cu_agents, sim_task, sim_env, planner, my_world):
+    # just before reset_stage()’s return True
+    for a in cu_agents:
+        if hasattr(a, "planner") and a.planner is not None:
+            # break expensive reference cycles
+            a.planner.kill_cost_plots()     # already there
+            a.planner = None
+            a.stat_man = None
+    del cu_agents, sim_task, sim_env, planner, my_world
+
+    import gc, torch
+    gc.collect()                # run Python GC
+    torch.cuda.empty_cache()    # release cached blocks to driver
+    torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
+    
     
 def main(meta_cfg, out_path):
     
@@ -4002,12 +4019,14 @@ def main(meta_cfg, out_path):
                     
                     print(f"All Outputs saved to {out_path}")
                 
-                    a.planner.kill_cost_plots()
+                    free_memory(cu_agents, sim_task, sim_env, planner, my_world)
+                    # a.planner.kill_cost_plots()
                     if stop_event.is_set():
                         simulation_app.close()
                         return False
                     else:
                         # Thoroughly reset scene and World singleton so next iteration starts clean
+
                         reset_stage(my_world)
                         return True
             
@@ -4155,9 +4174,43 @@ def main(meta_cfg, out_path):
                 simulation_app.close()
 
 def reset_stage(my_world):
+
     """
+
     reset stage and world, normally before next simulation
     """
+    def _release_viewport_memory():
+        """
+        Frees the render-targets that the viewport keeps alive.
+        Works with both the new (utility) and the legacy viewport.
+        Does nothing when running headless.
+        """
+        import importlib
+        for mod_name in (
+            "omni.kit.viewport.utility",   # Isaac-Sim ≥ 2023.1
+            "omni.kit.viewport_legacy",    # Isaac-Sim 2022.x
+        ):
+            try:
+                vp = importlib.import_module(mod_name)
+            except ImportError:
+                continue
+
+            # 1. New viewport – we get a *window*, then ask it for the interface
+            if hasattr(vp, "get_active_viewport_window"):
+                win = vp.get_active_viewport_window()
+                if win is not None and hasattr(win, "get_viewport_interface"):
+                    iface = win.get_viewport_interface()
+                    if iface is not None and hasattr(iface, "release_resources"):
+                        iface.release_resources()
+                        return
+
+            # 2. Legacy viewport – static helper already returns the interface
+            if hasattr(vp, "get_viewport_interface"):
+                iface = vp.get_viewport_interface()
+                if iface is not None and hasattr(iface, "release_resources"):
+                    iface.release_resources()
+                    return
+    
     try:
         my_world.stop()
     except Exception:
@@ -4171,7 +4224,7 @@ def reset_stage(my_world):
         World.clear_instance()
     except Exception:
         pass
-    try:
+    try:    
         from omni.isaac.core.utils.stage import create_new_stage
         create_new_stage()
     except Exception:
@@ -4181,6 +4234,12 @@ def reset_stage(my_world):
     except Exception:
         pass
 
+    _release_viewport_memory()
+
+    import gc, torch
+    gc.collect()                # run Python GC
+    torch.cuda.empty_cache()    # release cached blocks to driver
+    torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
 
 
 # Global flag to track if we should stop
@@ -4210,14 +4269,22 @@ if __name__ == "__main__":
         meta_cfgs = [meta_cfg]
         out_names = ['my_sim']
     
+
+    
     else: # using custom meta cfg file (from command line)
-        if args.cfg.endswith('.yml'): # single meta cfg file            
+        if args.cfg.endswith('.pickle'):
+            with open(args.cfg, 'rb') as f:
+                meta_cfg = pickle.load(f)
+            meta_cfgs = [meta_cfg]
+            out_names = ['my_sim']
+            
+        elif args.cfg.endswith('.yml'): # single meta cfg file            
             meta_cfg_path = args.cfg
             meta_cfg = load_yaml(meta_cfg_path)
             meta_cfgs = [meta_cfg]
             out_names = ['my_sim']
         elif 'combo' in args.cfg: # combo cfg file
-                meta_cfgs, out_names = modify_to_benchmark_mode(combo_cfg_path)
+            meta_cfgs, out_names = modify_to_benchmark_mode(combo_cfg_path)
         else: # path to a directory with multiple meta cfg files
             cfg_names = os.listdir(args.cfg)
             meta_cfgs = []
@@ -4242,24 +4309,31 @@ if __name__ == "__main__":
     plotting_alive = False
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
         
-        formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        if args.livestream:
-            meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
-        if len(meta_cfg["out"]["batch_dir_name"]):
-            meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
-            print(f'warning-livestream mode')
-        else:
-            meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
-        
-        out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
-        print(f'out_path: {out_path}')
-        os.makedirs(out_path, exist_ok=False)
-        particle_cfg_path_old = meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]
-        if particle_cfg_path_old is not None and particle_cfg_path_old.endswith('ml'): # yaml or yml
-            particle_file_path_new = f'{out_path}/particle_cfg.yml'
-            meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_file_path_new
-            shutil.copy(particle_cfg_path_old, particle_file_path_new)
 
+        if not args.cfg.endswith('.pickle'):
+
+            formatted_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+            if args.livestream:
+                meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+            if len(meta_cfg["out"]["batch_dir_name"]):
+                meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
+                print(f'warning-livestream mode')
+            else:
+                meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
+            
+            out_path = os.path.join(meta_cfg["out"]["out_dir"], f'{formatted_time}_{out_name}')
+            print(f'out_path: {out_path}')
+            os.makedirs(out_path, exist_ok=False)
+            particle_cfg_path_old = meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"]
+            if particle_cfg_path_old is not None and particle_cfg_path_old.endswith('ml'): # yaml or yml
+                particle_file_path_new = f'{out_path}/particle_cfg.yml'
+                meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_file_path_new
+                shutil.copy(particle_cfg_path_old, particle_file_path_new)
+
+        else:
+            out_path = args.out_path  
+    
+    
         keep_running = main(meta_cfg, out_path)
         
         # No need to manually update plots - subprocess handles it automatically

@@ -321,9 +321,15 @@ class DynamicObsCollPredictor:
         # Compute L2 norm (distance between sphere centers)
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_surface_dist_buf)
         
+        _debug_using_wta = self.prior_rule == 'pose_wta' 
+        print(f'DEBUG: using wta: {_debug_using_wta}')
+        print(f'trust: {self.wta_trust}')
+        print(f'weight: {self.cost_weight}')
+        
         
         if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
             # Winner takes all conflict resolution is used
+            
             p_own_err, q_own_err = self.pose_wta_conflict_resolution['own_errors']
             subto_goal_errs = self.pose_wta_conflict_resolution['subto_errors']
             for st_idx in subto_goal_errs.keys():

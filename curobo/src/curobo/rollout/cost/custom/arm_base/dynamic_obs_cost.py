@@ -82,12 +82,14 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
         if DynamicObsCost._assignment_index < len(available_contexts):
             robot_context = available_contexts[DynamicObsCost._assignment_index]
             self.robot_id = robot_context['robot_id']
-            DynamicObsCost._assignment_index += 1
-        else:
-            print(f"ERROR: No robot context available - found {len(available_contexts)} contexts")
-            self.col_pred = None
-            self.disable_cost()
-            return
+            DynamicObsCost._assignment_index = (DynamicObsCost._assignment_index + 1) % len(available_contexts) # this will ensure that next simulation will start from the first robot (i=0)
+        
+        # else:
+        #     # print(f"ERROR: No robot context available - found {len(available_contexts)} contexts")
+        #     self.col_pred = None
+        #     self.disable_cost()
+        #     raise RuntimeError("Please reset the assignment index of DynamicObsCost to 0 before any simulation")
+            
         
         # Get required values from robot context - fail if any are missing
         required_keys = ['robot_pose', 'n_obstacle_spheres', 'n_own_spheres', 'horizon', 'n_rollouts', 'col_pred_with']
@@ -234,3 +236,6 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
                 
         # return self.col_pred.cost_fn(state.robot_spheres, base_pose=new_base)
         return self.col_pred.cost_fn(state.robot_spheres)
+    
+    def reset_before_simulation(self):
+        DynamicObsCost._assignment_index = 0
