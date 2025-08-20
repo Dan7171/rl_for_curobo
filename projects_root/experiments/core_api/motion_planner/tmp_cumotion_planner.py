@@ -4304,7 +4304,6 @@ if __name__ == "__main__":
 
 
 
-
     
     plotting_alive = False
     for meta_cfg, out_name in zip(meta_cfgs, out_names):

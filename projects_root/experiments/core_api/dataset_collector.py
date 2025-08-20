@@ -293,7 +293,7 @@ def free_memory(cu_agents, sim_task, sim_env, planner, my_world):
     torch.cuda.empty_cache()    # release cached blocks to driver
     torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
 
-def signal_handler(signum):
+def signal_handler(signum, _frame):
     """Handle Ctrl+C gracefully"""
     print(f"\nReceived signal {signum} - shutting down gracefully...")
     stop_event.set()
@@ -312,13 +312,14 @@ if __name__ == "__main__":
     robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
     benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
     TMP_PARTICLE_FILES_STORAGE = 'projects_root/experiments/benchmarks/cfgs/particle/.tmp'
+    shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=True)
     os.makedirs(TMP_PARTICLE_FILES_STORAGE, exist_ok=False)
     meta_cfgs, out_names = make_meta_cfgs(args.combo_cfg_path)
             
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    stop_simulation = False
-    stop_event = Event()
+    # stop_simulation = False
+    # stop_event = Event()
 
     for meta_cfg, out_name in zip(meta_cfgs, out_names):
         
@@ -348,12 +349,21 @@ if __name__ == "__main__":
         # with open(meta_cfg_pickle_path, 'wb') as f:
         #     pickle.dump(meta_cfg, f)
 
-        p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path})
-        time.sleep(1)
-
+        stop_event = Event()
+        p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event})
         p.start()
+        time.sleep(1)
+        
+
         try:
-            p.join()              # blocks until child terminates
+            while not stop_event.is_set() and p.is_alive():
+                # print(f'debug: stop_event.is_set(): {stop_event.is_set()}, p.is_alive(): {p.is_alive()}')
+                time.sleep(0.1)
+            if p.is_alive():      # e.g. killed by Ctrl-C
+                p.terminate()
+                shutil.rmtree(TMP_PARTICLE_FILES_STORAGE, ignore_errors=False)
+                exit()
+        
         finally:
             if p.is_alive():      # e.g. killed by Ctrl-C
                 p.terminate()

@@ -3,6 +3,7 @@ import random
 from typing import Optional, Union
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import multiprocessing as mp
 
 
 class PoseUtils:
@@ -95,7 +96,7 @@ class PoseUtils:
                 q_out = q_new
             return q_out
 
-def root(meta_cfg, out_path):
+def root(meta_cfg, out_path,stop_event):
 
     import argparse
     import os
@@ -3760,6 +3761,7 @@ def root(meta_cfg, out_path):
         arm_to_arm_col_count = 0 # for debugging
         arm_to_env_col_count = 0 # for debugging
         outdir_name = out_path.split('/')[-1]
+        global stop_simulation
         with Progress() as progress:
             task1 = progress.add_task(f"{outdir_name}", total=1000000000000000) # not a real progress bar, just for printing the name
             task2 = progress.add_task(f"Sim Steps (lim={tsto})", total=tsto)
@@ -4014,7 +4016,8 @@ def root(meta_cfg, out_path):
                     tsto_reached = t > tsto # stop due to time step limit
                     sto_reached = time() - sim_time_start > sto # stop due to simulation time limit
                     pto_reached = my_world.current_time - physics_time_start > pto # stop due to physics time limit
-                    if stop_simulation or tsto_reached or sto_reached or pto_reached or stop_event.is_set():
+                    
+                    if tsto_reached or sto_reached or pto_reached or stop_event.is_set():
                         if should_capture_frames:
                             frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
 
@@ -4030,15 +4033,15 @@ def root(meta_cfg, out_path):
                         print(f"All Outputs saved to {out_path}")
                     
                         free_memory(cu_agents, sim_task, sim_env, planner, my_world)
-                        # a.planner.kill_cost_plots()
-                        if stop_event.is_set():
-                            simulation_app.close()
-                            return False
-                        else:
-                            # Thoroughly reset scene and World singleton so next iteration starts clean
+                        simulation_app.close()
+                        return
+                        # return False
+                        # else:
+                        #     # Thoroughly reset scene and World singleton so next iteration starts clean
 
-                            reset_stage(my_world)
-                            return True
+                        #     reset_stage(my_world)
+                        #     return True
+                        
                 
                     
                         
@@ -4077,14 +4080,11 @@ def root(meta_cfg, out_path):
                         print(f"async iter time: {time() - debug_time}")
                         debug_time = time()
 
-                        if stop_simulation:
-                            print("Saving stats...")
-                            # a_stats = [a.stats for a in cu_agents]
-                            # stats_out = sim_task.stats.save(formatted_time,a_stats,{})
-                            
-                            # print(f"Stats saved to {stats_out}")
+                        # if stop_simulation:
+                        if stop_event.is_set():
+                            print("stop_event.is_set()")
                             simulation_app.close()
-                            break
+                            return
                                 
                     simulation_app.close() 
 
@@ -4256,8 +4256,12 @@ def root(meta_cfg, out_path):
     def signal_handler(signum, _frame):
         print(f"\nReceived {signum} – stopping…")
         stop_event.set()
+        global stop_simulation
+        stop_simulation = True
 
-    stop_event = Event()
+    # stop_event = mp.Event()
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     main(meta_cfg, out_path)
         
 
