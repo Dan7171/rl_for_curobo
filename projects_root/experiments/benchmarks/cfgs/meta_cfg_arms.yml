@@ -94,7 +94,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
       is_on_world: False # visualize collision spheres in world frame
       is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
-      ts_delta: 5 # int
+      ts_delta: 3 # int
       color: viz_color
 
     visualize_col_pred:
@@ -230,19 +230,19 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       obs: False # True
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
         is_on: True    
-    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: False # True # visualize collision spheres in world frame
-      ts_delta: 1 # int
+#     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+#       is_on_world: False # True # visualize collision spheres in world frame
+#       ts_delta: 1 # int
  
-- 
+# - 
   
-  sim_robot_cfg:
-    visualize_col_pred:
-      own: False # True
-      obs: False # True
-    visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: False # True # visualize collision spheres in world frame
-      ts_delta: 1 # int
+#   sim_robot_cfg:
+#     visualize_col_pred:
+#       own: False # True
+#       obs: False # True
+#     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
+#       is_on_world: False # True # visualize collision spheres in world frame
+#       ts_delta: 1 # int
 
 # - mpc:
 #     {}
