@@ -1,4 +1,4 @@
-base: [projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml]
+base: [projects_root/experiments/benchmarks/cfgs/meta_ready/meta_cfg_arms_500steps.yml]
 # alg: [SD, CC, O, SC, D, O-]
 alg: ['O'] #'O'] # ['SC'] # [O] # [O, SC, SD, CC, O-]
 robot_fam: ['ur5e'] #  #[ ur5e]
@@ -8,8 +8,8 @@ task_seed: [0]
 task_to_levels:
   # manual: [1]
   bin: [1,2,3,4,5]
-  follow: [4,5,6,10,11,12] # [1,2,3,4,5]
+  follow: [4,5,6] # [1,2,3,4,5]
   reach: [1,2,3,4,5,6]
   # follow: [4,5,6,10,11,12,16,17,18]
 
-# particle: {'init_cov':[0.05, 0.1,0.2,0.5],'wta_trust':[1.0,3.0,5.0],'wta_weight':[500, 1000,5000,10000]}
+particle: {'init_cov':[0.05,0.2,0.5],'wta_trust':[1.0,3.0,5.0],'wta_weight':[1000,5000,10000]}

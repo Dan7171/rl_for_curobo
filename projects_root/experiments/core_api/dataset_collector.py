@@ -1,6 +1,7 @@
 
 
 import os, shutil, yaml, signal, datetime, argparse
+from typing import Union
 import time
 from multiprocessing import Process, Event
 import numpy as np
@@ -9,7 +10,7 @@ from curobo.util_file import load_yaml
 from copy import deepcopy
 from projects_root.experiments.core_api import benchmark_sim
 from projects_root.experiments.core_api.benchmark_sim import PoseUtils
-
+import traceback
 def make_meta_cfgs(combo_cfg_path):
     
     def get_default_particle_file(alg='O'):
@@ -307,13 +308,19 @@ def signal_handler(signum, _frame):
     print(f"\nReceived signal {signum} - shutting down gracefully...")
     stop_event.set() # tells sub process to stop
     
+def invalidate(out_path):
+    import shutil
+    print(f'INVALIDATING {out_path}')
+    shutil.move(out_path, out_path + '_failed')
 
 if __name__ == "__main__":
 
 
     args = argparse.ArgumentParser()
     args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_cfg.yml")
-    args.add_argument("--livestream", action="store_true")
+    args.add_argument("--vis_mode", type=str, default="gui", choices=["gui", "livestream", "headless"])
+    args.add_argument("--cluster", action="store_true") # if True, will run on cluster
+    args.add_argument("--job_id", type=str, default='')
     args = args.parse_args()
     
     meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
@@ -327,58 +334,80 @@ if __name__ == "__main__":
     # stop_simulation = False
     # stop_event = Event()
 
+    batch_dirname_timestamp = 'BATCH_' + datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     for meta_cfg, initial_out_name, particle_cfg in zip(meta_cfgs, initial_out_names, particle_cfgs):
         
-        # Rename output directory if livestream mode
-        if args.livestream:
-            meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
-        if len(meta_cfg["out"]["batch_dir_name"]):
-            meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
-            print(f'warning-livestream mode')
-        else:
-            meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
-        
-        
-        # Make output directory with timestamp and rename the initial out name
-        formatted_time_simstart = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        new_out_name = f'{formatted_time_simstart}_{initial_out_name}'
-        out_path = os.path.join(meta_cfg["out"]["out_dir"], new_out_name)
-        print(f'out_path: {out_path}')
-        os.makedirs(out_path, exist_ok=False)
-        
-        particle_cfg_path = os.path.join(out_path, 'particle_cfg.yml')
-        with open(particle_cfg_path, 'w') as f:
-            yaml.dump(particle_cfg, f)
-        meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_cfg_path
+        try:
 
+            # Rename output directory if livestream mode
+            if args.cluster:
+                meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+                if not (args.vis_mode == 'livestream' or args.vis_mode == 'headless'):
+                    raise ValueError(f'invalid vis_mode in cluster: {args.vis_mode}')
+        
 
-        as_subprocess = True
-        stop_event = Event()
-        if as_subprocess:
+            if len(meta_cfg["out"]["batch_dir_name"]):
+                if meta_cfg["out"]["batch_dir_name"] == 'TIMESTAMP':
+                    meta_cfg["out"]["batch_dir_name"] = batch_dirname_timestamp 
+                    if args.job_id != '':
+                        meta_cfg["out"]["batch_dir_name"] = f'{meta_cfg["out"]["batch_dir_name"]}_job{args.job_id}'
+
+                meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
+                os.makedirs(meta_cfg["out"]["out_dir"], exist_ok=True)
+                if not 'combo_file.yml' in os.listdir(meta_cfg["out"]["out_dir"]):
+                    shutil.copy(args.combo_cfg_path, os.path.join(meta_cfg["out"]["out_dir"], 'combo_file.yml'))
+            else:
+                meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
             
-            p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event, 'livestream':args.livestream})
-            p.start()
-        
+            
+            
+            # Make output directory with timestamp and rename the initial out name
+            sim_start_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+            new_out_name = f'{sim_start_timestamp}_{initial_out_name}'
+            out_path = os.path.join(meta_cfg["out"]["out_dir"], new_out_name)
+            print(f'out_path: {out_path}')
+            os.makedirs(out_path, exist_ok=False)
+            
+            particle_cfg_path = os.path.join(out_path, 'particle_cfg.yml')
+            with open(particle_cfg_path, 'w') as f:
+                yaml.dump(particle_cfg, f)
+            meta_cfg["default"]["mpc"]["mpc_solver_cfg"]["override_particle_file"] = particle_cfg_path
 
-            while p.is_alive():
-                # print(f'debug: stop_event.is_set(): {stop_event.is_set()}, p.is_alive(): {p.is_alive()}')
-                if not stop_event.is_set():
-                    time.sleep(0.1)
-                else:
-                    time.sleep(5)
-                    if p.is_alive():
-                        p.terminate()
+
+            as_subprocess = True
+            stop_event = Event()
+            if as_subprocess:
+                
+                # Pass arguments positionally rather than by name so that we do not rely on the exact
+                # parameter names that the child process sees if an older benchmark_sim module is found
+                p = Process(target=benchmark_sim.root, args=(meta_cfg, out_path, stop_event, args.vis_mode))
+                p.start()
+                time.sleep(1)
+            
+
+                while p.is_alive():
+                    # print(f'debug: stop_event.is_set(): {stop_event.is_set()}, p.is_alive(): {p.is_alive()}')
+                    if not stop_event.is_set():
+                        time.sleep(0.1)
+                    else:
+                        time.sleep(5)
                         if p.is_alive():
-                            p.kill()
-                    exit()
-            if p.exitcode is not None:
-                if p.exitcode != 0:
-                    print(f'error: sim failed with exit code {p.exitcode}')
-                    exit()
-            
-        else:
-            benchmark_sim.root(meta_cfg, out_path, stop_event=stop_event, livestream=args.livestream)
-            
-        
+                            p.terminate()
+                            if p.is_alive():
+                                p.kill()
+                        exit()
+                if p.exitcode is not None:
+                    if p.exitcode != 0:
+                        print(f'SIM FAILED!')
+                        print(f'error: sim failed with exit code {p.exitcode}')
+                        invalidate(out_path)
+                
+            else:
+                benchmark_sim.root(meta_cfg, out_path, stop_event, args.vis_mode)
+                
+        except Exception as e:
+            print(f'SERIOUS WARNING - EXCEPTION OCCURED')
+            print(f'error: {traceback.format_exc()}')
+            invalidate(out_path)
     
     print(f'all sims done')

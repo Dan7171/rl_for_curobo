@@ -97,7 +97,7 @@ class PoseUtils:
                 q_out = q_new
             return q_out
 
-def root(meta_cfg, out_path,stop_event, livestream):
+def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
     import argparse
     import os
@@ -126,27 +126,33 @@ def root(meta_cfg, out_path,stop_event, livestream):
     simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
     simapp_cfg = load_yaml(simapp_cfg_path)
     # if args.livestream:
-    if livestream:
+    if vis_mode == 'livestream':
         simapp_cfg = simapp_cfg["livestream_mode"]
-    else:
+    elif vis_mode == 'gui':
         simapp_cfg = simapp_cfg["gui_mode"] # simapp_cfg["headless_mode"]
+    elif vis_mode == 'headless':
+        simapp_cfg = simapp_cfg["headless_mode"]
+    else:
+        raise ValueError(f'invalid vis_mode: {vis_mode}')
 
     simulation_app = SimulationApp({**simapp_cfg["init_app_settings"]})
 
     from projects_root.utils.helper import add_extensions 
 
     from isaacsim.core.utils.extensions import enable_extension
-    if livestream:
+    if vis_mode == 'livestream':
         # Default Livestream settings, enable Livestream extension
         simulation_app.set_setting("/app/window/drawMouse", True)
         # _headless_mode = 'webrtc'
         _headless_mode = 'webrtc'
         # enable_extension("omni.kit.livestream.webrtc")
+        init_livestream = True
     else:
-        _headless_mode = None
-    add_extensions(simulation_app, headless_mode=_headless_mode)
-    simulation_app.set_setting("/ngx/useDlss", False)
-    simulation_app.set_setting("/app/renderer/dlss/enable", False)
+        _headless_mode = True if vis_mode == 'headless' else None
+        init_livestream = False
+    add_extensions(simulation_app, headless_mode=_headless_mode, init_livestream_if_headless=init_livestream)
+    # simulation_app.set_setting("/ngx/useDlss", False)
+    # simulation_app.set_setting("/app/renderer/dlss/enable", False)
     import os
     from abc import abstractmethod
     from collections.abc import Callable
