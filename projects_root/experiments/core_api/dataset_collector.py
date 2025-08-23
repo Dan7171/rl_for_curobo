@@ -313,7 +313,8 @@ if __name__ == "__main__":
 
     args = argparse.ArgumentParser()
     args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_cfg.yml")
-    args.add_argument("--livestream", action="store_true")
+    args.add_argument("--vis_mode", type=str, default="gui", choices=["gui", "livestream", "headless"])
+    args.add_argument("--cluster", action="store_true") # if True, will run on cluster
     args = args.parse_args()
     
     meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
@@ -330,11 +331,15 @@ if __name__ == "__main__":
     for meta_cfg, initial_out_name, particle_cfg in zip(meta_cfgs, initial_out_names, particle_cfgs):
         
         # Rename output directory if livestream mode
-        if args.livestream:
+        if args.cluster:
             meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
+            if not (args.vis_mode == 'livestream' or args.vis_mode == 'headless'):
+                raise ValueError(f'invalid vis_mode in cluster: {args.vis_mode}')
+       
+
         if len(meta_cfg["out"]["batch_dir_name"]):
             meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
-            print(f'warning-livestream mode')
+            
         else:
             meta_cfg["out"]["out_dir"] = meta_cfg["out"]["out_dir_root"]
         
@@ -356,8 +361,11 @@ if __name__ == "__main__":
         stop_event = Event()
         if as_subprocess:
             
-            p = Process(target=benchmark_sim.root, kwargs={'meta_cfg':meta_cfg, 'out_path':out_path, 'stop_event':stop_event, 'livestream':args.livestream})
+            # Pass arguments positionally rather than by name so that we do not rely on the exact
+            # parameter names that the child process sees if an older benchmark_sim module is found
+            p = Process(target=benchmark_sim.root, args=(meta_cfg, out_path, stop_event, args.vis_mode))
             p.start()
+            time.sleep(1)
         
 
             while p.is_alive():
@@ -377,7 +385,7 @@ if __name__ == "__main__":
                     exit()
             
         else:
-            benchmark_sim.root(meta_cfg, out_path, stop_event=stop_event, livestream=args.livestream)
+            benchmark_sim.root(meta_cfg, out_path, stop_event, args.vis_mode)
             
         
     

@@ -25,3 +25,14 @@ livestream_mode:
     renderer: "RaytracedLighting"
     display_options: 3286
 
+headless_mode:
+  enable_gpu_dynamics: True
+  init_app_settings:
+    # width: 1280
+    # height: 720
+    # window_width: 1920
+    # window_height: 1080
+    headless: True
+    hide_ui: True
+    renderer: "RaytracedLighting"
+    # display_options: 3286
