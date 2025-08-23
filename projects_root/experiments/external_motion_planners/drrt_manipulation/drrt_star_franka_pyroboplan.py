@@ -46,17 +46,15 @@ Standalone demonstration that:
             # run drrt* algorithm
             drrt_input = [(q_start_t, q_target_t,prm_planners[i]) for i in range(n_robots)]
             agents_paths = drrt*(drrt_input) # TODO - this is the core of drrt* algorithm
+            # We now have 2D implementation of drrt* algorithm, we need to implement 3D version
+            2D version: projects_root/experiments/external_motion_planners/drrt/2d_simple_drrt*_from_github
 
-            
-            
-
-            
-        
 
          """
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import os
 import time
 from pathlib import Path
@@ -66,21 +64,56 @@ import coal
 import numpy as np
 import pinocchio as pin
 from pinocchio.visualize import MeshcatVisualizer
- 
+from pinocchio.robot_wrapper import RobotWrapper
 
 from pyroboplan.models.panda import (
         load_models,
         add_self_collisions,
-        add_object_collisions,
+        add_object_collisions, # Adding 4-5 obstacles to the collision model (see panda example)
     )
 from pyroboplan.planning.prm import PRMPlanner, PRMPlannerOptions
-from pyroboplan.core.utils import get_random_collision_free_state,check_collisions_at_state
+from pyroboplan.core.utils import get_random_collision_free_state,check_collisions_at_state,set_collisions
 from pyroboplan.planning.graph import Node
-
+from pyroboplan.ik.nullspace_components import (
+    joint_limit_nullspace_component,
+    collision_avoidance_nullspace_component,
+)
+# https://pyroboplan.readthedocs.io/en/latest/api/pyroboplan.ik.html
+from pyroboplan.ik.differential_ik import DifferentialIk, DifferentialIkOptions
 from curobo.util_file import load_yaml # to load curobo robot cfg from path (yml)
 from curobo.types.math import Pose
+import os
 
 
+def q_to_rot_mat(q:list)->np.ndarray:
+    """
+    Convert a quaternion to a rotation matrix
+    q = [w,x,y,z]
+    R = rotation matrix (3x3)
+    """
+
+    return pin.Quaternion(q[0], q[1], q[2], q[3]).toRotationMatrix()
+
+def rot_mat_to_q(rot_mat:np.ndarray)->list:
+    """
+    Convert a rotation matrix to a quaternion
+    R = rotation matrix (3x3)
+    q = [w,x,y,z]
+    """
+    return pin.Quaternion(rot_mat).coeffs()
+
+def SE3_to_xyzquat(SE3:pin.SE3)->list:
+    """
+    Convert a SE3 pose to a xyzquat pose
+    """
+    return pin.se3ToXYZQUAT(SE3)
+
+
+def xyzquat_to_SE3(xyzquat:list)->pin.SE3:
+    """
+    Convert a xyzquat pose to a SE3 pose
+    """
+    return pin.XYZQUATtoSE3(xyzquat)
 
 class Isaac:
     def __init__(self):
@@ -172,21 +205,22 @@ class Isaac:
             self.prims.append(obj)
 
 
-
-# -------------------- Environment sphere extraction --------------------
-
-# If future PyRoboPlan versions expose obstacle helpers import them, otherwise skip.
-try:
-    from pyroboplan.models.utils import attach_sphere_obstacle # TODO: currently raises an error, warining is printed. Check how to actually add obstacles.
-except ImportError:
-    attach_sphere_obstacle = None
-
 class SimpleObstacle:
-    def __init__(self, obj_type: str, pos: list, size:float, quat: list=[1,0,0,0]):
-        self.obj_type = obj_type
+    """
+    Used to convert easily from isaac prims to pyroboplan (pinocchio) obstacles
+    """
+    def __init__(self, name: str, pos: list, quat: list=[1,0,0,0]):
+        self.name = name
         self.pos = pos
-        self.size = size
         self.quat = quat
+class SimpleBox(SimpleObstacle):
+    def __init__(self, name: str, pos: list, quat: list=[1,0,0,0],size=[0.1,0.1,0.1]):
+        super().__init__(name, pos, quat)
+        self.size = size
+class SimpleSphere(SimpleObstacle):
+    def __init__(self, name: str, pos: list, quat: list=[1,0,0,0],radius=0.05):
+        super().__init__(name, pos, quat)
+        self.radius = radius
 
 class PRPIsaacBridge:
     """
@@ -214,15 +248,20 @@ class PRPIsaacBridge:
         
 
 class PRPWrap:
-    def __init__(self, open_viz=True):
-        self.robot_models = []
-        self.robot_datas = []
-        self.collision_models = []
-        self.collision_datas = []
-        self.visual_models = [] 
-        self.prm_planners = [] # objects of PRMPlanner class, contains the roadmap (and optional A* planner to plan paths based on the roadmap)
+    """
+    PyRoboPlan wrapper, to handle the robot models, collision models, visual models, PRM planners, etc.
+    """
+    def __init__(self, urdf_path='', mesh_dirs_paths=[], open_viz=True):
+        self.urdf_path = ''
+        self.mesh_dirs_paths = []
+        self.robot_model = None # []
+        self.robot_data = None #[]
+        self.collision_model = None # []
+        self.collision_data = None # []
+        self.visual_model = None # [] 
+        self.prm_planner = None # [] # objects of PRMPlanner class, contains the roadmap (and optional A* planner to plan paths based on the roadmap)
         self.open_viz = open_viz # whether to open the visualizer of pyroboplan
-        self.vizs = [] # objects of MeshcatVisualizer class, contains the visualizer of pyroboplan
+        self.viz = None # [] # objects of MeshcatVisualizer class, contains the visualizer of pyroboplan
     
     # def update_col_model(self, col_model, obstacles: List[SimpleObstacle]):
     #     has_changed = False
@@ -233,17 +272,25 @@ class PRPWrap:
     #             # TODO: update the collision model with the new obstacle 
     #             has_changed = True # at least one obstacle has moved                
     #     return has_changed
+    
+    
+    def _load_from_urdf(self):    
+        if len(self.mesh_dirs_paths) > 0:
+            mesh_dirs = os.path.split(self.urdf_path)[0]
+        else:
+            mesh_dirs = self.mesh_dirs_paths
+        return RobotWrapper.BuildFromURDF(self.urdf_path, mesh_dirs) # inspired by pyroboplan/models/panda.py
+        
+    def set_robot_model(self, model):
+        self.robot_model = model
+        self.robot_data = model.createData()
 
-    def add_robot_model(self, model):
-        self.robot_models.append(model)
-        self.robot_datas.append(model.createData())
+    def set_collision_model(self, collision_model):
+        self.collision_model = collision_model
+        self.collision_data = collision_model.createData()
 
-    def add_collision_model(self, collision_model):
-        self.collision_models.append(collision_model)
-        self.collision_datas.append(collision_model.createData())
-
-    def add_visual_model(self, visual_model):
-        self.visual_models.append(visual_model)
+    def set_visual_model(self, visual_model):
+        self.visual_model = visual_model
 
     def add_self_collisions(self, model, collision_model):
         add_self_collisions(model, collision_model)
@@ -251,14 +298,11 @@ class PRPWrap:
     def has_col_model_changed(self, collision_model):
         return False
     
-    def add_roadmap(self,robot_config, env_obstacles: List[SimpleObstacle], add_self_col=True):
+    def add_agent(self, robot_config, env_obstacles: List[SimpleObstacle], add_self_col=True):
+        
         model, collision_model, visual_model = self._init_models(robot_config, env_obstacles, add_self_col)
-        self.add_robot_model(model)
-        self.add_collision_model(collision_model)
-        self.add_visual_model(visual_model)
-
-        a_idx = len(self.robot_models) - 1
-        self._add_env_obstacles(a_idx, env_obstacles)
+        
+        self._add_env_obstacles(model,collision_model,visual_model, env_obstacles)
         
         # roadmap options
         opts = PRMPlannerOptions( # was taken from franka example in pyroboplan as a standard config    
@@ -273,37 +317,82 @@ class PRPWrap:
         planner = PRMPlanner(model, collision_model, options=opts)
         print("Constructing roadmap …")
         planner.construct_roadmap() # Making the graph Gi in C-space (i is the robot index)
-        self.prm_planners.append(planner) 
+        self.prm_planner = planner
 
         # Visualiser
         viz = MeshcatVisualizer(model, collision_model, visual_model)
         viz.initViewer(open=self.open_viz)
         viz.loadViewerModel()   
-        self.vizs.append(viz)
+        self.viz = viz
 
-    def _init_models(self, robot_config, env_obstacles: List[SimpleObstacle], add_self_col=True):
-        if not robot_config.endswith('.urdf'):
-            if robot_config == 'panda':
-                model, collision_model, visual_model = load_models() # pyroboplan: load robot model, collision model, visual model ()
-                
-            else:
-                model,collision_model, visual_model = None, None, None
-                raise NotImplementedError(f"Loading {robot_config} is not implemented yet")
-
+    def IK(self,robot_model,robot_data,collision_model,collision_data,target_frame,target_tform,init_state, ignore_rotation=True):
+        """
+        inverse_kinematics
+        # Inputs:
+        # - robot_model, robot_data: Pinocchio robot model and data
+        # - q_init: initial guess in joint space
+        # - target_SE3: desired EE pose (target_SE3 x,y,z,w,x,y,z)
+        # - ee_name: name of the end-effector link
+        # - max_iter / tol: optional
+        
+        """
+        if ignore_rotation:
+            max_rotation_error = 2 * np.pi - 0.00001 # 360 degrees at most
         else:
-            model,collision_model, visual_model = None, None, None
-            # TODO figure out how to load robot from urdf in pyroboplan / pinocchio
-            # model, collision_model, visual_model = load_robot_from_urdf(robot)
-            raise NotImplementedError(f"Loading robot from urdf is not implemented yet")
+            max_rotation_error = np.pi / 18 # 10 degrees at most
 
+        
+        options = DifferentialIkOptions(
+            max_iters=200, # max number of iterations
+            max_translation_error=0.05, # max translation error (in meters) to consider the problem solved
+            max_rotation_error=max_rotation_error, # max rotation error (in radians) to consider the problem solved
+            damping=0.0001,
+            min_step_size=0.025,
+            max_step_size=0.1,
+            ignore_joint_indices=[],  # optional joints to ignore
+        )
+
+        ik = DifferentialIk(
+            robot_model,
+            data=robot_data,
+            collision_model=collision_model,
+            options=options,
+        )
+
+        # Nullspace components let the IK solver respect secondary objectives like avoiding collisions or staying within joint limits.
+        nullspace_components = [
+            lambda model, q: collision_avoidance_nullspace_component(
+                model, robot_data, collision_model, collision_data, q, gain=1.0, dist_padding=0.05
+            ),
+            lambda model, q: joint_limit_nullspace_component(model, q, gain=0.1, padding=0.025)
+        ]
+        q_sol = ik.solve(
+            target_frame,
+            target_tform,
+            init_state=init_state,
+            nullspace_components=nullspace_components,
+            verbose=True,
+        )
+        return q_sol
+    
+    def _init_models(self, env_obstacles: List[SimpleObstacle], add_self_col=True):
+        
+        if len(self.urdf_path) > 0:
+            model, collision_model, visual_model = self._load_from_urdf()
+        
+        else: # Franka example
+            model, collision_model, visual_model = load_models() # pyroboplan: load robot model, collision model, visual model ()
 
                 
         if add_self_col:
             add_self_collisions(model, collision_model)
         
+        self.set_robot_model(model)
+        self.set_collision_model(collision_model)
+        self.set_visual_model(visual_model)
         return model, collision_model, visual_model
     
-    def _add_env_obstacles(self, agent_idx, objects: List[SimpleObstacle], inflation_radius=0.0):
+    def _add_env_obstacles(self, model, collision_model, visual_model, env_obstacles: List[SimpleObstacle], inflation_radius=0.0):
         """
         Adds spheres and cubes to the collision and visual models.
 
@@ -328,46 +417,10 @@ class PRPWrap:
         inflation_radius : float, optional
             Extra radius (in meters) added around objects for collision inflation.
         """
-        # model, collision_model, visual_model = self.robot_models[agent_idx], self.prp.collision_models[agent_idx], self.prp.visual_models[agent_idx]
-        model, collision_model, visual_model = self.robot_models[agent_idx], self.collision_models[agent_idx], self.visual_models[agent_idx]
         
-        # for i, obj in enumerate(objects):
-        #     pos = np.array(obj.pos)
-        #     quat = np.array(obj.quat)
-        #     R = pin.Quaternion(quat[0], quat[1], quat[2], quat[3]).toRotationMatrix()
-        #     placement = pin.SE3(R, pos)
+     
 
-        #     if obj.obj_type == "sphere":
-        #         radius = obj.size + inflation_radius
-        #         geom = coal.Sphere(radius)
-        #     elif obj.obj_type == "cube":
-        #         sx, sy, sz = obj.size, obj.size, obj.size
-        #         geom = coal.Box(
-        #             sx + 2.0 * inflation_radius,
-        #             sy + 2.0 * inflation_radius,
-        #             sz + 2.0 * inflation_radius,
-        #         )
-        #     else:
-        #         raise ValueError(f"Unknown object type: {obj.obj_type}")
-        #     obj_name = f'{obj.obj_type}_{i}'
-
-        #     # geom_obj = pin.GeometryObject(obj_name, 0, placement, geom)
-        #     geom_obj = pin.GeometryObject(
-        #         obj_name, 
-        #         0, # attach to universe joint
-        #         geom, # geometry (Sphere, Box, etc.)
-        #         placement # SE3 placement
-        #         )
-
-
-        #     # Optional color
-        #     # if "color" in obj:
-        #     geom_obj.meshColor =  np.array([0.0, 1.0, 0.0, 0.5]) # green color
-
-        #     visual_model.addGeometryObject(geom_obj)
-        #     collision_model.addGeometryObject(geom_obj)
-
-        for i, obj in enumerate(objects):
+        for i, obj in enumerate(env_obstacles):
             # ---- pose ----
             pos = np.asarray(obj.pos, dtype=float).reshape(3)
             quat = np.asarray(obj.quat, dtype=float).reshape(4)  # (w, x, y, z)
@@ -383,31 +436,64 @@ class PRPWrap:
             placement = pin.SE3(R, pos)
 
             # ---- geometry ----
-            if obj.obj_type == "sphere":
-                radius = float(obj.size) + float(inflation_radius)
+            if type(obj) == SimpleSphere:
+                radius = float(obj.radius) + float(inflation_radius)
                 geom = coal.Sphere(radius)
-            elif obj.obj_type == "cube":
-                # cube → equal side lengths
-                s = float(obj.size)
+            elif type(obj) == SimpleBox:
+                dim1, dim2, dim3 = obj.size
                 geom = coal.Box(
-                    s + 2.0 * float(inflation_radius),
-                    s + 2.0 * float(inflation_radius),
-                    s + 2.0 * float(inflation_radius),
+                    dim1 + 2.0 * float(inflation_radius),
+                    dim2 + 2.0 * float(inflation_radius),
+                    dim3 + 2.0 * float(inflation_radius),
                 )
             else:
-                raise ValueError(f"Unknown object type: {obj.obj_type}")
+                raise ValueError(f"Unknown object type: {type(obj)}")
 
-            obj_name = f"{obj.obj_type}_{i}"
 
-            # ---- add to models (placement BEFORE geometry, like your working code) ----
-            visual_obj = pin.GeometryObject(obj_name, 0, placement, geom)
-            visual_obj.meshColor = np.array([0.0, 1.0, 0.0, 0.5], dtype=float)
-            visual_model.addGeometryObject(visual_obj)
+            # Add object to collision and visual model
+            geom_obj = pin.GeometryObject(obj.name, 0, placement, geom)
+            geom_obj.meshColor = np.array([0.0, 1.0, 0.0, 0.5], dtype=float)
+            visual_model.addGeometryObject(geom_obj)            
+            collision_model.addGeometryObject(geom_obj)
 
-            collision_obj = pin.GeometryObject(obj_name, 0, placement, geom)
-            collision_model.addGeometryObject(collision_obj)
+
+        # After adding the obstacles, we need to define the active collision pairs between the robot and obstacle links.
+        # Active collision pairs
+        # Define the active collision pairs between the robot and obstacle links.
+        a_idx = len(self.robot_models) - 1
+        
+        # TODO:
+        # repalce with # collision_names = self.get_robot_link_names(model)
+        collision_names = [
+            cobj.name for cobj in collision_model.geometryObjects if "panda" in cobj.name
+        ] # replace with robot link names
+
+        obstacle_names = [obj.name for obj in env_obstacles]
+        # obstacle_names = [
+        #     "ground_plane",
+        #     "obstacle_box_1",
+        #     "obstacle_box_2",
+        #     "obstacle_sphere_1",
+        #     "obstacle_sphere_2",
+        # ]
+        
+        for obstacle_name in obstacle_names:
+            for collision_name in collision_names:
+                set_collisions(model, collision_model, obstacle_name, collision_name, True)
+
+        # Exclude the collision between the ground and the base link
+        base_link_name = "panda_link0" # self.get_base_link_name(robot_config)
+        set_collisions(model, collision_model,base_link_name , "ground_plane", False)
+
+    
+    def get_robot_link_names(self,robot_model):
+        return [link.name for link in robot_model.model.links]
+    
  
- 
+    
+    def get_base_link_name(self,robot_cfg):
+        return robot_cfg["kinematics"]["base_link"]
+    
     def verified_for_search(self,agent_idx,q_start,q_goal):
         """
         inspired by PRPPlanner.plan() which does that before planning, we just ommitted the planning part
@@ -455,8 +541,48 @@ class PRPWrap:
         """
         """
         pass
+
+
+@dataclass
+class CfgPack:
+    curobo_cfg_path: str = ''
+    mesh_root: str = ''
+    if curobo_cfg_path:
+        urdf_path: str = load_yaml(curobo_cfg_path)["robot_cfg"]["kinematics"]["urdf_path"]
+        ee_link: str = load_yaml(curobo_cfg_path)["robot_cfg"]["kinematics"]["ee_link"]
+        base_link: str = load_yaml(curobo_cfg_path)["robot_cfg"]["kinematics"]["base_link"]
+    else:
+        urdf_path: str = ''
+        ee_link: str = ''
+        base_link: str = ''
+
+cfg_packs = {
+    'panda': CfgPack(curobo_cfg_path='curobo/src/curobo/content/configs/robot/franka.yml',mesh_root='curobo/src/curobo/content/assets/robot/franka_description/meshes'),
+    'ur5e':CfgPack(curobo_cfg_path='curobo/src/curobo/content/configs/robot/ur5e.yml',mesh_root='curobo/src/curobo/content/assets/robot/ur_description/meshes'),
+}
+
+
+class Agent:
     
-def main(robot_config='panda',run_isaac=False):
+    class SimRobot:
+        pass
+
+    def __init__(self,robot_cfg_path,franka_example=False):
+        self.robot_cfg_path = robot_cfg_path
+        self.robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
+        self.base_pose = [0,0,0,1,0,0,0]
+        self.ee_name = self.robot_cfg["kinematics"]["ee_link"]
+        self.urdf_path = self.robot_cfg["kinematics"]["urdf_path"]
+        self.franka_example = franka_example
+        if franka_example:
+            self.prp = PRPWrap(open_viz=False)
+        else:
+            self.prp = PRPWrap(urdf_path=self.urdf_path, mesh_dirs_paths=[], open_viz=False)
+    
+    def init_robot(self):
+        
+
+def main(run_isaac=False):
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", type=str, default="", help="USD stage path")
@@ -465,7 +591,7 @@ def main(robot_config='panda',run_isaac=False):
     agent_cfg_paths = ['curobo/src/curobo/content/configs/robot/franka.yml']
     agent_cfgs = [load_yaml(agent_cfg_path)["robot_cfg"] for agent_cfg_path in agent_cfg_paths]
     ee_names = [agent_cfg["kinematics"]["ee_link"] for agent_cfg in agent_cfgs]
-    
+    urdf_paths = [agent_cfg['kinematics']['urdf_path'] for agent_cfg in agent_cfgs]
     n_agents = len(agent_cfg_paths)
     
     args = parser.parse_args()
@@ -484,17 +610,28 @@ def main(robot_config='panda',run_isaac=False):
         
     # add obstacles to the world
 
-    objects = [['cube',[0,0,0],0.3], ['sphere',[1,0,0],0.5]]
-    simple_objects = [SimpleObstacle(*x)  for x in objects] # simple representation of obstacles 
-    if run_isaac:
-        isaac.add_objects(simple_objects)
     
-    for a_idx in range(n_agents):        
-        prp.add_roadmap(robot_config,env_obstacles=simple_objects,add_self_col=True)
+    env_obstacles = [
+        SimpleBox('ground_plane',[0,0,-0.05,1,0,0,0],[3,3,0.1]),
+        SimpleBox('obstacle_box_1',[0.4,0.4,0.4,1,0,0,0],[0.1,0.1,0.1]),
+        SimpleSphere('obstacle_sphere_1',[1,0,0.5],[0.05]),
+        SimpleSphere('obstacle_sphere_2',[0,1,0.5],[0.05]),
+        ] # simple representation of obstacles 
+    if run_isaac:
+        isaac.add_objects(env_obstacles)
+    
+    for a_idx in range(n_agents): 
+
+        agent = Agent(
+            agent_cfg_paths[a_idx], 
+            env_obstacles=env_obstacles,
+            isaac=False,
+            franka_example=False
+            )        
+        
         if run_isaac:
             isaac.add_robot(a_idx=a_idx,robot_cfg_path=agent_cfg_paths[a_idx])
         
-    
     
         
         # world.step(render=True)
