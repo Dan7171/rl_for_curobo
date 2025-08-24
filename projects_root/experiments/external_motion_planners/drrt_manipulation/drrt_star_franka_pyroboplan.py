@@ -556,31 +556,48 @@ class CfgPack:
         ee_link: str = ''
         base_link: str = ''
 
-cfg_packs = {
-    'panda': CfgPack(curobo_cfg_path='curobo/src/curobo/content/configs/robot/franka.yml',mesh_root='curobo/src/curobo/content/assets/robot/franka_description/meshes'),
-    'ur5e':CfgPack(curobo_cfg_path='curobo/src/curobo/content/configs/robot/ur5e.yml',mesh_root='curobo/src/curobo/content/assets/robot/ur_description/meshes'),
-}
+# cfg_packs = {
+#     'panda': CfgPack(curobo_cfg_path='curobo/src/curobo/content/configs/robot/franka.yml',mesh_root='curobo/src/curobo/content/assets/robot/franka_description/meshes'),
+#     'ur5e':CfgPack(curobo_cfg_path='curobo/src/curobo/content/configs/robot/ur5e.yml',mesh_root='curobo/src/curobo/content/assets/robot/ur_description/meshes'),
+# }
 
+cfg_path_to_mesh_root = {
+    'curobo/src/curobo/content/configs/robot/franka.yml': 'curobo/src/curobo/content/assets/robot/franka_description/meshes',
+    'curobo/src/curobo/content/configs/robot/ur5e.yml': 'curobo/src/curobo/content/assets/robot/ur_description/meshes',
+}
 
 class Agent:
     
     class SimRobot:
         pass
 
-    def __init__(self,robot_cfg_path,franka_example=False):
+    def __init__(self, 
+                 env_obstacles:List[SimpleObstacle], 
+                 base_pose=[0,0,0,1,0,0,0], 
+                 robot_cfg_path='franka',
+                 mesh_root='',
+                 robot_type=''
+                 ):
+        self.env_obstacles = env_obstacles
+        self.base_pose = base_pose
         self.robot_cfg_path = robot_cfg_path
-        self.robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
-        self.base_pose = [0,0,0,1,0,0,0]
-        self.ee_name = self.robot_cfg["kinematics"]["ee_link"]
-        self.urdf_path = self.robot_cfg["kinematics"]["urdf_path"]
-        self.franka_example = franka_example
-        if franka_example:
-            self.prp = PRPWrap(open_viz=False)
+        if robot_cfg_path.endswith('.yml'):
+            self.robot_cfg = load_yaml(robot_cfg_path)["robot_cfg"]
+            self.ee_name = self.robot_cfg["kinematics"]["ee_link"]
+            self.urdf_path = self.robot_cfg["kinematics"]["urdf_path"]
+            self.mesh_root = cfg_path_to_mesh_root[robot_cfg_path]
         else:
-            self.prp = PRPWrap(urdf_path=self.urdf_path, mesh_dirs_paths=[], open_viz=False)
+            self.urdf_path = ''
+            self.ee_name = 'panda_hand'
+            self.mesh_root = mesh_root
+            self.robot_type = robot_type
+        
+        self.prp = PRPWrap(urdf_path=self.urdf_path, mesh_dirs_paths=[self.mesh_root], open_viz=False)
+
+        self.prp.add_agent(self.robot_cfg, self.env_obstacles, add_self_col=True)
     
     def init_robot(self):
-        
+        pass
 
 def main(run_isaac=False):
 
