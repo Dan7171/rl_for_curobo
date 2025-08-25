@@ -1,101 +1,139 @@
 from __future__ import annotations
 import random
+import signal
 from typing import Optional, Union
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 import multiprocessing as mp
 
-stop_simulation = False
+# stop_simulation = False
 
 class PoseUtils:
-        def __init__(self, seed:Optional[int]=None):
-            self.seed = seed
-            if seed is not None:
-                self._local_rng = random.Random(seed)
-            else:
-                self._local_rng = random.Random()
+    def __init__(self, seed:Optional[int]=None):
+        self.seed = seed
+        if seed is not None:
+            self._local_rng = random.Random(seed)
+        else:
+            self._local_rng = random.Random()
 
-        def sample_pos_in_box(self, box_center:list[float],box_dim:float,)->list[float]:     
-            """
-            sample a position inside an (imaginary) box.
-            Args:
-                box_center (list[float]): center position of the box (xyz in world frame)
-                box_dim (float): dimension of the volume (side length for box)
-            Returns:
-                list[float]: sampled position (xyz in world frame)
-            """
+    def sample_pos_in_box(self, box_center:list[float],box_dim:float,)->list[float]:     
+        """
+        sample a position inside an (imaginary) box.
+        Args:
+            box_center (list[float]): center position of the box (xyz in world frame)
+            box_dim (float): dimension of the volume (side length for box)
+        Returns:
+            list[float]: sampled position (xyz in world frame)
+        """
+        
+        ans = []
+        for dim in range(3):
+            delta = box_dim / 2 # diam/2 (radius) for sphere, (side length)/2 for box
+            dim_translation = (self._local_rng.uniform(-delta, delta))
+            ans.append(box_center[dim] + dim_translation)
+        return ans
+    
+    def sample_pos_in_sphere(self, sphere_center:list[float], radius:float)->list[float]:     
+        """
+        sample a position inside an (imaginary) sphere.
+        Args:
+            volume_center_pos (list[float]): center position of the sphere (xyz in world frame)
+            volume_dim (float): dimension of the sphere (diameter)
+
+        Returns:
+            list[float]: sampled position (xyz in world frame)
+        """
+        ans = []
+        x_delta = self._local_rng.uniform(-radius, radius)
+        y_delta = self._local_rng.uniform(-radius, radius)
+        z_delta_abs = np.sqrt(radius**2 - x_delta**2 + y_delta**2)
+        z_delta = self._local_rng.choice([-z_delta_abs, z_delta_abs])
+        ans.append(sphere_center[0] + x_delta)
+        ans.append(sphere_center[1] + y_delta)
+        ans.append(sphere_center[2] + z_delta)
+        return ans
+    
+    @staticmethod
+    def rotate_quat(q_in:Union[np.ndarray, list[float]], euler_deg:Union[np.ndarray, list[float]],q_in_wxyz:bool=True, q_out_wxyz:bool=True)->list[float]:
+        """
+        given a quaternion and euler angles, return the new quaternion rotated by the euler angles.
+        Args:
+            q_in (Union[np.ndarray, list[float]]): quaternion (wxyz)
+            euler_deg (Union[np.ndarray, list[float]]): euler angles (xyz)
+            q_in_wxyz (bool): if True, q_in is in wxyz format, if False, q_in is in xyzw format
+            q_out_wxyz (bool): if True, q_out is in wxyz format, if False, q_out is in xyzw format
+        Returns:
+            list[float]: new quaternion (wxyz)
+        Example:
+            q_in = [1,0,0,0] # (identity)
+            euler_deg = [0,0,0] # no rotation
+            q_out = [1,0,0,0] # (identity)
+            q_in = [1,0,0,0] # (x-axis)
+            euler_deg = [0,0,90] # 90 degrees around z-axis
+            q_out = [0,0,0,1] # (z-axis) # TODO VERIFY THIS
+        """
+        # Pure numpy implementation to avoid scipy circular import issues
+        
+        def euler_to_quat(euler_deg, order='xyz'):
+            """Convert euler angles (in degrees) to quaternion using pure numpy"""
+            # Convert to radians
+            euler_rad = np.array(euler_deg) * np.pi / 180.0
             
-            ans = []
-            for dim in range(3):
-                delta = box_dim / 2 # diam/2 (radius) for sphere, (side length)/2 for box
-                dim_translation = (self._local_rng.uniform(-delta, delta))
-                ans.append(box_center[dim] + dim_translation)
-            return ans
+            # Create quaternions for each axis rotation
+            qx = np.array([np.cos(euler_rad[0]/2), np.sin(euler_rad[0]/2), 0, 0])
+            qy = np.array([np.cos(euler_rad[1]/2), 0, np.sin(euler_rad[1]/2), 0])
+            qz = np.array([np.cos(euler_rad[2]/2), 0, 0, np.sin(euler_rad[2]/2)])
+            
+            # Multiply quaternions in the specified order
+            if order == 'xyz':
+                q_temp = quat_multiply_numpy(qx, qy)
+                q_delta = quat_multiply_numpy(q_temp, qz)
+            elif order == 'zyx':
+                q_temp = quat_multiply_numpy(qz, qy)
+                q_delta = quat_multiply_numpy(q_temp, qx)
+            else:
+                # Default to xyz
+                q_temp = quat_multiply_numpy(qx, qy)
+                q_delta = quat_multiply_numpy(q_temp, qz)
+            
+            return q_delta
         
-        def sample_pos_in_sphere(self, sphere_center:list[float], radius:float)->list[float]:     
-            """
-            sample a position inside an (imaginary) sphere.
-            Args:
-                volume_center_pos (list[float]): center position of the sphere (xyz in world frame)
-                volume_dim (float): dimension of the sphere (diameter)
-
-            Returns:
-                list[float]: sampled position (xyz in world frame)
-            """
-            ans = []
-            x_delta = self._local_rng.uniform(-radius, radius)
-            y_delta = self._local_rng.uniform(-radius, radius)
-            z_delta_abs = np.sqrt(radius**2 - x_delta**2 + y_delta**2)
-            z_delta = self._local_rng.choice([-z_delta_abs, z_delta_abs])
-            ans.append(sphere_center[0] + x_delta)
-            ans.append(sphere_center[1] + y_delta)
-            ans.append(sphere_center[2] + z_delta)
-            return ans
+        def quat_multiply_numpy(q1, q2):
+            """Multiply two quaternions (wxyz format) using pure numpy"""
+            w1, x1, y1, z1 = q1
+            w2, x2, y2, z2 = q2
+            
+            w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+            x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+            y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+            z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+            
+            return np.array([w, x, y, z])
         
-        @staticmethod
-        def rotate_quat(q_in:Union[np.ndarray, list[float]], euler_deg:Union[np.ndarray, list[float]],q_in_wxyz:bool=True, q_out_wxyz:bool=True)->list[float]:
-            """
-            given a quaternion and euler angles, return the new quaternion rotated by the euler angles.
-            Args:
-                q_in (Union[np.ndarray, list[float]]): quaternion (wxyz)
-                euler_deg (Union[np.ndarray, list[float]]): euler angles (xyz)
-                q_in_wxyz (bool): if True, q_in is in wxyz format, if False, q_in is in xyzw format
-                q_out_wxyz (bool): if True, q_out is in wxyz format, if False, q_out is in xyzw format
-            Returns:
-                list[float]: new quaternion (wxyz)
-            Example:
-                q_in = [1,0,0,0] # (identity)
-                euler_deg = [0,0,0] # no rotation
-                q_out = [1,0,0,0] # (identity)
-                q_in = [1,0,0,0] # (x-axis)
-                euler_deg = [0,0,90] # 90 degrees around z-axis
-                q_out = [0,0,0,1] # (z-axis) # TODO VERIFY THIS
-            """
-            # q_in: scalar-first (wxyz)
-            # euler_deg: rotation to apply, in degrees (xyz)
+        # q_in: scalar-first (wxyz)
+        # euler_deg: rotation to apply, in degrees (xyz)
 
-            # Convert input quaternion to scalar-last for scipy
-            if q_in_wxyz: # q_orig is wxyz
-                q_in_scipy = [q_in[1], q_in[2], q_in[3], q_in[0]]
-            else: # q_in is xyzw
-                q_in_scipy = q_in
-                
-            r_in = R.from_quat(q_in_scipy)
+        # Convert input quaternion to wxyz format if needed
+        if not q_in_wxyz: # q_in is xyzw, convert to wxyz
+            q_in_wxyz_format = [q_in[3], q_in[0], q_in[1], q_in[2]]
+        else: # q_in is already wxyz
+            q_in_wxyz_format = q_in
+            
+        # Create rotation quaternion from Euler angles
+        q_delta = euler_to_quat(euler_deg, 'xyz')
 
-            # Create rotation from Euler angles (in degrees)
-            # Default order is 'xyz', change if needed (e.g., 'zyx', 'xyz', etc.)
-            r_delta = R.from_euler('xyz', euler_deg, degrees=True)
+        # Apply the new rotation (q_delta * q_in)
+        q_new = quat_multiply_numpy(q_delta, q_in_wxyz_format)
 
-            # Apply the new rotation
-            r_new = r_delta * r_in  # r_delta is applied first
-
-            # Convert result back to scalar-first
-            q_new = r_new.as_quat()   # [x, y, z, w]
-            if q_out_wxyz: # return wxyz format
-                q_out = [q_new[3], q_new[0], q_new[1], q_new[2]]
-            else: # return xyzw format
-                q_out = q_new
-            return q_out
+        # Normalize the result
+        q_new = q_new / np.linalg.norm(q_new)
+        
+        # Convert result to desired format
+        if q_out_wxyz: # return wxyz format
+            q_out = q_new.tolist()
+        else: # return xyzw format
+            q_out = [q_new[1], q_new[2], q_new[3], q_new[0]]
+        
+        return q_out
 
 def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
@@ -2237,8 +2275,40 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         """
         Calculate the rotation error between two quaternions (each wxyz).
         """
-        euler1 = R.from_quat(q1).as_euler('xyz', degrees=True)
-        euler2 = R.from_quat(q2).as_euler('xyz', degrees=True)
+        # Pure numpy implementation to avoid scipy circular import issues
+        
+        def quat_to_euler(q, order='xyz'):
+            """Convert quaternion (wxyz) to euler angles (in degrees) using pure numpy"""
+            # Normalize quaternion
+            q = np.array(q) / np.linalg.norm(q)
+            w, x, y, z = q
+            
+            # Convert to euler angles (xyz order)
+            # Roll (x-axis rotation)
+            sinr_cosp = 2 * (w * x + y * z)
+            cosr_cosp = 1 - 2 * (x * x + y * y)
+            roll = np.arctan2(sinr_cosp, cosr_cosp)
+            
+            # Pitch (y-axis rotation)
+            sinp = 2 * (w * y - z * x)
+            if abs(sinp) >= 1:
+                pitch = np.copysign(np.pi / 2, sinp)  # use 90 degrees if out of range
+            else:
+                pitch = np.arcsin(sinp)
+            
+            # Yaw (z-axis rotation)
+            siny_cosp = 2 * (w * z + x * y)
+            cosy_cosp = 1 - 2 * (y * y + z * z)
+            yaw = np.arctan2(siny_cosp, cosy_cosp)
+            
+            # Convert to degrees
+            euler_rad = np.array([roll, pitch, yaw])
+            euler_deg = euler_rad * 180.0 / np.pi
+            
+            return euler_deg
+        
+        euler1 = quat_to_euler(q1, 'xyz')
+        euler2 = quat_to_euler(q2, 'xyz')
         euler_error = euler2 - euler1
         # Normalize angle to [-180, 180]
         euler_error = (euler_error + 180) % 360 - 180
@@ -3110,7 +3180,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             
             # Position camera to see the scene
             with self.camera:
-                rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
+                # Use tuples (not lists) of floats; replicator samples treat tuples correctly
+                rep.modify.pose(position=(0.0, -5.0, 3.0), look_at=(0.0, 0.0, 0.0))
             
             # Create render product
             self.render_product = rep.create.render_product(self.camera, (1280, 720))
@@ -3255,7 +3326,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         return a_cfg
 
     def free_memory(cu_agents, sim_task, sim_env, planner, my_world):
-        # just before reset_stage()’s return True
+        # just before reset_stage()'s return True
         for a in cu_agents:
             if hasattr(a, "planner") and a.planner is not None:
                 # break expensive reference cycles
@@ -3536,7 +3607,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         arm_to_arm_col_count = 0 # for debugging
         arm_to_env_col_count = 0 # for debugging
         outdir_name = out_path.split('/')[-1]
-        global stop_simulation
+        # global stop_simulation
         with Progress() as progress:
             task1 = progress.add_task(f"{outdir_name}", total=1000000000000000) # not a real progress bar, just for printing the name
             task2 = progress.add_task(f"Sim Steps (lim={tsto})", total=tsto)
@@ -3963,87 +4034,25 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                         a.stop_worker()
                     simulation_app.close()
 
-    def reset_stage(my_world):
-
-        """
-
-        reset stage and world, normally before next simulation
-        """
-        def _release_viewport_memory():
-            """
-            Frees the render-targets that the viewport keeps alive.
-            Works with both the new (utility) and the legacy viewport.
-            Does nothing when running headless.
-            """
-            import importlib
-            for mod_name in (
-                "omni.kit.viewport.utility",   # Isaac-Sim ≥ 2023.1
-                "omni.kit.viewport_legacy",    # Isaac-Sim 2022.x
-            ):
-                try:
-                    vp = importlib.import_module(mod_name)
-                except ImportError:
-                    continue
-
-                # 1. New viewport – we get a *window*, then ask it for the interface
-                if hasattr(vp, "get_active_viewport_window"):
-                    win = vp.get_active_viewport_window()
-                    if win is not None and hasattr(win, "get_viewport_interface"):
-                        iface = win.get_viewport_interface()
-                        if iface is not None and hasattr(iface, "release_resources"):
-                            iface.release_resources()
-                            return
-
-                # 2. Legacy viewport – static helper already returns the interface
-                if hasattr(vp, "get_viewport_interface"):
-                    iface = vp.get_viewport_interface()
-                    if iface is not None and hasattr(iface, "release_resources"):
-                        iface.release_resources()
-                        return
-        
-        try:
-            my_world.stop()
-        except Exception:
-            pass
-        try:
-            my_world.scene.clear(registry_only=False)
-        except Exception:
-            pass
-        clear_stage()
-        try:
-            World.clear_instance()
-        except Exception:
-            pass
-        try:    
-            from omni.isaac.core.utils.stage import create_new_stage
-            create_new_stage()
-        except Exception:
-            pass
-        try:
-            simulation_app.update()
-        except Exception:
-            pass
-
-        _release_viewport_memory()
-
-        import gc, torch
-        gc.collect()                # run Python GC
-        torch.cuda.empty_cache()    # release cached blocks to driver
-        torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
-
+    
 
     # Global flag to track if we should stop
-    def signal_handler(signum, _frame):
-        print(f"\nReceived {signum} – stopping…")
-        # stop_event.set()
-        global stop_simulation
-        stop_simulation = True
-
-    # stop_event = mp.Event()
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    
     main(meta_cfg, out_path)
         
 
+
+
+# if __name__ == "__main__":
+#     stop_event = mp.Event()
     
-            
+#     import signal
+#     def signal_handler(signum, _frame):
+#         print(f"\nReceived {signum} – stopping…")
+#         stop_event.set()
+
+#     # stop_event = mp.Event()
+#     signal.signal(signal.SIGINT, signal_handler)
+#     signal.signal(signal.SIGTERM, signal_handler)
+#     stop_event = mp.Event()
+   
