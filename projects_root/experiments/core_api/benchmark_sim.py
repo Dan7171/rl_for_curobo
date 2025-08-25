@@ -323,9 +323,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             min_dim=0.1,
             volume_center_pos=[0,0,1],
             volume_shape='sphere',
-            volume_dim=1,
+            volume_dim=0.7,
             obj_lin_vel=[0,0,0],
             obj_rigid_body_enabled=False,
+            cfg=[]
             ):
             """
             static obstacles.
@@ -345,7 +346,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
             super().__init__(world.stage)
             self.world:World = world
-            self.n_obs = n_obs
+            self.n_obs = n_obs if not len(cfg) else len(cfg)
             self.obj_shape = obj_shape
             self.obj_volume_center_pos = volume_center_pos
             self.obj_volume_shape = volume_shape
@@ -354,35 +355,48 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             self.min_dim = min_dim
             self._pose_utils = pose_utils
             self._local_rng = random.Random(self._pose_utils.seed)
-            self.obj_lin_vel = obj_lin_vel
             self.obj_rigid_body_enabled = obj_rigid_body_enabled
             
-            if obj_shape == "cube":
-                if obj_lin_vel != [0,0,0]:
-                    if obj_rigid_body_enabled:
-                        self._prim_class = DynamicCuboid
-                    else:
-                        self._prim_class = VisualCuboid
-                else:
-                    self._prim_class = FixedCuboid
-            elif obj_shape == "sphere":
-                if obj_lin_vel != [0,0,0]:
-                    if obj_rigid_body_enabled:
-                        self._prim_class = DynamicSphere
-                    else:
-                        self._prim_class = VisualSphere
-                else:
-                    self._prim_class = FixedSphere
+            
 
             self._objs = []
+            self._obj_vels = []
             
-            for i in range(n_obs):
+            for i in range(self.n_obs):
+                print(f'debug iiiiiii {i}')
+                print(f'cfggggg: {cfg}')
+                if obj_shape == "cube":
+                    if len(cfg):
+                        v = cfg[i][1]
+                    else:
+                        v = obj_lin_vel 
+                    if v != [0,0,0]:
+                        if obj_rigid_body_enabled:
+                            self._prim_class = DynamicCuboid
+                        else:
+                            self._prim_class = VisualCuboid
+                    else:
+                        self._prim_class = FixedCuboid
+                elif obj_shape == "sphere":
+                    if v != [0,0,0]:
+                        if obj_rigid_body_enabled:
+                            self._prim_class = DynamicSphere
+                        else:
+                            self._prim_class = VisualSphere
+                    else:
+                        self._prim_class = FixedSphere
                 kwargs = {}
-                obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
 
-                if self._prim_class in [DynamicCuboid, DynamicSphere]:
-                    kwargs["linear_velocity"] = np.array(self.obj_lin_vel)
+                if len(cfg) and 'dims' in cfg[i]:
+                    mind = cfg['dims'][0]
+                    maxd = cfg['dims'][1]
+                else:
+                    mind = min_dim
+                    maxd = max_dim
                 
+                obj_dim_size_m = self._local_rng.uniform(mind, maxd) # side length for cube, diameter for sphere
+                if self._prim_class in [DynamicCuboid, DynamicSphere]:
+                    kwargs["linear_velocity"]  = np.array(v)
                 if self._prim_class in [VisualSphere, DynamicSphere, FixedSphere]:
                     kwargs["radius"] = obj_dim_size_m / 2.0
                 if self._prim_class in [VisualCuboid, DynamicCuboid, FixedCuboid]:
@@ -392,22 +406,26 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                 obj_path = f"{self.scope_path}/{obj_name}_{i}"
                 
                 # sample position in volume
-                if self.obj_volume_shape == "sphere":
-                    obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2))
-                elif self.obj_volume_shape == "box":
-                    obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim))
+                if len(cfg):
+                    p = cfg[i][0]
                 else:
-                    raise ValueError(f"Invalid volume shape: {self.obj_volume_shape}")
-                
+                    if self.obj_volume_shape == "sphere":
+                        p = self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2)
+                    else: # box
+                        p = self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim)
+
+                obj_pos = Gf.Vec3d(p)                
                 obj = self._prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
                 self._objs.append(obj)
+                self._obj_vels.append(v)
 
             
         def step(self,**kwargs):
             if self._prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
-                for obj in self._objs:
+                for i,obj in enumerate(self._objs):
                     p, q = get_world_pose(obj.prim_path)
-                    obj.set_world_pose(p+np.array(self.obj_lin_vel) * self.world.get_physics_dt(), q)
+                    v = self._obj_vels[i]
+                    obj.set_world_pose(p+np.array(v) * self.world.get_physics_dt(), q)
     
 
     class SimTask:

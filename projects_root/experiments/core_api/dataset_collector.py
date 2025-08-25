@@ -185,9 +185,9 @@ def make_meta_cfgs(combo_cfg_path):
                                     dynamic_obstacles = False
                                     
                                     if task in ['reach', 'follow']:
-                                        if level in [2,5]:
+                                        if level in [2,5,8,11,14,17]:
                                             static_obstacles = True
-                                        elif level in [3,6]:
+                                        elif level in [3,6,9,12,15,18]:
                                             dynamic_obstacles = True
                                     if static_obstacles or dynamic_obstacles:
                                         
