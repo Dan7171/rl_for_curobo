@@ -40,6 +40,10 @@ headless_mode:
     headless: True
     no_window: True           # same as --no-window
     renderer: "None"          # skip RTX entirely if you don’t render
+    "/renderer/multiGpu/enabled": False
+    "/rtx/enabled": False
+    "/rtx/hydra/enabled": False
+    "/app/renderer/active": "None"
     gpu_device: 0     
     audio_enabled: False
   

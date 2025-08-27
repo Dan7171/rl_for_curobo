@@ -131,23 +131,33 @@ def add_robot_to_scene(
         root_path = robot_path
         file_name = filename
 
-        # Parse the robot's URDF file to generate a robot model
-
+        # Prefer an existing pre-converted USD to avoid URDF parse on headless clusters
         dest_path = join_path(
             root_path, get_filename(file_name, remove_extension=True) + "_temp.usd"
         )
 
-        result, robot_path = omni.kit.commands.execute(
-            "URDFParseAndImportFile",
-            urdf_path="{}/{}".format(root_path, file_name),
-            import_config=import_config,
-            dest_path=dest_path,
-        )
-        prim_path = omni.usd.get_stage_next_free_path(
-            my_world.scene.stage,
-            str(my_world.scene.stage.GetDefaultPrim().GetPath()) + robot_path,
-            False,
-        )
+        import os
+        if os.path.exists(dest_path):
+            # Reuse existing USD without parsing URDF again
+            prim_path = omni.usd.get_stage_next_free_path(
+                my_world.scene.stage,
+                str(my_world.scene.stage.GetDefaultPrim().GetPath()) + f"/{get_filename(file_name, remove_extension=True)}",
+                False,
+            )
+        else:
+            # Parse the robot's URDF file to generate a robot model once
+            result, robot_path = omni.kit.commands.execute(
+                "URDFParseAndImportFile",
+                urdf_path="{}/{}".format(root_path, file_name),
+                import_config=import_config,
+                dest_path=dest_path,
+            )
+            prim_path = omni.usd.get_stage_next_free_path(
+                my_world.scene.stage,
+                str(my_world.scene.stage.GetDefaultPrim().GetPath()) + robot_path,
+                False,
+            )
+
         robot_prim = my_world.scene.stage.OverridePrim(prim_path)
         robot_prim.GetReferences().AddReference(dest_path)
         robot_path = prim_path

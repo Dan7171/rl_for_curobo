@@ -117,10 +117,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     #args = parser.parse_args()
 
     # Isaac Sim
-    try:
-        import isaacsim
-    except ImportError:
-        pass
+    # try:
+    #     import isaacsim
+    # except ImportError:
+    #     pass
     from omni.isaac.kit import SimulationApp
 
     simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
@@ -187,11 +187,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     from omni.isaac.core.utils.viewports import set_camera_view
     from omni.isaac.core.utils.stage import open_stage, clear_stage # sim reset
 
-    # frame capturing
-    enable_extension("omni.replicator.core")
-    enable_extension("omni.replicator.isaac")
-    import omni.replicator.core as rep 
-    from omni.replicator.core import BasicWriter 
+    # frame capturing (extensions enabled lazily only if needed later)
 
 
     # CuRobo
@@ -4032,8 +4028,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
 
 
-    # Signal handling is centralized by the caller (dataset_collector.py).
-    # Just run main; cooperative shutdown happens when stop_event is set.
+    # Global flag to track if we should stop
+    def signal_handler(signum, _frame):
+        print(f"\nReceived {signum} – stopping…")
+        # stop_event.set()
+        global stop_simulation
+        stop_simulation = True
+
+    # stop_event = mp.Event()
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     main(meta_cfg, out_path)
         
 
