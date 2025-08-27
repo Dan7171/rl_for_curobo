@@ -151,8 +151,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         _headless_mode = True if vis_mode == 'headless' else None
         init_livestream = False
     add_extensions(simulation_app, headless_mode=_headless_mode, init_livestream_if_headless=init_livestream)
-    simulation_app.set_setting("/ngx/useDlss", False)
-    simulation_app.set_setting("/app/renderer/dlss/enable", False)
+    # simulation_app.set_setting("/ngx/useDlss", False)
+    # simulation_app.set_setting("/app/renderer/dlss/enable", False)
     import os
     from abc import abstractmethod
     from collections.abc import Callable
@@ -4032,16 +4032,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
 
 
-    # Global flag to track if we should stop
-    def signal_handler(signum, _frame):
-        print(f"\nReceived {signum} – stopping…")
-        # stop_event.set()
-        global stop_simulation
-        stop_simulation = True
-
-    # stop_event = mp.Event()
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Signal handling is centralized by the caller (dataset_collector.py).
+    # Just run main; cooperative shutdown happens when stop_event is set.
     main(meta_cfg, out_path)
         
 

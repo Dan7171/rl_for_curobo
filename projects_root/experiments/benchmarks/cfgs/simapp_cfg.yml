@@ -2,7 +2,7 @@
 gui_mode:
   enable_gpu_dynamics: True
   init_app_settings:
-    headless: null # set 'true' to run in headless mode
+    headless: False # set 'false' to show GUI
     width: 800 # 280
     height: 600 # 720
     window_width: 1920
@@ -32,7 +32,14 @@ headless_mode:
     # height: 720
     # window_width: 1920
     # window_height: 1080
+    # headless: True
+    # hide_ui: True
+    # renderer: "RaytracedLighting"
+    # # display_options: 3286
+
     headless: True
-    hide_ui: True
-    renderer: "RaytracedLighting"
-    # display_options: 3286
+    no_window: True           # same as --no-window
+    renderer: "None"          # skip RTX entirely if you don’t render
+    gpu_device: 0     
+    audio_enabled: False
+  
