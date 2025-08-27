@@ -651,94 +651,63 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     stats_cfg:dict,
                     pose_utils:PoseUtils,
                     velocity_scale = 1.0, # scale factor for the target velocity
-                    add_velocity_noise = False, # noise for the target velocity
-                    update_interval_tphys:float=0.2, # physics dt to update target
+                    update_interval_tphys:float=0.0, # physics dt to update target
                     initial_vel_direction='center',
-                    # initial_targets_density=0.5,
+                    initial_targets_density=0.5,
                     vel_noise=0.2,
                     ):
             
             """
-            level:
-
-                1. jumpy-target, no obstacles,  density: 1.0
-                2. jumpy-target, static obstacles,  ,density = 1.0
-                3. jumpy-target, dynamic obstacles,  , density = 1.0
-                4: smooth-target, no obstacles,  ,density = 1.0
-                5: smooth-target, static obstacles, .density = 1.0
-                6: smooth-target, dynamic obstacles, ,density = 1.0    
-
-                7. jumpy-target, no obstacles,  ,density = 0.5
-                8. jumpy-target, static obstacles,   density = 0.5
-                9. jumpy-target, dynamic obstacles,  ,density = 0.5
-                10: smooth-target, no obstacles,  ,density = 0.5
-                11: smooth-target, static obstacles, . density = 0.5
-                12: smooth-target, dynamic obstacles, , density = 0.5
-
-                13. jumpy-target, no obstacles,  , noise: 0.1,density = 0.0
-                14. jumpy-target, static obstacles,  , noise: 0.1 density = 0.0
-                15. jumpy-target, dynamic obstacles,  ,density = 0.0
-                16: smooth-target, no obstacles,  ,density = 0.0
-                17: smooth-target, static obstacles, . density = 0.0
-                18: smooth-target, dynamic obstacles, , density = 0.0
-
-                
-
-
-
-
-            
+    
+        
             
             """
             super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
             self._pose_utils = pose_utils
             self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
             self.velocity_scale = velocity_scale
-            # self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
-            
-            self.update_interval_tphys = update_interval_tphys if level in [1,2,3,7,8,9,13,14,15] else 0.0
-            self.add_velocity_noise = add_velocity_noise
-
-            if 1<=self.level<=6:
-                self.initial_targets_density = 0.0
-            elif 7<=self.level<=12:
-                self.initial_targets_density = 0.5
-            elif 13<=self.level<=18:
-                self.initial_targets_density = 1.0
-            else:
-                raise ValueError(f"Invalid level: {self.level}")
-
+            self.update_interval_tphys = update_interval_tphys
+            self.add_velocity_noise = vel_noise > 0.0
+            self.initial_targets_density = initial_targets_density
             self.initial_vel_direction = initial_vel_direction # 'center' or 'none'
             self.target_vel_noise = vel_noise
             # Setup targets:
             self.link_name_to_target_vel = [{} for _ in range(self.n_agents)]
+            self.link_name_to_initial_target_pos = [{} for _ in range(self.n_agents)]
             
             link_name_to_target_pose_np = [{} for _ in range(self.n_agents)]
             robots_center = self.get_arms_bases_center_pos()
+            self.robots_center = robots_center
+             
             for a_idx in range(self.n_agents):
                 for link_name in self.link_name_to_path[a_idx].keys():
                     robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
                     init_target_pos = robot_base_pos + self.initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
-                    init_target_pos[2] += 0.75 # m above the base
+                    
+                    init_target_pos[2] += 0.5 # 0.75 # m above the base
                     init_target_quat = np.array([0,1,0,0])
                     link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
                     if self.initial_vel_direction == 'center':
                         tar_vel_direction = (init_target_pos - robot_base_pos) # getting away from the robot base
                     else:
                         tar_vel_direction = np.array([0,0,0])
+                        
+                    
                     tar_vel_direction = np.array([tar_vel_direction[0], tar_vel_direction[1], 0])
                     scaled_vel = tar_vel_direction * self.velocity_scale 
                     if self.add_velocity_noise:
-                        scaled_vel += self._add_noise_to_target_vel()
-                        
-                        # for axis in range(3):
-                        #     # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
-                        #     noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
-                        #     noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
-                        #     scaled_vel[axis] += noise_axis
-                            # print(f'noise_axis: {noise_axis}, scaled_vel: {scaled_vel}')
+                        if np.linalg.norm(tar_vel_direction) > 0.001:
+                            scaled_vel += self._add_noise_to_target_vel() * self.velocity_scale
+                        else:
+                            initial_vel_range = np.arange(-self.velocity_scale, self.target_vel_noise, self.velocity_scale/10)
+                            for axis in range(3):
+                                noise_axis = self._pose_utils._local_rng.sample(list(initial_vel_range),1)[0]
+                                tar_vel_direction[axis] = noise_axis                        
+                    
                     self.link_name_to_target_vel[a_idx][link_name] = scaled_vel 
+                    self.link_name_to_initial_target_pos[a_idx][link_name] = init_target_pos
                     self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(init_target_pos), quaternion=self.tensor_args.to_device(init_target_quat))
+            
             self._set_targets_world_pose(link_name_to_target_pose_np)
             
             self._is_initialized = False
@@ -779,6 +748,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                         
                         target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
                         p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
+                        
+                        # if the target is too far from the robots center, set it to the initial target position
+                        if np.linalg.norm(p_target_new - self.robots_center) > np.linalg.norm(self.link_name_to_initial_target_pos[a_idx][link_name] - self.robots_center):
+                            p_target_new = self.link_name_to_initial_target_pos[a_idx][link_name]
+                        
                         self._update_target(p_target_new, q_target, a_idx, link_name)
                         self._set_target_world_pose_by_link_name(a_idx, link_name, p_target_new, q_target)
                         

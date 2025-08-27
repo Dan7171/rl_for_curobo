@@ -183,8 +183,13 @@ def make_meta_cfgs(combo_cfg_path):
                                     # center base pose of arms
                                     static_obstacles = False
                                     dynamic_obstacles = False
-                                    
-                                    if task in ['reach', 'follow']:
+                                    if task == 'follow':
+                                        if level in [3,6]:
+                                            dynamic_obstacles = True
+                                        elif level in [2,4]:
+                                            static_obstacles = True
+
+                                    if task in ['reach']:
                                         if level in [2,5,8,11,14,17]:
                                             static_obstacles = True
                                         elif level in [3,6,9,12,15,18]:
