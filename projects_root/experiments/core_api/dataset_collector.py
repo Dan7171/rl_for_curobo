@@ -1,16 +1,26 @@
 
+try:
+    import isaacsim
+except ImportError:
+    pass
 
 import os, shutil, yaml, signal, datetime, argparse
 from typing import Union
 import time
+import multiprocessing
 from multiprocessing import Process, Event
 import numpy as np
+
+# Set multiprocessing method to spawn (better for Isaac Sim)
+multiprocessing.set_start_method('spawn', force=True)
 import pickle
 from curobo.util_file import load_yaml
 from copy import deepcopy
 from projects_root.experiments.core_api import benchmark_sim
 from projects_root.experiments.core_api.benchmark_sim import PoseUtils
 import traceback
+
+
 def make_meta_cfgs(combo_cfg_path):
     
     def get_default_particle_file(alg='O'):

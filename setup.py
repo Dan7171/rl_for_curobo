@@ -12,9 +12,11 @@ setup(
     author_email="your.email@example.com",
     packages=find_packages(),
     install_requires=[
-        # Add your dependencies here
-        # "torch",
-        # "numpy",
+        "rich",  # For progress bars and rich text display
+        "numpy==1.26.0",  # Match Isaac Sim requirement
+        "scipy==1.15.3",  # Match Isaac Sim requirement
+        "tqdm",  # For progress bars
+        "pyyaml",  # For YAML file parsing
         # Add other dependencies as needed
     ],
     python_requires=">=3.8",

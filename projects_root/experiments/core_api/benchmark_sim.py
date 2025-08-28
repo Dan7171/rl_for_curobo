@@ -2,10 +2,13 @@ from __future__ import annotations
 import random
 from typing import Optional, Union
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 import multiprocessing as mp
 
 stop_simulation = False
+
+def _get_scipy_rotation():
+    from scipy.spatial.transform import Rotation as Rotation
+    return Rotation
 
 class PoseUtils:
         def __init__(self, seed:Optional[int]=None):
@@ -80,11 +83,11 @@ class PoseUtils:
             else: # q_in is xyzw
                 q_in_scipy = q_in
                 
-            r_in = R.from_quat(q_in_scipy)
+            r_in = _get_scipy_rotation().from_quat(q_in_scipy)
 
             # Create rotation from Euler angles (in degrees)
             # Default order is 'xyz', change if needed (e.g., 'zyx', 'xyz', etc.)
-            r_delta = R.from_euler('xyz', euler_deg, degrees=True)
+            r_delta = _get_scipy_rotation().from_euler('xyz', euler_deg, degrees=True)
 
             # Apply the new rotation
             r_new = r_delta * r_in  # r_delta is applied first
@@ -117,10 +120,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     #args = parser.parse_args()
 
     # Isaac Sim
-    # try:
-    #     import isaacsim
-    # except ImportError:
-    #     pass
+    try:
+        import isaacsim
+    except ImportError:
+        pass
     from omni.isaac.kit import SimulationApp
 
     simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
@@ -2233,8 +2236,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         """
         Calculate the rotation error between two quaternions (each wxyz).
         """
-        euler1 = R.from_quat(q1).as_euler('xyz', degrees=True)
-        euler2 = R.from_quat(q2).as_euler('xyz', degrees=True)
+        euler1 = _get_scipy_rotation().from_quat(q1).as_euler('xyz', degrees=True)
+        euler2 = _get_scipy_rotation().from_quat(q2).as_euler('xyz', degrees=True)
         euler_error = euler2 - euler1
         # Normalize angle to [-180, 180]
         euler_error = (euler_error + 180) % 360 - 180
@@ -3326,6 +3329,14 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             # if retract cfg specificed for robot, uue it. Else will take default from ["kinematics"]["cspace"]["retract_config"]
             if "retract_cfg" in a_cfg: 
                 robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = a_cfg["retract_cfg"]        
+                # # Ensure cspace_distance_weight matches DOF length to avoid curobo shape errors
+                # try:
+                #     rcfg = robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"]
+                #     w = robot_cfgs[a_idx]["kinematics"]["cspace"].get("cspace_distance_weight", None)
+                #     if (w is None) or (len(w) != len(rcfg)):
+                #         robot_cfgs[a_idx]["kinematics"]["cspace"]["cspace_distance_weight"] = [1.0] * len(rcfg)
+                # except Exception:
+                #     pass
                 
             # parse base rotation (if euler angles, convert to quaternion)
             base_pose[a_idx] = a_cfg["base_pose"]
@@ -4039,7 +4050,6 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     main(meta_cfg, out_path)
-        
 
-    
+
             
