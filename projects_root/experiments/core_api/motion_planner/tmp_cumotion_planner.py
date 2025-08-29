@@ -3,7 +3,6 @@ import argparse
 import os
 import shutil
 import numpy as np
-from torch.utils.checkpoint import Any
 import yaml
 from tqdm import tqdm
 from rich.progress import Progress
