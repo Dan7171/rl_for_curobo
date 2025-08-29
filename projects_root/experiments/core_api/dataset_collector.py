@@ -435,6 +435,7 @@ if __name__ == "__main__":
                 
             
         else:
+
             try:
                 benchmark_sim.root(meta_cfg, out_path, stop_event, args.vis_mode)
                 print(f'Successful sim!')
