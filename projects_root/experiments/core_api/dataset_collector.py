@@ -66,7 +66,7 @@ def make_meta_cfgs(combo_cfg_path):
             
         return ret
     
-    colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
+    colors = ['orange','blue','green','red','purple','yellow']
     dec_robot_fam_to_cfg = {
         'franka': 'franka.yml',
          'franka_mobile': 'franka_mobile.yml', 
@@ -76,7 +76,7 @@ def make_meta_cfgs(combo_cfg_path):
          'kinova_gen3': 
          'kinova_gen3.yml', 
          'jaco7': 'jaco7.yml',
-        'tiny_disk': 'simple_disk_tiny.yml'
+        'tinyDisk': 'simple_disk_tiny.yml'
         }
     cent_robot_cfgs = {
         'franka':
@@ -197,7 +197,7 @@ def make_meta_cfgs(combo_cfg_path):
                                     meta_cfg["sim_task"]["arm_poses"] = []
                                     for arm_idx in range(n_arms):
                                         if task == 'CBSMP1':
-                                            a_to_read = 0
+                                            a_to_read = 0 # template
                                         else:
                                             a_to_read = arm_idx
                                         arm_position = pose_root["dec"][a_to_read][:3]
@@ -205,10 +205,6 @@ def make_meta_cfgs(combo_cfg_path):
                                         arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
                                         arm_pose = [*arm_position, *arm_quat]
                                         meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
-                                            
-                                        
-   
-                                    
                                     
                                     # Set sim_task
                                     meta_cfg["sim_task"]["task_type"] = task
@@ -259,11 +255,15 @@ def make_meta_cfgs(combo_cfg_path):
                                             ret_cfg = [item for sublist in ret_root for item in sublist] # flatten the list of lists
                                             base_pose = pose_root["cent"]
                                         else:
-                                            ret_cfg = ret_root[a_idx] # in dec mode: arm index = agent index retract cfg for the robot 
-                                            base_pose = pose_root["dec"][a_idx] # arm base pose   
+                                            if task == 'CBSMP1':
+                                                idx_to_read = 0
+                                            else:
+                                                idx_to_read = a_idx
+                                            ret_cfg = ret_root[idx_to_read] # in dec mode: arm index = agent index retract cfg for the robot 
+                                            base_pose = pose_root["dec"][idx_to_read] # arm base pose   
                                     
                                         if a_idx < len(base_cu_agent_cfgs):
-                                            print(f'warning: reading               ecifications for agent{a_idx} from meta cfg')
+                                            print(f'warning: reading specifications for agent{a_idx} from meta cfg')
                                             agent_cfg = base_cu_agent_cfgs[a_idx]
                                             # recursive_fill_from_default(agent_cfg, meta_cfg["default"],use_deepcopy=True)
                                             
@@ -275,8 +275,9 @@ def make_meta_cfgs(combo_cfg_path):
                                         # Override base values with new values
                                         agent_cfg["robot"] = robot_cfg_path
                                         agent_cfg["planner"] = planner_type
-                                        agent_cfg["base_pose"] = base_pose
-                                        agent_cfg["viz_color"] = colors[a_idx%n_arms]
+                                        # Ensure each agent gets its own copy to avoid shared-list mutations later
+                                        agent_cfg["base_pose"] = deepcopy(base_pose)
+                                        agent_cfg["viz_color"] = colors[a_idx%len(colors)]
                                         agent_cfg["retract_cfg"] = ret_cfg
                                         cu_agent_cfgs.append(agent_cfg)
 

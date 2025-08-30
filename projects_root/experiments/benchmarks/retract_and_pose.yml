@@ -93,9 +93,9 @@ ur5e:
         - [0.45,-0.45,0.0, 0.0, 0.0, 315.0] # 45.0] # 180.0] # arm 3 base pose [x,y,z,roll,pitch,yaw]
         - [-0.45,-0.45,0.0, 0.0, 0.0, 225.0] # 135.0] # 180.0] # arm 4 base pose [x,y,z,roll,pitch,yaw]
             
-tiny_disk:
+tinyDisk:
   disk_template:
-    n_arms: 1 # change to control number of arms
+    n_arms: 8 # change to control number of arms
     retract:
       - [0.0, 0.0] 
     pose:

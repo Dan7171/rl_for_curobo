@@ -890,11 +890,20 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
 
     class CbsMp1Task(ManualTask):
-        def __init__(self, agents_task_cfgs, world, usd_help, 
-        tensor_args,level,stats_cfg,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
+        def __init__(self, 
+        agents_task_cfgs, 
+        world, 
+        usd_help, 
+        tensor_args,
+        level,stats_cfg,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
             super().__init__(agents_task_cfgs, world, usd_help, tensor_args,stats_cfg)
 
             self._is_initialized = False
+            print(f'debug: base_pose: {base_pose}')
+            print(f'debug: spacing: {spacing}')
+            print(f'debug: noise: {noise}')
+            print(f'debug: robot_base_radius: {robot_base_radius}')
+            print(f'debug: add_walls: {add_walls}')
             self.start_poses = base_pose
             self.goal_poses = []
             self.robot_base_radius = robot_base_radius
@@ -955,6 +964,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     d += spacing
                 
                 s.append(start_pos)
+            print(f'debug: start_positions for CBSMP1: {s}')
             return s
 
         @staticmethod
@@ -3297,7 +3307,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
             start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["task_cfgs"]["CBSMP1"])
             for a_idx, p in enumerate(start_positions):
-                meta_cfg["cu_agents"][a_idx]["base_pose"][:3] = p
+                meta_cfg["cu_agents"][a_idx]["base_pose"][:3] = deepcopy(p)
+                
             
             
         
@@ -3329,7 +3340,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         for a_idx, a_cfg in enumerate(agent_cfgs):
             # print(f'a_idx: {a_idx}')   
             # sleep(2)
+            print(f'debug: a {a_idx} base pose before fill: {a_cfg["base_pose"]}')
             recursive_fill_from_default(a_cfg, meta_cfg["default"],use_deepcopy=True)
+            print(f'debug: a {a_idx} base pose after fill: {a_cfg["base_pose"]}')
 
             robot_cfgs_paths[a_idx] = a_cfg["robot"]
             robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
@@ -3458,7 +3471,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         # prepare task 
 
         agents_task_cfgs = []
-        target_colors = ['red', 'green', 'blue', 'yellow', 'purple', 'orange', 'pink', 'brown', 'gray', 'black']
+        target_colors = ['red', 'green', 'blue', 'yellow', 'purple', 'orange']
         color_cnt = 0
         arm_poses = meta_cfg["sim_task"]["arm_poses"] if "arm_poses" in meta_cfg["sim_task"] else [[] for _ in range(len(cu_agents))] # arms base poses
         centrealized = len(cu_agents) == 1
