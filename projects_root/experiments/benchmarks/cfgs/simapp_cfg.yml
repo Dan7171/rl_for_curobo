@@ -28,22 +28,20 @@ livestream_mode:
 headless_mode:
   enable_gpu_dynamics: True
   init_app_settings:
-    # width: 1280
-    # height: 720
-    # window_width: 1920
-    # window_height: 1080
-    # headless: True
-    # hide_ui: True
-    # renderer: "RaytracedLighting"
-    # # display_options: 3286
-
     headless: True
-    no_window: True           # same as --no-window
-    renderer: "None"          # skip RTX entirely if you don’t render
-    # "/renderer/multiGpu/enabled": False
-    # "/rtx/enabled": False
-    # "/rtx/hydra/enabled": False
-    # "/app/renderer/active": "None"
+    no_window: True
+    hide_ui: True
+    renderer: "None"
+    # Disable viewport and rendering to prevent segfaults
+    "/app/renderer/enabled": False
+    "/app/window/enabled": False
+    "/rtx/enabled": False
+    "/rtx/hydra/enabled": False
+    "/app/fastShutdown": True
+    "/app/installSignalHandlers": False
+    # Prevent viewport initialization that causes segfaults
+    "/persistent/app/viewport/enabled": False
+    "/persistent/app/viewport/createCameraModel": False
     gpu_device: 0     
     audio_enabled: False
   

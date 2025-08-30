@@ -126,19 +126,12 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         pass
     from omni.isaac.kit import SimulationApp
 
-    simapp_cfg_path = "projects_root/experiments/benchmarks/cfgs/simapp_cfg.yml"
-    simapp_cfg = load_yaml(simapp_cfg_path)
-    # if args.livestream:
-    if vis_mode == 'livestream':
-        simapp_cfg = simapp_cfg["livestream_mode"]
-    elif vis_mode == 'gui':
-        simapp_cfg = simapp_cfg["gui_mode"] # simapp_cfg["headless_mode"]
-    elif vis_mode == 'headless':
-        simapp_cfg = simapp_cfg["headless_mode"]
-    else:
-        raise ValueError(f'invalid vis_mode: {vis_mode}')
-
-    simulation_app = SimulationApp({**simapp_cfg["init_app_settings"]})
+    # Use simple, stable configuration like working examples
+    simulation_app = SimulationApp({
+        "headless": vis_mode == 'headless',
+        "width": "1920" if vis_mode != 'headless' else "800",
+        "height": "1080" if vis_mode != 'headless' else "600",
+    })
 
     from projects_root.utils.helper import add_extensions 
 
@@ -189,6 +182,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     from omni.isaac.core.objects import DynamicCuboid, VisualCuboid, VisualSphere, DynamicSphere, FixedCuboid, FixedSphere
     from omni.isaac.core.utils.viewports import set_camera_view
     from omni.isaac.core.utils.stage import open_stage, clear_stage # sim reset
+    import omni.replicator.core as rep
+    from omni.replicator.core import BasicWriter
 
     # frame capturing (extensions enabled lazily only if needed later)
 
@@ -3145,7 +3140,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             # rep.orchestrator.wait_until_complete()
             try:
                 self.capture_task.cancel()
-                self.writer.detach([self.render_product])
+                self.writer.detach()
 
             except Exception as e:
                 print(f'debug: error in finish: {e}')

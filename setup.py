@@ -16,7 +16,7 @@ setup(
         "numpy==1.26.0",  # Match Isaac Sim requirement
         "scipy==1.15.3",  # Match Isaac Sim requirement
         "tqdm",  # For progress bars
-        "pyyaml",  # For YAML file parsing
+        # "pyyaml",  # For YAML file parsing
         # Add other dependencies as needed
     ],
     python_requires=">=3.8",

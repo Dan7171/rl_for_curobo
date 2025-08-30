@@ -16,9 +16,16 @@ multiprocessing.set_start_method('spawn', force=True)
 import pickle
 from curobo.util_file import load_yaml
 from copy import deepcopy
+import sys
+import os
+
+# Add the root directory to Python path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+
 from projects_root.experiments.core_api import benchmark_sim
 from projects_root.experiments.core_api.benchmark_sim import PoseUtils
 import traceback
+
 
 
 def make_meta_cfgs(combo_cfg_path):
@@ -314,14 +321,134 @@ def free_memory(cu_agents, sim_task, sim_env, planner, my_world):
     torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
     
 
+_cleanup_in_progress = False
+
 def signal_handler(signum, _frame):
     """Central signal handler: set cooperative stop flag; leave cleanup to worker/root."""
+    global _cleanup_in_progress
+    
+    if _cleanup_in_progress:
+        print(f"\nReceived signal {signum} during cleanup - force exiting...")
+        os._exit(1)
+    
+    _cleanup_in_progress = True
     print(f"\nReceived signal {signum} - shutting down gracefully...")
+    
     try:
         stop_event.set()
-    except NameError:
-        pass
+        
+        # Quick cleanup of any running subprocess
+        if 'current_process' in globals() and current_process is not None:
+            print("Terminating Isaac Sim subprocess...")
+            if current_process.is_alive():
+                current_process.terminate()
+                current_process.join(timeout=2)  # Reduced timeout
+                if current_process.is_alive():
+                    print("Force killing Isaac Sim subprocess...")
+                    current_process.kill()
+                    current_process.join(timeout=1)  # Wait for cleanup
+        
+        # Properly close multiprocessing resources
+        try:
+            import multiprocessing
+            multiprocessing.active_children()  # Trigger cleanup of dead processes
+            
+            # Close the stop_event properly
+            if stop_event is not None:
+                stop_event.set()
+                # Give a moment for processes to see the event
+                import time
+                time.sleep(0.1)
+                
+        except Exception as e:
+            print(f"Warning: Could not clean up multiprocessing resources: {e}")
+            
+        print("Exiting...")
+        
+    except Exception as e:
+        print(f"Error during signal cleanup: {e}")
     
+    # Use sys.exit() instead of os._exit() to allow proper Python cleanup
+    sys.exit(0)
+    
+def cleanup_isaac_processes():
+    """
+    Aggressively clean up any remaining Isaac Sim processes and resources
+    """
+    import psutil
+    import gc
+    import os
+    import subprocess
+    
+    try:
+        print("Starting aggressive process cleanup...")
+        current_pid = os.getpid()
+        print(f"Current process PID: {current_pid}")
+        
+        # Method 1: Use psutil to find and kill processes
+        killed_processes = []
+        print("Scanning for processes to clean up...")
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                # Skip the current process to avoid self-termination
+                if proc.info['pid'] == current_pid:
+                    continue
+                    
+                cmdline = proc.info['cmdline'] or []
+                cmdline_str = ' '.join(cmdline).lower()
+                
+                # Look for Isaac, Omni, and our simulation processes (be more specific)
+                if any(keyword in cmdline_str for keyword in [
+                    'isaacsim', 'isaac-sim', 'isaac.kit', 'omni.isaac', 
+                    'benchmark_sim', 'simulation_app', 
+                    'curobo/src', 'kit.*isaac', 'omniverse'
+                ]) and 'python' in cmdline_str:
+                    print(f"Killing process PID {proc.info['pid']}: {proc.info['name']}")
+                    proc.kill()
+                    killed_processes.append(proc.info['pid'])
+                # Skip dataset_collector processes to avoid killing ourselves
+                # (Let the user manually clean up old dataset_collector instances if needed)
+                    
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        
+        # Method 2: Use pkill as backup for any missed processes (be very specific)
+        # Avoid killing the current dataset_collector process
+        patterns = [
+            "python.*benchmark_sim",  # Only kill benchmark_sim subprocesses
+            "isaac-sim",
+            "isaacsim"
+        ]
+        
+        for pattern in patterns:
+            try:
+                subprocess.run(['pkill', '-f', pattern], capture_output=True)
+            except Exception:
+                pass
+        
+        if killed_processes:
+            print(f"Cleaned up {len(killed_processes)} processes: {killed_processes}")
+        else:
+            print("No processes found to clean up")
+                
+        # Force cleanup GPU memory
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                torch.cuda.synchronize()
+                print("GPU memory cleared")
+        except ImportError:
+            pass
+            
+        # Force garbage collection
+        gc.collect()
+        print("Garbage collection completed")
+        
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
 def invalidate(out_path):
     """
     Invalidate sim out path to mark sim as corrupted
@@ -333,24 +460,39 @@ def invalidate(out_path):
 
 if __name__ == "__main__":
 
-
+    # Set CUDA arch to speed up compilation
+    if 'TORCH_CUDA_ARCH_LIST' not in os.environ:
+        os.environ['TORCH_CUDA_ARCH_LIST'] = '8.9'
+    
+    # Parse arguments first to see if we should do cleanup
     args = argparse.ArgumentParser()
     args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_cfg.yml")
     args.add_argument("--vis_mode", type=str, default="gui", choices=["gui", "livestream", "headless"])
     args.add_argument("--cluster", action="store_true") # if True, will run on cluster
     args.add_argument("--job_id", type=str, default='')
-    args.add_argument("--in_process", action="store_true", default=False)
+    args.add_argument("--in_process", action="store_true", default=False, help="Run the simulation in the same process as the dataset_collector. Automatically sets the num of meta cfgs to 1 (the first in combo) to avoid issues caused by many isaac-sim processes running at the same time")
     args.add_argument('--ignore_sim_errors',action="store_true", default=False)
+    args.add_argument('--cleanup', action="store_true", default=True, help="Clean up zombie processes before starting")
     args = args.parse_args()
+    
+    # Startup cleanup disabled to prevent self-termination
+    # User can manually clean up processes if needed
+    if args.cleanup:
+        print("Note: --cleanup flag provided but startup cleanup is disabled to prevent self-termination")
+        print("If you need to clean up old processes, please do so manually with 'pkill' or 'htop'")
     
     meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
     default_meta_cfg_path = "meta_cfg_arms.yml"
     robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
     benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
     meta_cfgs, initial_out_names, particle_cfgs = make_meta_cfgs(args.combo_cfg_path)
-            
+    print(f"debug: Generated {len(meta_cfgs)} simulation configurations")
+    if args.in_process:
+        meta_cfgs = [meta_cfgs[0]], initial_out_names = [initial_out_names[0]], particle_cfgs = [particle_cfgs[0]]
+        print(f"debug: Running in in_process mode - reduced to  {len(meta_cfgs)} meta cfgs")
     # Create a shared stop_event before installing signal handlers
     stop_event = Event()
+    current_process = None  # Track the current subprocess for proper cleanup
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     # stop_simulation = False
@@ -366,8 +508,8 @@ if __name__ == "__main__":
         # Rename output directory if livestream mode
         if args.cluster:
             meta_cfg["out"]["out_dir_root"] = os.path.expanduser('~/mr_mpc_logs') # '/mnt/new_home/evrond/mr_mpc_logs'
-            if not (args.vis_mode == 'livestream' or args.vis_mode == 'headless'):
-                raise ValueError(f'invalid vis_mode in cluster: {args.vis_mode}')
+            # if not (args.vis_mode == 'livestream' or args.vis_mode == 'headless'):
+            #     raise ValueError(f'invalid vis_mode in cluster: {args.vis_mode}')
     
 
         if len(meta_cfg["out"]["batch_dir_name"]):
@@ -375,7 +517,7 @@ if __name__ == "__main__":
                 meta_cfg["out"]["batch_dir_name"] = batch_dirname_timestamp 
                 if args.job_id != '':
                     meta_cfg["out"]["batch_dir_name"] = f'{meta_cfg["out"]["batch_dir_name"]}_job{args.job_id}'
-
+            
             meta_cfg["out"]["out_dir"] = os.path.join(meta_cfg["out"]["out_dir_root"], f'{meta_cfg["out"]["batch_dir_name"]}')
             os.makedirs(meta_cfg["out"]["out_dir"], exist_ok=True)
             if not 'combo_file.yml' in os.listdir(meta_cfg["out"]["out_dir"]):
@@ -406,31 +548,36 @@ if __name__ == "__main__":
             
             # Pass arguments positionally rather than by name so that we do not rely on the exact
             # parameter names that the child process sees if an older benchmark_sim module is found
-            p = Process(target=benchmark_sim.root, args=(meta_cfg, out_path, stop_event, args.vis_mode))
-            p.start()
+            current_process = Process(target=benchmark_sim.root, args=(meta_cfg, out_path, stop_event, args.vis_mode))
+            current_process.start()
             time.sleep(1)
         
 
-            while p.is_alive():
-                # print(f'debug: stop_event.is_set(): {stop_event.is_set()}, p.is_alive(): {p.is_alive()}')
+            while current_process.is_alive():
+                # print(f'debug: stop_event.is_set(): {stop_event.is_set()}, current_process.is_alive(): {current_process.is_alive()}')
                 if not stop_event.is_set():
                     time.sleep(0.1)
                 else:
                     time.sleep(5)
-                    if p.is_alive():
-                        p.terminate()
-                        if p.is_alive():
-                            p.kill()
+                    if current_process.is_alive():
+                        current_process.terminate()
+                        if current_process.is_alive():
+                            current_process.kill()
                     exit()
-            if p.exitcode is not None:
-                if p.exitcode != 0:
+            if current_process.exitcode is not None:
+                if current_process.exitcode != 0:
                     
                     invalidate(out_path)
                     print(f'SIM FAILED!')
-                    print(f'error: sim failed with exit code {p.exitcode}')
+                    print(f'error: sim failed with exit code {current_process.exitcode}')
+                    # Light cleanup after failed simulation - aggressive cleanup kills the batch
                     if args.ignore_sim_errors:
                         continue
                     raise Exception("Simualtion Suprocess (benchmark_sim.root()) failed and run_mode set to  NOT IGRNORRING SIMULATION ERRORS")
+                else:
+                    # Light cleanup after successful simulation
+                    print("Simulation completed successfully")
+                    # Only do light cleanup between simulations, not aggressive cleanup
                         
                 
             
@@ -446,7 +593,6 @@ if __name__ == "__main__":
             except Exception as e:
                 invalidate(out_path)
                 print(f'SIM FAILED!')
-                print(f'error: sim failed with exit code {p.exitcode}')
                 print(f'error: {traceback.format_exc()}')
                 print('Continuing simulation...')
                 
@@ -462,3 +608,15 @@ if __name__ == "__main__":
         
     
     print(f'all sims done')
+    
+    # Final cleanup to prevent semaphore leaks
+    try:
+        import multiprocessing
+        multiprocessing.active_children()  # Clean up any remaining child processes
+        
+        if stop_event is not None:
+            stop_event.set()  # Signal any waiting processes
+            
+        print("Final cleanup completed")
+    except Exception as e:
+        print(f"Warning during final cleanup: {e}")

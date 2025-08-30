@@ -9,7 +9,6 @@ Requires-Dist: rich
 Requires-Dist: numpy==1.26.0
 Requires-Dist: scipy==1.15.3
 Requires-Dist: tqdm
-Requires-Dist: pyyaml
 Dynamic: author
 Dynamic: author-email
 Dynamic: requires-dist
