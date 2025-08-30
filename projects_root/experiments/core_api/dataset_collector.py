@@ -334,13 +334,14 @@ def invalidate(out_path):
 if __name__ == "__main__":
 
 
+
     args = argparse.ArgumentParser()
     args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_cfg.yml")
     args.add_argument("--vis_mode", type=str, default="gui", choices=["gui", "livestream", "headless"])
     args.add_argument("--cluster", action="store_true") # if True, will run on cluster
     args.add_argument("--job_id", type=str, default='')
     args.add_argument("--in_process", action="store_true", default=False)
-    args.add_argument('--ignore_sim_errors',action="store_true", default=False)
+    args.add_argument('--ignore_sim_errors',action="store_true", default=True)
     args = args.parse_args()
     
     meta_cfgs_dir = "projects_root/experiments/benchmarks/cfgs"
