@@ -890,8 +890,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
 
     class CbsMp1Task(ManualTask):
-        def __init__(self, agents_task_cfgs, world, usd_help, tensor_args,stats_cfg,level,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
-            super().__init__(agents_task_cfgs, world, usd_help, tensor_args,level,stats_cfg)
+        def __init__(self, agents_task_cfgs, world, usd_help, 
+        tensor_args,level,stats_cfg,base_pose,spacing=1.0,noise=False,robot_base_radius=0.025,add_walls=False):
+            super().__init__(agents_task_cfgs, world, usd_help, tensor_args,stats_cfg)
 
             self._is_initialized = False
             self.start_poses = base_pose
@@ -3294,7 +3295,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
 
         if meta_cfg["sim_task"]["task_type"] == 'CBSMP1':
-            start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["cfg"])
+            start_positions = CbsMp1Task.get_agents_start_positions(len(meta_cfg["cu_agents"]),**meta_cfg["sim_task"]["task_cfgs"]["CBSMP1"])
             for a_idx, p in enumerate(start_positions):
                 meta_cfg["cu_agents"][a_idx]["base_pose"][:3] = p
             

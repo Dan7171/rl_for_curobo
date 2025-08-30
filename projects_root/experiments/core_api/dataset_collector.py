@@ -67,7 +67,17 @@ def make_meta_cfgs(combo_cfg_path):
         return ret
     
     colors = ['orange','blue','green','red','purple','yellow','brown','pink','gray','black','white']
-    dec_robot_fam_to_cfg = {'franka': 'franka.yml', 'franka_mobile': 'franka_mobile.yml', 'ur5e': 'ur5e.yml', 'ur10e': 'ur10e.yml', 'iiwa': 'iiwa.yml', 'kinova_gen3': 'kinova_gen3.yml', 'jaco7': 'jaco7.yml'}
+    dec_robot_fam_to_cfg = {
+        'franka': 'franka.yml',
+         'franka_mobile': 'franka_mobile.yml', 
+         'ur5e': 'ur5e.yml', 
+         'ur10e': 'ur10e.yml', 
+         'iiwa': 'iiwa.yml', 
+         'kinova_gen3': 
+         'kinova_gen3.yml', 
+         'jaco7': 'jaco7.yml',
+        'tiny_disk': 'simple_disk_tiny.yml'
+        }
     cent_robot_cfgs = {
         'franka':
             {
@@ -91,6 +101,7 @@ def make_meta_cfgs(combo_cfg_path):
                 '4_04':'quad_ur5e_04.yml'
                 }
             }
+            
     
     
     # take retract cfg of benchmarks
@@ -142,6 +153,8 @@ def make_meta_cfgs(combo_cfg_path):
                         default_particle_file_path = get_default_particle_file(alg)
                         particle_cfg = load_yaml(default_particle_file_path)
                         particle_paths_alg_options =  [particle_cfg]
+                    
+                    
                     for task in task_to_levels_options: # dict
                         for level in task_to_levels_options[task]: # list
                             for task_seed in seed_options: # list
@@ -183,12 +196,18 @@ def make_meta_cfgs(combo_cfg_path):
                                     # Set arm poses (base poses of arms, independent of cent/dec)
                                     meta_cfg["sim_task"]["arm_poses"] = []
                                     for arm_idx in range(n_arms):
-                                        arm_position = pose_root["dec"][arm_idx][:3]
-                                        arm_euler = pose_root["dec"][arm_idx][3:]
+                                        if task == 'CBSMP1':
+                                            a_to_read = 0
+                                        else:
+                                            a_to_read = arm_idx
+                                        arm_position = pose_root["dec"][a_to_read][:3]
+                                        arm_euler = pose_root["dec"][a_to_read][3:]
                                         arm_quat = PoseUtils.rotate_quat([1,0,0,0], arm_euler, q_in_wxyz=True, q_out_wxyz=True)
                                         arm_pose = [*arm_position, *arm_quat]
                                         meta_cfg["sim_task"]["arm_poses"].append(arm_pose)
-                                    
+                                            
+                                        
+   
                                     
                                     
                                     # Set sim_task
@@ -491,7 +510,7 @@ if __name__ == "__main__":
         meta_cfgs = [meta_cfgs[0]]
         initial_out_names = [initial_out_names[0]] 
         particle_cfgs = [particle_cfgs[0]]
-        
+
         print(f"debug: Running in in_process mode - reduced to  {len(meta_cfgs)} meta cfgs")
     # Create a shared stop_event before installing signal handlers
     stop_event = Event()

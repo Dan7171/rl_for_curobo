@@ -177,6 +177,11 @@ sim_task:
       p_err_threh: 0.05
       q_err_threh: 300.0
       # bin_pos: [0.0,0.0,0.0] # set only in one arm case (for debugging)
+    disk:
+      spacing: 0.1 # 0.25 # 0.15 # 
+      noise: False
+      robot_base_radius: 0.025
+      add_walls: True
 
       
   # tasks stat managers    
