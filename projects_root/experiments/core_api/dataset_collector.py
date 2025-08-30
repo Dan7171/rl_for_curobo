@@ -466,7 +466,7 @@ if __name__ == "__main__":
     
     # Parse arguments first to see if we should do cleanup
     args = argparse.ArgumentParser()
-    args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_cfg.yml")
+    args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_manual.yml")
     args.add_argument("--vis_mode", type=str, default="gui", choices=["gui", "livestream", "headless"])
     args.add_argument("--cluster", action="store_true") # if True, will run on cluster
     args.add_argument("--job_id", type=str, default='')
@@ -488,7 +488,10 @@ if __name__ == "__main__":
     meta_cfgs, initial_out_names, particle_cfgs = make_meta_cfgs(args.combo_cfg_path)
     print(f"debug: Generated {len(meta_cfgs)} simulation configurations")
     if args.in_process:
-        meta_cfgs = [meta_cfgs[0]], initial_out_names = [initial_out_names[0]], particle_cfgs = [particle_cfgs[0]]
+        meta_cfgs = [meta_cfgs[0]]
+        initial_out_names = [initial_out_names[0]] 
+        particle_cfgs = [particle_cfgs[0]]
+        
         print(f"debug: Running in in_process mode - reduced to  {len(meta_cfgs)} meta cfgs")
     # Create a shared stop_event before installing signal handlers
     stop_event = Event()

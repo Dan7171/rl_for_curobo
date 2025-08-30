@@ -1,10 +1,21 @@
 from __future__ import annotations
+import argparse
 import random
 from typing import Optional, Union
 import numpy as np
+import os
 import multiprocessing as mp
-
+from curobo.util_file import load_yaml
 stop_simulation = False
+
+def signal_handler(signum, _frame):
+    """
+    signal handler for stopping the simulation when running in __main__
+    """
+    print(f"\nReceived {signum} – stopping…")
+    global stop_simulation
+    stop_simulation = True
+
 
 def _get_scipy_rotation():
     from scipy.spatial.transform import Rotation as Rotation
@@ -3317,6 +3328,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         for a_idx, a_cfg in enumerate(agent_cfgs):
             # print(f'a_idx: {a_idx}')   
             # sleep(2)
+            recursive_fill_from_default(a_cfg, meta_cfg["default"],use_deepcopy=True)
+
             robot_cfgs_paths[a_idx] = a_cfg["robot"]
             robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
             # robot_cfgs[a_idx]["kinematics"]["collision_sphere_buffer"] += 0.02
@@ -3347,7 +3360,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             # sphere_counts_total[a_idx] = sphere_counts_splits[a_idx][0] + sphere_counts_splits[a_idx][1]
     
             # fill missing values from default
-            recursive_fill_from_default(a_cfg, meta_cfg["default"],use_deepcopy=True)
+            # recursive_fill_from_default(a_cfg, meta_cfg["default"],use_deepcopy=True)
             # if "plan_pub_sub" in a_cfg and "sub" in a_cfg["plan_pub_sub"]:
             #     pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
             # else:
@@ -3799,7 +3812,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     sto_reached = time() - sim_time_start > sto # stop due to simulation time limit
                     pto_reached = my_world.current_time - physics_time_start > pto # stop due to physics time limit
                     
-                    if tsto_reached or sto_reached or pto_reached or stop_event.is_set():
+                    if tsto_reached or sto_reached or pto_reached or stop_event.is_set() or stop_simulation:
                         if should_capture_frames:
                             frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
 
@@ -3863,7 +3876,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                         debug_time = time()
 
                         # if stop_simulation:
-                        if stop_event.is_set():
+                        if stop_event.is_set() or stop_simulation:
                             print("stop_event.is_set()")
                             simulation_app.close()
                             return
@@ -4047,4 +4060,12 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     main(meta_cfg, out_path)
 
 
-            
+if __name__ == "__main__":
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vis_mode", type=str, default="gui", help="vis_mode")
+    args = parser.parse_args()
+    meta_cfg = load_yaml("projects_root/experiments/benchmarks/cfgs/meta_cfg_arms_benchmark.yml")
+    stop_event = mp.Event() # Just a dummy event to pass to the root function (won't be used)
+    out_path = os.path.join(meta_cfg["out"]["out_dir_root"], meta_cfg["out"]["batch_dir_name"])
+    root(meta_cfg, out_path, stop_event, args.vis_mode)

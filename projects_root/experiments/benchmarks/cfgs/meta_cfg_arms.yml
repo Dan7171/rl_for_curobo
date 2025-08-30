@@ -1,5 +1,5 @@
 timeout:
-  tstep: 50 # 500 # world steps timeout
+  tstep: 500 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
