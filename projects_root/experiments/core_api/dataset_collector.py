@@ -19,7 +19,12 @@ from copy import deepcopy
 from projects_root.experiments.core_api import benchmark_sim
 from projects_root.experiments.core_api.benchmark_sim import PoseUtils
 import traceback
+import pathlib
 
+# 
+import sys
+workspace = pathlib.Path(__file__).resolve().parents[3]  # /home/dan/rl_for_curobo
+sys.path.insert(0, str(workspace))
 
 def make_meta_cfgs(combo_cfg_path):
     
@@ -447,17 +452,15 @@ if __name__ == "__main__":
             except Exception as e:
                 invalidate(out_path)
                 print(f'SIM FAILED!')
-                print(f'error: sim failed with exit code {p.exitcode}')
                 print(f'error: {traceback.format_exc()}')
-                print('Continuing simulation...')
-                
                 if args.ignore_sim_errors:
                     if not stop_event.is_set():
                         continue
                     else:
                         break
-                print(f'Stopping simulations due to error: {e}')
-                raise e
+                else:
+                    print(f'Stopping simulations due to error: {e}')
+                    raise e
                     
                     
         

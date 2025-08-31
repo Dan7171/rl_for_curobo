@@ -273,20 +273,45 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         def step(self,**kwargs):
             pass
 
+    class ObjectCfg:
+        def __init__(self,
+            obj_shape:str='cube',
+            obj_lin_vel:list[float]=[0,0,0],
+            obj_rigid_body_enabled:bool=False,
+            obj_size=[0.5,0.5,0.5],
+            obj_pos=[0,0,0],
+        ):
+
+            self.obj_shape = obj_shape
+            self.obj_size = obj_size
+            self.obj_lin_vel = obj_lin_vel
+            self.obj_rigid_body_enabled = obj_rigid_body_enabled
+            self.obj_pos = obj_pos
+
+    # class Obj():
+    #     def __init__(self,shape:str,size:Union[list[float],float],lin_vel:list[float],rigid_body_enabled:bool):
+    #         self.shape = shape
+    #         self.size = size
+    #         self.lin_vel = lin_vel
+    #         self.rigid_body_enabled = rigid_body_enabled
+            
+
+            
         
     class PrimsEnv(SimEnv):
         def __init__(self,
             world,
             pose_utils,
-            n_obs,
-            obj_shape='cube',
-            max_dim=0.5,
-            min_dim=0.1,
-            volume_center_pos=[0,0,1],
-            volume_shape='sphere',
-            volume_dim=1,
-            obj_lin_vel=[0,0,0],
-            obj_rigid_body_enabled=False,
+            obj_cfgs:list[ObjectCfg]
+            # n_obs,
+            # obj_shape='cube',
+            # max_dim=0.5,
+            # min_dim=0.1,
+            # volume_center_pos=[0,0,1],
+            # volume_shape='sphere',
+            # volume_dim=1,
+            # obj_lin_vel=[0,0,0],
+            # obj_rigid_body_enabled=False,
             ):
             """
             static obstacles.
@@ -303,72 +328,76 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             
             """
             # relevant prim docs: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#objects
-
+            # https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html?highlight=fixedcuboid#isaacsim.core.api.objects.FixedCuboid
             super().__init__(world.stage)
             self.world:World = world
-            self.n_obs = n_obs
-            self.obj_shape = obj_shape
-            self.obj_volume_center_pos = volume_center_pos
-            self.obj_volume_shape = volume_shape
-            self.obj_volume_dim = volume_dim
-            self.max_dim = max_dim
-            self.min_dim = min_dim
+            self.obj_cfgs = obj_cfgs      
             self._pose_utils = pose_utils
             self._local_rng = random.Random(self._pose_utils.seed)
-            self.obj_lin_vel = obj_lin_vel
-            self.obj_rigid_body_enabled = obj_rigid_body_enabled
-            
-            if obj_shape == "cube":
-                if obj_lin_vel != [0,0,0]:
-                    if obj_rigid_body_enabled:
-                        self._prim_class = DynamicCuboid
-                    else:
-                        self._prim_class = VisualCuboid
-                else:
-                    self._prim_class = FixedCuboid
-            elif obj_shape == "sphere":
-                if obj_lin_vel != [0,0,0]:
-                    if obj_rigid_body_enabled:
-                        self._prim_class = DynamicSphere
-                    else:
-                        self._prim_class = VisualSphere
-                else:
-                    self._prim_class = FixedSphere
-
             self._objs = []
-            
-            for i in range(n_obs):
-                kwargs = {}
-                obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
-
-                if self._prim_class in [DynamicCuboid, DynamicSphere]:
-                    kwargs["linear_velocity"] = np.array(self.obj_lin_vel)
-                
-                if self._prim_class in [VisualSphere, DynamicSphere, FixedSphere]:
-                    kwargs["radius"] = obj_dim_size_m / 2.0
-                if self._prim_class in [VisualCuboid, DynamicCuboid, FixedCuboid]:
-                    kwargs["size"] = obj_dim_size_m
-
-                obj_name = "Cube" if obj_shape == "cube" else "Sphere"
-                obj_path = f"{self.scope_path}/{obj_name}_{i}"
-                
-                # sample position in volume
-                if self.obj_volume_shape == "sphere":
-                    obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2))
-                elif self.obj_volume_shape == "box":
-                    obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim))
+            self._objs_prim_classes = []
+            for obj_cfg in obj_cfgs:            
+                prim_class = None
+                if  obj_cfg.obj_shape == "cube":
+                    if obj_cfg.obj_lin_vel != [0,0,0]:
+                        if obj_cfg.obj_rigid_body_enabled:
+                            prim_class = DynamicCuboid
+                        else:
+                            prim_class = VisualCuboid
+                    else:
+                        prim_class = FixedCuboid
+                elif obj_cfg.obj_shape == "sphere":
+                    if obj_cfg.obj_lin_vel != [0,0,0]:
+                        if obj_cfg.obj_rigid_body_enabled:
+                            prim_class = DynamicSphere
+                        else:
+                            prim_class = VisualSphere
+                    else:
+                        prim_class = FixedSphere
                 else:
-                    raise ValueError(f"Invalid volume shape: {self.obj_volume_shape}")
+                    raise ValueError(f"Invalid object shape: {obj_cfg.obj_shape}")
                 
-                obj = self._prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
+                # self._objs.append(Obj(obj_cfg.obj_shape, obj_cfg.obj_size, obj_cfg.obj_lin_vel, obj_cfg.obj_rigid_body_enabled))
+                self._objs_prim_classes.append(prim_class)
+            for obj_idx, (prim_class,obj_cfg) in enumerate(zip(self._objs_prim_classes,obj_cfgs)):
+                kwargs = {}
+                
+                # if prim_class in [DynamicCuboid, DynamicSphere]:
+                #     kwargs["linear_velocity"] = np.array(self.obj_lin_vel)
+                if prim_class in [DynamicCuboid, DynamicSphere]:
+                    kwargs["linear_velocity"] = np.array(obj_cfg.obj_lin_vel)
+
+                if prim_class in [VisualSphere, DynamicSphere, FixedSphere]:
+                    kwargs["radius"] = obj_cfg.obj_size / 2.0
+                if prim_class in [VisualCuboid, DynamicCuboid, FixedCuboid]:
+                    kwargs["scale"] = np.array(obj_cfg.obj_size) # https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/core_api_overview.html
+
+                obj_name = "Cube" if obj_cfg.obj_shape == "cube" else "Sphere"
+                obj_path = f"{self.scope_path}/{obj_name}_{obj_idx}"
+                
+                obj_pos = Gf.Vec3d(obj_cfg.obj_pos) # may need to change this to tuple (p,q)
+                # sample position in volume
+                # if self.obj_volume_shape == "sphere":
+                #     obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2))
+                # elif self.obj_volume_shape == "box":
+                #     obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim))
+                # else:
+                #     raise ValueError(f"Invalid volume shape: {self.obj_volume_shape}")
+                
+                obj = prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
                 self._objs.append(obj)
 
             
         def step(self,**kwargs):
-            if self._prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
-                for obj in self._objs:
-                    p, q = get_world_pose(obj.prim_path)
-                    obj.set_world_pose(p+np.array(self.obj_lin_vel) * self.world.get_physics_dt(), q)
+            """
+            update objects according to their lin_vel
+            """
+            for obj_idx, obj in enumerate(self._objs):
+                prim_class = self._objs_prim_classes[obj_idx]
+                if prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
+                    for obj in self._objs:
+                        p, q = get_world_pose(obj.prim_path)
+                        obj.set_world_pose(p+np.array(self.obj_cfgs[obj_idx].obj_lin_vel) * self.world.get_physics_dt(), q)
     
 
     class SimTask:
@@ -3495,8 +3524,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                 sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,pose_utils,**sim_task_cfg)
             else:
                 raise ValueError(f"Invalid task type: {sim_task_type}")
-
-        sim_env = PrimsEnv(my_world, pose_utils, **meta_cfg["sim_env"]["cfg"])
+            
+        obj_cfgs = [ObjectCfg(**obj_cfg) for obj_cfg in meta_cfg["sim_env"]["cfg"]["obj_cfgs"]]
+        sim_env = PrimsEnv(my_world, pose_utils, obj_cfgs)
 
         all_target_paths = [list(sim_task.target_path_to_prim[i].keys())[j] for i in range(len(cu_agents)) for j in range(len(sim_task.target_path_to_prim[i]))]
         # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets

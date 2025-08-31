@@ -1,12 +1,13 @@
 base: [projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml]
 # alg: [SD, CC, O, SC, D, O-]
-alg: ['O'] #'O'] # ['SC'] # [O] # [O, SC, SD, CC, O-]
+alg: ['O'] # ['O'] #'O'] # ['SC'] # [O] # [O, SC, SD, CC, O-]
 robot_fam: ['ur5e'] #  #[ ur5e]
 robot_type: ['4_05'] # ['4_05'] # ['4_05'] # ['2_05b'] # ['2_05'] # ['2_05', '4_04']
 # task_seed: [0,1,2] #[0,1,2]
 task_seed: [0,1,2]
 task_to_levels:
   bin: [1,2,3,4,5]
-  follow: [4,5,6] #[4,10]
   reach: [1,2,3,4,5,6]
-particle: {'init_cov':[0.5],'wta_trust':[3.0],'wta_weight':[5000,10000,15000,20000]}
+  follow: [4,5,6] #[4,10]
+  # reach: [6]
+# sparticle: {'init_cov':[0.5],'wta_trust':[3.0],'wta_weight':[5000,10000,15000,20000]}
