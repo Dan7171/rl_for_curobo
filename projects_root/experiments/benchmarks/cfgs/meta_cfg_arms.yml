@@ -162,10 +162,10 @@ sim_task:
   task_cfgs:
     manual: {}
     follow:
+      {}
       # update_interval_tphys: 0.2 # physics dt to update target
-      add_velocity_noise: True # add noise for the target velocity
-      initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
-      vel_noise: 0.02 # size of noise interval to add to the target velocity on each axis
+      # initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
+      # vel_noise: 0.02 # size of noise interval to add to the target velocity on each axis
       # initial_targets_density: 0.0 # a valud between 0 and 1 where 0 means no density and 1 means full density
     reach: 
       targets_box_dim: 0.5
@@ -211,18 +211,52 @@ sim_env:
     obj_cfgs:
       - {
         obj_shape: 'cube',
-        obj_lin_vel: [0.2,0.2,0.1],
+        obj_lin_vel: [0.3,0.0,0.0],
         obj_rigid_body_enabled: False,
-        obj_size: [0.2,0.2,0.5],
-        obj_pos: [0,0,0.5],
+        obj_size: [0.5,0.5,0.1],
+        obj_pos: [-1,0,0.5],
       }
-      - {
-        obj_shape: 'sphere',
-        obj_lin_vel: [0.2,0.2,0.1],
-        obj_rigid_body_enabled: False,
-        obj_size: 0.2,
-        obj_pos: [0,0,0.8],
-      }
+      # - {
+      #   obj_shape: 'sphere',
+      #   obj_lin_vel: [0.2,0.2,0.1],
+      #   obj_rigid_body_enabled: False,
+      #   obj_size: 0.2,
+      #   obj_pos: [0,0,0.8],
+      # }
+      # - {
+      #   obj_shape: 'cube',
+      #   obj_lin_vel: [0.2,0.2,0.1],
+      #   obj_rigid_body_enabled: False,
+      #   obj_size: [0.2,0.2,0.5],
+      #   obj_pos: [0,0,0.5],
+      # }
+      # - {
+      #   obj_shape: 'sphere',
+      #   obj_lin_vel: [0.2,0.2,0.1],
+      #   obj_rigid_body_enabled: False,
+      #   obj_size: 0.2,
+      #   obj_pos: [0,0,0.8],
+      # }
+      # - {
+      #   obj_shape: 'cube',
+      #   obj_lin_vel: [0.2,0.2,0.1],
+      #   obj_rigid_body_enabled: False,
+      #   obj_size: [0.2,0.2,0.5],
+      #   obj_pos: [0,0,0.5],
+      # }
+      # - {
+      #   obj_shape: 'sphere',
+      #   obj_lin_vel: [0.2,0.2,0.1],
+      #   obj_rigid_body_enabled: False,
+      #   obj_size: 0.2,
+      #   obj_pos: [0,0,0.8],
+      # }
+
+      
+
+      
+
+
 
     # - [cube, [0.5,0.5,0.5], [0.2,0.2,0.1]]
     # - 

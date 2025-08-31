@@ -193,37 +193,49 @@ def make_meta_cfgs(combo_cfg_path):
                                     meta_cfg["sim_task"]["task_type"] = task
                                     meta_cfg["sim_task"]["level"] = level
                                     
+                                    
+                                    
+                                    
                                     # Set static and dynamic obstacles depending on the level
                                     
                                     
                                     # center base pose of arms
-                                    static_obstacles = False
-                                    dynamic_obstacles = False
-                                    
-                                    if task in ['reach', 'follow']:
-                                        if level in [2,5]:
-                                            static_obstacles = True
-                                        elif level in [3,6]:
-                                            dynamic_obstacles = True
-                                    if static_obstacles or dynamic_obstacles:
+                                    # static_obstacles = False
+                                    # dynamic_obstacles = False
+                                    # if task in ['reach', 'follow']:
+                                    #     for i in range(level):
+                                            
+                                    #         obj_cfg = {
+                                    #             'obj_shape': 'cube',
+                                    #             'obj_lin_vel': [0.3,0.0,0.0],
+                                    #             'obj_rigid_body_enabled': False,
+                                    #             'obj_size': [0.5,0.5,0.1],
+                                    #             'obj_pos': [-1,0,0.5],
+                                    #         }
+                                    # if task in ['reach', 'follow']:
+                                    #     if level in [2,5]:
+                                    #         static_obstacles = True
+                                    #     elif level in [3,6]:
+                                    #         dynamic_obstacles = True
+                                    # if static_obstacles or dynamic_obstacles:
                                         
-                                        # get center of arms
-                                        arms_center = np.array([0.0,0.0,0.0])
-                                        for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
-                                            arms_center += np.array(arm_pose[:3])
-                                        arms_center /= n_arms
+                                    #     # get center of arms
+                                    #     arms_center = np.array([0.0,0.0,0.0])
+                                    #     for arm_pose in meta_cfg["sim_task"]["arm_poses"]:
+                                    #         arms_center += np.array(arm_pose[:3])
+                                    #     arms_center /= n_arms
                                         
-                                        # set obstacles
-                                        env_cfg = meta_cfg["sim_env"]["cfg"] 
-                                        env_cfg["n_obs"] = 5
-                                        if static_obstacles:
-                                            volume_center_pos = arms_center + np.array([0,0,0.5])
-                                        else:
-                                            volume_center_pos = arms_center + np.array([-1.0,-1.0,0.5])
-                                        env_cfg["volume_center_pos"] = volume_center_pos.tolist()
-                                        if dynamic_obstacles:
-                                            # env_cfg["obj_rigid_body_enabled"] = True
-                                            env_cfg["obj_lin_vel"] = [0.15,0.15,0.0]
+                                    #     # set obstacles
+                                    #     env_cfg = meta_cfg["sim_env"]["cfg"] 
+                                    #     env_cfg["n_obs"] = 5
+                                    #     if static_obstacles:
+                                    #         volume_center_pos = arms_center + np.array([0,0,0.5])
+                                    #     else:
+                                    #         volume_center_pos = arms_center + np.array([-1.0,-1.0,0.5])
+                                    #     env_cfg["volume_center_pos"] = volume_center_pos.tolist()
+                                    #     if dynamic_obstacles:
+                                    #         # env_cfg["obj_rigid_body_enabled"] = True
+                                    #         env_cfg["obj_lin_vel"] = [0.15,0.15,0.0]
 
                                     
                                      
