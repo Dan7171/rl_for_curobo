@@ -395,9 +395,18 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             for obj_idx, obj in enumerate(self._objs):
                 prim_class = self._objs_prim_classes[obj_idx]
                 if prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
-                    for obj in self._objs:
-                        p, q = get_world_pose(obj.prim_path)
-                        obj.set_world_pose(p+np.array(self.obj_cfgs[obj_idx].obj_lin_vel) * self.world.get_physics_dt(), q)
+                    # Get current pose as numpy array
+                    p, q = get_world_pose(obj.prim_path)
+                    p_np = np.array(p)
+                    vel_np = np.array(self.obj_cfgs[obj_idx].obj_lin_vel)
+                    dt = self.world.get_physics_dt()
+
+                    new_p = p_np + vel_np * dt
+
+                    # Debug
+                    # print(f"debug obj {obj_idx}: p {p_np} vel {vel_np} dt {dt} new_p {new_p}")
+
+                    obj.set_world_pose(new_p, q)
     
 
     class SimTask:
@@ -3262,7 +3271,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         return a_cfg
 
     def free_memory(cu_agents, sim_task, sim_env, planner, my_world):
-        # just before reset_stage()’s return True
+        # just before reset_stage()'s return True
         for a in cu_agents:
             if hasattr(a, "planner") and a.planner is not None:
                 # break expensive reference cycles

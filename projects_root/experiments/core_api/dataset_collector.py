@@ -128,7 +128,35 @@ def make_meta_cfgs(combo_cfg_path):
     meta_cfgs = []
     particle_cfgs = []
 
+    reach_follow_objects_by_level = {
+        1: [],
+        2: [
+            {
+            'obj_shape': 'cube',
+            'obj_lin_vel': [0.3,0.0,0.0],
+            'obj_size': [0.5,0.5,0.1],
+            'obj_pos': [-0.8, 0, 0.5],
+            }
+            ],
 
+        3: [
+            {
+            'obj_shape': 'cube',
+            'obj_lin_vel': [0.3,0.0,0.0],
+            'obj_size': [0.5,0.5,0.1],
+            'obj_pos': [-0.8, 0, 0.5],
+            },
+            {
+            'obj_shape': 'cube',
+            'obj_lin_vel': [-0.4,-0.4,0.0],
+            'obj_size': [0.2,0.2,0.05],
+            'obj_pos': [0.9,0.9,0.4],
+            }
+            ],
+        4: [],
+        5: [],
+        6: [],
+    }
 
     for base_cfg_path in base_options:
         for robot_fam in robot_fam_options: # list
@@ -202,8 +230,8 @@ def make_meta_cfgs(combo_cfg_path):
                                     # center base pose of arms
                                     # static_obstacles = False
                                     # dynamic_obstacles = False
-                                    # if task in ['reach', 'follow']:
-                                    #     for i in range(level):
+                                    if task in ['reach', 'follow']:
+                                        meta_cfg["sim_env"]["cfg"]["obj_cfgs"] = reach_follow_objects_by_level[level]
                                             
                                     #         obj_cfg = {
                                     #             'obj_shape': 'cube',
