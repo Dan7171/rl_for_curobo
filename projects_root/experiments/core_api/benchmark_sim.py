@@ -720,15 +720,25 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     arm_body_center = [arm_base[0], arm_base[1], 0.4] # ~ half of ur5e length. Replace with other arm length if needed!
                     too_far_from_robot = np.linalg.norm(p_target - arm_body_center) > 0.2
                     if too_far_from_robot: # if target is too far from robot, sample a new position near the arm body center
-                        # Sample new target start position, and new constant velocity!
                         print(f'debug: target {target_name} too far from robot {link_name}')
-                        # arm_body_center = self.link_name_to_arm_base[a_idx][link_name][:3]
-                        # arm_body_center[2] += 0.4 # ~ half of ur5e length. Replace with other arm length if needed!
-                        # p_target = arm_body_center + np.random.uniform(-0.1, 0.1, 3) # sample a new position near the arm body center
+                        
+                        
+                        # Sample new target start position!
                         p_target = arm_body_center + np.random.uniform(-0.05, 0.05, 3) # sample a new position near the arm body center
+                        for i in range(3):
+                            p_target[i] += self._pose_utils._local_rng.sample(list(np.arange(-0.05, 0.05, 0.005)),1)[0]
+                        
                         q_target = np.array([0,1,0,0])
                         target_name_to_pose[a_idx][target_name] = (p_target, q_target)
-                        self.link_name_to_target_vel[a_idx][link_name] = np.random.uniform(-0.3, 0.3, 3)
+                        
+
+                        # self.link_name_to_target_vel[a_idx][link_name] = np.random.uniform(-0.3, 0.3, 3)
+                        # Sample new target velocity!
+                        for i in range(3):
+                            self.link_name_to_target_vel[a_idx][link_name][i] += self._pose_utils._local_rng.sample(list(np.arange(-0.3, 0.3, 0.03)),1)[0]
+                        
+                        
+                        
                         self._update_target(p_target, q_target, a_idx, link_name)
                         self._set_target_world_pose_by_link_name(a_idx, link_name, p_target, q_target)
                         continue

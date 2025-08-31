@@ -135,12 +135,7 @@ def make_meta_cfgs(combo_cfg_path):
         'obj_size': [0.5,0.5,0.1],
         'obj_pos': [-0.8, 0, 0.5],
         },
-        {
-        'obj_shape': 'cube',
-        'obj_lin_vel': [-0.4,-0.4,0.0],
-        'obj_size': [0.5,0.5,0.1],
-        'obj_pos': [0.9,0.9,0.4],
-        },
+        
         {
         'obj_shape': 'cube',
         'obj_lin_vel': [-0.4,0.0,0.0],
@@ -149,9 +144,15 @@ def make_meta_cfgs(combo_cfg_path):
         },
         {
         'obj_shape': 'cube',
-        'obj_lin_vel': [1.0,1.0,0.0], # [0.4,0.4,0.0],
+        'obj_lin_vel': [0.3,0.3,0.0], # [0.4,0.4,0.0],
         'obj_size': [0.2,0.2,0.05],
         'obj_pos': [-0.9,-0.9,0.6],
+        },
+        {
+        'obj_shape': 'cube',
+        'obj_lin_vel': [-0.4,-0.4,0.0],
+        'obj_size': [0.5,0.5,0.1],
+        'obj_pos': [0.9,0.9,0.4],
         },        
         ]
     reach_follow_objects_by_level = {
