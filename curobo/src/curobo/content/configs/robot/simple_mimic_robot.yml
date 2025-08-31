@@ -43,5 +43,5 @@ robot_cfg:
       retract_config: [0.3, 0.0]
       null_space_weight: [1,1]
       cspace_distance_weight: [1,1]
-      max_acceleration: 15.0
-      max_jerk: 500.0
+      max_acceleration: 0.03 # 0.3 # 3.0 # 15.0
+      max_jerk: 1.0 # 10.0 # 100 # 500.0

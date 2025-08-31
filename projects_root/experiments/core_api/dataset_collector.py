@@ -481,8 +481,8 @@ def invalidate(out_path):
 if __name__ == "__main__":
 
     # Set CUDA arch to speed up compilation
-    if 'TORCH_CUDA_ARCH_LIST' not in os.environ:
-        os.environ['TORCH_CUDA_ARCH_LIST'] = '8.9'
+    # if 'TORCH_CUDA_ARCH_LIST' not in os.environ:
+    #     os.environ['TORCH_CUDA_ARCH_LIST'] = '8.9'
     
     # Parse arguments first to see if we should do cleanup
     args = argparse.ArgumentParser()

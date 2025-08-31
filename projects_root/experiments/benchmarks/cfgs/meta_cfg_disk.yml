@@ -1,6 +1,6 @@
 
 timeout:
-  tstep: 500 # 500 # world steps timeout
+  tstep: 2500 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -81,7 +81,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     mpc_solver_cfg:
       override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml 
       use_cuda_graph: False 
-      step_dt: 0.0333
+      step_dt: 0.0167
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
@@ -161,25 +161,25 @@ sim_task:
   level: 1 # 1: easy, 2: medium, 3: hard ...
   # task cfgs
   task_cfgs:
-    manual: {}
-    follow:
-      # update_interval_tphys: 0.2 # physics dt to update target
-      add_velocity_noise: True # add noise for the target velocity
-      initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
-      vel_noise: 0.02 # size of noise interval to add to the target velocity on each axis
-      # initial_targets_density: 0.0 # a valud between 0 and 1 where 0 means no density and 1 means full density
-    reach: 
-      targets_box_dim: 0.5
-      update_interval_tphys: 1.0
-      p_err_threh: 0.05
-      q_err_threh: 300.0
-    bin:
-      wall_dims_hwd: [0.20,0.40,0.05] # height, width, depth of the bin walls
-      p_err_threh: 0.05
-      q_err_threh: 300.0
-      # bin_pos: [0.0,0.0,0.0] # set only in one arm case (for debugging)
+    # manual: {}
+    # follow:
+    #   # update_interval_tphys: 0.2 # physics dt to update target
+    #   add_velocity_noise: True # add noise for the target velocity
+    #   initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
+    #   vel_noise: 0.02 # size of noise interval to add to the target velocity on each axis
+    #   # initial_targets_density: 0.0 # a valud between 0 and 1 where 0 means no density and 1 means full density
+    # reach: 
+    #   targets_box_dim: 0.5
+    #   update_interval_tphys: 1.0
+    #   p_err_threh: 0.05
+    #   q_err_threh: 300.0
+    # bin:
+    #   wall_dims_hwd: [0.20,0.40,0.05] # height, width, depth of the bin walls
+    #   p_err_threh: 0.05
+    #   q_err_threh: 300.0
+    #   # bin_pos: [0.0,0.0,0.0] # set only in one arm case (for debugging)
     CBSMP1:
-      spacing: 0.1 # 0.25 # 0.15 # 
+      spacing: 0.25 # 0.5 # 0.25 # 0.15 # 
       noise: False
       robot_base_radius: 0.025
       add_walls: False
@@ -235,15 +235,10 @@ sim_env:
 
 # cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
 
-
-#  - # robot:  curobo/src/curobo/content/configs/robot/simple_disk_tiny.yml # simple_disk.yml # franka_mobile.yml # curobo/src/curobo/content/configs/robot/franka.yml # dual_ur10e.yml
-    # planner: 'mpc' # mpc or cumotion 
-    # base_pose: [1, 0.0, 0.0, 1, 0, 0, 0]
-    # viz_color: 'purple'
-    # is_mobile: True
-    # mobile_base_link_subpath: "/ee_link"
-    # cu_world_wrapper: # curoboworld collision wrapper
-    #   verbosity: 4 # 0 to 4 (0 is no output, 4 is max output) 
-    #   never_add: ['defaultGroundPlane'] # paths of objects that should never be added to the collision world (for example, robot itself or the robot target)
-    #   never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
-      
+cu_agents: 
+  -  visualize_col_pred:
+      own: True
+      own_color: 'blue'
+      own_mean_only: True
+      obs: True
+      obs_color: 'red'
