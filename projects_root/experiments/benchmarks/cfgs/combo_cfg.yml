@@ -8,6 +8,6 @@ task_seed: [0]
 task_to_levels:
   # bin: [1,2,3,4,5]
   # reach: [1,2,3,4,5,6]
-  follow: [3] #[4,10]
+  follow: [5,4] #[4,10]
   # reach: [6]
 # sparticle: {'init_cov':[0.5],'wta_trust':[3.0],'wta_weight':[5000,10000,15000,20000]}

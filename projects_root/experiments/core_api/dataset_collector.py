@@ -128,34 +128,38 @@ def make_meta_cfgs(combo_cfg_path):
     meta_cfgs = []
     particle_cfgs = []
 
+    obj_configs = [
+        {
+        'obj_shape': 'cube',
+        'obj_lin_vel': [0.3,0.0,0.0],
+        'obj_size': [0.5,0.5,0.1],
+        'obj_pos': [-0.8, 0, 0.5],
+        },
+        {
+        'obj_shape': 'cube',
+        'obj_lin_vel': [-0.4,-0.4,0.0],
+        'obj_size': [0.5,0.5,0.1],
+        'obj_pos': [0.9,0.9,0.4],
+        },
+        {
+        'obj_shape': 'cube',
+        'obj_lin_vel': [-0.4,0.0,0.0],
+        'obj_size': [0.2,0.2,0.05],
+        'obj_pos': [0.8,0.0,0.3],
+        },
+        {
+        'obj_shape': 'cube',
+        'obj_lin_vel': [1.0,1.0,0.0], # [0.4,0.4,0.0],
+        'obj_size': [0.2,0.2,0.05],
+        'obj_pos': [-0.9,-0.9,0.6],
+        },        
+        ]
     reach_follow_objects_by_level = {
         1: [],
-        2: [
-            {
-            'obj_shape': 'cube',
-            'obj_lin_vel': [0.3,0.0,0.0],
-            'obj_size': [0.5,0.5,0.1],
-            'obj_pos': [-0.8, 0, 0.5],
-            }
-            ],
-
-        3: [
-            {
-            'obj_shape': 'cube',
-            'obj_lin_vel': [0.3,0.0,0.0],
-            'obj_size': [0.5,0.5,0.1],
-            'obj_pos': [-0.8, 0, 0.5],
-            },
-            {
-            'obj_shape': 'cube',
-            'obj_lin_vel': [-0.4,-0.4,0.0],
-            'obj_size': [0.2,0.2,0.05],
-            'obj_pos': [0.9,0.9,0.4],
-            }
-            ],
-        4: [],
-        5: [],
-        6: [],
+        2: [obj_configs[0]],
+        3: [obj_configs[0], obj_configs[1]],
+        4: [obj_configs[0],obj_configs[1], obj_configs[2]],
+        5: [obj_configs[0],obj_configs[1], obj_configs[2], obj_configs[3]],
     }
 
     for base_cfg_path in base_options:
