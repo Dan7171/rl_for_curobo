@@ -1,5 +1,5 @@
 model:
-  horizon: 60 # 40 # 40 # 30 # 30 # 30
+  horizon: 40 # 40 # 40 # 30 # 30 # 30
   state_filter_cfg:
     filter_coeff:
       position: 0.1
@@ -69,7 +69,7 @@ cost:
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
         a_select_mode: normal # 'col_free' # col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
-        weight: 7000.0  # 7000.0  # 100  
+        weight: 5000.0  # 7000.0  # 100  
         terminal: False
         safety_margin: 0.3 # 0.05
         prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
@@ -97,7 +97,7 @@ mppi:
   step_size_cov     : 0.01
   beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
-  num_particles     : 800 # 200 #10000
+  num_particles     : 400 # 200 #10000
   update_cov        : False
   cov_type          : "DIAG_A" #
   kappa             : 0.0001

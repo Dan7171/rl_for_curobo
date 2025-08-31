@@ -278,7 +278,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         
         def step(self,**kwargs):
             pass
-     class ObjectCfg:
+    class ObjectCfg:
         def __init__(self,
             obj_shape:str='cube',
             obj_lin_vel:list[float]=[0,0,0],
