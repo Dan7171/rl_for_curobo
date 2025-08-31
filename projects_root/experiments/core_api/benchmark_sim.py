@@ -278,21 +278,35 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         
         def step(self,**kwargs):
             pass
+     class ObjectCfg:
+        def __init__(self,
+            obj_shape:str='cube',
+            obj_lin_vel:list[float]=[0,0,0],
+            obj_rigid_body_enabled:bool=False,
+            obj_size=[0.5,0.5,0.5],
+            obj_pos=[0,0,0],
+        ):
 
+            self.obj_shape = obj_shape
+            self.obj_size = obj_size
+            self.obj_lin_vel = obj_lin_vel
+            self.obj_rigid_body_enabled = obj_rigid_body_enabled
+            self.obj_pos = obj_pos
         
     class PrimsEnv(SimEnv):
         def __init__(self,
             world,
             pose_utils,
-            n_obs,
-            obj_shape='cube',
-            max_dim=0.5,
-            min_dim=0.1,
-            volume_center_pos=[0,0,1],
-            volume_shape='sphere',
-            volume_dim=1,
-            obj_lin_vel=[0,0,0],
-            obj_rigid_body_enabled=False,
+            obj_cfgs:list[ObjectCfg]
+            # n_obs,
+            # obj_shape='cube',
+            # max_dim=0.5,
+            # min_dim=0.1,
+            # volume_center_pos=[0,0,1],
+            # volume_shape='sphere',
+            # volume_dim=1,
+            # obj_lin_vel=[0,0,0],
+            # obj_rigid_body_enabled=False,
             ):
             """
             static obstacles.
@@ -309,73 +323,85 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             
             """
             # relevant prim docs: https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#objects
-
+            # https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/extensions/isaacsim.core.api/docs/index.html?highlight=fixedcuboid#isaacsim.core.api.objects.FixedCuboid
             super().__init__(world.stage)
             self.world:World = world
-            self.n_obs = n_obs
-            self.obj_shape = obj_shape
-            self.obj_volume_center_pos = volume_center_pos
-            self.obj_volume_shape = volume_shape
-            self.obj_volume_dim = volume_dim
-            self.max_dim = max_dim
-            self.min_dim = min_dim
+            self.obj_cfgs = obj_cfgs      
             self._pose_utils = pose_utils
             self._local_rng = random.Random(self._pose_utils.seed)
-            self.obj_lin_vel = obj_lin_vel
-            self.obj_rigid_body_enabled = obj_rigid_body_enabled
-            
-            if obj_shape == "cube":
-                if obj_lin_vel != [0,0,0]:
-                    if obj_rigid_body_enabled:
-                        self._prim_class = DynamicCuboid
-                    else:
-                        self._prim_class = VisualCuboid
-                else:
-                    self._prim_class = FixedCuboid
-            elif obj_shape == "sphere":
-                if obj_lin_vel != [0,0,0]:
-                    if obj_rigid_body_enabled:
-                        self._prim_class = DynamicSphere
-                    else:
-                        self._prim_class = VisualSphere
-                else:
-                    self._prim_class = FixedSphere
-
             self._objs = []
-            
-            for i in range(n_obs):
-                kwargs = {}
-                obj_dim_size_m = self._local_rng.uniform(min_dim, max_dim) # side length for cube, diameter for sphere
-
-                if self._prim_class in [DynamicCuboid, DynamicSphere]:
-                    kwargs["linear_velocity"] = np.array(self.obj_lin_vel)
-                
-                if self._prim_class in [VisualSphere, DynamicSphere, FixedSphere]:
-                    kwargs["radius"] = obj_dim_size_m / 2.0
-                if self._prim_class in [VisualCuboid, DynamicCuboid, FixedCuboid]:
-                    kwargs["size"] = obj_dim_size_m
-
-                obj_name = "Cube" if obj_shape == "cube" else "Sphere"
-                obj_path = f"{self.scope_path}/{obj_name}_{i}"
-                
-                # sample position in volume
-                if self.obj_volume_shape == "sphere":
-                    obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2))
-                elif self.obj_volume_shape == "box":
-                    obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim))
+            self._objs_prim_classes = []
+            for obj_cfg in obj_cfgs:            
+                prim_class = None
+                if  obj_cfg.obj_shape == "cube":
+                    if obj_cfg.obj_lin_vel != [0,0,0]:
+                        if obj_cfg.obj_rigid_body_enabled:
+                            prim_class = DynamicCuboid
+                        else:
+                            prim_class = VisualCuboid
+                    else:
+                        prim_class = FixedCuboid
+                elif obj_cfg.obj_shape == "sphere":
+                    if obj_cfg.obj_lin_vel != [0,0,0]:
+                        if obj_cfg.obj_rigid_body_enabled:
+                            prim_class = DynamicSphere
+                        else:
+                            prim_class = VisualSphere
+                    else:
+                        prim_class = FixedSphere
                 else:
-                    raise ValueError(f"Invalid volume shape: {self.obj_volume_shape}")
+                    raise ValueError(f"Invalid object shape: {obj_cfg.obj_shape}")
                 
-                obj = self._prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
+                # self._objs.append(Obj(obj_cfg.obj_shape, obj_cfg.obj_size, obj_cfg.obj_lin_vel, obj_cfg.obj_rigid_body_enabled))
+                self._objs_prim_classes.append(prim_class)
+            for obj_idx, (prim_class,obj_cfg) in enumerate(zip(self._objs_prim_classes,obj_cfgs)):
+                kwargs = {}
+                
+                # if prim_class in [DynamicCuboid, DynamicSphere]:
+                #     kwargs["linear_velocity"] = np.array(self.obj_lin_vel)
+                if prim_class in [DynamicCuboid, DynamicSphere]:
+                    kwargs["linear_velocity"] = np.array(obj_cfg.obj_lin_vel)
+
+                if prim_class in [VisualSphere, DynamicSphere, FixedSphere]:
+                    kwargs["radius"] = obj_cfg.obj_size / 2.0
+                if prim_class in [VisualCuboid, DynamicCuboid, FixedCuboid]:
+                    kwargs["scale"] = np.array(obj_cfg.obj_size) # ~https://docs.isaacsim.omniverse.nvidia.com/latest/python_scripting/core_api_overview.html
+
+                obj_name = "Cube" if obj_cfg.obj_shape == "cube" else "Sphere"
+                obj_path = f"{self.scope_path}/{obj_name}_{obj_idx}"
+                
+                obj_pos = Gf.Vec3d(obj_cfg.obj_pos) # may need to change this to tuple (p,q)
+                # sample position in volume
+                # if self.obj_volume_shape == "sphere":
+                #     obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_sphere(self.obj_volume_center_pos, self.obj_volume_dim/2))
+                # elif self.obj_volume_shape == "box":
+                #     obj_pos = Gf.Vec3d(self._pose_utils.sample_pos_in_box(self.obj_volume_center_pos, self.obj_volume_dim))
+                # else:
+                #     raise ValueError(f"Invalid volume shape: {self.obj_volume_shape}")
+                
+                obj = prim_class(prim_path=obj_path, name=obj_path, position=obj_pos, **kwargs)
                 self._objs.append(obj)
 
             
         def step(self,**kwargs):
-            if self._prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
-                for obj in self._objs:
+            """
+            update objects according to their lin_vel
+            """
+            for obj_idx, obj in enumerate(self._objs):
+                prim_class = self._objs_prim_classes[obj_idx]
+                if prim_class in [VisualSphere, VisualCuboid]: # visual objects with velocity
+                    # Get current pose as numpy array
                     p, q = get_world_pose(obj.prim_path)
-                    obj.set_world_pose(p+np.array(self.obj_lin_vel) * self.world.get_physics_dt(), q)
-    
+                    p_np = np.array(p)
+                    vel_np = np.array(self.obj_cfgs[obj_idx].obj_lin_vel)
+                    dt = self.world.get_physics_dt()
+
+                    new_p = p_np + vel_np * dt
+
+                    # Debug
+                    # print(f"debug obj {obj_idx}: p {p_np} vel {vel_np} dt {dt} new_p {new_p}")
+
+                    obj.set_world_pose(new_p, q)
 
     class SimTask:
         def __init__(self, 
@@ -599,38 +625,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     level:int,
                     stats_cfg:dict,
                     pose_utils:PoseUtils,
-                    velocity_scale = 1.0, # scale factor for the target velocity
-                    add_velocity_noise = False, # noise for the target velocity
-                    update_interval_tphys:float=0.2, # physics dt to update target
                     initial_vel_direction='center',
-                    # initial_targets_density=0.5,
-                    vel_noise=0.2,
+                    # target_vel_noise=0.2,
+                    # target_pos_noise=0.2,
+                    
                     ):
             
             """
             level:
 
-                1. jumpy-target, no obstacles,  density: 1.0
-                2. jumpy-target, static obstacles,  ,density = 1.0
-                3. jumpy-target, dynamic obstacles,  , density = 1.0
-                4: smooth-target, no obstacles,  ,density = 1.0
-                5: smooth-target, static obstacles, .density = 1.0
-                6: smooth-target, dynamic obstacles, ,density = 1.0    
-
-                7. jumpy-target, no obstacles,  ,density = 0.5
-                8. jumpy-target, static obstacles,   density = 0.5
-                9. jumpy-target, dynamic obstacles,  ,density = 0.5
-                10: smooth-target, no obstacles,  ,density = 0.5
-                11: smooth-target, static obstacles, . density = 0.5
-                12: smooth-target, dynamic obstacles, , density = 0.5
-
-                13. jumpy-target, no obstacles,  , noise: 0.1,density = 0.0
-                14. jumpy-target, static obstacles,  , noise: 0.1 density = 0.0
-                15. jumpy-target, dynamic obstacles,  ,density = 0.0
-                16: smooth-target, no obstacles,  ,density = 0.0
-                17: smooth-target, static obstacles, . density = 0.0
-                18: smooth-target, dynamic obstacles, , density = 0.0
-
+ 
                 
 
 
@@ -642,32 +646,22 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
             self._pose_utils = pose_utils
             self.target_name_to_target_lin_vel = [{} for _ in range(len(agents_task_cfgs))]
-            self.velocity_scale = velocity_scale
-            # self.add_velocity_noise = add_velocity_noise or self.level > 6 # add noise to the target velocity if level is > 6
-            
-            self.update_interval_tphys = update_interval_tphys if level in [1,2,3,7,8,9,13,14,15] else 0.0
-            self.add_velocity_noise = add_velocity_noise
-
-            if 1<=self.level<=6:
-                self.initial_targets_density = 0.0
-            elif 7<=self.level<=12:
-                self.initial_targets_density = 0.5
-            elif 13<=self.level<=18:
-                self.initial_targets_density = 1.0
-            else:
-                raise ValueError(f"Invalid level: {self.level}")
-
             self.initial_vel_direction = initial_vel_direction # 'center' or 'none'
-            self.target_vel_noise = vel_noise
+            # self.target_vel_noise = target_vel_noise
+            # self.target_pos_noise = target_pos_noise
             # Setup targets:
             self.link_name_to_target_vel = [{} for _ in range(self.n_agents)]
             
             link_name_to_target_pose_np = [{} for _ in range(self.n_agents)]
-            robots_center = self.get_arms_bases_center_pos()
+            # robots_center = self.get_arms_bases_center_pos()
             for a_idx in range(self.n_agents):
                 for link_name in self.link_name_to_path[a_idx].keys():
                     robot_base_pos = self.link_name_to_arm_base[a_idx][link_name][:3]
-                    init_target_pos = robot_base_pos + self.initial_targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                    init_target_pos = robot_base_pos #robots_center # robot_base_pos + self.targets_density * (robots_center - robot_base_pos) # target is halfway between robot and center of all robots
+                    # if self.target_pos_noise > 0:
+                    #     for axis in range(3):
+                    #         init_target_pos[axis] += self._pose_utils._local_rng.sample(list(np.arange(-self.target_pos_noise/2, self.target_pos_noise/2, self.target_pos_noise/10)),1)[0]
+                    
                     init_target_pos[2] += 0.75 # m above the base
                     init_target_quat = np.array([0,1,0,0])
                     link_name_to_target_pose_np[a_idx][link_name] = (init_target_pos, init_target_quat)
@@ -676,16 +670,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     else:
                         tar_vel_direction = np.array([0,0,0])
                     tar_vel_direction = np.array([tar_vel_direction[0], tar_vel_direction[1], 0])
-                    scaled_vel = tar_vel_direction * self.velocity_scale 
-                    if self.add_velocity_noise:
-                        scaled_vel += self._add_noise_to_target_vel()
+                    scaled_vel = tar_vel_direction  
+                    # if self.target_vel_noise > 0:
+                    #     scaled_vel += self._add_noise_to_target_vel()
                         
-                        # for axis in range(3):
-                        #     # noise_range = np.arange(-scaled_vel[axis]/2, scaled_vel[axis]/2, scaled_vel[axis]/10)
-                        #     noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
-                        #     noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
-                        #     scaled_vel[axis] += noise_axis
-                            # print(f'noise_axis: {noise_axis}, scaled_vel: {scaled_vel}')
                     self.link_name_to_target_vel[a_idx][link_name] = scaled_vel 
                     self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(init_target_pos), quaternion=self.tensor_args.to_device(init_target_quat))
             self._set_targets_world_pose(link_name_to_target_pose_np)
@@ -697,14 +685,14 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
             
         
-        def _add_noise_to_target_vel(self):
-            noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
-            noise = np.zeros(3)
-            for axis in range(3):
-                noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
-                print(f'noise_axis: {noise_axis}')
-                noise[axis] = noise_axis
-            return noise
+        # def _add_noise_to_target_vel(self):
+        #     noise_range = np.arange(-self.target_vel_noise/2, self.target_vel_noise/2, self.target_vel_noise/10)
+        #     noise = np.zeros(3)
+        #     for axis in range(3):
+        #         noise_axis = self._pose_utils._local_rng.sample(list(noise_range),1)[0]
+        #         print(f'noise_axis: {noise_axis}')
+        #         noise[axis] = noise_axis
+        #     return noise
     
         def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose) -> List[Dict[str, Tuple[np.ndarray]]] | None:
             if not self._is_initialized:
@@ -715,22 +703,49 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
             # update target pose in sim according to target lin vel
             tphysics_since_update = tphysics_cur - self._tphysics_at_last_update
-            if tphysics_since_update > self.update_interval_tphys:
-                self._tphysics_at_last_update = tphysics_cur
-                for a_idx in range(len(self.target_name_to_target_lin_vel)):
-                    for link_name in self.link_name_to_path[a_idx].keys():
-                        target_name = self.name_link_to_target[a_idx][link_name]     
-                        p_target, q_target = target_name_to_pose[a_idx][target_name]
+            # if tphysics_since_update > self.update_interval_tphys:
+            self._tphysics_at_last_update = tphysics_cur
+            for a_idx in range(len(self.target_name_to_target_lin_vel)):
+                for link_name in self.link_name_to_path[a_idx].keys():
+                    target_name = self.name_link_to_target[a_idx][link_name]     
+                    p_target, q_target = target_name_to_pose[a_idx][target_name]
+                    
+                    arm_base = deepcopy(self.link_name_to_arm_base[a_idx][link_name][:3])
+                    arm_body_center = [arm_base[0], arm_base[1], 0.4] # ~ half of ur5e length. Replace with other arm length if needed!
+                    too_far_from_robot = np.linalg.norm(p_target - arm_body_center) > 0.2
+                    if too_far_from_robot: # if target is too far from robot, sample a new position near the arm body center
+                        print(f'debug: target {target_name} too far from robot {link_name}')
+                        
+                        
+                        # Sample new target start position!
+                        p_target = arm_body_center + np.random.uniform(-0.05, 0.05, 3) # sample a new position near the arm body center
+                        for i in range(3):
+                            p_target[i] += self._pose_utils._local_rng.sample(list(np.arange(-0.05, 0.05, 0.005)),1)[0]
+                        
+                        q_target = np.array([0,1,0,0])
+                        target_name_to_pose[a_idx][target_name] = (p_target, q_target)
+                        
 
-                        if self.add_velocity_noise: # nudge the target velocity by a small amount                        
-                            noise = self._add_noise_to_target_vel()
-                            self.link_name_to_target_vel[a_idx][link_name] += noise
+                        # self.link_name_to_target_vel[a_idx][link_name] = np.random.uniform(-0.3, 0.3, 3)
+                        # Sample new target velocity!
+                        for i in range(3):
+                            self.link_name_to_target_vel[a_idx][link_name][i] += self._pose_utils._local_rng.sample(list(np.arange(-0.3, 0.3, 0.03)),1)[0]
                         
-                        target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
-                        p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
-                        self._update_target(p_target_new, q_target, a_idx, link_name)
-                        self._set_target_world_pose_by_link_name(a_idx, link_name, p_target_new, q_target)
                         
+                        
+                        self._update_target(p_target, q_target, a_idx, link_name)
+                        self._set_target_world_pose_by_link_name(a_idx, link_name, p_target, q_target)
+                        continue
+
+                    # if self.add_velocity_noise: # nudge the target velocity by a small amount                        
+                    #     noise = self._add_noise_to_target_vel()
+                    #     self.link_name_to_target_vel[a_idx][link_name] += noise
+                    
+                    target_lin_vel = self.link_name_to_target_vel[a_idx][link_name]
+                    p_target_new = p_target + tphysics_since_update * np.array(target_lin_vel)
+                    self._update_target(p_target_new, q_target, a_idx, link_name)
+                    self._set_target_world_pose_by_link_name(a_idx, link_name, p_target_new, q_target)
+                    
             return None
         
         def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
@@ -744,6 +759,23 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     raise ValueError(f"Invalid stat name: {stat_name}")
                 stats[stat_name] = val
             return stats
+
+    
+    class ManualTask(SimTask):
+        def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg):
+            super().__init__(agents_task_cfgs, world, usd_help, tensor_args, 1, stats_cfg)
+            
+        def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+            for a_idx in range(len(errors)):
+                for link_name in errors[a_idx].keys():
+                    p_err, q_err = errors[a_idx][link_name]
+                    target_name = self.name_link_to_target[a_idx][link_name]
+                    p_target, q_target = target_name_to_pose[a_idx][target_name]
+                    self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
+        
+        
+        def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+            return {}
 
     
     class ManualTask(SimTask):
@@ -3518,8 +3550,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             else:
                 raise ValueError(f"Invalid task type: {sim_task_type}")
 
-        sim_env = PrimsEnv(my_world, pose_utils, **meta_cfg["sim_env"]["cfg"])
-
+        obj_cfgs = [ObjectCfg(**obj_cfg) for obj_cfg in meta_cfg["sim_env"]["cfg"]["obj_cfgs"]]
+        sim_env = PrimsEnv(my_world, pose_utils, obj_cfgs)
         all_target_paths = [list(sim_task.target_path_to_prim[i].keys())[j] for i in range(len(cu_agents)) for j in range(len(sim_task.target_path_to_prim[i]))]
         # reset collision model for all agents, each agent ignores itslef, its targets and other agents' targets
         for a in cu_agents:
