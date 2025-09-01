@@ -263,7 +263,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       own: False # True
       obs: False # True
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-        is_on: True    
+        is_on: False    
 #     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
 #       is_on_world: False # True # visualize collision spheres in world frame
 #       ts_delta: 1 # int
