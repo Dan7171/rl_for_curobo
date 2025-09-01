@@ -341,7 +341,7 @@ class DynamicObsCollPredictor:
         # print(f'weight: {self.cost_weight}')
         
         # Reset RRC buffer (M: NXH) 
-        self.tmp_cost_mat_buf_sparse = torch.zeros_like(self.tmp_cost_mat_buf_sparse) # set reset cost matrix buffer (rows are rollouts, cols are sparse steps)
+        self.tmp_cost_mat_buf_sparse.zero_() # set reset cost matrix buffer (rows are rollouts, cols are sparse steps)
         
         if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
         
@@ -365,13 +365,14 @@ class DynamicObsCollPredictor:
                 
                 # Make masking f:
                 # now we ge the min distance to any st (subto) sphere on each rollout (dim 0) step h (dim 1)
-                min_dcol_self_subto_s2s = torch.amin(self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :], dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
-                min_dcol_self_subto_s2s = torch.relu(min_dcol_self_subto_s2s) # negative values (distances) mean intersection between spheres. We assume its impossibly to have a penetration, so we set distance to 0 instead, treating it just as contact between spheres.
-                th = self.safety_margin # safety margin, which if distance < th we start to penalize
-                d_col = min_dcol_self_subto_s2s # min distance to a sphere of subto (surface to surface distance)
-                f_mask = f_mask(d_col, th) # A matrix with values between 0 and 1, where 1 means collision, 0 means dist(self, subto) >= th (>= safety margin)
-                penalty_from_subto = alpha * f_mask # penalize self 
-                self.tmp_cost_mat_buf_sparse += penalty_from_subto
+                with torch.no_grad():  # Reduce memory overhead for intermediate computations
+                    min_dcol_self_subto_s2s = torch.amin(self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :], dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
+                    torch.relu_(min_dcol_self_subto_s2s)  # In-place operation to reduce memory
+                    th = self.safety_margin # safety margin, which if distance < th we start to penalize
+                    d_col = min_dcol_self_subto_s2s # min distance to a sphere of subto (surface to surface distance)
+                    f = f_mask(d_col, th) # A matrix with values between 0 and 1, where 1 means collision, 0 means dist(self, subto) >= th (>= safety margin)
+                    penalty_from_subto = alpha * f # penalize self 
+                    self.tmp_cost_mat_buf_sparse += penalty_from_subto
                        
         else: # without GPDB
 
@@ -399,6 +400,12 @@ class DynamicObsCollPredictor:
         # CLAMPING: 
         # set upper bound to 100,000 to avoid numerical issues        
         self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
+        
+        # Clear intermediate computation results to free GPU memory
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+            # Force synchronize to ensure memory is actually freed
+            torch.cuda.synchronize()
         
         return self.cost_mat_buf
 

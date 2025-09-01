@@ -497,7 +497,7 @@ if __name__ == "__main__":
     
     # Parse arguments first to see if we should do cleanup
     args = argparse.ArgumentParser()
-    args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_manual.yml")
+    args.add_argument("--combo_cfg_path", type=str, default="projects_root/experiments/benchmarks/cfgs/combo_cfg.yml")
     args.add_argument("--vis_mode", type=str, default="gui", choices=["gui", "livestream", "headless"])
     args.add_argument("--cluster", action="store_true") # if True, will run on cluster
     args.add_argument("--job_id", type=str, default='')
