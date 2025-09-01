@@ -215,7 +215,12 @@ def make_meta_cfgs(combo_cfg_path):
                                     # get num of arms and num of agents (n_cfgs) by alg type    
                                     cent = alg in ['CC', 'SC','D'] # is centralized planner        
                                     planner_type = alg_to_planner[alg]
-                                    n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
+                                    if task == 'CBSMP1':
+                                        n_disks = level
+                                        n_arms = n_disks
+                                    else:
+                                        n_arms = ret_pose_cfg[robot_fam][robot_type]["n_arms"]
+                                    
                                     if cent:
                                         robot_cfg_path =  cent_robot_cfgs[robot_fam][robot_type] #[n_arms]
                                         n_cfgs = 1
