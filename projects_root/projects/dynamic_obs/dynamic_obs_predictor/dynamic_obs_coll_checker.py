@@ -19,7 +19,19 @@ from curobo.geom.transform import batch_transform_points
 
 import time
 
+def f_mask(d_col:torch.Tensor, margin:float) -> torch.Tensor:
+    
+    if torch.any(d_col < 0):
+        print(f'DEBUG: d_col < 0: {d_col}')
+        raise ValueError('d_col < 0, d_col should be non-negative') 
+    x = d_col 
+    m =  -(1 / margin)
+    b = 1
+    f =   b + m * x
+    f_pos = torch.relu(f)
+    return f_pos
 
+    
 
 class DynamicObsCollPredictor:
     """
@@ -320,22 +332,22 @@ class DynamicObsCollPredictor:
 
         # Compute L2 norm (distance between sphere centers)
         torch.norm(self.ownobs_diff_vector_buff, dim=-1, keepdim=True, out=self.pairwise_surface_dist_buf)
-        
-        _debug_using_wta = self.prior_rule == 'pose_wta' 
+        ## Subtract radius sums to get surface-to-surface distance
+        self.pairwise_surface_dist_buf.sub_(self.pairwise_radsum_broadcast)
+
+        # _debug_using_wta = self.prior_rule == 'pose_wta' 
         # print(f'DEBUG: using wta: {_debug_using_wta}')
         # print(f'trust: {self.wta_trust}')
         # print(f'weight: {self.cost_weight}')
         
+        # Reset RRC buffer (M: NXH) 
+        self.tmp_cost_mat_buf_sparse = torch.zeros_like(self.tmp_cost_mat_buf_sparse) # set reset cost matrix buffer (rows are rollouts, cols are sparse steps)
         
         if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
-            # GPDB: (Goal Proximity Distance Biasing) - 
-            # If self has lower error than other robot (which self is susbcribed to), then we create the illusion
-            # for self, that other is far (that way, self will prioritize itself over other robot and ignore it as an obstacle)
-            # Note that assuming other robot is subsribed to self as well, it will do the exact opposite (self will "look" closer to the other robot, and other robot will be extra cautious regarding self) 
-            # That way we "bias" the actual distances robots sense, so the prioritized robot will "experience" new high distance (helping it ignoring the unprioritized robot)
-            # and the unprioritized robot will "experience" new low distance (helping it being extra cautious regarding the prioritized robot)
+        
             p_own_err, q_own_err = self.pose_wta_conflict_resolution['own_errors']
             subto_goal_errs = self.pose_wta_conflict_resolution['subto_errors']
+            
             for st_idx in subto_goal_errs.keys(): # for every robot self is subscribed to
                 p_err_subto, q_err_subto = subto_goal_errs[st_idx]
                 # if p_err_subto > p_own_err: # self has lower error than subto, so self is the winner. Self will set subto's distance to a very high distance to ignore it in action
@@ -345,34 +357,46 @@ class DynamicObsCollPredictor:
                 end_idx_subto = robot_map['end_idx']
 
                 # We now set self.pairwise_surface_dist_buf to a very high distance for the subto spheres (to ignore them in collision check and prioritize ourselves on top of them)
-                err_ratio = (p_err_subto / p_own_err) 
-            
-                # Biasing: make distances to the other robot spheres higher, trusting it to handle collisions (since it's ratio < 1 therefore it's inferior)
-                self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :] *= (err_ratio ** self.wta_trust) # = 10000 # very high fake norm 
+                
+                # Make prioritization expression (alpha) between self and other (subto) = err_ratio ** tau
+                err_ratio = p_own_err / p_err_subto   
+                tau = self.wta_trust
+                alpha = err_ratio ** tau 
+                
+                # Make masking f:
+                # now we ge the min distance to any st (subto) sphere on each rollout (dim 0) step h (dim 1)
+                min_dcol_self_subto_s2s = torch.amin(self.pairwise_surface_dist_buf[:, :, :, start_idx_subto:end_idx_subto, :], dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
+                min_dcol_self_subto_s2s = torch.relu(min_dcol_self_subto_s2s) # negative values (distances) mean intersection between spheres. We assume its impossibly to have a penetration, so we set distance to 0 instead, treating it just as contact between spheres.
+                th = self.safety_margin # safety margin, which if distance < th we start to penalize
+                d_col = min_dcol_self_subto_s2s # min distance to a sphere of subto (surface to surface distance)
+                f_mask = f_mask(d_col, th) # A matrix with values between 0 and 1, where 1 means collision, 0 means dist(self, subto) >= th (>= safety margin)
+                penalty_from_subto = alpha * f_mask # penalize self 
+                self.tmp_cost_mat_buf_sparse += penalty_from_subto
                        
-        # Subtract radius sums to get surface-to-surface distance
-        self.pairwise_surface_dist_buf.sub_(self.pairwise_radsum_broadcast)
-    
-        # AT EACH STEP h IN ROLLLOUT n, set cost to 1 / min distance to some other robot's sphere 
-        min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
-        # Remove negative distances ("sphere to sphere penetrations", replace them with 0)
-        min_dist_surf2surf = torch.max(min_dist_surf2surf, torch.zeros_like(min_dist_surf2surf)) # negative values (distances) mean intersection between spheres. We set distance to 0 instead, treating it just as contact between spheres.
-        self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) / (min_dist_surf2surf + 1e-6) # cost[i,j] = 1 / min distance[i,j] 
-        
-        # IF NOT USING GPDB PRIORITIZATION: MASK OUT (SET cost to0) WHEN SELF IS FAR ENOUGH FROM ANY OTHER ROBOT (SURFACE DIST >= SAFETY MARGIN)    
-        if self.prior_rule != 'pose_wta': 
+        else: # without GPDB
+
+            min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
+            # Remove negative distances ("sphere to sphere penetrations", replace them with 0)
+            min_dist_surf2surf = torch.max(min_dist_surf2surf, torch.zeros_like(min_dist_surf2surf)) # negative values (distances) mean intersection between spheres. We set distance to 0 instead, treating it just as contact between spheres.
+            self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) / (min_dist_surf2surf + 1e-6) # cost[i,j] = 1 / min distance[i,j] 
+            
+            # IF NOT USING GPDB PRIORITIZATION: MASK OUT (SET cost to0) WHEN SELF IS FAR ENOUGH FROM ANY OTHER ROBOT (SURFACE DIST >= SAFETY MARGIN)    
             # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
             margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
             # Mask out the cost where collision distance >  safety margin
             self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
 
-        # OPTIONAL- IF SPARSE STEPS IS ON, INTERPOLATE
+        
+        # INTERPOLATION (OPTIONAL)-
+        # IF SPARSE STEPS IS ON, INTERPOLATE
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
-        
-        # FINALLY, MULTIPLY BY CONSTANT WEIGHT OF COST TERM (HYPER PARAM) 
+    
+        # WEIGHTING:
+        # MULTIPLY BY CONSTANT WEIGHT OF COST TERM (HYPER PARAM) 
         self.cost_mat_buf.mul_(self.cost_weight)
 
+        # CLAMPING: 
         # set upper bound to 100,000 to avoid numerical issues        
         self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
         
