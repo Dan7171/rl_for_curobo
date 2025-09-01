@@ -2143,7 +2143,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             consume = True
             if code == PLAN_NEW:
                 print(f'planning...')
-                print(f'debug: goals: {goals}')
+                # print(f'debug: goals: {goals}')
                 _success = self._plan_new(cu_js, goals)
                 
             elif code == STOP_IN_PLACE:
@@ -3768,12 +3768,14 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                             pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
                             
                             # update agent stats
-                            stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
+                            stats_to_update_now = a.stat_man.get_now_update_names(t) # could also pass t
+                            print(f'debug: stats_to_update_now: {stats_to_update_now}')
                             stats = {}
                             for stat_name in stats_to_update_now:
                                 
 
                                 if stat_name == 'env_cols':
+                                    print(f'debug: min_esdf_distance: {a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R)}')
                                     in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
                                     if in_col:
                                         print(f"debug: warning robot {a.idx} in col with obstacle!!!")
@@ -4093,16 +4095,19 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
 
 
-    # Global flag to track if we should stop
+    # Simple signal handler to set stop flag and let normal flow handle simulation_app.close()
     def signal_handler(signum, _frame):
-        print(f"\nReceived {signum} – stopping…")
-        # stop_event.set()
+        print(f"[benchmark_sim] Received signal {signum} - setting stop flags...")
+        stop_event.set()  # Set the cooperative stop event
         global stop_simulation
         stop_simulation = True
+        print("[benchmark_sim] Stop flags set - normal flow will close simulation_app")
 
-    # stop_event = mp.Event()
+    # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Run main simulation 
     main(meta_cfg, out_path)
 
 

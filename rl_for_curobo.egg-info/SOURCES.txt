@@ -1528,6 +1528,7 @@ projects_root/examples/from_docs/omni_isaac_4.0.0_docs/multiple_robots.py
 projects_root/examples/from_docs/omni_isaac_4.0.0_docs/multiple_tasks.py
 projects_root/examples/from_docs/omniverse_tutorials/usd_files/my_first_usd.usd
 projects_root/examples/from_docs/omniverse_tutorials/usd_files/.thumbs/256x256/my_first_usd.usd.png
+projects_root/experiments/__init__.py
 projects_root/experiments/algorithm_comparison_visualization.ipynb
 projects_root/experiments/visualization_comparison_simple.py
 projects_root/experiments/benchmarks/control_table.csv
@@ -1535,6 +1536,8 @@ projects_root/experiments/benchmarks/experiments_plan_v0.yml
 projects_root/experiments/benchmarks/retract_and_pose.yml
 projects_root/experiments/benchmarks/run_experiments.py
 projects_root/experiments/benchmarks/cfgs/combo_cfg.yml
+projects_root/experiments/benchmarks/cfgs/combo_disk_task.yml
+projects_root/experiments/benchmarks/cfgs/combo_manual.yml
 projects_root/experiments/benchmarks/cfgs/meta_cfg_arms.yml
 projects_root/experiments/benchmarks/cfgs/meta_cfg_disk.yml
 projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml
@@ -1552,6 +1555,7 @@ projects_root/experiments/benchmarks/cfgs/meta_ready/meta_cfg_arms_500steps.yml
 projects_root/experiments/benchmarks/cfgs/meta_ready/meta_cfg_arms_50steps.yml
 projects_root/experiments/benchmarks/cfgs/particle/O.yml
 projects_root/experiments/benchmarks/cfgs/particle/others.yml
+projects_root/experiments/core_api/__init__.py
 projects_root/experiments/core_api/benchmark_sim.py
 projects_root/experiments/core_api/dataset_collector.py
 projects_root/experiments/core_api/simapp_livestream.py
