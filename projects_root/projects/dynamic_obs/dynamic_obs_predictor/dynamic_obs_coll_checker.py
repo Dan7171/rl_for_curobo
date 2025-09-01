@@ -343,7 +343,7 @@ class DynamicObsCollPredictor:
                 robot_map = self.col_with_idx_map[st_idx]
                 start_idx_subto = robot_map['start_idx']
                 end_idx_subto = robot_map['end_idx']
-                
+
                 # We now set self.pairwise_surface_dist_buf to a very high distance for the subto spheres (to ignore them in collision check and prioritize ourselves on top of them)
                 err_ratio = (p_err_subto / p_own_err) 
             
@@ -359,27 +359,21 @@ class DynamicObsCollPredictor:
         min_dist_surf2surf = torch.max(min_dist_surf2surf, torch.zeros_like(min_dist_surf2surf)) # negative values (distances) mean intersection between spheres. We set distance to 0 instead, treating it just as contact between spheres.
         self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) / (min_dist_surf2surf + 1e-6) # cost[i,j] = 1 / min distance[i,j] 
         
-        if self.prior_rule != 'pose_wta': # If not using GPDB prioritizatin- MASK OUT (SET 0) WHEN WHEN DISTANCE TO OTHER ROBOTS   
+        # IF NOT USING GPDB PRIORITIZATION: MASK OUT (SET cost to0) WHEN SELF IS FAR ENOUGH FROM ANY OTHER ROBOT (SURFACE DIST >= SAFETY MARGIN)    
+        if self.prior_rule != 'pose_wta': 
             # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
             margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
             # Mask out the cost where collision distance >  safety margin
             self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
 
-
-        # << OLD LOGIC >>
-        # # Check collision condition and count violations
-        # # Using lt_ for in-place comparison, then sum to count violations
-        # collision_mask = self.pairwise_surface_dist_buf.lt_(self.safety_margin)
-        # torch.sum(collision_mask, dim=[2, 3, 4], out=self.tmp_cost_mat_buf_sparse)
-        
+        # OPTIONAL- IF SPARSE STEPS IS ON, INTERPOLATE
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
         
-
-        # Apply cost weight
+        # FINALLY, MULTIPLY BY CONSTANT WEIGHT OF COST TERM (HYPER PARAM) 
         self.cost_mat_buf.mul_(self.cost_weight)
 
-        # set upper bound to 10_000 to avoid numerical issues        
+        # set upper bound to 100,000 to avoid numerical issues        
         self.cost_mat_buf = torch.min(self.cost_mat_buf, torch.ones_like(self.cost_mat_buf) * 100_000)
         
         return self.cost_mat_buf
