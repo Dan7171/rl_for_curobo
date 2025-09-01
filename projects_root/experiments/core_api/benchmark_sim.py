@@ -3768,7 +3768,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                             pts_debug.append({'points': p_obs, 'color': a.sim_robot.viz_col_pred_obs_color})
                             
                             # update agent stats
-                            stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
+                            stats_to_update_now = a.stat_man.get_now_update_names(t) # could also pass t
                             print(f'debug: stats_to_update_now: {stats_to_update_now}')
                             stats = {}
                             for stat_name in stats_to_update_now:
