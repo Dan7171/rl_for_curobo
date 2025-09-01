@@ -95,7 +95,7 @@ ur5e:
             
 tinyDisk:
   disk_template:
-    n_arms: 16 # change to control number of arms
+    n_arms: 4 # change to control number of arms
     retract:
       - [0.0, 0.0] 
     pose:

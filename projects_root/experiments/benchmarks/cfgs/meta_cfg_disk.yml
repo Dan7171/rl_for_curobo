@@ -1,6 +1,6 @@
 
 timeout:
-  tstep: 500 # 500 # world steps timeout
+  tstep: 5000 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -14,7 +14,7 @@ out:
     to_mp4_cfg:
       is_on: True # convert frames to mp4
       result_path: '' # result path for the mp4 video. If '', will be saved in the frames directory under the name 'simulation_video.mp4'
-      in_background: True # convert frames to mp4 in background
+      in_background: False # convert frames to mp4 in background
       video_fps: 15 # frames per second (for video)
     
   
