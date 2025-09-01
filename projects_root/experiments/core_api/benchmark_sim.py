@@ -3769,6 +3769,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             
                             # update agent stats
                             stats_to_update_now = a.stat_man.get_now_update_names(a.step_count) # could also pass t
+                            print(f'debug: stats_to_update_now: {stats_to_update_now}')
                             stats = {}
                             for stat_name in stats_to_update_now:
                                 
