@@ -26,13 +26,17 @@ from projects_root.experiments.core_api import benchmark_sim
 from projects_root.experiments.core_api.benchmark_sim import PoseUtils
 import traceback
 
-
+alg_to_particle_file = {
+    'O': 'O',
+    'O-': 'O_zero_trust',
+    # 'others': 'others.yml',
+}
 
 def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
     
     def get_default_particle_file(alg='O'):
         particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
-        particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
+        particle_file_name = alg_to_particle_file[alg] if alg in alg_to_particle_file else 'others' # (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
         return particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
         
     def make_tmp_particle_options(particle_options,default_particle_file_path):
