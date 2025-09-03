@@ -35,13 +35,9 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
         particle_file_name = (alg if alg == 'O' else 'others') # should be the same except for the 'prior_rule' field
         return particle_files_root + f'/{particle_file_name}.yml' # auto chosen # projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
         
-    def make_tmp_particle_options(particle_options,alg):
+    def make_tmp_particle_options(particle_options,default_particle_file_path):
         import yaml
         ret = []
-        if custom_particle_path != '':
-            default_particle_file_path = custom_particle_path
-        else:
-            default_particle_file_path = get_default_particle_file(alg)
         
         init_cov_options = particle_options["init_cov"] if "init_cov" in particle_options else [-1]
         wta_trust_options = particle_options["wta_trust"] if "wta_trust" in particle_options else [-1]
@@ -184,10 +180,11 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
         for robot_fam in robot_fam_options: # list
             for robot_type in robot_type: # list
                 for alg in alg_options: # list
+                    particle_file_path = custom_particle_path if custom_particle_path != '' else get_default_particle_file(alg)
                     if len(particle_options) > 0:
-                        particle_paths_alg_options = make_tmp_particle_options(combo_cfg["particle"],alg)
+                        particle_paths_alg_options = make_tmp_particle_options(combo_cfg["particle"],particle_file_path)
                     else:
-                        default_particle_file_path = get_default_particle_file(alg)
+                        default_particle_file_path = particle_file_path
                         particle_cfg = load_yaml(default_particle_file_path)
                         particle_paths_alg_options =  [particle_cfg]
                     
