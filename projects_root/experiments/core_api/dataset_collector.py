@@ -28,7 +28,7 @@ import traceback
 
 
 
-def make_meta_cfgs(combo_cfg_path):
+def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
     
     def get_default_particle_file(alg='O'):
         particle_files_root = 'projects_root/experiments/benchmarks/cfgs/particle'
@@ -38,8 +38,11 @@ def make_meta_cfgs(combo_cfg_path):
     def make_tmp_particle_options(particle_options,alg):
         import yaml
         ret = []
-        default_particle_file_path = get_default_particle_file(alg)
-
+        if custom_particle_path != '':
+            default_particle_file_path = custom_particle_path
+        else:
+            default_particle_file_path = get_default_particle_file(alg)
+        
         init_cov_options = particle_options["init_cov"] if "init_cov" in particle_options else [-1]
         wta_trust_options = particle_options["wta_trust"] if "wta_trust" in particle_options else [-1]
         wta_weight_options = particle_options["wta_weight"] if "wta_weight" in particle_options else [-1]
@@ -504,6 +507,7 @@ if __name__ == "__main__":
     args.add_argument("--in_process", action="store_true", default=False, help="Run the simulation in the same process as the dataset_collector. Automatically sets the num of meta cfgs to 1 (the first in combo) to avoid issues caused by many isaac-sim processes running at the same time")
     args.add_argument('--ignore_sim_errors',action="store_true", default=False)
     args.add_argument('--cleanup', action="store_true", default=True, help="Clean up zombie processes before starting")
+    args.add_argument('--custom_particle_path', type=str, default='')
     args = args.parse_args()
     
     # Startup cleanup disabled to prevent self-termination
@@ -516,7 +520,7 @@ if __name__ == "__main__":
     default_meta_cfg_path = "meta_cfg_arms.yml"
     robot_cfgs_dir = "curobo/src/curobo/content/configs/robot"
     benchmarks_ret_cfg = "projects_root/experiments/benchmarks/retract_and_pose.yml"
-    meta_cfgs, initial_out_names, particle_cfgs = make_meta_cfgs(args.combo_cfg_path)
+    meta_cfgs, initial_out_names, particle_cfgs = make_meta_cfgs(args.combo_cfg_path, args.custom_particle_path)
     print(f"debug: Generated {len(meta_cfgs)} simulation configurations")
     if args.in_process:
         meta_cfgs = [meta_cfgs[0]]
