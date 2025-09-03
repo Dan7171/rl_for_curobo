@@ -175,6 +175,9 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
         5: [obj_configs[0],obj_configs[1], obj_configs[2], obj_configs[3]],
     }
 
+    for level in range(6,11): # Currently (currently in reach only, not available in follow!) whats changed is the overlapping target boxes mode (if level > 5, then its overlapping target boxes mode)
+        reach_follow_objects_by_level[level] = reach_follow_objects_by_level[level-5] 
+
 
     for base_cfg_path in base_options:
         for robot_fam in robot_fam_options: # list

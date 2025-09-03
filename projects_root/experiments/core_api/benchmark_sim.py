@@ -797,12 +797,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     class ReachTask(SimTask):
         """
         level:
-            1: non-overlapping target boxes (centered around robots bases), no obstacles
-            2. non-overlapping target boxes (centered around robots bases), static obstacles
-            3. non-overlapping target boxes (centered around robots bases), dynamic obstacles
-            4. overlapping target boxes (centered around robots middle), no obstacles
-            5. overlapping target boxes (centered around robots middle), static obstacles
-            6. overlapping target boxes (centered around robots middle), dynamic obstacles
+           
             
             
 
@@ -820,7 +815,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             self.link_name_to_target_box_center = [{} for _ in range(self.n_agents)]
             target_box_h = targets_box_dim/2 + 0.2
             overlap_mode_box_center = robots_center + np.array([0,0,target_box_h])
-            self.overlapping_target_boxes = level > 3
+            self.overlapping_target_boxes = level in range(6,11)
 
             
             
