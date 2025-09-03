@@ -29,6 +29,7 @@ import traceback
 alg_to_particle_file = {
     'O': 'O',
     'O-': 'O_zero_trust',
+    'SD': 'binary_col_cost',
     # 'others': 'others.yml',
 }
 

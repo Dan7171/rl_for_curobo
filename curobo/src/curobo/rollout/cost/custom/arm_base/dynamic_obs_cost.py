@@ -27,6 +27,8 @@ class DynamicObsCostConfig(CostConfig):
     prior_weight_mode: str = "linear" # or exponential
     safety_margin: float = 0.1
     wta_trust: float = 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
+    cost_type: str = "linear" # storm_binary, (or defauly 'linear')
+    assert cost_type in ["linear", "storm_binary"], "Invalid cost type"
     assert a_select_mode in ["normal", "col_free"], "Invalid action selection mode"
     assert prior_rot_err_impact_angle >= 0 and prior_rot_err_impact_angle <= 180, "Rotation error affection angle must be between 0 and 180"
     assert prior_p_err_impact_rad >= 0 , "Position error affection radius must be positive (its recommended to set it small, like 0.3 or below)"
@@ -201,6 +203,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             },
             col_with_idx_map,
             self.safety_margin,
+            self.cost_type,
             self.prior_rule,
             self.wta_trust
         )
