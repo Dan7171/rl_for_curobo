@@ -386,18 +386,19 @@ class DynamicObsCollPredictor:
                         self.tmp_cost_mat_buf_sparse += penalty_from_subto
                         
             else: # without GPDB
-                raise ValueError("This is deprecated, should not be used")
-
-                min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
-                # Remove negative distances ("sphere to sphere penetrations", replace them with 0)
-                min_dist_surf2surf = torch.max(min_dist_surf2surf, torch.zeros_like(min_dist_surf2surf)) # negative values (distances) mean intersection between spheres. We set distance to 0 instead, treating it just as contact between spheres.
-                self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) / (min_dist_surf2surf + 1e-6) # cost[i,j] = 1 / min distance[i,j] 
+                # raise ValueError("This is deprecated, should not be used")
+                pass 
+                print(f'WARNING: NO COST WAS CALCULATED')
+                # min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
+                # # Remove negative distances ("sphere to sphere penetrations", replace them with 0)
+                # min_dist_surf2surf = torch.max(min_dist_surf2surf, torch.zeros_like(min_dist_surf2surf)) # negative values (distances) mean intersection between spheres. We set distance to 0 instead, treating it just as contact between spheres.
+                # self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) / (min_dist_surf2surf + 1e-6) # cost[i,j] = 1 / min distance[i,j] 
                 
-                # IF NOT USING GPDB PRIORITIZATION: MASK OUT (SET cost to0) WHEN SELF IS FAR ENOUGH FROM ANY OTHER ROBOT (SURFACE DIST >= SAFETY MARGIN)    
-                # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
-                margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
-                # Mask out the cost where collision distance >  safety margin
-                self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
+                # # IF NOT USING GPDB PRIORITIZATION: MASK OUT (SET cost to0) WHEN SELF IS FAR ENOUGH FROM ANY OTHER ROBOT (SURFACE DIST >= SAFETY MARGIN)    
+                # # Make a mask for the safety margin, to avoid punishing robot for being far enough (beyond margin) from other robots.
+                # margin_mask = min_dist_surf2surf.lt(self.safety_margin).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
+                # # Mask out the cost where collision distance >  safety margin
+                # self.tmp_cost_mat_buf_sparse.mul_(margin_mask) # set cost to 0 where collision distance >  safety margin
 
         
         # INTERPOLATION (OPTIONAL)-
