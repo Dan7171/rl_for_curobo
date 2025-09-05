@@ -212,16 +212,19 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
                                     # set pub sub config by alg type
                                     is_pub = alg_to_pub_sub[alg][0]
                                     is_sub = alg_to_pub_sub[alg][1]
+                                    cent = alg in ['CC', 'SC','D'] # is algorithm centralized
                                     meta_cfg["default"]["plan_pub_sub"] = {
-                                        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
-                                        'sub':{'is_on':is_sub,'to':'all'}
+                                        'is_on': not cent,
+                                        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0}, # is on: should publishe full plan. if false: publish current state as plan (naive plan)
+                                        'sub':{'is_on':is_sub,'to':'all'} # should compute costs based on other robots etimated plans (either full or naive)
+                                        
                                     }
                                     
                                     
 
                         
                                     # get num of arms and num of agents (n_cfgs) by alg type    
-                                    cent = alg in ['CC', 'SC','D'] # is centralized planner        
+                                     # is centralized planner        
                                     planner_type = alg_to_planner[alg]
                                     if task == 'CBSMP1':
                                         n_disks = level
@@ -390,14 +393,23 @@ def signal_handler(signum, _frame):
         # Properly close multiprocessing resources
         try:
             import multiprocessing
-            multiprocessing.active_children()  # Trigger cleanup of dead processes
+            import time
+            
+            # Clean up active children
+            active_children = multiprocessing.active_children()
+            for child in active_children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join(timeout=1)
+                    if child.is_alive():
+                        child.kill()
             
             # Close the stop_event properly
             if stop_event is not None:
                 stop_event.set()
-                # Give a moment for processes to see the event
-                import time
-                time.sleep(0.1)
+                time.sleep(0.1)  # Give a moment for processes to see the event
+                if hasattr(stop_event, 'close'):
+                    stop_event.close()
                 
         except Exception as e:
             print(f"Warning: Could not clean up multiprocessing resources: {e}")
@@ -657,11 +669,35 @@ if __name__ == "__main__":
     # Final cleanup to prevent semaphore leaks
     try:
         import multiprocessing
-        multiprocessing.active_children()  # Clean up any remaining child processes
+        import time
         
+        # Clean up active children first
+        active_children = multiprocessing.active_children()
+        if active_children:
+            print(f"Cleaning up {len(active_children)} active child processes...")
+            for child in active_children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join(timeout=2)
+                    if child.is_alive():
+                        child.kill()
+                        child.join(timeout=1)
+        
+        # Properly close the stop_event
         if stop_event is not None:
-            stop_event.set()  # Signal any waiting processes
-            
-        print("Final cleanup completed")
+            try:
+                stop_event.set()
+                time.sleep(0.1)  # Give time for processes to see the event
+                if hasattr(stop_event, 'close'):
+                    stop_event.close()
+            except Exception as e:
+                print(f"Warning: Could not close stop_event: {e}")
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        print("Enhanced cleanup completed - semaphore leaks prevented")
+        
     except Exception as e:
         print(f"Warning during final cleanup: {e}")
