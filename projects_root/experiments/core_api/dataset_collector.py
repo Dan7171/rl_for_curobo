@@ -390,14 +390,23 @@ def signal_handler(signum, _frame):
         # Properly close multiprocessing resources
         try:
             import multiprocessing
-            multiprocessing.active_children()  # Trigger cleanup of dead processes
+            import time
+            
+            # Clean up active children
+            active_children = multiprocessing.active_children()
+            for child in active_children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join(timeout=1)
+                    if child.is_alive():
+                        child.kill()
             
             # Close the stop_event properly
             if stop_event is not None:
                 stop_event.set()
-                # Give a moment for processes to see the event
-                import time
-                time.sleep(0.1)
+                time.sleep(0.1)  # Give a moment for processes to see the event
+                if hasattr(stop_event, 'close'):
+                    stop_event.close()
                 
         except Exception as e:
             print(f"Warning: Could not clean up multiprocessing resources: {e}")
@@ -657,11 +666,35 @@ if __name__ == "__main__":
     # Final cleanup to prevent semaphore leaks
     try:
         import multiprocessing
-        multiprocessing.active_children()  # Clean up any remaining child processes
+        import time
         
+        # Clean up active children first
+        active_children = multiprocessing.active_children()
+        if active_children:
+            print(f"Cleaning up {len(active_children)} active child processes...")
+            for child in active_children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join(timeout=2)
+                    if child.is_alive():
+                        child.kill()
+                        child.join(timeout=1)
+        
+        # Properly close the stop_event
         if stop_event is not None:
-            stop_event.set()  # Signal any waiting processes
-            
-        print("Final cleanup completed")
+            try:
+                stop_event.set()
+                time.sleep(0.1)  # Give time for processes to see the event
+                if hasattr(stop_event, 'close'):
+                    stop_event.close()
+            except Exception as e:
+                print(f"Warning: Could not close stop_event: {e}")
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        print("Enhanced cleanup completed - semaphore leaks prevented")
+        
     except Exception as e:
         print(f"Warning during final cleanup: {e}")
