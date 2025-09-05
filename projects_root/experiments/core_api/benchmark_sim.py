@@ -1329,14 +1329,17 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             pub_cfg:dict,
             sub_cfg:dict,
             valid_spheres:int,
-            total_spheres:int
+            total_spheres:int,
+            
             ):
             self.pub_cfg = pub_cfg
             self.sub_cfg = sub_cfg
             self.valid_spheres = valid_spheres
             self.total_spheres = total_spheres
-
+            
         def should_pub_now(self, t:int)->bool:
+
+
             def bernoulli():
                 return random.random() <= self.pub_cfg["pr"]
             if self.pub_cfg["is_dt_in_sec"]:
@@ -2628,7 +2631,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     js = self.sim_robot.get_js(sync_new=False)
                     plan = None
                     if js is not None and self.plan_pub_sub is not None and self.plan_pub_sub.should_pub_now(t):
-                        share_full_plan = self.is_plan_publisher()
+                        share_full_plan = self.is_full_plan_publisher()
                         psw.on()
                         try:
                             plan = self.planner.get_estimated_plan(
@@ -2715,7 +2718,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
                     # 8) Optional debug: visualize collision predictor data if publishing and multi-robot
                     if (viz_cpred_own or viz_cpred_obs) and (t % viz_cpred_dt == 0):
-                        if self.is_plan_publisher():
+                        if self.is_full_plan_publisher():
                             debug_data = self.planner.get_col_pred_debug()
                             if debug_data is not None:
                                 p_obs, p_own, r_obs, r_own = debug_data
@@ -2771,7 +2774,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                 js = self.sim_robot.get_js(sync_new=False)
                 plan = None
                 if js is not None and self.plan_pub_sub is not None and self.plan_pub_sub.should_pub_now(t):
-                    share_full_plan = self.is_plan_publisher()
+                    share_full_plan = self.is_full_plan_publisher()
                     psw.on()
                     try:
                         plan = self.planner.get_estimated_plan(
@@ -2859,7 +2862,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
                 # 8) Optional debug: visualize collision predictor data if publishing and multi-robot
                 if (viz_cpred_own or viz_cpred_obs) and (t % viz_cpred_dt == 0) and pts_debug is not None:
-                    if self.is_plan_publisher():
+                    if self.is_full_plan_publisher():
                         debug_data = self.planner.get_col_pred_debug()
                         if debug_data is not None:
                             p_obs, p_own, r_obs, r_own = debug_data
@@ -2893,7 +2896,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         
             plan = None
             if js is not None: #and self.plan_pub_sub.should_pub_now(t):
-                share_full_plan = self.is_plan_publisher() # naive means broadcase state as plan over horizon
+                share_full_plan = self.is_full_plan_publisher() # naive means broadcase state as plan over horizon
                 plan = self.planner.get_estimated_plan(ctrl_dof_names, self.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))                    
             if plan is not None: # currently available in mpc only
                 with plans_lock:
@@ -2953,8 +2956,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         def is_plan_subscriber(self)->bool:
             return self.plan_pub_sub is not None and self.plan_pub_sub.sub_cfg["is_on"]
 
-        def is_plan_publisher(self):
-            return self.plan_pub_sub.pub_cfg["is_on"]
+        def is_full_plan_publisher(self):
+            return self.plan_pub_sub is not None and self.plan_pub_sub.pub_cfg["is_on"]
+
+            
 
         @staticmethod
         def check_collisions_between_agents(agents_spheres:list[torch.Tensor])->list[list[list[tuple[int,int]]]]:
@@ -3408,6 +3413,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             #     pub_sub_cfgs[a_idx]["sub"] = deepcopy(meta_cfg["default"]["plan_pub_sub"]["sub"])
             pub_sub_cfgs[a_idx]["sub"] = a_cfg["plan_pub_sub"]["sub"]
             pub_sub_cfgs[a_idx]["pub"] = a_cfg["plan_pub_sub"]["pub"]
+            pub_sub_cfgs[a_idx]["is_on"] = a_cfg["plan_pub_sub"]["is_on"]
 
             # parse sub to
             if pub_sub_cfgs[a_idx]["sub"]["to"] == "all":
@@ -3477,6 +3483,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             
             a_stat_man_cfg = deepcopy(a_cfg["stat_man_cfg"]) # if "stat_man_cfg" in a_cfg else deepcopy(meta_cfg["default"]["stat_man_cfg"])
             a_stat_man_cfg["unique_name"] = f'agent_{a_idx}'
+            plan_pub_sub = None if (not pub_sub_cfgs[a_idx]["is_on"]) else PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx])
             a = CuAgent(
                 a_idx,
                 tensor_args,
@@ -3485,7 +3492,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                 robot_cfg_path=robot_cfgs_paths[a_idx],
                 robot_cfg=robot_cfgs[a_idx],
                 sim_robot=sim_robot, # optional, when using simulation
-                plan_pub_sub=PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
+                plan_pub_sub=plan_pub_sub, #PlanPubSub(pub_sub_cfgs[a_idx]["pub"], pub_sub_cfgs[a_idx]["sub"], sphere_counts_splits[a_idx][0], sphere_counts_total[a_idx]),
                 viz_color=viz_color,
                 stat_man_cfg=a_stat_man_cfg,
                 world=my_world if sim_robot is not None else None,
@@ -3639,19 +3646,23 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             # sw.off()
 
                             
-                            psw.on()
                             plan = None
-                            if js is not None and a.plan_pub_sub.should_pub_now(t):
-                                share_full_plan = a.is_plan_publisher() # naive means broadcase state as plan over horizon
-                                plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))
-                            psw.off()
-
-                            if plan is not None: # currently available in mpc only
-                                plans_board[a.idx] = plan
-                                if viz_plans and t % viz_plans_dt == 0:
-                                    pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
-                            
-                            
+                            agent_decentralized = a.plan_pub_sub is not None
+                            if agent_decentralized:
+                                if js is not None and a.plan_pub_sub.should_pub_now(t):
+                                    # print(f'planning debug')
+                                    share_full_plan = a.is_full_plan_publisher() # naive means broadcase state as plan over horizon
+                                    psw.on()
+                                    plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))                        
+                                    elapsed = psw.off()
+                                    print(f'debug agent: {a_idx} plan getting time: {elapsed}')
+                                    # psw.off()
+                                    if plan is not None: # currently available in mpc only
+                                        plans_board[a.idx] = plan
+                                        if viz_plans and t % viz_plans_dt == 0:
+                                            pts_debug.append({'points': plan['task_space']['spheres']['p'], 'color': a.sim_robot.viz_plan_color})
+                                    
+                                    
             
                 
                             # sense obstacles 
@@ -3674,19 +3685,22 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                             if isinstance(planner, MpcPlanner):
                                 planner.update_state(cu_js)
-                            
+                            elapsed = psw.off()
+                            print(f'debug agent: {a_idx} js update time: {elapsed}')
+
                             task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
                             spheres_R = task_space_state_R['spheres']
                             p_R, r_R = spheres_R['p'], spheres_R['r']
                             pr_R = torch.cat((p_R.squeeze(0), r_R.T),dim=1) # S (sphres) x 4 (xyzr)
-                            psw.off()
-
+                            # psw.off()
+                            # debug_stime = psw.off()
+                            # print(f'debug block 2 time: {debug_stime}')
                             
-                            psw.on()
-                            # sense plans
-                            if a.is_plan_subscriber():
-                                
+                            # if a.is_plan_subscriber():
+                            if a.is_full_plan_publisher():    
                                 # read goal errors for wta conflict resolution
+                                psw.on()
+                            
                                 a_n_links = len(l_name_to_goal_err[a.idx])
                                 a_goal_errors = l_name_to_goal_err[a.idx]
                                 p_err, q_err = 0.0, 0.0
@@ -3694,9 +3708,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                     p_err += p_err_link
                                     q_err += q_err_link
                                 mean_goal_err[a.idx] = (p_err / a_n_links, q_err / a_n_links)
+                                elapsed = psw.off()
+                                print(f'debug: agent {a_idx}, elapsed {elapsed} at goal upadte from others for prioritization in cost function')
 
-                            a.update_col_pred(plans_board, mean_goal_err)
-                                            
+                            # sense plans
+                            if a.plan_pub_sub is not None: # everyone that has plan_pub_sub != None are at least subscribers
+                                psw.on()
+                                a.update_col_pred(plans_board, mean_goal_err) # update horizon/naive plans from others
+                                elapsed = psw.off()
+                                print(f'debug: agent {a_idx}, elapsed: {elapsed} at update plans of others (naive/over horizon) to use in robot-robot-col cost function')
+            
                             # sense goals
                             goals = link_name_to_target_pose[a.idx]
 
@@ -3708,21 +3729,27 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
 
                             # yield action
+                            
                             if isinstance(planner, CumotionPlanner):
+                                psw.on()
                                 action = planner.yield_action(goals, cu_js, js.velocities)
+                                elapsed = psw.off()
+                                print(f'debug agent {a_idx} solver step time: {elapsed}')
                             elif isinstance(planner, MpcPlanner):
+                                psw.on()
                                 action = planner.yield_action(goals)
+                                elapsed = psw.off()
+                                print(f'debug agent {a_idx} solver step time: {elapsed}')
                                 if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
                                     pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.viz_mpc_ee_rollouts_color})
 
                             else:
                                 raise ValueError(f"Invalid planner type: {planner_type}")
-                            psw.off()
-                            
                             # act
                             if action is not None:
                                 isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
                                 a.sim_robot.articulation_controller.apply_action(isaac_action)
+                                # print(f'Debug: robot {a_idx} action = {isaac_action}')
                                 a.step_count += 1
                             
                             # debug
@@ -3751,7 +3778,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 a.sim_robot.update_robot_sim_spheres('/curobo', True, a.idx, sphere_viz_tensor,viz_spheres_in_col)
 
                             if (viz_cpred_own or viz_cpred_obs) and t % viz_cpred_dt == 0:
-                                if a.is_plan_publisher() and len(cu_agents) > 1:
+                                if a.is_full_plan_publisher() and len(cu_agents) > 1:
                                     debug_data = a.planner.get_col_pred_debug()
                                     if debug_data is not None:
                                         p_obs, p_own, r_obs, r_own = debug_data
@@ -3764,13 +3791,13 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             
                             # update agent stats
                             stats_to_update_now = a.stat_man.get_now_update_names(t) # could also pass t
-                            print(f'debug: stats_to_update_now: {stats_to_update_now}')
+                            # print(f'debug: stats_to_update_now: {stats_to_update_now}')
                             stats = {}
                             for stat_name in stats_to_update_now:
                                 
 
                                 if stat_name == 'env_cols':
-                                    print(f'debug: min_esdf_distance: {a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R)}')
+                                    # print(f'debug: min_esdf_distance: {a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R)}')
                                     in_col = a.cu_world_wrapper.col_check_wrap.get_min_esdf_distance(pr_R) < 0.01
                                     if in_col:
                                         print(f"debug: warning robot {a.idx} in col with obstacle!!!")
@@ -3784,8 +3811,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                     val = sphere_tensor_W
                                     # agents_spheres[a.idx] = sphere_tensor_W
                                 elif stat_name == 'total_planning_time': # total planning time
-                                    val = psw.total 
-
+                                    val = psw.total
+                                    # print(f'debug: total planning time agent i={a_idx}: {val}') 
+                                    print(f'debug TOTAL CONTROL ITER PLANNING TIME AGENT: {a_idx} = {val/t}')
                                 elif stat_name == 'arm_cols': # collisions between arms
                                     viz_spheres_in_col = set()
                                     if not len(sphere_tensor_W):
@@ -3961,7 +3989,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 if a.plan_pub_sub is not None and a.plan_pub_sub.should_pub_now(t):
                                     js_prev = a.sim_robot.get_js(sync_new=False)
                                     if js_prev is not None:
-                                        share_full_plan = a.is_plan_publisher()
+                                        share_full_plan = a.is_full_plan_publisher()
                                         plan = a.planner.get_estimated_plan(
                                             a.sim_robot.robot.dof_names,
                                             a.plan_pub_sub.valid_spheres,

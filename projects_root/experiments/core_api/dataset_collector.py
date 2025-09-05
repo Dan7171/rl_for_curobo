@@ -212,16 +212,19 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
                                     # set pub sub config by alg type
                                     is_pub = alg_to_pub_sub[alg][0]
                                     is_sub = alg_to_pub_sub[alg][1]
+                                    cent = alg in ['CC', 'SC','D'] # is algorithm centralized
                                     meta_cfg["default"]["plan_pub_sub"] = {
-                                        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0},
-                                        'sub':{'is_on':is_sub,'to':'all'}
+                                        'is_on': not cent,
+                                        'pub':{'is_on':is_pub,'dt':1,'is_dt_in_sec':False,'pr':1.0}, # is on: should publishe full plan. if false: publish current state as plan (naive plan)
+                                        'sub':{'is_on':is_sub,'to':'all'} # should compute costs based on other robots etimated plans (either full or naive)
+                                        
                                     }
                                     
                                     
 
                         
                                     # get num of arms and num of agents (n_cfgs) by alg type    
-                                    cent = alg in ['CC', 'SC','D'] # is centralized planner        
+                                     # is centralized planner        
                                     planner_type = alg_to_planner[alg]
                                     if task == 'CBSMP1':
                                         n_disks = level
