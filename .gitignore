@@ -25,4 +25,3 @@ third_party
 *.pkl
 *NvStreamer*
 */particle/.tmp*
-*.ipynb
