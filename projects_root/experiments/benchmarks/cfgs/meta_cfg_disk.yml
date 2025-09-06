@@ -5,12 +5,12 @@ timeout:
   physics_tsec: 30000 # physics seconds (world time) timeout
 
 out:
-  out_dir_root: '/home/evrond/mr_mpc_logs' # output directory
+  out_dir_root: '/home/dan/mr_mpc_logs' # output directory
   batch_dir_name: 'TIMESTAMP' # '1908_repeat_follow_task' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
-    is_on: True # capture and save frames to pngs
+    is_on: False # capture and save frames to pngs
     to_mp4_cfg:
       is_on: True # convert frames to mp4
       result_path: '' # result path for the mp4 video. If '', will be saved in the frames directory under the name 'simulation_video.mp4'
@@ -30,52 +30,6 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     # never_update: ['defaultGroundPlane'] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
     never_update: [] # paths of objects that are added at the beginning of the simulation and should never be updated in the collision world (normally should set here the static objects, like the ground)
   
-  cumotion: # cumotion related default values (if not specified by the agent)
-    motion_gen_cfg:
-      use_cuda_graph: True 
-      self_collision_check: True
-      collision_checker_type: MESH
-      collision_cache: {"obb": 15, "mesh": 15}
-      interpolation_dt: 0.03
-      collision_activation_distance: 0.025
-      fixed_iters_trajopt: True
-      maximum_trajectory_dt: 0.5
-      ik_opt_iters: 500
-      # use_cuda_graph: True 
-      # self_collision_check: True
-      # collision_checker_type: MESH
-      # collision_cache: {"obb": 15, "mesh": 15}
-      # interpolation_dt: 0.03
-      # collision_activation_distance: 0.025
-      # fixed_iters_trajopt: True
-      # maximum_trajectory_dt: 0.5
-      # ik_opt_iters: 500 # 1000
-      # num_ik_seeds: 32 # 256 # 128 # 32
-      position_threshold: 0.05 #0.05 # 0.005
-      rotation_threshold: 100.0 # very high to disable rotation threshold (original 0.05)
-
-    motion_gen_plan_cfg:
-      enable_graph: False
-      enable_graph_attempt: 4
-      max_attempts: 10
-      time_dilation_factor: 0.5
-    
-    warmup_cfg:
-      enable_graph: True
-      warmup_js_trajopt: False
-    
-    # motion_gen_plan_cfg:
-    #   enable_graph: False
-    #   enable_graph_attempt: 4
-    #   max_attempts: 10 # 10
-    #   time_dilation_factor: 0.5
-    #   finetune_attempts: 30 # 5
-    #   enable_finetune_trajopt: False # True  # True
-    
-    # warmup_cfg:
-    #   enable_graph: True
-    #   warmup_js_trajopt: False
-    
   
   mpc: # mpc related default values (if not specified in the agent)
     mpc_solver_cfg:
@@ -88,7 +42,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: False # for debugging
+      plot_costs: True # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
@@ -149,37 +103,19 @@ default: # default values to fallback to if not specified in the agent cfg. Note
                 
   
 async: False
-async_type: "loop" # "step" or "loop"
-
 pose_utils:
   seed: 0 # seed to sample the obstacle poses
 
   
 sim_task:
   
-  task_type: manual # bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
-  level: 1 # 1: easy, 2: medium, 3: hard ...
+  task_type: CBSMP1 # bin # manual # reach # 'CBSMP1' # reach/follow/manual/CBSMP_1 (for debugging)
+  level: 2 # 1: easy, 2: medium, 3: hard ...
   # task cfgs
   task_cfgs:
-    # manual: {}
-    # follow:
-    #   # update_interval_tphys: 0.2 # physics dt to update target
-    #   add_velocity_noise: True # add noise for the target velocity
-    #   initial_vel_direction: 'none' # 'none' for no initial velocity, 'center' for initial velocity towards the center of all robots
-    #   vel_noise: 0.02 # size of noise interval to add to the target velocity on each axis
-    #   # initial_targets_density: 0.0 # a valud between 0 and 1 where 0 means no density and 1 means full density
-    # reach: 
-    #   targets_box_dim: 0.5
-    #   update_interval_tphys: 1.0
-    #   p_err_threh: 0.05
-    #   q_err_threh: 300.0
-    # bin:
-    #   wall_dims_hwd: [0.20,0.40,0.05] # height, width, depth of the bin walls
-    #   p_err_threh: 0.05
-    #   q_err_threh: 300.0
-    #   # bin_pos: [0.0,0.0,0.0] # set only in one arm case (for debugging)
+
     CBSMP1:
-      spacing: 0.25 # 0.5 # 0.25 # 0.15 # 
+      spacing: 2.25 # 0.5 # 0.25 # 0.15 # 
       noise: False
       robot_base_radius: 0.025
       add_walls: False
@@ -187,27 +123,6 @@ sim_task:
       
   # tasks stat managers    
   stat_man_cfgs:
-    bin: 
-      keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['arm_err', 'arm_picks', 'arm_drops'] # for each robot, a list with the link names that were picked/ placed at each step
-      collect_dt: 1
-      dt_key_type: 'tstep'
-      save: True
-    reach: # link and target poses will be available by agent stats (and no other stats needed)
-      # keys: ['tsys', 'tphysics', 'w_step']
-      keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['arm_err', 'arm_changed', 'arm_reached']
-
-      collect_dt: 1
-      dt_key_type: 'tstep'
-      save: True
-      
-    follow: # link and target poses will be available by agent stats (and no other stats needed)
-      keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['arm_err']
-      collect_dt: 1
-      dt_key_type: 'tstep'
-      save: True
     manual: 
       {}
     CBSMP1:
@@ -216,22 +131,9 @@ sim_task:
       collect_dt: 1
       dt_key_type: 'tstep'
       save: True
-
-  
-    
       
 sim_env:
   cfg:
     obj_cfgs: []
     
 
-
-# cu_agents:  # list of agents (each agent is a robot with a planner). Note: you can specify agent-specific values here for each of  the default values in this file (see above).
-
-cu_agents: 
-  -  visualize_col_pred:
-      own: True
-      own_color: 'blue'
-      own_mean_only: True
-      obs: True
-      obs_color: 'red'
