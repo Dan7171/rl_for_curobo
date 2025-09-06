@@ -344,7 +344,7 @@ class DynamicObsCollPredictor:
         # print(f'weight: {self.cost_weight}')
         
         # Reset RRC buffer (M: NXH) 
-        self.cost_type = 'linear'
+        # self.cost_type = 'linear'
         self.tmp_cost_mat_buf_sparse.zero_() # set reset cost matrix buffer (rows are rollouts, cols are sparse steps)
         
         if self.cost_type == 'storm_binary': # 1 where collision, 0 where not
