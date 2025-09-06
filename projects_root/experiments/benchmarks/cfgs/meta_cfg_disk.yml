@@ -126,8 +126,11 @@ sim_task:
     manual: 
       {}
     CBSMP1:
-      keys: ['tsys', 'tphysics', 'w_step']
-      stat_names: ['p_err']
+      # keys: ['tsys', 'tphysics', 'w_step']
+      # dt_key_type: 'tstep' # 'tstep' or 'tsec' or 'tphysics'
+      keys: ['tsys', 'tphysics', 'w_step', 'a_step'] # added to  every stat
+      stat_names: ['env_cols', 'link_target_poses', 'arm_cols', 'total_planning_time', 'spheres']
+      # stat_names: ['p_err']
       collect_dt: 1
       dt_key_type: 'tstep'
       save: True
