@@ -5,4 +5,4 @@ robot_fam: ['tinyDisk'] #  # ur5e, ur10e, franka
 robot_type: [disk_template] # ['4_05'] # ['4_05'] # ['2_05b'] # ['2_05'] # ['2_05', '4_04']
 task_seed: [0] #[0,1,2]
 task_to_levels:
-  CBSMP1: [2]
+  CBSMP1: [8]

@@ -1,6 +1,6 @@
 
 timeout:
-  tstep: 5000 # 500 # world steps timeout
+  tstep: 1000 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -10,7 +10,7 @@ out:
   stats: True # save stats 
   meta_cfg: True # save meta cfg
   frame_cap: # frame capturing
-    is_on: False # capture and save frames to pngs
+    is_on: True # capture and save frames to pngs
     to_mp4_cfg:
       is_on: True # convert frames to mp4
       result_path: '' # result path for the mp4 video. If '', will be saved in the frames directory under the name 'simulation_video.mp4'
@@ -35,7 +35,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     mpc_solver_cfg:
       override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_disk.yml 
       use_cuda_graph: False 
-      step_dt: 0.0167
+      step_dt: 0.016666 # 0.0167
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
@@ -65,12 +65,12 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       ts_delta: 2 # int
       
     visualize_plan: # visualize the planned trajectory of the robot (for debugging)
-      is_on: False
+      is_on: True
       color: viz_color
       ts_delta: 1 # int
     
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-      is_on: False
+      is_on: True
       color: 'green'
       ts_delta: 1 # int
 
@@ -115,7 +115,7 @@ sim_task:
   task_cfgs:
 
     CBSMP1:
-      spacing: 2.25 # 0.5 # 0.25 # 0.15 # 
+      spacing: 0.2 # 2.25 # 0.5 # 0.25 # 0.15 # 
       noise: False
       robot_base_radius: 0.025
       add_walls: False

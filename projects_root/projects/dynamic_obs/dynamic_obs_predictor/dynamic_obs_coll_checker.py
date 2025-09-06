@@ -348,6 +348,7 @@ class DynamicObsCollPredictor:
         self.tmp_cost_mat_buf_sparse.zero_() # set reset cost matrix buffer (rows are rollouts, cols are sparse steps)
         
         if self.cost_type == 'storm_binary': # 1 where collision, 0 where not
+            print(f'DEBUG: in storm_binary cost type')
             min_dist_surf2surf = torch.amin(self.pairwise_surface_dist_buf, dim=tuple(range(2, self.pairwise_surface_dist_buf.ndim)))
             self.tmp_cost_mat_buf_sparse = torch.ones_like(min_dist_surf2surf) 
             mask_out_of_collision = min_dist_surf2surf.lt(0.01).float() # 1 where minimal distance is less than required safety margin, 0 otherwise
@@ -355,6 +356,7 @@ class DynamicObsCollPredictor:
             print(f'DEBUG: tmp_cost_mat_buf_sparse max: {self.tmp_cost_mat_buf_sparse.max()}, min: {self.tmp_cost_mat_buf_sparse.min()}')
             
         elif self.cost_type == 'linear':
+            print(f'DEBUG: in linear cost type')
             if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
             
                 p_own_err, q_own_err = self.pose_wta_conflict_resolution['own_errors']
