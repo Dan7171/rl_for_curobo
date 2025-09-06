@@ -1,16 +1,5 @@
-##
-## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-##
-## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
-## property and proprietary rights in and to this material, related
-## documentation and any modifications thereto. Any use, reproduction,
-## disclosure or distribution of this material and related documentation
-## without an express license agreement from NVIDIA CORPORATION or
-## its affiliates is strictly prohibited.
-##
-
 model:
-  horizon: 30 # 45 # 30
+  horizon: 40 # REDUCED FROM 40 TO SAVE GPU MEMORY
   state_filter_cfg:
     filter_coeff:
       position: 0.1
@@ -21,7 +10,7 @@ model:
     base_dt: 0.01
     base_ratio: 0.5
     max_dt: 0.04
-  vel_scale: 0.35
+  vel_scale: 1.0
   control_space: 'ACCELERATION'
   teleport_mode: False
   state_finite_difference_mode: "CENTRAL"
@@ -30,8 +19,8 @@ model:
 cost:
   pose_cfg:
     vec_weight: [1.0,1.0, 1.0, 1.0, 1.0, 1.0]
-    run_vec_weight: [1.0,1.0, 1.0, 1.0, 1.0, 1.0] # [1.0,1.0, 1.0, 1.0, 1.0, 1.0]
-    weight: [0.1,100.0,0.1,20] #[150.0, 2000.0, 30, 40]
+    run_vec_weight: [1.0,1.0, 1.0, 1.0, 1.0, 1.0] # [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # 
+    weight: [1.0,50.0,1.0,20.0] # [1.0,300.0,1.0,20.0] #[150.0, 2000.0, 30, 40]
     vec_convergence: [0.0, 0.00] # orientation, position
     terminal: True
     run_weight: 1.0
@@ -43,12 +32,12 @@ cost:
     run_weight: 1.0
 
   bound_cfg:
-    weight: [5000.0, 5000.0,5000.0, 0000.0]
-    activation_distance: [0.1,0.25,0.1, 0.1]
-    smooth_weight: [0.0, 10.0, 0.0,0.0]
-    run_weight_velocity: 1.0
-    run_weight_acceleration: 0.0
-    run_weight_jerk: 0.0
+    weight: [5000.0, 5000.0,5000.0,000.0]
+    activation_distance: [0.1,0.1,0.1,0.1] # for position, velocity, acceleration and jerk
+    smooth_weight: [0.0, 50.0, 0.0,0.0] # [vel, acc, jerk, alpha_vel, eta_position, eta_vel, eta_acc]
+    run_weight_velocity: 0.0
+    run_weight_acceleration: 1.0
+    run_weight_jerk: 1.0
     null_space_weight: [10.0]
 
   primitive_collision_cfg:
@@ -59,15 +48,15 @@ cost:
     use_sweep_kernel: True
     use_speed_metric: False
     speed_dt: 0.1 # used only for speed metric
-    activation_distance: 0.2 # 0.025
+    activation_distance: 0.025
 
   self_collision_cfg:
-    weight: 0.1
+    weight: 50000.0
     classify: False
 
 
   stop_cfg:
-    weight: 1000 # 0.0001 # 10.0 #50.0
+    weight: 200.0 #50.0
     max_nlimit: 0.25 #0.2
 
   custom:  
@@ -80,11 +69,11 @@ cost:
         class_name: "DynamicObsCost"
         config_class_name: "DynamicObsCostConfig"
         a_select_mode: normal # 'col_free' # col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
-        weight: 1000.0  # 100  
+        weight: 5000.0  # 7000.0  # 100  
         terminal: False
-        safety_margin: 0.01 # 0.05
+        safety_margin: 0.3 # 0.05
         prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
-        wta_trust: 0.001 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
+        wta_trust: 0.000001 # 0.00001 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
         prior_p_err_impact_rad: 0.1 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_rot_err_impact_angle: 180 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost
         prior_keep_lower_bound: 0.0 # between 0 and 1.A lower bound on how much we keep from the origianl dynamic obs cost. 0 means no lower bound. 1 means keep all.
@@ -96,40 +85,20 @@ cost:
         sparse_spheres:
           use: True
 
-    # arm_base:
-    #   dynamic_obs_cost:
-    #     module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
-    #     class_name: "DynamicObsCost"
-    #     config_class_name: "DynamicObsCostConfig"
-    #     weight: 100.0  # 100  
-    #     terminal: False
-    #     safety_margin: 0.1
-    #     prior_rule: pose # rule of prioratization: none/pose/random
-    #     # f: linear # linear/exponential
-    #     prior_p_err_impact_rad: 0.05 # 0.05 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
-    #     prior_rot_err_impact_angle: 10 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost
-    #     prior_keep_lower_bound: 0.0 # between 0 and 1.A lower bound on how much we keep from the origianl dynamic obs cost. 0 means no lower bound. 1 means keep all.
-    #     prior_pos_to_rot_ratio: 0.99 # If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.
-    #     sparse_steps:
-    #       use: False
-    #       ratio: 0.2
-        
-    #     sparse_spheres:
-    #       use: True
 
-
-
+# cur best: init_cov: 0.2, update_cov: False
+# original:init_cov: 0.05, update_cov: True
 mppi:
-  init_cov          : 0.3 # 0.05 #.5 #.5
-  gamma             : 0.999 # 0.98
+  init_cov          : 0.5 # 0.2 # 0.05 #.5 #.5
+  gamma             : 0.9999 # 0.98
   n_iters           : 5
   cold_start_n_iters: 5
-  step_size_mean    : 0.7
-  step_size_cov     : 0.005
-  beta              : 0.1
+  step_size_mean    : 0.9
+  step_size_cov     : 0.01
+  beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
-  num_particles     : 200 # 400 #10000
-  update_cov        : False # True
+  num_particles     : 400 # REDUCED FROM 400 TO SAVE GPU MEMORY
+  update_cov        : False
   cov_type          : "DIAG_A" #
   kappa             : 0.0001
   null_act_frac     : 0.05
@@ -148,7 +117,8 @@ mppi:
     fixed_samples: True
     sample_ratio: {'halton':0.3, 'halton-knot':0.7, 'random':0.0, 'random-knot':0.0}
     seed: 0
-    filter_coeffs: [0.1, 0.2, 0.2]
+    filter_coeffs: [0.3, 0.3, 0.4]
     n_knots: 5
   debug_info:
     visual_traj       : 'ee_pos_seq'
+    k: 'all'
