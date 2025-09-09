@@ -24,6 +24,8 @@ livestream_mode:
     hide_ui: False
     renderer: "RaytracedLighting"
     display_options: 3286
+    physics_dt: 0.0333 # 0.03 # 0.016666666666666666 # 0.016666666666666666
+    rendering_dt: 0.0333 # 0.03 # 0.016666666666666666 # 0.016666666666666666
 
 headless_mode:
   enable_gpu_dynamics: True
@@ -34,5 +36,7 @@ headless_mode:
     # window_height: 1080
     headless: True
     hide_ui: True
+    physics_dt: 0.0333 # 0.03 # 0.016666666666666666 # 0.016666666666666666
+    rendering_dt: 0.0333 # 0.03 # 0.016666666666666666 # 0.016666666666666666
     renderer: "RaytracedLighting"
     # display_options: 3286
