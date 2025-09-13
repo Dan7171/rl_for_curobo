@@ -4048,3 +4048,6 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 #     signal.signal(signal.SIGTERM, signal_handler)
 #     stop_event = mp.Event()
    
+
+
+   
