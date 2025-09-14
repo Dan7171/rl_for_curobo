@@ -1,5 +1,5 @@
 import os
-path = '/home/evrond/analysis_data/final_analysis/0709/500ts/time_task_collision/SD'
+path = '/home/evrond/analysis_data/final_analysis/0709/500ts/'
 
 def profile_dirname(dirname):
     split_dir = dirname.split('_')
@@ -7,7 +7,8 @@ def profile_dirname(dirname):
     seed = split_dir[-2]
     task = split_dir[-3]
     alg = split_dir[-4]
-    return {'level': level, 'seed': seed, 'task': task, 'alg': alg}
+    timestamp = dirname[:19]
+    return {'level': level, 'seed': seed, 'task': task, 'alg': alg,'id': dirname,'timestamp': timestamp}
 
 def make_dir_list(path):
     dir_list = []
@@ -40,6 +41,22 @@ def check_unique(filtered):
     return unique, duplicates, unique_filtered, duplicates_filtered
     
 
+
+def find_id_duplicates(filtered):
+    found_ids = set()
+    # found_filtered = set()
+    timestamp_to_filtered = {}
+    for f in filtered:
+        filtered_dirname, dirname = f
+        if filtered_dirname['timestamp'] not in timestamp_to_filtered:
+            timestamp_to_filtered[filtered_dirname['timestamp']] = []
+        timestamp_to_filtered[filtered_dirname['timestamp']].append(filtered_dirname)
+    
+    duplicates_id_to_filtered = {}
+    for k, v in timestamp_to_filtered.items():
+        if len(v) > 1:
+            duplicates_id_to_filtered[k] = v
+    return duplicates_id_to_filtered
 filtered = get_profiled_dirs(make_dir_list(path))
 unique, duplicates, unique_filtered, duplicates_filtered = check_unique(filtered)
 print(len(unique))
@@ -48,7 +65,11 @@ print(len(duplicates))
 for i in range(len(duplicates)):
     print(duplicates[i])
     print(duplicates_filtered[i])
-
+duplicates_id_to_filtered = find_id_duplicates(filtered)
+for k, v in duplicates_id_to_filtered.items():
+    print(k)
+    for v in v:
+        print(v)
 
 
 
