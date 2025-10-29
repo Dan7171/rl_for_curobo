@@ -940,6 +940,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             d_start = self.start_poses[0][0]
     #        d_current = d_start
             d_final = d_start * (len(self.start_poses)//2 +1)
+            self.camera_eye_pos = [d_final/2, d_final/2, 3* d_final]
+            self.camera_eye_view = [d_final/2, d_final/2, 0]
+            
             for i in range(len(self.start_poses)):
                 xyz = self.start_poses[i][:3]
                 if i % 2 == 0:
@@ -3150,8 +3153,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
 
 
-    class FrameCapturer:
-        def __init__(self, frames_output_dir):
+    class FrameCapturer: # Currently captures 1 frame every 2 world ticks
+        def __init__(self, frames_output_dir, camera_eye_pos=[0,-5,3], camera_eye_view=[0,0,0]):
             self.frames_dir = frames_output_dir
             # Create a camera for recording
             self.camera = rep.create.camera()
@@ -3584,8 +3587,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         if should_capture_frames:
             out_path_frames = os.path.join(out_path, "frames")
             os.makedirs(out_path_frames, exist_ok=True)
-            frame_capturer = FrameCapturer(out_path_frames)
-
+            if sim_task_type == 'CBSMP1':
+                frame_capturer = FrameCapturer(out_path_frames, sim_task.camera_eye_pos, sim_task.camera_eye_view)
+            else:
+                frame_capturer = FrameCapturer(out_path_frames)
 
             
             
