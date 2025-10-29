@@ -70,7 +70,7 @@ python3 mpc_example_client.py --server_ip 132.72.65.138 --server_port 10051
 ### Connection Issues:
 1. **"No route to host"**: Check firewall settings or try different ports
 2. **"Address already in use"**: Port is occupied, try `--port 10052` or similar
-3. **Slow performance**: Check network latency with `ping`
+3. **Slow perfgormance**: Check network latency with `ping`
 
 ---
 
