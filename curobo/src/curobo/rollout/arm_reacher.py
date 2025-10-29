@@ -894,7 +894,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
 
 
         if getattr(self, '_enable_live_plotting', False):
-            dict_to_plot =  {'total': cat_sum_reacher(list(cost_dict.values()))}
+            # dict_to_plot =  {'total': cat_sum_reacher(list(cost_dict.values()))}
+            dict_to_plot = {}
             # dict_to_plot['spectral_concentration_score'] = torch.tensor(spectral_concentration_score)
             # dict_to_plot['entropy_score'] = torch.tensor(entropy_score)
             

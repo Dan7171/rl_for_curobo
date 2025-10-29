@@ -140,8 +140,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     # Use simple, stable configuration like working examples
     simulation_app = SimulationApp({
         "headless": vis_mode == 'headless',
-        "width": "1920" if vis_mode != 'headless' else "800",
-        "height": "1080" if vis_mode != 'headless' else "600",
+        "width": "1920", # if vis_mode != 'headless' else "800",
+        "height": "1080", # if vis_mode != 'headless' else "600",
     })
 
     from projects_root.utils.helper import add_extensions 
@@ -958,7 +958,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                 # add wall parallel to x axis
                 wall2 = FixedCuboid(prim_path="/World/Xform/wall2", color=np.array([1.0, 0.0, 0.0]),position=np.array([d_final/2 + 0.2,d_final + 0.4,0]),scale=np.array([1.5*d_final,0.1,d_final]))
                 
-                set_camera_view(eye=[0, 0, d_final], target=[d_final/2, d_final/2, 0], camera_prim_path="/OmniverseKit_Persp") # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#omni.isaac.core.utils.viewports.set_camera_view
+            set_camera_view(eye=[0, 0, d_final*2], target=[d_final/2, d_final/2, 0], camera_prim_path="/OmniverseKit_Persp") # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.core/docs/index.html#omni.isaac.core.utils.viewports.set_camera_view
 
         
 
@@ -3158,7 +3158,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             
             # Position camera to see the scene
             with self.camera:
-                rep.modify.pose(position=[0, -5, 3], look_at=[0, 0, 0])
+                rep.modify.pose(position=[0, -3, 3], look_at=[0, 0, 0.5])
             
             # Create render product
             self.render_product = rep.create.render_product(self.camera, (1280, 720))

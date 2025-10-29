@@ -455,7 +455,7 @@ def cleanup_isaac_processes():
                     'curobo/src', 'kit.*isaac', 'omniverse'
                 ]) and 'python' in cmdline_str:
                     print(f"Killing process PID {proc.info['pid']}: {proc.info['name']}")
-                    proc.kill()
+                    proc.kill() 
                     killed_processes.append(proc.info['pid'])
                 # Skip dataset_collector processes to avoid killing ourselves
                 # (Let the user manually clean up old dataset_collector instances if needed)

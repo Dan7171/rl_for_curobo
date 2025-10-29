@@ -1,6 +1,6 @@
 
 timeout:
-  tstep: 1000 # 500 # world steps timeout
+  tstep: 4000 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -42,7 +42,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: True # for debugging
+      plot_costs: False # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
@@ -70,12 +70,12 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       ts_delta: 1 # int
     
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-      is_on: True
+      is_on: False
       color: 'green'
       ts_delta: 1 # int
 
       own_color: 'blue'
-      own_mean_only: True
+      own_mean_only: False
       obs: False
       obs_color: 'red'
       ts_delta: 1 # int

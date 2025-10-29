@@ -1,5 +1,5 @@
 timeout:
-  tstep: 500 # 500 # world steps timeout
+  tstep: 300 # 500 # world steps timeout
   tsec: 30000 # seconds timeout
   physics_tsec: 30000 # physics seconds (world time) timeout
 
@@ -87,14 +87,14 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       collision_cache: {"obb": 15, "mesh": 15}
       use_mppi: True
       use_lbfgs: False
-      plot_costs: False # for debugging
+      plot_costs: True # for debugging
 
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
       is_on_world: False # visualize collision spheres in world frame
       is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
-      ts_delta: 3 # int
+      ts_delta: 1 # int
       color: viz_color
 
     visualize_col_pred:
