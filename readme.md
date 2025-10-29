@@ -180,8 +180,9 @@ python3 /home/dan/rl_for_curobo/projects_root/experiments/core_api/dataset_colle
 
 ```
 ## Additional Resources
-
+- [MR-STORM official website](https://roboworkshop.github.io/multi-robot-mpc/)
 - [CuRobo Documentation](https://curobo.org/)
+- [Storm Github](https://github.com/NVlabs/storm)
 - [Isaac Sim Documentation](https://docs.isaacsim.omniverse.nvidia.com/)
 
 ## License
