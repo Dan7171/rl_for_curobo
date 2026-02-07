@@ -1,5 +1,6 @@
 model:
-  horizon: 20 # REDUCED FROM 40 TO SAVE GPU MEMORY
+  # horizon: 20 # REDUCED FROM 40 TO SAVE GPU MEMORY
+  horizon: 40 # REDUCED FROM 40 TO SAVE GPU MEMORY
   state_filter_cfg:
     filter_coeff:
       position: 0.1
@@ -71,7 +72,7 @@ cost:
         a_select_mode: normal # 'col_free' # col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
         weight: 5000.0  # 7000.0  # 100  
         terminal: False
-        safety_margin: 0.3 # 0.05
+        safety_margin: 0.02 # 0.05
         prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
         wta_trust: 3.0 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
         prior_p_err_impact_rad: 0.1 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
@@ -97,7 +98,7 @@ mppi:
   step_size_cov     : 0.01
   beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
-  num_particles     : 80 # REDUCED FROM 400 TO SAVE GPU MEMORY
+  num_particles     : 400 # 80 # REDUCED FROM 400 TO SAVE GPU MEMORY
   update_cov        : False
   cov_type          : "DIAG_A" #
   kappa             : 0.0001

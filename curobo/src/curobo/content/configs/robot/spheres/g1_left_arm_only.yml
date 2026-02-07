@@ -35,11 +35,78 @@ collision_spheres:
       radius: 0.03
       
   left_rubber_hand:
+    # Palm Base (5x3 grid in XZ plane)
+    # Swapped Y -> Z from previous attempt
+    - center: [0.0, 0.0, -0.04]
+      radius: 0.02
+    - center: [0.0, 0.0, -0.02]
+      radius: 0.02
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.02
+    - center: [0.0, 0.0, 0.02]
+      radius: 0.02
+    - center: [0.0, 0.0, 0.04]
+      radius: 0.02
+    - center: [0.02, 0.0, -0.04]
+      radius: 0.02
+    - center: [0.02, 0.0, -0.02]
+      radius: 0.02
     - center: [0.02, 0.0, 0.0]
-      radius: 0.03
-    - center: [0.05, 0.0, 0.0]
+      radius: 0.02
+    - center: [0.02, 0.0, 0.02]
+      radius: 0.02
+    - center: [0.02, 0.0, 0.04]
+      radius: 0.02
+    - center: [0.04, 0.0, -0.04]
+      radius: 0.02
+    - center: [0.04, 0.0, -0.02]
+      radius: 0.02
+    - center: [0.04, 0.0, 0.0]
+      radius: 0.02
+    - center: [0.04, 0.0, 0.02]
+      radius: 0.02
+    - center: [0.04, 0.0, 0.04]
+      radius: 0.02
+    # Fingers (3 fingers, extending in X, width in Z)
+    - center: [0.06, 0.0, -0.03]
+      radius: 0.015
+    - center: [0.06, 0.0, 0.0]
+      radius: 0.015
+    - center: [0.06, 0.0, 0.03]
+      radius: 0.015
+    - center: [0.08, 0.0, -0.03]
+      radius: 0.015
+    - center: [0.08, 0.0, 0.0]
+      radius: 0.015
+    - center: [0.08, 0.0, 0.03]
+      radius: 0.015
+    - center: [0.10, 0.0, -0.03]
+      radius: 0.015
+    - center: [0.10, 0.0, 0.0]
+      radius: 0.015
+    - center: [0.10, 0.0, 0.03]
+      radius: 0.015
+    # Thumb approx (Offset in Z)
+    - center: [0.02, 0.0, -0.06]
+      radius: 0.015
+    - center: [0.04, 0.0, -0.06]
+      radius: 0.015
+    - center: [0.06, 0.0, -0.05]
+      radius: 0.015
+    # Fingertips (5 tips, 45deg inward bend - estimated x+=0.03, y+=0.02, z distributed)
+    # Assuming "inward" means curling towards palm (Y-axis offset)
+    # Thumb Tip
+    - center: [0.05, 0.0, 0.07] 
       radius: 0.025
-    - center: [0.05, 0.02, 0.0] # approximate finger
-      radius: 0.02
-    - center: [0.05, -0.02, 0.0] # approximate finger
-      radius: 0.02
+    # Index Tip
+    - center: [0.12, -0.015, 0.035]
+      radius: 0.025
+    # Middle Tip
+    - center: [0.125, -0.015, 0.0]
+      radius: 0.025
+    # Ring Tip
+    - center: [0.12, -0.015, -0.035]
+      radius: 0.025
+    # Pinky Tip
+    - center: [0.11, -0.015, -0.06]
+      radius: 0.025

@@ -1,5 +1,6 @@
 base: [projects_root/real_world/meta_cfg_g1.yml]
-alg: [O] # , SD, CC, O, O-] #'O'] # ['SC'] # [O] # [O, SC, SD, CC, O-]
+# alg: [O-] # , SD, CC, O, O-] #'O'] # ['SC'] # [O] # [O, SC, SD, CC, O-]
+alg: [O]
 robot_fam: ['g1'] # ['franka'] #  #[ ur5e]
 robot_type: ['2_arms_only'] # ['4_05'] # ['4_05'] # ['2_05b'] # ['2_05'] # ['2_05', '4_04']
 task_seed: [0]

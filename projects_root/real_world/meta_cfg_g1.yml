@@ -97,7 +97,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
       is_on_world: False # visualize collision spheres in world frame
-      is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
+      is_on_robot: False # (confusing, not recommended to use) visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
       ts_delta: 3 # int
       color: viz_color
 
@@ -119,7 +119,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       ts_delta: 1 # int
     
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-      is_on: True
+      is_on: False
       color: 'green'
       ts_delta: 1 # int
 
