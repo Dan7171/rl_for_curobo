@@ -14,3 +14,9 @@ to verify run:
 
 Command:
 python projects_root/real_world/mpc_g1_feb26.py --robot g1_feb26/left_arm.yml --visualize_spheres
+
+left arm only:
+python projects_root/real_world/mpc_g1_feb26.py --robot g1_feb26/left_arm_only.yml --visualize_spheres
+
+right arm only:
+python projects_root/real_world/mpc_g1_feb26.py --robot g1_feb26/left_arm_only.yml --visualize_spheres
