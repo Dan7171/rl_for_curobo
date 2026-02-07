@@ -23,11 +23,12 @@ python projects_root/real_world/mpc_g1_feb26.py --robot g1_feb26/right_arm_only.
 
 
 
+2 arms in sim: franka for debugging:
+(env_isaac) dan@de:~/rl_for_curobo$ python projects_root/experiments/core_api/dataset_collector.py --combo_cfg /home/dan/rl_for_curobo/projects_root/real_world/combo_cfg_franka.yml
+
+
 2 arms in sim:
 THIS IS THE SATISFYING VERSION, SWITCH TO O- AND REMOVE OVERRIDE_PARTICLE_FILE FROM 
 (env_isaac) dan@de:~/rl_for_curobo$ python projects_root/experiments/core_api/dataset_collector.py --combo_cfg /home/dan/rl_for_curobo/projects_root/real_world/combo_cfg_g1.yml
-
-2 arms in sim: franka for debugging:
-(env_isaac) dan@de:~/rl_for_curobo$ python projects_root/experiments/core_api/dataset_collector.py --combo_cfg /home/dan/rl_for_curobo/projects_root/real_world/combo_cfg_franka.yml
 
 
