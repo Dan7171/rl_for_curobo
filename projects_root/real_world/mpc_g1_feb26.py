@@ -20,7 +20,7 @@ except ImportError:
 
 # Third Party
 import torch
-
+import time
 a = torch.zeros(4, device="cuda:0")
 
 # Standard Library
@@ -382,7 +382,7 @@ def main():
         use_es=False,
         store_rollouts=True,
         step_dt=0.02,
-        override_particle_file="projects_root/projects/cfgs_by_robot/g1/mpc_single_arm/left_arm/particle_mpc.yml",
+        override_particle_file="projects_root/real_world/particle_mpc.yml",
     )
 
     mpc = MpcSolver(mpc_config)
@@ -404,7 +404,7 @@ def main():
     goal_buffer = mpc.setup_solve_single(goal, 1)
     mpc.update_goal(goal_buffer)
     mpc_result = mpc.step(current_state, max_attempts=2)
-
+   
     usd_help.load_stage(my_world.stage)
     init_world = False
     cmd_state_full = None
@@ -522,8 +522,10 @@ def main():
                         sphere_pos_world = base_rot.apply(s.position) + base_pos
                         spheres[si].set_world_pose(position=np.ravel(sphere_pos_world))
                         spheres[si].set_radius(float(s.radius))
-
+        mpc_time = time.time()
         mpc_result = mpc.step(current_state, max_attempts=2)
+        mpc_time = time.time() - mpc_time
+        print(f"MPC time: {mpc_time}")
         # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
         succ = True  # ik_result.success.item()

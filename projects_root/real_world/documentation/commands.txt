@@ -1,0 +1,16 @@
+6.2.26:
+
+Full body, old g1 (july 25), moves arm fine but slowly:
+python projects_root/real_world/mpc_g1_feb26.py --visualize_spheres
+
+Left arm only, new g1 (feb 26),arm wiggling:
+python projects_root/real_world/mpc_g1_feb26.py --robot g1_feb26/left_arm.yml --visualize_spheres
+
+
+7.2.26:
+
+solved the left arm wiggling problem in new g1 (see projects_root/real_world/documentation/G1_Configuration_Guidelines.md)
+to verify run:
+
+Command:
+python projects_root/real_world/mpc_g1_feb26.py --robot g1_feb26/left_arm.yml --visualize_spheres

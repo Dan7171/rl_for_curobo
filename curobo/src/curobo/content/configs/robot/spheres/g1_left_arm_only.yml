@@ -1,0 +1,45 @@
+collision_spheres:
+  # Left Arm
+  left_shoulder_pitch_link:
+    - center: [-0.004, 0.05, -0.001]
+      radius: 0.052
+  left_shoulder_roll_link:
+    - center: [0.012, 0.002, -0.069]
+      radius: 0.04
+  left_shoulder_yaw_link:
+    - center: [0.0, 0.0, -0.02]
+      radius: 0.04
+    - center: [0.0, 0.0, -0.05]
+      radius: 0.04
+    - center: [0.0, 0.0, -0.08]
+      radius: 0.04
+  
+  left_elbow_link:
+    - center: [0.02, 0.0, 0.0]
+      radius: 0.035
+    - center: [0.05, 0.0, 0.0]
+      radius: 0.035
+    - center: [0.08, 0.0, 0.0]
+      radius: 0.035
+      
+  left_wrist_roll_link:
+    - center: [0.02, 0.0, 0.0]
+      radius: 0.03
+      
+  left_wrist_pitch_link:
+    - center: [0.02, 0.0, 0.0]
+      radius: 0.03
+      
+  left_wrist_yaw_link:
+    - center: [0.02, 0.0, 0.0]
+      radius: 0.03
+      
+  left_rubber_hand:
+    - center: [0.02, 0.0, 0.0]
+      radius: 0.03
+    - center: [0.05, 0.0, 0.0]
+      radius: 0.025
+    - center: [0.05, 0.02, 0.0] # approximate finger
+      radius: 0.02
+    - center: [0.05, -0.02, 0.0] # approximate finger
+      radius: 0.02
