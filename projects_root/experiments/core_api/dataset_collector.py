@@ -80,7 +80,9 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
          'kinova_gen3': 
          'kinova_gen3.yml', 
          'jaco7': 'jaco7.yml',
-        'tinyDisk': 'simple_disk_tiny.yml'
+         'jaco7': 'jaco7.yml',
+        'tinyDisk': 'simple_disk_tiny.yml',
+        'g1': 'g1_feb26/left_arm_only.yml'
         }
     cent_robot_cfgs = {
         'franka':
@@ -104,6 +106,7 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
                 '4_05':'quad_ur5e_05.yml',
                 '4_04':'quad_ur5e_04.yml'
                 }
+                
             }
             
     
@@ -262,6 +265,8 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
                                     
                                     if task in ['reach', 'follow']:
                                         meta_cfg["sim_env"]["cfg"]["obj_cfgs"] = reach_follow_objects_by_level[level]
+                                    else:
+                                        meta_cfg["sim_env"]["cfg"]["obj_cfgs"] = []
                                             
 
                                     
@@ -295,7 +300,14 @@ def make_meta_cfgs(combo_cfg_path, custom_particle_path=''):
                                         
 
                                         # Override base values with new values
-                                        agent_cfg["robot"] = robot_cfg_path
+                                        if robot_fam == 'g1' and robot_type == '2_arms_only':
+                                            if a_idx == 1:
+                                                final_robot_cfg = robot_cfg_path.replace('left_arm_only.yml', 'right_arm_only.yml')
+                                            else:
+                                                final_robot_cfg = robot_cfg_path
+                                            agent_cfg["robot"] = final_robot_cfg
+                                        else:
+                                            agent_cfg["robot"] = robot_cfg_path
                                         agent_cfg["planner"] = planner_type
                                         # Ensure each agent gets its own copy to avoid shared-list mutations later
                                         agent_cfg["base_pose"] = deepcopy(base_pose)
@@ -587,7 +599,8 @@ if __name__ == "__main__":
         new_out_name = f'{sim_start_timestamp}_{initial_out_name}'
         out_path = os.path.join(meta_cfg["out"]["out_dir"], new_out_name)
         print(f'out_path: {out_path}')
-        os.makedirs(out_path, exist_ok=False)
+        if len(out_path):
+            os.makedirs(out_path, exist_ok=False)
         
         particle_cfg_path = os.path.join(out_path, 'particle_cfg.yml')
         with open(particle_cfg_path, 'w') as f:

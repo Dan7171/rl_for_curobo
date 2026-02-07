@@ -1,3 +1,14 @@
+##
+## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+##
+## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+## property and proprietary rights in and to this material, related
+## documentation and any modifications thereto. Any use, reproduction,
+## disclosure or distribution of this material and related documentation
+## without an express license agreement from NVIDIA CORPORATION or
+## its affiliates is strictly prohibited.
+##
+
 model:
   horizon: 30
   state_filter_cfg:
@@ -59,6 +70,31 @@ cost:
     weight: 100.0 #50.0
     max_nlimit: 0.25 #0.2
 
+  custom:  
+    published_info:
+      spheres_to_exclude_in_sparse_mode: []  # User will fill this later
+
+    arm_base:
+      dynamic_obs_cost:
+        module_path: "curobo.rollout.cost.custom.arm_base.dynamic_obs_cost"
+        class_name: "DynamicObsCost"
+        config_class_name: "DynamicObsCostConfig"
+        a_select_mode: normal # 'col_free' # col_free  # col free will make sure action is selected from rollout with min(w) over all col free rollouts (when mppi[sample_mode] = BEST )
+        weight: 7000.0  # 100  
+        terminal: False
+        safety_margin: 0.2 # 0.05
+        prior_rule: pose_wta # rule of prioratization: none/pose/pose_wta/random 
+        wta_trust: 0.01 # 1.0 # valid range between 0 to inf. Formula is d(self,subto) *= (d(subto,goal) / d(self,goal))^trust. 
+        prior_p_err_impact_rad: 0.1 # if link error is >= this, then the dynamic obs cost is not affected by the pose cost
+        prior_rot_err_impact_angle: 180 # if error (in mean rotation error per axis (total rotation error / 3)) is >= this, then the dynamic obs cost is not affected by the pose cost
+        prior_keep_lower_bound: 0.0 # between 0 and 1.A lower bound on how much we keep from the origianl dynamic obs cost. 0 means no lower bound. 1 means keep all.
+        prior_pos_to_rot_ratio: 1.0 # TODO- Fix rotation error check(until then use 1.0). If rule is pose, then (if both pos and rot are in affection radius/limit) we will scale the dynamic obs cost by this ratio. 1 means using position and ignoring rotation completetly, 0 means using rotation and ignoring position completetly.
+        prior_weight_mode: exponential # linear or exponential
+        sparse_steps:
+          use: False
+          ratio: 0.2
+        sparse_spheres:
+          use: True
 
 
 mppi:
