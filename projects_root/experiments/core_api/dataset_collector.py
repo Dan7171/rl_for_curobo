@@ -595,13 +595,15 @@ if __name__ == "__main__":
         
         
         # Make output directory with timestamp and rename the initial out name
-        sim_start_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        new_out_name = f'{sim_start_timestamp}_{initial_out_name}'
-        out_path = os.path.join(meta_cfg["out"]["out_dir"], new_out_name)
-        print(f'out_path: {out_path}')
-        if len(out_path):
-            os.makedirs(out_path, exist_ok=False)
+        if len(initial_out_name):
         
+            sim_start_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+            new_out_name = f'{sim_start_timestamp}_{initial_out_name}'
+            out_path = os.path.join(meta_cfg["out"]["out_dir"], new_out_name)
+            print(f'out_path: {out_path}')
+            # exit()
+            os.makedirs(out_path, exist_ok=False)
+            
         particle_cfg_path = os.path.join(out_path, 'particle_cfg.yml')
         with open(particle_cfg_path, 'w') as f:
             yaml.dump(particle_cfg, f)

@@ -4,6 +4,7 @@ timeout:
   physics_tsec: 30000 # physics seconds (world time) timeout
 
 out:
+
   # out_dir_root: '/home/evrond/mr_mpc_logs' # output directory
   # batch_dir_name: 'TIMESTAMP' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
   out_dir_root: ''
@@ -95,7 +96,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
   
   sim_robot_cfg: # default values for SimRobot class which is used to control the robot in simulation (if not specified by the agent)
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True # visualize collision spheres in world frame
+      is_on_world: False # visualize collision spheres in world frame
       is_on_robot: False # visualize collision spheres in robot frame (should be around the origin with quaternion [1,0,0,0])
       ts_delta: 3 # int
       color: viz_color
