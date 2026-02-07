@@ -31,6 +31,12 @@
       </geometry>
       <material name="white"/>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/waist_yaw_link.STL"/>
+      </geometry>
+    </collision>
   </link>
   <link name="waist_roll_link">
     <inertial>
@@ -45,6 +51,12 @@
       </geometry>
       <material name="white"/>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/waist_roll_link.STL"/>
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_roll_joint" type="fixed">
     <origin xyz="-0.0039635 0 0.035" rpy="0 0 0"/>

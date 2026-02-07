@@ -10,6 +10,9 @@ robot_cfg:
 
     # Collision configuration
     collision_link_names:
+      - waist_yaw_link
+      - waist_roll_link
+      - waist_support_link
       - torso_link
       - head_link
       - left_shoulder_pitch_link
@@ -41,6 +44,9 @@ robot_cfg:
     collision_sphere_buffer: 0.0001
 
     self_collision_buffer:
+      waist_yaw_link: 0.0001
+      waist_roll_link: 0.0001
+      waist_support_link: 0.0001
       torso_link: 0.0001
       head_link: 0.0001
       left_shoulder_pitch_link: 0.0001
@@ -53,13 +59,16 @@ robot_cfg:
       "left_shoulder_pitch_link": ["head_link", "left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
       "left_shoulder_roll_link": ["head_link", "left_shoulder_pitch_link", "left_shoulder_yaw_link", "left_elbow_link", "torso_link"],
       "left_shoulder_yaw_link": ["head_link", "torso_link", "left_shoulder_roll_link", "left_shoulder_pitch_link", "left_elbow_link"],
-      "left_elbow_link": ["torso_link", "left_shoulder_roll_link", "left_shoulder_pitch_link", "left_shoulder_yaw_link", "left_rubber_hand", "left_wrist_roll_link", "left_wrist_pitch_link", "left_wrist_yaw_link"],
+      "left_elbow_link": ["left_shoulder_roll_link", "left_shoulder_pitch_link", "left_shoulder_yaw_link", "left_rubber_hand", "left_wrist_roll_link", "left_wrist_pitch_link", "left_wrist_yaw_link"],
       "left_wrist_roll_link": ["left_elbow_link", "left_wrist_pitch_link", "left_wrist_yaw_link", "left_rubber_hand"],
       "left_wrist_pitch_link": ["left_wrist_roll_link", "left_wrist_yaw_link", "left_rubber_hand", "left_elbow_link"],
       "left_wrist_yaw_link": ["left_wrist_roll_link", "left_wrist_pitch_link", "left_rubber_hand", "left_elbow_link"],
       "left_rubber_hand": ["left_elbow_link", "left_wrist_roll_link", "left_wrist_pitch_link", "left_wrist_yaw_link"],
-      "torso_link": ["head_link", "left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link", "left_elbow_link"],
-      "head_link": ["torso_link", "left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link"],
+      "torso_link": ["head_link", "left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link", "waist_yaw_link", "waist_roll_link", "waist_support_link"],
+      "head_link": ["torso_link", "left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link", "waist_yaw_link"],
+      "waist_yaw_link": ["waist_roll_link", "waist_support_link", "torso_link", "left_shoulder_pitch_link", "left_shoulder_roll_link", "head_link"],
+      "waist_roll_link": ["waist_yaw_link", "waist_support_link", "torso_link", "left_shoulder_pitch_link", "left_shoulder_roll_link"],
+      "waist_support_link": ["waist_yaw_link", "waist_roll_link", "torso_link", "left_shoulder_pitch_link", "left_shoulder_roll_link"],
     }
 
     collision_spheres: spheres/g1_left_arm.yml

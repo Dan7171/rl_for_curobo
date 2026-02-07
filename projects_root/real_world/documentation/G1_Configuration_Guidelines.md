@@ -31,9 +31,21 @@ When running complex simulations with Curobo and Isaac Sim:
   ```
 - **Avoid Double Launch:** Place `SimulationApp` initialization inside `if __name__ == "__main__":` blocks to prevent spawned processes from re-launching the simulator.
 
+## 4. Resolving Collision Penetration
+If robot parts are passing through each other (e.g. arm through torso):
+- **Check URDF Collision Geometry:** Ensure all links have `<collision>` tags defined. Visual meshes alone are not enough for physics!
+  - *Example:* `waist_yaw_link` was missing collision tags, making it a "ghost" to the physics engine.
+- **Update Collision Config (`robot.yml`):**
+  - Add all relevant links to `collision_link_names`.
+  - Ensure correct spheres are defined in the sphere config file.
+- **Verify Ignore Rules:** Be careful with `self_collision_ignore`.
+  - Collision ignores are often symmetric. If `Link A` ignores `Link B`, the system might allow collision even if `Link B` doesn't list `Link A`.
+  - *Fix:* Remove both links from each other's ignore lists to enforce collision checking.
+
 ## Debugging Checklist
 If the robot is behaving erratically:
 1.  **Check URDF Dynamics:** Are `damping` and `friction` non-zero?
 2.  **Check Collision Ignores:** Are adjacent links causing constant collisions?
 3.  **Check Mass Properties:** Are masses realistic? (Too low mass = instability).
 4.  **Verify Controller:** Are gains reachable? (Don't hack gains to fix physics issues; fix the physics model first).
+5.  **Check Collision Geometry:** Do all links have `<collision>` tags in URDF?
