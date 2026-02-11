@@ -2221,6 +2221,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             if sync_new:
                 js = self.robot.get_joints_state() # from simulation. TODO: change "robot" to sim_robot and add a real_robot attribute
                 self._cur_js = js # update the last synced state
+
             else:
                 js = self._cur_js # return the last synced state
             return js
@@ -3706,8 +3707,12 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 paths_to_search_obs_under=["/World"]
                             )
                             
-            
-                
+
+                            # new: set new sim robot state joint positions from real robot positions
+                            idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
+                            real_arm_js = get_joint_states()[a.idx] # client call 
+                            a.sim_robot.robot.set_joint_positions(real_arm_js, idx_list) # from config
+                        
                             js = a.sim_robot.get_js(sync_new=True)
 
                             if js is None:
