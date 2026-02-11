@@ -3720,9 +3720,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             if step_joint_states is not None:
                                 real_arm_positions = step_joint_states[0][a.idx] 
                                 real_arm_velocities = step_joint_states[1][a.idx]
-                                
                                 a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list) # from real arm positions
-                                # a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list) # from real arm velocities
+                                a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list) # from real arm velocities
 
                             # Read joint states from simulator (that is already should bez updated to match real arm state)
                             js = a.sim_robot.get_js(sync_new=True)
