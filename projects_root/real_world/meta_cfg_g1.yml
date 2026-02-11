@@ -7,7 +7,7 @@ out:
 
   # out_dir_root: '/home/evrond/mr_mpc_logs' # output directory
   # batch_dir_name: 'TIMESTAMP' # rename to your batch name (will auto create the directory) or set '' to not put in a batch directory
-  out_dir_root: '/home/humanoid/dane/dekstop/mr_storm_logs'
+  out_dir_root: '/home/humanoid/Desktop/mr_storm_logs'
   batch_dir_name: ''
   stats: False # save stats 
   meta_cfg: False # save meta cfg
