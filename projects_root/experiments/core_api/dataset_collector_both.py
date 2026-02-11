@@ -272,7 +272,8 @@ def make_meta_cfgs(combo_cfg_path):
                                     if task in ['reach', 'follow']:
                                         meta_cfg["sim_env"]["cfg"]["obj_cfgs"] = reach_follow_objects_by_level[level]
                                     else:
-                                        meta_cfg["sim_env"]["cfg"]["obj_cfgs"] = []
+                                        pass
+                                        # meta_cfg["sim_env"]["cfg"]["obj_cfgs"] = []
                                             
 
                                     

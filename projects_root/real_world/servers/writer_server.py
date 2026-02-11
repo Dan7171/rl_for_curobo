@@ -39,7 +39,7 @@ class LowCmdPublisher(Node):
         self.traj_publisher = self.create_publisher(
             JointTrajectory,
             '/arm_plan',
-            30 # Hz
+            10 # Hz
         )
         
         self.get_logger().info('LowCmd publisher initialized for /arm_plan')
