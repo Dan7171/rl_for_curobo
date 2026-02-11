@@ -3679,7 +3679,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
                             ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
                             
-                            # publish 
+                            # *** publish plan *** 
                             # sw.on()
                             js = a.sim_robot.get_js(sync_new=False) # get last step's joint state
                             # sw.off()
@@ -3704,7 +3704,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                     
             
                 
-                            # sense obstacles 
+                            # *** sense obstacles *** 
                             a.update_col_model_from_isaac_sim(
                                 a.sim_robot.path, 
                                 usd_help, 
@@ -3712,10 +3712,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 paths_to_search_obs_under=["/World"]
                             )
                             
-
+                            # *** sense joint positions and velocities *** 
                             # new for the real robot: set new sim robot state joint positions from real robot positions
                             idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
                             
+                            # real state to simulation for visualization only (we basically override the physics of the simulator and making it a visualization of the real world)
                             step_joint_states = get_joint_states()
                             if step_joint_states is not None:
                                 real_arm_positions = step_joint_states[0][a.idx] 
@@ -3762,24 +3763,24 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 elapsed = psw.off()
                                 print(f'debug: agent {a_idx}, elapsed {elapsed} at goal upadte from others for prioritization in cost function')
 
-                            # sense plans
+                            # *** sense plans ***
                             if a.plan_pub_sub is not None: # everyone that has plan_pub_sub != None are at least subscribers
                                 psw.on()
                                 a.update_col_pred(plans_board, mean_goal_err) # update horizon/naive plans from others
                                 elapsed = psw.off()
                                 print(f'debug: agent {a_idx}, elapsed: {elapsed} at update plans of others (naive/over horizon) to use in robot-robot-col cost function')
             
-                            # sense goals
+                            # *** sense goals ***
                             goals = link_name_to_target_pose[a.idx]
 
-                            # plan
+                            # *** plan ***
                             robot_context = get_topics().get_default_env()[a.idx]
                             robot_context["link_name_to_pose"] = sim_task.get_link_name_to_pose()[a.idx]
                             robot_context["name_link_to_target"] = sim_task.name_link_to_target[a.idx]
                             robot_context["target_name_to_pose"] = sim_task.get_target_name_to_pose()[a.idx]
 
 
-                            # yield action
+                            # *** yield action ***
                             
                             if isinstance(planner, CumotionPlanner):
                                 psw.on()
@@ -3796,7 +3797,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
                             else:
                                 raise ValueError(f"Invalid planner type: {planner_type}")
-                            # act
+                            # *** act *** 
                             if action is not None:
                                 isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
                                 a.sim_robot.articulation_controller.apply_action(isaac_action)
