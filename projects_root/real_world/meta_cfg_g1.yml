@@ -124,7 +124,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       ts_delta: 1 # int
 
       own_color: 'blue'
-      own_mean_only: True
+      own_mean_only: False
       obs: False
       obs_color: 'red'
       ts_delta: 1 # int
@@ -148,7 +148,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
     stat_names: ['env_cols', 'link_target_poses', 'arm_cols', 'total_planning_time', 'spheres']
     collect_dt: [1,1,1,1,100] # dt for each stat
     verbose: False # [False,False,False,False,False,True]
-    save: True
+    save: False
                 
   
 async: False
@@ -238,13 +238,13 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
 - 
   sim_robot_cfg:
     visualize_col_pred:
-      own: True # True
-      obs: True # True
+      own: False # True
+      obs: False # True
     visualize_mpc_ee_rollouts: # visualize the end-effector rollouts of the mpc (for debugging)
-        is_on: True    
+        is_on: False    
 
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True # True # visualize collision spheres in world frame
+      is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int
  
 - 
@@ -254,7 +254,7 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
       own: False # True
       obs: False # True
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
-      is_on_world: True # True # visualize collision spheres in world frame
+      is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int
 
 # - mpc:

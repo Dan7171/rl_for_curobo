@@ -140,10 +140,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
     from omni.isaac.kit import SimulationApp
 
     # Use simple, stable configuration like working examples
+    # simulation_app = SimulationApp({
+    #     "headless": vis_mode == 'headless',
+    #     "width": "1920", # if vis_mode != 'headless' else "800",
+    #     "height": "1080", # if vis_mode != 'headless' else "600",
+    # })
+    
     simulation_app = SimulationApp({
-        "headless": vis_mode == 'headless',
-        "width": "1920", # if vis_mode != 'headless' else "800",
-        "height": "1080", # if vis_mode != 'headless' else "600",
+        "headless": False, # vis_mode == 'headless',
+        "width": "400", # if vis_mode != 'headless' else "800",
+        "height": "300", # if vis_mode != 'headless' else "600",
     })
 
     from projects_root.utils.helper import add_extensions 
@@ -3645,13 +3651,19 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             task3 = progress.add_task(f"Simulation Time [sec] (lim={sto} )", total=sto)
             task4 = progress.add_task(f"Physics Time [sec] (lim={pto})", total=pto)
             
+            debug_ctrl_freq_steps = 0
+            debug_ctrl_freq_time = time()
             if not meta_cfg["async"]: # sync mode
                 
                 while simulation_app.is_running():
                     prog_bar_tsys_iter_start = time()
                     prog_bar_tphys_iter_start = my_world.current_time 
 
+                    world_step_start = time()
                     my_world.step(render=True)
+                    world_step_end = time()
+                    world_step_dt = world_step_end - world_step_start
+                    print(f"World step dt: {world_step_dt}")
                     pts_debug = []
 
                     # Updating targets. Updating targets in sim and return new target poses so planners can react
@@ -3676,8 +3688,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             viz_cpred_own = a.sim_robot.viz_col_pred_own_on
                             viz_cpred_obs = a.sim_robot.viz_col_pred_obs_on
 
-                            ctrl_dof_names = a.sim_robot.robot.dof_names # or from real
-                            ctrl_dof_indices = a.sim_robot.robot.get_dof_index # or from real
+                            ctrl_dof_names = a.sim_robot.robot.dof_names 
+                            ctrl_dof_indices = a.sim_robot.robot.get_dof_index 
                             
                             # *** publish plan *** 
                             # sw.on()
@@ -3705,6 +3717,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             
                 
                             # *** sense obstacles *** 
+                            
                             a.update_col_model_from_isaac_sim(
                                 a.sim_robot.path, 
                                 usd_help, 
@@ -3738,7 +3751,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             if isinstance(planner, MpcPlanner):
                                 planner.update_state(cu_js)
                             elapsed = psw.off()
-                            print(f'debug agent: {a_idx} js update time: {elapsed}')
+                            # print(f'debug agent: {a_idx} js update time: {elapsed}')
 
                             task_space_state_R = a.planner.get_state_in_task_space(cu_js, frame='R')
                             spheres_R = task_space_state_R['spheres']
@@ -3813,7 +3826,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 
                                 # $$$$$$$$$ WARNING: REAL COMMAND SENDING $$$$$$$$$$$
                                 # uncomment when ready to use real robot!
-                                # send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)
+                                send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)
                                 
                                 a.step_count += 1
                             
@@ -3948,6 +3961,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     sto_reached = time() - sim_time_start > sto # stop due to simulation time limit
                     pto_reached = my_world.current_time - physics_time_start > pto # stop due to physics time limit
                     
+                    debug_ctrl_freq_steps += 1
+                    debug_ctrl_freq = debug_ctrl_freq_steps /  (time() - debug_ctrl_freq_time)
+                    print(f"Debug Ctrl Freq: {debug_ctrl_freq}")            
+                    
                     if tsto_reached or sto_reached or pto_reached or stop_event.is_set() or stop_simulation:
                         if should_capture_frames:
                             frame_capturer.finish(frame_capturing_cfg["to_mp4_cfg"])
@@ -3972,11 +3989,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
 
                         #     reset_stage(my_world)
                         #     return True
+
                         
                 
                     
                         
-            
             
     def reset_stage(my_world):
 

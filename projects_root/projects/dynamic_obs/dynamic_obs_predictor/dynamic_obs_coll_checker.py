@@ -356,7 +356,7 @@ class DynamicObsCollPredictor:
             print(f'DEBUG: tmp_cost_mat_buf_sparse max: {self.tmp_cost_mat_buf_sparse.max()}, min: {self.tmp_cost_mat_buf_sparse.min()}')
             
         elif self.cost_type == 'linear':
-            print(f'DEBUG: in linear cost type')
+            # print(f'DEBUG: in linear cost type')
             if self.prior_rule == 'pose_wta' and len(self.pose_wta_conflict_resolution): # pose wta conflict resolution is used
             
                 p_own_err, q_own_err = self.pose_wta_conflict_resolution['own_errors']
@@ -416,7 +416,7 @@ class DynamicObsCollPredictor:
         # WEIGHTING:
         # MULTIPLY BY CONSTANT WEIGHT OF COST TERM (HYPER PARAM) 
         self.cost_mat_buf.mul_(self.cost_weight)
-        print(f'DEBUG: cost_mat_buf max: {self.cost_mat_buf.max()}, min: {self.cost_mat_buf.min()}')
+        # print(f'DEBUG: cost_mat_buf max: {self.cost_mat_buf.max()}, min: {self.cost_mat_buf.min()}')
         if torch.isnan(self.cost_mat_buf).any():
             print(f'DEBUG: cost_mat_buf has nan values!')
             return torch.zeros_like(self.cost_mat_buf)

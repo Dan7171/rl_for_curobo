@@ -39,7 +39,7 @@ class LowCmdPublisher(Node):
         self.traj_publisher = self.create_publisher(
             JointTrajectory,
             '/arm_plan',
-            10 # Hz
+            200 # Hz
         )
         
         self.get_logger().info('LowCmd publisher initialized for /arm_plan')
@@ -117,8 +117,9 @@ class LowCmdServer:
     def _spin_ros(self):
         """Spin ROS2 in background thread"""
         while rclpy.ok():
-            rclpy.spin_once(self.publisher, timeout_sec=0.01)
-    
+            # rclpy.spin_once(self.publisher, timeout_sec=0.005)
+            rclpy.spin_once(self.publisher)
+                
     def run(self):
         """Accept connections and handle requests"""
         try:

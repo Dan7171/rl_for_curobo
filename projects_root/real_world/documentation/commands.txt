@@ -65,3 +65,7 @@ python3 /home/humanoid/dane/rl_for_curobo/projects_root/real_world/servers/reade
 
 # start writer server:
 python3 /home/humanoid/dane/rl_for_curobo/projects_root/real_world/servers/writer_server.py
+
+# start writer server:
+python3 /home/humanoid/dane/rl_for_curobo/projects_root/real_world/servers/writer_server.py
+
