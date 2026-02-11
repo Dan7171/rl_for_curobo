@@ -29,14 +29,51 @@ def get_joint_states(socket_path='/tmp/lowstate.sock'):
         # Close connection
         client_socket.close()
         
-        full_js = response['joint_positions'] # 35 length
+        full_joint_positions = response['joint_positions'] # 35 length
+        full_joint_velocities = response['joint_velocities'] # 35 length
+
+        left_arm_positions, right_arm_positions = filter_joint_states(full_joint_positions) # 7 dof each
+        left_arm_velocities, right_arm_velocities = filter_joint_states(full_joint_velocities) # 7 dof each
+        assert len(left_arm_positions) == 7, f"left arm has {len(left_arm_positions)} dof: {left_arm_positions}"
+        assert len(right_arm_positions) == 7, f"right arm has {len(right_arm_positions)} dof: {right_arm_positions}"
+        assert len(left_arm_velocities) == 7, f"left arm has {len(left_arm_velocities)} dof: {left_arm_velocities}"
+        assert len(right_arm_velocities) == 7, f"right arm has {len(right_arm_velocities)} dof: {right_arm_velocities}"
+        return (left_arm_positions, right_arm_positions), (left_arm_velocities, right_arm_velocities)
+        
+    except Exception as e:
+        print(f"Error getting joint states: {e}")
+        return None
+
+def get_joint_velocities(socket_path='/tmp/lowstate.sock'):
+    """
+    Get current joint velocities from the server.
+    
+    Returns:
+        list: Joint velocities, or None if error
+    """
+    try:
+        # Create socket and connect to server
+        client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client_socket.connect(socket_path)
+        
+        # Send request (can be any message)
+        client_socket.sendall(b'get_state')
+        
+        # Receive response
+        data = client_socket.recv(4096)
+        response = json.loads(data.decode('utf-8'))
+        
+        # Close connection
+        client_socket.close()
+        
+        full_js = response['joint_velocities'] # 35 length
         left_js, right_js = filter_joint_states(full_js) # 7 dof each
         assert len(left_js) == 7, f"left arm has {len(left_js)} dof: {left_js}"
         assert len(right_js) == 7, f"right arm has {len(right_js)} dof: {right_js}"
         return left_js, right_js
         
     except Exception as e:
-        print(f"Error getting joint states: {e}")
+        print(f"Error getting joint velocities: {e}")
         return None
 
 def send_joint_commands(joint_positions:list[float], arm_idx:int, socket_path='/tmp/lowcmd.sock'):
@@ -101,15 +138,20 @@ if __name__ == '__main__':
     print("Requesting joint states from server...")
     i = 0
     while True:
-        left_js, right_js = get_joint_states()
+        
+        (left_arm_positions, left_arm_velocities), (right_arm_positions, right_arm_velocities) = get_joint_states()
         # next_js = mpc.plan()
         # left_arm_js, right_arm_js = filter_joint_states(full_js)
-        send_joint_commands(left_js, 0)
-        print(f'left sent: {left_js}')
-        send_joint_commands(right_js, 1)
-        print(f'right sent: {right_js}')
+        
+        send_joint_commands(left_arm_positions, 0)
+        # print(f'left sent: {left_arm_positions}')
+        send_joint_commands(left_arm_positions, 0)
+        send_joint_commands(right_arm_positions, 1)
+        # print(f'right sent: {right_arm_positions}')
         print(f"\n # n = {i+1} requests completed")
-        print(f"client: left_js: {left_js}")
-        print(f"client: right_js: {right_js}")
+        print(f"client: left_js: {left_arm_positions}")
+        print(f"client: left_velocities: {left_arm_velocities}")
+        print(f"client: right_js: {right_arm_positions}")
+        print(f"client: right_velocities: {right_arm_velocities}")
         i += 1
         # time.sleep(0.5)

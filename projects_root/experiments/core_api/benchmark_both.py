@@ -3421,7 +3421,12 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             # robot_cfgs[a_idx]["kinematics"]["collision_sphere_buffer"] += 0.02
 
             # SET RETRACT CONFIG TO BE REAL ROBOT JOINT STATE
-            robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = get_joint_states()[a_idx]         
+            setup_joint_states = get_joint_states()
+            if setup_joint_states is not None:
+                agent_joint_positions = setup_joint_states[a_idx][0]
+                robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = agent_joint_positions
+            else:
+                 print(f"Warning: Could not get joint states for retract config setup for agent {a_idx}")
 
 
             # parse base rotation (if euler angles, convert to quaternion)
@@ -3708,11 +3713,18 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             )
                             
 
-                            # new: set new sim robot state joint positions from real robot positions
+                            # new for the real robot: set new sim robot state joint positions from real robot positions
                             idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
-                            real_arm_js = get_joint_states()[a.idx] # client call 
-                            a.sim_robot.robot.set_joint_positions(real_arm_js, idx_list) # from config
-                        
+                            
+                            step_joint_states = get_joint_states()
+                            if step_joint_states is not None:
+                                real_arm_positions = step_joint_states[0][a.idx] 
+                                real_arm_velocities = step_joint_states[1][a.idx]
+                                
+                                a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list) # from real arm positions
+                                # a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list) # from real arm velocities
+
+                            # Read joint states from simulator (that is already should bez updated to match real arm state)
                             js = a.sim_robot.get_js(sync_new=True)
 
                             if js is None:
@@ -3721,6 +3733,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             
                             psw.on()
                             _0 = tensor_args.to_device(js.positions) * 0.0
+                            
                             cu_js = JointState(tensor_args.to_device(js.positions),tensor_args.to_device(js.velocities), _0, ctrl_dof_names,_0).get_ordered_joint_state(planner.ordered_j_names)
                             if isinstance(planner, MpcPlanner):
                                 planner.update_state(cu_js)

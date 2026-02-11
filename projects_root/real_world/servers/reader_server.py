@@ -25,10 +25,15 @@ class LowStateSubscriber(Node):
     def lowstate_callback(self, msg):
         # Store only joint positions
         self.latest_joint_positions = [motor.q for motor in msg.motor_state]
+        self.latest_joint_velocities = [motor.dq for motor in msg.motor_state]
 
     def get_joint_positions(self):
         """Return the latest joint positions"""
         return self.latest_joint_positions
+    
+    def get_joint_velocities(self):
+        """Return the latest joint velocities"""
+        return self.latest_joint_velocities
 
 
 class LowStateServer:
@@ -92,16 +97,19 @@ class LowStateServer:
             if data:
                 # Get latest joint positions
                 joint_positions = self.subscriber.get_joint_positions() # full body (35)
+                joint_velocities = self.subscriber.get_joint_velocities() # full body (35)
 
                 # Send response as JSON
                 response = json.dumps({
-                    'joint_positions': joint_positions
+                    'joint_positions': joint_positions,
+                    'joint_velocities': joint_velocities
                 })
                 client_socket.sendall(response.encode('utf-8'))
                 
                 self.response_cntr += 1
                 print(f"debug: sent response")
                 print(f"debug: joint_positions: {joint_positions}")
+                print(f"debug: joint_velocities: {joint_velocities}")
                 print(f"debug: response: {self.response_cntr}")
                 
         except Exception as e:
