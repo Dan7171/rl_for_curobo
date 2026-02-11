@@ -3810,6 +3810,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 # ACTION IN REAL ROBOT:
                                 action_filtered = action.position.cpu().numpy().flatten().tolist() # joint positions only (list in lengths 7 as the arm dofs)
                                 # print(f'Debug: robot {a_idx} action_filtered = {action_filtered}')
+                                
+                                # $$$$$$$$$ WARNING: REAL COMMAND SENDING $$$$$$$$$$$
                                 # uncomment when ready to use real robot!
                                 # send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)
                                 
