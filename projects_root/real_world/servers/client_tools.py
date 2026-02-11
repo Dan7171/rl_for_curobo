@@ -143,15 +143,15 @@ if __name__ == '__main__':
         # next_js = mpc.plan()
         # left_arm_js, right_arm_js = filter_joint_states(full_js)
         
-        send_joint_commands(left_arm_positions, 0)
+        # send_joint_commands(left_arm_positions, 0)
         # print(f'left sent: {left_arm_positions}')
         send_joint_commands(left_arm_positions, 0)
         send_joint_commands(right_arm_positions, 1)
         # print(f'right sent: {right_arm_positions}')
         print(f"\n # n = {i+1} requests completed")
         print(f"client: left_js: {left_arm_positions}")
-        print(f"client: left_velocities: {left_arm_velocities}")
+        # print(f"client: left_velocities: {left_arm_velocities}")
         print(f"client: right_js: {right_arm_positions}")
-        print(f"client: right_velocities: {right_arm_velocities}")
+        # print(f"client: right_velocities: {right_arm_velocities}")
         i += 1
         # time.sleep(0.5)

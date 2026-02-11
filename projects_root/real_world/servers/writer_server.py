@@ -1,57 +1,89 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from unitree_hg.msg import LowCmd
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import socket
 import os
 import json
 import threading
+import time
+
+# Joint names must match the order in joint_positions [shoulder pitch, roll, yaw, elbow, wrist roll, pitch, yaw]
+# These names are based on the user's config
+JOINT_NAMES_LEFT = [
+    'left_shoulder_pitch_joint', 
+    'left_shoulder_roll_joint', 
+    'left_shoulder_yaw_joint', 
+    'left_elbow_joint', 
+    'left_wrist_roll_joint', 
+    'left_wrist_pitch_joint', 
+    'left_wrist_yaw_joint'
+]
+
+JOINT_NAMES_RIGHT = [
+    'right_shoulder_pitch_joint', 
+    'right_shoulder_roll_joint', 
+    'right_shoulder_yaw_joint', 
+    'right_elbow_joint', 
+    'right_wrist_roll_joint', 
+    'right_wrist_pitch_joint', 
+    'right_wrist_yaw_joint'
+]
 
 class LowCmdPublisher(Node):
     """Publish actions (target joint states) to ros topic"""
     def __init__(self):
         super().__init__('lowcmd_publisher')
-        self.publisher = self.create_publisher(
-            LowCmd,
-            '/cmd/left', # our custom topic name
-            30 # Hz (publishing frequency)
+        
+        # JointTrajectory publisher
+        self.traj_publisher = self.create_publisher(
+            JointTrajectory,
+            '/arm_plan',
+            30 # Hz
         )
-        self.get_logger().info('LowCmd publisher initialized')
+        
+        self.get_logger().info('LowCmd publisher initialized for /arm_plan')
     
-    def send_joint_commands(self, joint_positions):
+    def send_joint_commands(self, joint_positions, arm_idx):
         """
         Publish joint position commands to the robot.
         
         Args:
-            joint_positions: List of 7 desired joint positions (left arm)
+            joint_positions: List of 7 desired (target) joint positions
+            arm_idx: 0 for left arm, 1 for right arm
         """
-        # if joint_positions is None or len(joint_positions) != 7:
-        #     self.get_logger().error(f'Invalid joint positions: expected 7, got {len(joint_positions) if joint_positions else 0}')
-        #     return False
-        # if joint_positions is None or len(joint_positions) != 29:
-        #     self.get_logger().error(f'Invalid joint positions: expected 29, got {len(joint_positions) if joint_positions else 0}')
-        #     return False
-        if joint_positions is None or len(joint_positions) != 35:
-            self.get_logger().error(f'Invalid joint positions: expected 35, got {len(joint_positions) if joint_positions else 0}')
+        
+        # Select joint names based on arm_idx
+        if arm_idx == 0:
+            joint_names = JOINT_NAMES_LEFT
+        elif arm_idx == 1:
+            joint_names = JOINT_NAMES_RIGHT
+        else:
+            self.get_logger().error(f'Invalid arm_idx: {arm_idx}')
             return False
             
-        # Create LowCmd message
-        cmd_msg = LowCmd()
-        
-        # Set motor commands for each joint
-        for i, position in enumerate(joint_positions):
-            if i < len(cmd_msg.motor_cmd):
-                cmd_msg.motor_cmd[i].q = float(position)
-                # You may need to set other fields like kp, kd, tau_ff, dq depending on your robot's requirements
-                # Example:
-                # cmd_msg.motor_cmd[i].kp = 50.0
-                # cmd_msg.motor_cmd[i].kd = 5.0
-                # cmd_msg.motor_cmd[i].tau_ff = 0.0
-                # cmd_msg.motor_cmd[i].dq = 0.0
-        
-        # Publish command
-        self.publisher.publish(cmd_msg)
-        self.get_logger().info(f'Published joint commands: {len(joint_positions)} joints')
+        # Publish using JointTrajectory format to /arm_plan
+        try:
+            traj_msg = JointTrajectory()
+            traj_msg.header.stamp = self.get_clock().now().to_msg()
+            traj_msg.joint_names = joint_names
+            
+            point = JointTrajectoryPoint()
+            point.positions = [float(p) for p in joint_positions]
+            point.velocities = [0.0] * len(joint_positions)
+            point.accelerations = [0.0] * len(joint_positions)
+            point.effort = [0.0] * len(joint_positions)
+            point.time_from_start.sec = 0
+            point.time_from_start.nanosec = 0 
+            
+            traj_msg.points.append(point)
+            
+            self.traj_publisher.publish(traj_msg)
+            
+        except Exception as e:
+            self.get_logger().error(f'Failed to publish trajectory: {e}')
+            return False
+            
         return True
 
 
@@ -114,10 +146,11 @@ class LowCmdServer:
             if data:
                 # Parse JSON request
                 request = json.loads(data.decode('utf-8'))
-                joint_positions = request.get('joint_positions')
+                joint_positions = request.get('joint_positions') # target joint positions (order = [shoulder pitch, shoulder roll, shoulder yaw, elbow, wrist roll, wrist pitch, wrist yaw])
+                arm_idx = request.get('arm_idx') # 0 for left arm, 1 for right arm
                 
                 # Send command to robot
-                success = self.publisher.send_joint_commands(joint_positions)
+                success = self.publisher.send_joint_commands(joint_positions, arm_idx)
                 
                 # Send acknowledgment back to client
                 response = json.dumps({
