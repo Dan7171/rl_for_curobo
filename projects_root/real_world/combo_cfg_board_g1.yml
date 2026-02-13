@@ -5,3 +5,4 @@ robot_type: ['2_arms_only']
 task_seed: [0]
 task_to_levels:
   board: [1]
+
