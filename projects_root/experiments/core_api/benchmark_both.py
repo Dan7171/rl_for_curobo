@@ -3902,12 +3902,13 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                             idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
                             
                             if real_robot:
+                               
                                 # before reading joint state from sim, setting it to be as real state of the robot (for visualization in sim of the real staet)
                                 # (we basically override the physics of the simulator and making it a visualization of the real world)
                                 step_joint_states = get_joint_states()
                                 if step_joint_states is not None:
-                                    real_arm_positions = step_joint_states[0][a.idx] 
-                                    real_arm_velocities = step_joint_states[1][a.idx]
+                                    real_arm_positions = step_joint_states[a.idx][0] 
+                                    real_arm_velocities = step_joint_states[a.idx][1]
                                     a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list) # from real arm positions to simulator
                                     a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list) # from real arm velocities to simulator
                             else: # simulation
@@ -3994,7 +3995,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                     action_filtered = action.position.cpu().numpy().flatten().tolist() # joint positions only (list in lengths 7 as the arm dofs)
                                     # $$$$$$$$$ WARNING: REAL COMMAND SENDING $$$$$$$$$$$
                                     # uncomment when ready to use real robot!
-                                    # send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)                                
+                                    send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)                                
                                 else: # 
                                     # act
                                     isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
@@ -4250,7 +4251,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Run main simulation 
-    main(meta_cfg, out_path)
+    main(meta_cfg, out_path, real_robot)
 
 
 if __name__ == "__main__":

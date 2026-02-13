@@ -632,7 +632,7 @@ if __name__ == "__main__":
             
             # Pass arguments positionally rather than by name so that we do not rely on the exact
             # parameter names that the child process sees if an older benchmark_both module is found
-            current_process = Process(target=benchmark_both.root, args=(meta_cfg, out_path, stop_event, args.vis_mode))
+            current_process = Process(target=benchmark_both.root, args=(meta_cfg, out_path, stop_event, args.vis_mode, args.real))
             current_process.start()
             time.sleep(1)
         

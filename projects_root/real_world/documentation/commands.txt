@@ -66,6 +66,17 @@ python3 /home/humanoid/dane/rl_for_curobo/projects_root/real_world/servers/reade
 # start writer server:
 python3 /home/humanoid/dane/rl_for_curobo/projects_root/real_world/servers/writer_server.py
 
-# start writer server:
-python3 /home/humanoid/dane/rl_for_curobo/projects_root/real_world/servers/writer_server.py
+ 
+# Feb 13
+# Manual, simulation
+humanoid@dt-hm10:~/dane/rl_for_curobo$ (mr_storm) python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_g1.yml 
+# Manual, real robot
+humanoid@dt-hm10:~/dane/rl_for_curobo$ (mr_storm) python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_g1.yml --real
+
+
+
+# Board task, simulation
+humanoid@dt-hm10:~/dane/rl_for_curobo$ (mr_storm) python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_board_g1.yml 
+# Board task, real robot
+humanoid@dt-hm10:~/dane/rl_for_curobo$ (mr_storm) python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_board_g1.yml --real
 
