@@ -84,7 +84,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       # override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
       override_particle_file: projects_root/real_world/particle_mpc.yml
       use_cuda_graph: False 
-      step_dt: 0.0333
+      step_dt: 0.05 # 0.0333
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
@@ -228,8 +228,8 @@ sim_env:
       - { # torso cuboid
         'obj_shape': 'cube',
         'obj_lin_vel': [0.0,0.0,0.0],
-        'obj_size': [0.1,0.15,0.35],
-        'obj_pos': [0, 0, 1.0],
+        'obj_size': [0.1,0.15,0.75],
+        'obj_pos': [0, 0, 0.75],
       }
 
 
@@ -251,8 +251,8 @@ cu_agents:  # list of agents (each agent is a robot with a planner). Note: you c
   
   sim_robot_cfg:
     visualize_col_pred:
-      own: False # True
-      obs: False # True
+      own: True # True
+      obs: True # True
     visualize_col_spheres: # visualize collision spheres of the robot (for debugging)
       is_on_world: False # True # visualize collision spheres in world frame
       ts_delta: 1 # int

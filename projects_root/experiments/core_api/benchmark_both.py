@@ -3370,6 +3370,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         tsto, sto, pto = get_simulation_timeouts(meta_cfg)
 
         my_world = World(stage_units_in_meters=1.0)
+        
+        step_size = 1/60
+        
+        # my_world.set_physics_step_size(step_size*0.1) 
+
         # activate_gpu_dynamics(my_world)
         my_world.scene.add_default_ground_plane()
         stage = my_world.stage
@@ -3963,7 +3968,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     
                     debug_ctrl_freq_steps += 1
                     debug_ctrl_freq = debug_ctrl_freq_steps /  (time() - debug_ctrl_freq_time)
-                    print(f"Debug Ctrl Freq: {debug_ctrl_freq}")            
+                    print(f"Debug Ctrl Freq (frequency for controlling two arms, per arm is double): {debug_ctrl_freq}")            
                     
                     if tsto_reached or sto_reached or pto_reached or stop_event.is_set() or stop_simulation:
                         if should_capture_frames:
