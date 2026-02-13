@@ -3989,22 +3989,20 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                             # *** act *** 
                             if action is not None: # new: we removed the action in simulator as we are using real robot (simulator now is only for visualization)
                                 
-                                # ACTION IN SIMULATOR:
-                                # isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
-                                # a.sim_robot.articulation_controller.apply_action(isaac_action)
-                                # print(f'Debug: robot {a_idx} action = {isaac_action}')
-                                # print(f'Debug: robot {a_idx} action = {action}')
-                                
-                                # ACTION IN REAL ROBOT:
-                                action_filtered = action.position.cpu().numpy().flatten().tolist() # joint positions only (list in lengths 7 as the arm dofs)
-                                # print(f'Debug: robot {a_idx} action_filtered = {action_filtered}')
-                                
-                                # $$$$$$$$$ WARNING: REAL COMMAND SENDING $$$$$$$$$$$
-                                # uncomment when ready to use real robot!
-                                # send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)
-                                
-                                a.step_count += 1
+                                if real_robot:
+                                    # ACTION IN REAL ROBOT:
+                                    action_filtered = action.position.cpu().numpy().flatten().tolist() # joint positions only (list in lengths 7 as the arm dofs)
+                                    # $$$$$$$$$ WARNING: REAL COMMAND SENDING $$$$$$$$$$$
+                                    # uncomment when ready to use real robot!
+                                    # send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)                                
+                                else: # 
+                                    # act
+                                    isaac_action = planner.convert_action_to_isaac(action, ctrl_dof_names, ctrl_dof_indices)
+                                    a.sim_robot.articulation_controller.apply_action(isaac_action)
                             
+                                a.step_count += 1
+                            else:
+                                print(f'Warning, action is None')
                             # debug
                             sphere_tensor_W = torch.tensor([])
                             if t % viz_col_spheres_dt == 0:

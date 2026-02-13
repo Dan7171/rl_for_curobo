@@ -64,7 +64,7 @@ robot_cfg:
         - left_wrist_roll_joint
         - left_wrist_pitch_joint
         - left_wrist_yaw_joint
-      # retract_config: [0, 0.3, 0.0, 0.5, 0.0, 0.0,0.0]
+      retract_config: [0, 0.3, 0.0, 0.5, 0.0, 0.0,0.0]
       null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       max_acceleration: 20.0 # Keeping user's high value, though 10.0 matches left_arm.yml
