@@ -771,21 +771,6 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             return stats
 
     
-    class ManualTask(SimTask):
-        def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, stats_cfg):
-            super().__init__(agents_task_cfgs, world, usd_help, tensor_args, 1, stats_cfg)
-            
-        def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
-            for a_idx in range(len(errors)):
-                for link_name in errors[a_idx].keys():
-                    p_err, q_err = errors[a_idx][link_name]
-                    target_name = self.name_link_to_target[a_idx][link_name]
-                    p_target, q_target = target_name_to_pose[a_idx][target_name]
-                    self._last_update[a_idx][link_name] = Pose(position=self.tensor_args.to_device(p_target), quaternion=self.tensor_args.to_device(q_target))
-        
-        
-        def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
-            return {}
 
     
     class ManualTask(SimTask):
@@ -1582,6 +1567,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             state = self.solver.rollout_fn.compute_kinematics(
                 JointState.from_position(retract_cfg, joint_names=joint_names)
             )
+
             self.current_state = JointState.from_position(retract_cfg, joint_names=joint_names)
             
             
@@ -3432,12 +3418,13 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             # robot_cfgs[a_idx]["kinematics"]["collision_sphere_buffer"] += 0.02
 
             # SET RETRACT CONFIG TO BE REAL ROBOT JOINT STATE
-            setup_joint_states = get_joint_states()
+            setup_joint_states = get_joint_states() # from real robot
+
             if setup_joint_states is not None:
                 agent_joint_positions = setup_joint_states[a_idx][0]
                 robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = agent_joint_positions
             else:
-                 print(f"Warning: Could not get joint states for retract config setup for agent {a_idx}")
+                print(f"Warning: Could not get joint states for retract config setup for agent {a_idx}")
 
 
             # parse base rotation (if euler angles, convert to quaternion)
@@ -3569,6 +3556,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                     color_cnt += 1
                     if color_cnt >= len(target_colors):
                         color_cnt = 0
+
                     link_retract_pose = a.planner.plan_goals[link_name]
                     
                     if centrealized:
@@ -3831,7 +3819,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 
                                 # $$$$$$$$$ WARNING: REAL COMMAND SENDING $$$$$$$$$$$
                                 # uncomment when ready to use real robot!
-                                send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)
+                                # send_joint_commands(action_filtered, a_idx) # sending also agent index to tell the server which arm we command (0 is left 1 is right)
                                 
                                 a.step_count += 1
                             

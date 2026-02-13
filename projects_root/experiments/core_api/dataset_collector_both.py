@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from projects_root.experiments.core_api import benchmark_both
 from projects_root.experiments.core_api.benchmark_both import PoseUtils
+from projects_root.real_world.servers.client_tools import get_joint_states, send_joint_commands
 
 import traceback
 
@@ -133,6 +134,7 @@ def make_meta_cfgs(combo_cfg_path):
         'D':[False,False], # drrt* - centralized planners do not publish or subscribe to plans (naturally)
         'O-':[True,True], # ours minus priority - same as O (publish full policy, and subscribe to others)
     }
+
 
     ret_pose_cfg = load_yaml(benchmarks_ret_cfg)
     combo_cfg = load_yaml(combo_cfg_path)
@@ -319,7 +321,16 @@ def make_meta_cfgs(combo_cfg_path):
                                         # Ensure each agent gets its own copy to avoid shared-list mutations later
                                         agent_cfg["base_pose"] = deepcopy(base_pose)
                                         agent_cfg["viz_color"] = colors[a_idx%len(colors)]
-                                        agent_cfg["retract_cfg"] = ret_cfg
+                                        # agent_cfg["retract_cfg"] = ret_cfg
+                                        
+                                        # if a_idx == 1:
+                                        #     print(f'reading joint states for agent {a_idx}')
+                                        #     # agent_cfg["retract_cfg"] = get_joint_states()[0][a_idx] # read from real robot
+                                        #     print(f'right arm js first : {get_joint_states()[0][a_idx]}')
+                                        #     print(f'right arm js second : {get_joint_states()[0][a_idx]}')                                            
+                                        #     sys.exit()
+
+                                        agent_cfg["retract_cfg"] = get_joint_states()[0][a_idx] # read from real robot                                 
                                         cu_agent_cfgs.append(agent_cfg)
 
                                     meta_cfg["cu_agents"] = cu_agent_cfgs
