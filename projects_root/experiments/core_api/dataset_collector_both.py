@@ -321,16 +321,12 @@ def make_meta_cfgs(combo_cfg_path):
                                         # Ensure each agent gets its own copy to avoid shared-list mutations later
                                         agent_cfg["base_pose"] = deepcopy(base_pose)
                                         agent_cfg["viz_color"] = colors[a_idx%len(colors)]
-                                        # agent_cfg["retract_cfg"] = ret_cfg
                                         
-                                        # if a_idx == 1:
-                                        #     print(f'reading joint states for agent {a_idx}')
-                                        #     # agent_cfg["retract_cfg"] = get_joint_states()[0][a_idx] # read from real robot
-                                        #     print(f'right arm js first : {get_joint_states()[0][a_idx]}')
-                                        #     print(f'right arm js second : {get_joint_states()[0][a_idx]}')                                            
-                                        #     sys.exit()
-
-                                        agent_cfg["retract_cfg"] = get_joint_states()[0][a_idx] # read from real robot                                 
+                                        if not args.real: # simulation mode
+                                            agent_cfg["retract_cfg"] = ret_cfg # fixed retract config from config files
+                                        else: # real mode
+                                            agent_cfg["retract_cfg"] = get_joint_states()[0][a_idx] # read joint positions from real robot ad set as initial config                                 
+                                        
                                         cu_agent_cfgs.append(agent_cfg)
 
                                     meta_cfg["cu_agents"] = cu_agent_cfgs
@@ -554,7 +550,7 @@ if __name__ == "__main__":
     args.add_argument("--in_process", action="store_true", default=False, help="Run the simulation in the same process as the dataset_collector. Automatically sets the num of meta cfgs to 1 (the first in combo) to avoid issues caused by many isaac-sim processes running at the same time")
     args.add_argument('--ignore_sim_errors',action="store_true", default=False)
     args.add_argument('--cleanup', action="store_true", default=True, help="Clean up zombie processes before starting")
-
+    args.add_argument('--real', action="store_true", default=False, help="Use real robot instead of simulation")
     args = args.parse_args()
     
     # Startup cleanup disabled to prevent self-termination
@@ -672,7 +668,7 @@ if __name__ == "__main__":
         else:
 
             try:
-                benchmark_both.root(meta_cfg, out_path, stop_event, args.vis_mode)
+                benchmark_both.root(meta_cfg, out_path, stop_event, args.vis_mode, args.real)
                 print(f'Successful sim!')
                 # In-process: on cancellation, invalidate and exit loop
                 if stop_event.is_set():

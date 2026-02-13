@@ -113,7 +113,7 @@ class PoseUtils:
                 q_out = q_new
             return q_out
 
-def root(meta_cfg, out_path,stop_event, vis_mode:str):
+def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
     import argparse
     import os
@@ -1023,6 +1023,188 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                         contact_matrix[j].append(i)
                         
             return contact_matrix
+    class RealWorldVerticallBoard(SimTask):
+        def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
+                    stats_cfg,pose_utils, 
+                    p_err_threh=0.05,q_err_threh=0.5,
+                    ):
+            """
+            Real world vertical board task with 9 fixed goal poses and fixed picking points.
+            """
+            super().__init__(agents_task_cfgs, world, usd_help, tensor_args, level, stats_cfg)
+            self.pose_utils = pose_utils
+            self._local_rng = random.Random(self.pose_utils.seed)
+            self.n_agents = len(self.agent_task_cfgs)
+            self._is_initialized = False
+            self.p_err_threh = p_err_threh
+            self.q_err_threh = q_err_threh
+            
+            # statistics:
+            self.link_name_to_placed_in_board = [{} for _ in range(len(self.agent_task_cfgs))] 
+            self.link_name_to_picked_from_back = [{} for _ in range(len(self.agent_task_cfgs))] 
+
+            # Fixed Board Goal Poses
+            self.board_goal_poses = [
+                ([0.4, 0.2, 1.0], [1,0,0,0]),
+                ([0.4, 0.0, 1.0], [1,0,0,0]),
+                ([0.4, -0.2, 1.0], [1,0,0,0]),
+                ([0.4, 0.2, 0.8], [1,0,0,0]),
+                ([0.4, 0.0, 0.8], [1,0,0,0]),
+                ([0.4, -0.2, 0.8], [1,0,0,0]),
+                ([0.4, 0.2, 0.6], [1,0,0,0]),
+                ([0.4, 0.0, 0.6], [1,0,0,0]),
+                ([0.4, -0.2, 0.6], [1,0,0,0]),
+            ]
+            
+            # Define behind arm goals (pick goals):
+            self.link_name_to_pick_pose = [{} for _ in range(self.n_agents)]
+
+            # Fixed Picking Points per arm index
+            # Arm 0: [0, -0.4, 0.7]
+            # Arm 1: [0, 0.4, 0.7]
+            # Orientation: [0, 1, 0, 0] (facing down)
+            
+            self.pick_points = {
+                0: ([0.0, -0.4, 0.7], [0,1,0,0]),
+                1: ([0.0, 0.4, 0.7], [0,1,0,0])
+            }
+
+            for agent_idx in range(self.n_agents):
+                # In centralized case, n_agents=1 but it might have multiple arms. 
+                # However, SimTask structure usually assumes 1 agent = 1 robot/planner.
+                # Just in case, we map agent_idx to the pick point.
+                # If we have multiple arms in one agent (e.g. centralized), we need to check how links are mapped.
+                # Based on BinTask, it iterates over links.
+                
+                # We will assume agent_idx corresponds to the arm index for picking point assignment if n_agents > 1
+                # If n_agents == 1 (centralized), we iterate links and assign based on link index if possible, or just alternate?
+                # The user requirement: "Robot arm 0... Robot arm 1..."
+                
+                # Let's try to infer arm index from agent index or link index
+                
+                start_arm_idx = agent_idx # Offset if multiple agents
+                
+                link_count = 0
+                for link_name in self.link_name_to_path[agent_idx]:
+                     # Determine effective arm index. 
+                     # If decentralized, agent_idx is the arm index (0, 1)
+                     # If centralized, likely 1 agent with multiple links.
+                    effective_arm_idx = start_arm_idx + link_count
+                    
+                    if effective_arm_idx in self.pick_points:
+                        pick_pose_data = self.pick_points[effective_arm_idx]
+                        pick_p = np.array(pick_pose_data[0])
+                        pick_q = np.array(pick_pose_data[1])
+                        self.link_name_to_pick_pose[agent_idx][link_name] = (pick_p, pick_q)
+                    else:
+                        print(f"Warning: No pick point defined for arm index {effective_arm_idx}, using default 0")
+                        pick_pose_data = self.pick_points[0]
+                        pick_p = np.array(pick_pose_data[0])
+                        pick_q = np.array(pick_pose_data[1])
+                        self.link_name_to_pick_pose[agent_idx][link_name] = (pick_p, pick_q)
+
+                    link_count += 1
+
+            # setup tracking of board goals taking by each link:
+            self._link_name_to_cur_boardgoal = [{} for _ in range(len(self.agent_task_cfgs))] 
+            for a_idx in range(len(self.agent_task_cfgs)):
+                for link_name in self.link_name_to_pick_pose[a_idx]: # Iterate based on configured links
+                    self._link_name_to_cur_boardgoal[a_idx][link_name] = -1 
+
+            self.max_concurrent_board_goals = 2 # Allow multiple
+            self.force_unique_goals = True # Level 1 usually simple, but let's enforce unique to prevent collision at goal
+
+        def _update_sim_targets(self, errors, target_name_to_pose, link_name_to_pose)->Optional[list[dict[str,tuple[np.ndarray, np.ndarray]]]]:
+            
+            self._last_step_picks = []
+            self._last_step_drops = []
+
+            _link_name_to_target_pose_np = [{} for _ in range(len(self.agent_task_cfgs))]
+            
+            if not self._is_initialized: # Initialize the targets
+                self._is_initialized = True
+                self._link_name_to_goal_type = [{} for _ in range(len(self.agent_task_cfgs))]
+                self._goal_types = ['board', 'pick_point']
+                goal_type = self._goal_types[1] # all arms start with pick point goal (picking)
+
+                for a_idx in range(len(self.agent_task_cfgs)):
+                    for link_name in link_name_to_pose[a_idx]:
+                        self._link_name_to_goal_type[a_idx][link_name] = goal_type
+                        # Set target to pick pose
+                        _link_name_to_target_pose_np[a_idx][link_name] = self.link_name_to_pick_pose[a_idx][link_name]
+            
+            else: # Check updates
+                arm_idx = 0
+                for a_idx in range(len(self.agent_task_cfgs)):
+                    for link_name in link_name_to_pose[a_idx]:
+                        err_p, err_q =  errors[a_idx][link_name]
+                        cur_goal_type = self._link_name_to_goal_type[a_idx][link_name]
+                        
+                        reached_goal = err_p < self.p_err_threh and err_q < self.q_err_threh
+                        
+                        if reached_goal: 
+                            if cur_goal_type == 'board': # PLACED at board
+                                goal_type = 'pick_point' # Next is pick
+                                goal_pose = self.link_name_to_pick_pose[a_idx][link_name]
+                                self._last_step_drops.append(arm_idx)
+                                
+                                # release board goal
+                                self._link_name_to_cur_boardgoal[a_idx][link_name] = -1 
+                                
+                            else: # PICKED from pick point
+                                goal_type = 'board' # Next is board
+
+                                # Choose a board goal
+                                taken_goals = []
+                                for a2_idx in range(len(self.agent_task_cfgs)):
+                                    for link_name2 in self._link_name_to_cur_boardgoal[a2_idx]:
+                                        if self._link_name_to_cur_boardgoal[a2_idx][link_name2] != -1:
+                                            taken_goals.append(self._link_name_to_cur_boardgoal[a2_idx][link_name2])
+                                
+                                free_goals = [i for i in range(len(self.board_goal_poses)) if i not in taken_goals]
+                                
+                                if not free_goals and self.force_unique_goals:
+                                    continue # Wait for free goal
+                                
+                                if self.force_unique_goals:
+                                    options = free_goals
+                                else:
+                                    options = list(range(len(self.board_goal_poses)))
+                                
+                                if not options: # Should not happen if not forced unique or enough goals
+                                     continue
+
+                                new_goal_idx = self._local_rng.choice(options)
+                                self._link_name_to_cur_boardgoal[a_idx][link_name] = new_goal_idx
+                                
+                                # Get goal pose components
+                                goal_pos_list, goal_quat_list = self.board_goal_poses[new_goal_idx]
+                                goal_pose = (np.array(goal_pos_list), np.array(goal_quat_list))
+                                
+                                self._last_step_picks.append(arm_idx)
+
+                            _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
+                            self._link_name_to_goal_type[a_idx][link_name] = goal_type
+                        
+                        arm_idx += 1
+
+            # update the targets in sim
+            self._set_targets_world_pose(_link_name_to_target_pose_np)
+            return _link_name_to_target_pose_np
+        
+        def get_stat_vals(self, stat_names:list[str])->dict[str,Any]:
+            stats = {}
+            for stat_name in stat_names:
+                if stat_name == 'arm_err':
+                    val = self.get_goal_err_by_arm()
+                elif stat_name == 'arm_picks':
+                    val = self._last_step_picks
+                elif stat_name == 'arm_drops':
+                    val = self._last_step_drops
+                else:
+                    raise ValueError(f"Invalid stat name: {stat_name}")
+                stats[stat_name] = val
+            return stats
     class BinTask(SimTask):
         def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
                     stats_cfg,pose_utils, wall_dims_hwd=np.array([0.5,0.5,0.3]), 
@@ -1098,6 +1280,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 color=color,position=in_wall_pos, orientation=in_wall_1_quat, scale=in_wall_scale)
             
             quarter0_pos = bin_pos + bin_to_out0_step / 2 + bin_to_out1_step /2
+
+
             quarter1_pos = bin_pos + bin_to_out0_step / 2 + bin_to_out3_step /2
             quarter2_pos = bin_pos + bin_to_out2_step / 2 + bin_to_out1_step /2
             quarter3_pos = bin_pos + bin_to_out2_step / 2 + bin_to_out3_step /2
@@ -3220,7 +3404,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             print(f'Finished converting frames to video: {result_path}')
             
 
-    def simulation_startup(simulation_app, my_world, cu_agents):
+    def simulation_startup(simulation_app, my_world, cu_agents, real_robot:bool=False):
         """
         Initialize simulation and wait for it to start playing.
         
@@ -3250,36 +3434,28 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                 for a in cu_agents:
                     if a.sim_robot is not None:
                         a.sim_robot.robot._articulation_view.initialize()
+
                         idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
-                        
-                        # set initial joint positions
-                        
-                        # original (set from config)
+                        if not real_robot: # in simulation- setting joints initial state to definitions in config 
+                            a.sim_robot.robot._articulation_view.initialize()
+                            idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
+                            a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"], idx_list)
+                            a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
 
-                        # print(f'debug: a.robot_cfg["kinematics"]["cspace"]["retract_config"] {a.robot_cfg["kinematics"]["cspace"]["retract_config"]}, idx_list: {idx_list}')
-                        # print(f'debug type: {type(a.robot_cfg["kinematics"]["cspace"]["retract_config"])}')
-                        a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"], idx_list) # from config
+                        else: # on real robot - setting joints initial state to real robot joint states (positions and velocities)
+                            a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"], idx_list) # from config
+                            real_arm_positions, real_arm_velocities = get_joint_states()[a.idx] # left arm js or right arm js depending on a.idx
+                            a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list)
+                            a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list)
                         
-                        # alternative: set from real robot joint states
-                        # t_debug = time()
-                        # real_arm_js = get_joint_states()[a.idx] # left arm js or right arm js depending on a.idx
-                        #t_debug = time() - t_debug
-                        # print(f'debug: get_joint_states time: {t_debug}')
-                        # print(f'debug: real_arm_js: {real_arm_js}, idx_list: {idx_list}')
-                        # a.sim_robot.robot.set_joint_positions(real_arm_js, idx_list) # set simulation robot joint positions to real robot joint positions
 
-                        # zero velocity
-                        a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
                         
                         # max efforts
                         a.sim_robot.robot._articulation_view.set_max_efforts(
                             values=np.array([5000 for i in range(len(idx_list))]), joint_indices=idx_list
                         )
                         _ = a.sim_robot.get_js(sync_new=True)
-                        # _ = _.positions
-                        # print(f'debug should have been (config): {a.robot_cfg["kinematics"]["cspace"]["retract_config"]}')
-                        # print(f'debug robot: {real_arm_js}')
-                        # print(f'debug actual (shouldbe robot): {_}')
+                    
             
             if step_index < 20:
                 continue
@@ -3345,7 +3521,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         torch.cuda.ipc_collect()    # release CUDA IPC handles (optional)
         
         
-    def main(meta_cfg, out_path):
+    def main(meta_cfg, out_path, real_robot=False):
         
         # start real robot's joint state and joint command servers. Importatnt: using different python environment (using computer python environment to use ros)
         
@@ -3417,15 +3593,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             robot_cfgs[a_idx] = load_yaml(robot_cfgs_paths[a_idx])["robot_cfg"]
             # robot_cfgs[a_idx]["kinematics"]["collision_sphere_buffer"] += 0.02
 
-            # SET RETRACT CONFIG TO BE REAL ROBOT JOINT STATE
-            setup_joint_states = get_joint_states() # from real robot
-
-            if setup_joint_states is not None:
-                agent_joint_positions = setup_joint_states[a_idx][0]
-                robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = agent_joint_positions
-            else:
-                print(f"Warning: Could not get joint states for retract config setup for agent {a_idx}")
-
+            
+            if real_robot:
+                # SET RETRACT CONFIG TO BE REAL ROBOT JOINT STATE
+                setup_joint_states = get_joint_states() # from real robot
+                if setup_joint_states is not None:
+                    agent_joint_positions = setup_joint_states[a_idx][0]
+                    robot_cfgs[a_idx]["kinematics"]["cspace"]["retract_config"] = agent_joint_positions
+                else:
+                    print(f"Warning: Could not get joint states for retract config setup for agent {a_idx}")
+                    raise ValueError(f"Could not get joint states from real robot for retract config setup for agent {a_idx}")
 
             # parse base rotation (if euler angles, convert to quaternion)
             base_pose[a_idx] = a_cfg["base_pose"]
@@ -3585,6 +3762,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
             elif sim_task_type == 'bin':
                 
                 sim_task = BinTask(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,pose_utils,**sim_task_cfg)
+            elif sim_task_type == 'board':
+                sim_task = RealWorldVerticallBoard(agents_task_cfgs, my_world, usd_help, tensor_args,level,stat_man_cfg,pose_utils,**sim_task_cfg)
             else:
                 raise ValueError(f"Invalid task type: {sim_task_type}")
 
@@ -3608,7 +3787,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
         plans_board:List[Optional[dict]] = [None for _ in range(len(agent_cfgs))] # plans will be stored here
         
         # setup simulation with dummy steps until initialized
-        _ = simulation_startup(simulation_app, my_world, cu_agents)
+        _ = simulation_startup(simulation_app, my_world, cu_agents, real_robot)
         
         # setup stats for simulation
         # sim_stat_man = StatManager(my_world, **meta_cfg["sim_stat_man_cfg"],unique_name='sim_stats')
@@ -3722,14 +3901,17 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                             # new for the real robot: set new sim robot state joint positions from real robot positions
                             idx_list = [a.sim_robot.robot.get_dof_index(x) for x in a.robot_cfg["kinematics"]["cspace"]["joint_names"]]
                             
-                            # real state to simulation for visualization only (we basically override the physics of the simulator and making it a visualization of the real world)
-                            step_joint_states = get_joint_states()
-                            if step_joint_states is not None:
-                                real_arm_positions = step_joint_states[0][a.idx] 
-                                real_arm_velocities = step_joint_states[1][a.idx]
-                                a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list) # from real arm positions
-                                a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list) # from real arm velocities
-
+                            if real_robot:
+                                # before reading joint state from sim, setting it to be as real state of the robot (for visualization in sim of the real staet)
+                                # (we basically override the physics of the simulator and making it a visualization of the real world)
+                                step_joint_states = get_joint_states()
+                                if step_joint_states is not None:
+                                    real_arm_positions = step_joint_states[0][a.idx] 
+                                    real_arm_velocities = step_joint_states[1][a.idx]
+                                    a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list) # from real arm positions to simulator
+                                    a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list) # from real arm velocities to simulator
+                            else: # simulation
+                                pass # reading state from simulator
                             # Read joint states from simulator (that is already should bez updated to match real arm state)
                             js = a.sim_robot.get_js(sync_new=True)
 

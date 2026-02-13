@@ -165,6 +165,9 @@ sim_task:
   # task cfgs
   task_cfgs:
     manual: {}
+    board: 
+      p_err_threh: 0.05
+      q_err_threh: 0.5
     follow:
       # update_interval_tphys: 0.2 # physics dt to update target
       add_velocity_noise: True # add noise for the target velocity
@@ -208,6 +211,12 @@ sim_task:
       save: False
     manual: 
       {}
+    board: 
+      keys: ['tsys', 'tphysics', 'w_step']
+      stat_names: ['arm_err', 'arm_picks', 'arm_drops']
+      collect_dt: 1
+      dt_key_type: 'tstep'
+      save: False
 
   
     
