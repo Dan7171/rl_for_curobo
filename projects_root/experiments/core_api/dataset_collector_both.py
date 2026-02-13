@@ -325,7 +325,7 @@ def make_meta_cfgs(combo_cfg_path):
                                         if not args.real: # simulation mode
                                             agent_cfg["retract_cfg"] = ret_cfg # fixed retract config from config files
                                         else: # real mode
-                                            agent_cfg["retract_cfg"] = get_joint_states()[0][a_idx] # read joint positions from real robot ad set as initial config                                 
+                                            agent_cfg["retract_cfg"] = get_joint_states()[a_idx][0] # read joint positions from real robot ad set as initial config                                 
                                         
                                         cu_agent_cfgs.append(agent_cfg)
 

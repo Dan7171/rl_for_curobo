@@ -3443,10 +3443,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                             a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
 
                         else: # on real robot - setting joints initial state to real robot joint states (positions and velocities)
-                            a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"], idx_list) # from config
+                            # a.sim_robot.robot.set_joint_positions(a.robot_cfg["kinematics"]["cspace"]["retract_config"], idx_list) # from config
                             real_arm_positions, real_arm_velocities = get_joint_states()[a.idx] # left arm js or right arm js depending on a.idx
                             a.sim_robot.robot.set_joint_positions(real_arm_positions, idx_list)
                             a.sim_robot.robot.set_joint_velocities(real_arm_velocities, idx_list)
+                            # a.sim_robot.robot.set_joint_velocities(np.zeros_like(a.robot_cfg["kinematics"]["cspace"]["retract_config"]), idx_list)
                         
 
                         

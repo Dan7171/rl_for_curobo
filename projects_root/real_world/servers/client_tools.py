@@ -38,7 +38,7 @@ def get_joint_states(socket_path='/tmp/lowstate.sock'):
         assert len(right_arm_positions) == 7, f"right arm has {len(right_arm_positions)} dof: {right_arm_positions}"
         assert len(left_arm_velocities) == 7, f"left arm has {len(left_arm_velocities)} dof: {left_arm_velocities}"
         assert len(right_arm_velocities) == 7, f"right arm has {len(right_arm_velocities)} dof: {right_arm_velocities}"
-        return (left_arm_positions, right_arm_positions), (left_arm_velocities, right_arm_velocities)
+        return (left_arm_positions, left_arm_velocities), (right_arm_positions, right_arm_velocities)
         
     except Exception as e:
         print(f"Error getting joint states: {e}")
