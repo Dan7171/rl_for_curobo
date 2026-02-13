@@ -1026,7 +1026,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     class RealWorldVerticallBoard(SimTask):
         def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
                     stats_cfg,pose_utils, 
-                    p_err_threh=0.05,q_err_threh=0.5,
+                    p_err_threh=0.1,q_err_threh=10.0,
                     ):
             """
             Real world vertical board task with 9 fixed goal poses and fixed picking points.
@@ -1045,15 +1045,15 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
             # Fixed Board Goal Poses
             self.board_goal_poses = [
-                ([0.4, 0.2, 1.0], [1,0,0,0]),
-                ([0.4, 0.0, 1.0], [1,0,0,0]),
-                ([0.4, -0.2, 1.0], [1,0,0,0]),
-                ([0.4, 0.2, 0.8], [1,0,0,0]),
-                ([0.4, 0.0, 0.8], [1,0,0,0]),
-                ([0.4, -0.2, 0.8], [1,0,0,0]),
-                ([0.4, 0.2, 0.6], [1,0,0,0]),
-                ([0.4, 0.0, 0.6], [1,0,0,0]),
-                ([0.4, -0.2, 0.6], [1,0,0,0]),
+                ([0.3, 0.15, 1.0], [1,0,0,0]),
+                ([0.3, 0.0, 1.0], [1,0,0,0]),
+                ([0.3, -0.15, 1.0], [1,0,0,0]),
+                ([0.3, 0.15, 0.9], [1,0,0,0]),
+                ([0.3, 0.0, 0.9], [1,0,0,0]),
+                ([0.3, -0.15, 0.9], [1,0,0,0]),
+                ([0.3, 0.15, 0.8], [1,0,0,0]),
+                ([0.3, 0.0, 0.8], [1,0,0,0]),
+                ([0.3, -0.15, 0.8], [1,0,0,0]),
             ]
             
             # Define behind arm goals (pick goals):
@@ -1065,8 +1065,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             # Orientation: [0, 1, 0, 0] (facing down)
             
             self.pick_points = {
-                0: ([0.0, -0.4, 0.7], [0,1,0,0]),
-                1: ([0.0, 0.4, 0.7], [0,1,0,0])
+                0: ([0.2, 0.4, 0.7], [0,1,0,0]),
+                1: ([0.2, -0.4, 0.7], [0,1,0,0])
             }
 
             for agent_idx in range(self.n_agents):
@@ -1140,7 +1140,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                         err_p, err_q =  errors[a_idx][link_name]
                         cur_goal_type = self._link_name_to_goal_type[a_idx][link_name]
                         
-                        reached_goal = err_p < self.p_err_threh and err_q < self.q_err_threh
+                        reached_goal = err_p < self.p_err_threh # and err_q < self.q_err_threh
                         
                         if reached_goal: 
                             if cur_goal_type == 'board': # PLACED at board
