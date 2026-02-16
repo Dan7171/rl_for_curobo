@@ -277,7 +277,7 @@
     </visual>
   </link>
   <joint name="dummy_ee_right_joint" type="fixed">
-    <origin xyz="0.1 0 0" rpy="0 0 0" />
+    <origin xyz="0.13 0.05 0" rpy="0 0 0" />
     <parent link="right_rubber_hand" />
     <child link="dummy_ee_right_link" />
   </joint>

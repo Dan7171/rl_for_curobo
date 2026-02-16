@@ -239,7 +239,8 @@
     </visual>
   </link>
   <joint name="dummy_ee_left_joint" type="fixed">
-    <origin xyz="0.1 0 0" rpy="0 0 0" />
+    <!-- Calculated from g1_29dof_with_hand: Palm->Index0(0.0777)+Index1(0.0458)+Tip(~0.04) = 0.1635 -->
+    <origin xyz="0.13 -0.05 -0.001" rpy="0 0 0" />
     <parent link="left_rubber_hand" />
     <child link="dummy_ee_left_link" />
   </joint>

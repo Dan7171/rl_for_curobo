@@ -1043,7 +1043,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                 os.remove(self.logs_csv_path)
             self.csv_log = open(self.logs_csv_path, 'w')
             self.csv_writer = csv.writer(self.csv_log)
-            self.csv_writer.writerow(['agent_idx', 't_placed'])
+            self.csv_writer.writerow(['agent_idx', 't_placed','target_id'])
             
             # statistics:
             self.link_name_to_placed_in_board = [{} for _ in range(len(self.agent_task_cfgs))] 
@@ -1151,13 +1151,14 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                         if reached_goal: 
                             if cur_goal_type == 'board': # PLACED at board
                                 goal_type = 'pick_point' # Next is pick
+                                goal_id = self._link_name_to_cur_boardgoal[a_idx][link_name] + 1
                                 goal_pose = self.link_name_to_pick_pose[a_idx][link_name]
                                 self._last_step_drops.append(arm_idx)
                                 
                                 # release board goal
                                 self._link_name_to_cur_boardgoal[a_idx][link_name] = -1 
                                 
-                                self.csv_writer.writerow([a_idx, time()])
+                                self.csv_writer.writerow([a_idx, time(),goal_id])
                                 self.csv_log.flush()
 
                             else: # PICKED from pick point

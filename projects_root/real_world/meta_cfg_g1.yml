@@ -1,7 +1,7 @@
 timeout:
-  tstep: 5000 # 500 # world steps timeout
-  tsec: 30000 # seconds timeout
-  physics_tsec: 30000 # physics seconds (world time) timeout
+  tstep: 10000000  # 500 # world steps timeout
+  tsec: 500 # seconds timeout
+  physics_tsec: 30000000 # physics seconds (world time) timeout
 
 out:
 
@@ -166,7 +166,8 @@ sim_task:
   task_cfgs:
     manual: {}
     board: 
-      p_err_threh: 0.05
+      # p_err_threh: 0.05
+      p_err_threh: 0.01
       q_err_threh: 10000
     follow:
       # update_interval_tphys: 0.2 # physics dt to update target
