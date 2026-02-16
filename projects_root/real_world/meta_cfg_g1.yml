@@ -84,7 +84,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       # override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
       override_particle_file: projects_root/real_world/particle_mpc.yml
       use_cuda_graph: False 
-      step_dt: 0.025 # 0.05 # 0.06666666666666667 # 0.05 # 0.0333
+      step_dt: 0.025 #0.025 #  0.06666666666666667 # 0.05 # 0.0333
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
