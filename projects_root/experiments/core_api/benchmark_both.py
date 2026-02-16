@@ -1038,7 +1038,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             self._is_initialized = False
             self.p_err_threh = p_err_threh
             self.q_err_threh = q_err_threh
-            self.logs_csv_path = '//home/humanoid/Desktop/real_world_vertical_board_task.csv' 
+            self.logs_csv_path = f'/home/humanoid/Desktop/real_world_vertical_board_task_seed={self.pose_utils.seed}.csv' 
             if os.path.exists(self.logs_csv_path):
                 os.remove(self.logs_csv_path)
             self.csv_log = open(self.logs_csv_path, 'w')
