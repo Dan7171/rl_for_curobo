@@ -6,7 +6,7 @@ import numpy as np
 import os
 import multiprocessing as mp
 from curobo.util_file import load_yaml
-
+import csv
 
 stop_simulation = False
 
@@ -1038,6 +1038,12 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             self._is_initialized = False
             self.p_err_threh = p_err_threh
             self.q_err_threh = q_err_threh
+            self.logs_csv_path = '//home/humanoid/Desktop/real_world_vertical_board_task.csv' 
+            if os.path.exists(self.logs_csv_path):
+                os.remove(self.logs_csv_path)
+            self.csv_log = open(self.logs_csv_path, 'w')
+            self.csv_writer = csv.writer(self.csv_log)
+            self.csv_writer.writerow(['agent_idx', 't_placed'])
             
             # statistics:
             self.link_name_to_placed_in_board = [{} for _ in range(len(self.agent_task_cfgs))] 
@@ -1151,6 +1157,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                 # release board goal
                                 self._link_name_to_cur_boardgoal[a_idx][link_name] = -1 
                                 
+                                self.csv_writer.writerow([a_idx, time()])
+                                self.csv_log.flush()
+
                             else: # PICKED from pick point
                                 goal_type = 'board' # Next is board
 
