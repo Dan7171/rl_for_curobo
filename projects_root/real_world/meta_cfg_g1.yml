@@ -103,7 +103,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
 
     visualize_col_pred:
         own: False
-        own_color: 'blue'
+        own_color: 'green'
         own_mean_only: True
         obs: False
         obs_color: 'red'

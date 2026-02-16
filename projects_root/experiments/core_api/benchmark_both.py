@@ -140,17 +140,17 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     from omni.isaac.kit import SimulationApp
 
     # Use simple, stable configuration like working examples
-    # simulation_app = SimulationApp({
-    #     "headless": vis_mode == 'headless',
-    #     "width": "1920", # if vis_mode != 'headless' else "800",
-    #     "height": "1080", # if vis_mode != 'headless' else "600",
-    # })
-    
     simulation_app = SimulationApp({
-        "headless": False, # vis_mode == 'headless',
-        "width": "400", # if vis_mode != 'headless' else "800",
-        "height": "300", # if vis_mode != 'headless' else "600",
+        "headless": vis_mode == 'headless',
+        "width": "1920", # if vis_mode != 'headless' else "800",
+        "height": "1080", # if vis_mode != 'headless' else "600",
     })
+    
+    # simulation_app = SimulationApp({
+    #     "headless": False, # vis_mode == 'headless',
+    #     "width": "400", # if vis_mode != 'headless' else "800",
+    #     "height": "300", # if vis_mode != 'headless' else "600",
+    # })
 
     from projects_root.utils.helper import add_extensions 
 
