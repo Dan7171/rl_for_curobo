@@ -208,7 +208,7 @@ class DynamicObsCost(CostBase, DynamicObsCostConfig):
             self.wta_trust
         )
         print(f"DynamicObsCost successfully initialized for robot {self.robot_id} with {n_obstacle_spheres} obstacle spheres")
-    
+        
     def forward(self, state: KinematicModelState) -> torch.Tensor:
         """
         Compute dynamic obstacle collision cost.

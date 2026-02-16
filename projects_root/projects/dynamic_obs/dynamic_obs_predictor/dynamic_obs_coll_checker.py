@@ -373,9 +373,12 @@ class DynamicObsCollPredictor:
                     # We now set self.pairwise_surface_dist_buf to a very high distance for the subto spheres (to ignore them in collision check and prioritize ourselves on top of them)
                     
                     # Make prioritization expression (alpha) between self and other (subto) = err_ratio ** tau
-                    err_ratio = p_own_err / p_err_subto   
+                    err_ratio = p_own_err / p_err_subto
+                    # print(f'err_ratio: {err_ratio}')   
                     tau = self.wta_trust
                     alpha = err_ratio ** tau 
+                    # print(f'alpha: {alpha}')
+
                     
                     # Make masking f:
                     # now we ge the min distance to any st (subto) sphere on each rollout (dim 0) step h (dim 1)

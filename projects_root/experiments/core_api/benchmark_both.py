@@ -140,17 +140,17 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     from omni.isaac.kit import SimulationApp
 
     # Use simple, stable configuration like working examples
-    simulation_app = SimulationApp({
-        "headless": vis_mode == 'headless',
-        "width": "1920", # if vis_mode != 'headless' else "800",
-        "height": "1080", # if vis_mode != 'headless' else "600",
-    })
-    
     # simulation_app = SimulationApp({
-    #     "headless": False, # vis_mode == 'headless',
-    #     "width": "400", # if vis_mode != 'headless' else "800",
-    #     "height": "300", # if vis_mode != 'headless' else "600",
+    #     "headless": vis_mode == 'headless',
+    #     "width": "1920", # if vis_mode != 'headless' else "800",
+    #     "height": "1080", # if vis_mode != 'headless' else "600",
     # })
+    
+    simulation_app = SimulationApp({
+        "headless": False, # vis_mode == 'headless',
+        "width": "400", # if vis_mode != 'headless' else "800",
+        "height": "300", # if vis_mode != 'headless' else "600",
+    })
 
     from projects_root.utils.helper import add_extensions 
 
@@ -1026,7 +1026,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     class RealWorldVerticallBoard(SimTask):
         def __init__(self, agents_task_cfgs, world, usd_help, tensor_args, level,
                     stats_cfg,pose_utils, 
-                    p_err_threh=0.1,q_err_threh=10.0,
+                    p_err_threh=0.1,q_err_threh=1000.0,
                     ):
             """
             Real world vertical board task with 9 fixed goal poses and fixed picking points.
@@ -1045,15 +1045,15 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
             # Fixed Board Goal Poses
             self.board_goal_poses = [
-                ([0.3, 0.15, 1.0], [1,0,0,0]),
-                ([0.3, 0.0, 1.0], [1,0,0,0]),
-                ([0.3, -0.15, 1.0], [1,0,0,0]),
-                ([0.3, 0.15, 0.9], [1,0,0,0]),
-                ([0.3, 0.0, 0.9], [1,0,0,0]),
-                ([0.3, -0.15, 0.9], [1,0,0,0]),
-                ([0.3, 0.15, 0.8], [1,0,0,0]),
-                ([0.3, 0.0, 0.8], [1,0,0,0]),
-                ([0.3, -0.15, 0.8], [1,0,0,0]),
+                ([0.45, 0.1, 1.0], [1,0,0,0]),
+                ([0.45, 0.0, 1.0], [1,0,0,0]),
+                ([0.45, -0.1, 1.0], [1,0,0,0]),
+                ([0.45, 0.1, 0.9], [1,0,0,0]),
+                ([0.45, 0.0, 0.9], [1,0,0,0]),
+                ([0.45, -0.1, 0.9], [1,0,0,0]),
+                ([0.45, 0.1, 0.8], [1,0,0,0]),
+                ([0.45, 0.0, 0.8], [1,0,0,0]),
+                ([0.45, -0.1, 0.8], [1,0,0,0]),
             ]
             
             # Define behind arm goals (pick goals):
@@ -1065,8 +1065,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             # Orientation: [0, 1, 0, 0] (facing down)
             
             self.pick_points = {
-                0: ([0.2, 0.4, 0.7], [0,1,0,0]),
-                1: ([0.2, -0.4, 0.7], [0,1,0,0])
+                0: ([0.25, 0.3, 0.6], [0,1,0,0]),
+                1: ([0.25, -0.3, 0.6], [0,1,0,0])
             }
 
             for agent_idx in range(self.n_agents):
