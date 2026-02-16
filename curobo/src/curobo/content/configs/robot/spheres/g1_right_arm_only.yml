@@ -1,10 +1,10 @@
 collision_spheres:
   # Right Arm
   right_shoulder_pitch_link:
-    - center: [-0.004, -0.05, -0.001]
+    - center: [-0.004, -0.04,  -0.03]
       radius: 0.052
   right_shoulder_roll_link:
-    - center: [0.012, -0.002, -0.069]
+    - center: [0.0, -0.002, -0.069] # [0.012, -0.002, -0.069]
       radius: 0.04
   right_shoulder_yaw_link:
     - center: [0.0, 0.0, -0.02]
@@ -12,27 +12,27 @@ collision_spheres:
     - center: [0.0, 0.0, -0.05]
       radius: 0.04
     - center: [0.0, 0.0, -0.08]
-      radius: 0.04
+      radius: 0.05
   
   right_elbow_link:
     - center: [0.02, 0.0, 0.0]
       radius: 0.035
     - center: [0.05, 0.0, 0.0]
-      radius: 0.035
+      radius: 0.04
     - center: [0.08, 0.0, 0.0]
       radius: 0.035
       
   right_wrist_roll_link:
     - center: [0.02, 0.0, 0.0]
-      radius: 0.03
+      radius: 0.035
       
   right_wrist_pitch_link:
     - center: [0.02, 0.0, 0.0]
-      radius: 0.03
+      radius: 0.035
       
   right_wrist_yaw_link:
     - center: [0.02, 0.0, 0.0]
-      radius: 0.03
+      radius: 0.035
       
   right_rubber_hand:
     # Palm Base (5x3 grid in XZ plane - Mirrored from Left)
@@ -92,27 +92,27 @@ collision_spheres:
       radius: 0.015
     - center: [0.10, 0.0, -0.03]
       radius: 0.015
-    # Thumb approx (Offset in Z - Positive for Right Hand?)
-    - center: [0.02, 0.0, 0.06]
-      radius: 0.015
-    - center: [0.04, 0.0, 0.06]
-      radius: 0.015
-    - center: [0.06, 0.0, 0.05]
-      radius: 0.015
+    # # Thumb approx (Offset in Z - Positive for Right Hand?)
+    # - center: [0.02, 0.0, 0.06]
+    #   radius: 0.015
+    # - center: [0.04, 0.0, 0.06]
+    #   radius: 0.015
+    # - center: [0.06, 0.0, 0.05]
+    #   radius: 0.015
     # Fingertips (Mirrored: Flip Z for width, Flip Y for curl direction?)
     # Assuming Right Hand curls opposite to Left (if Left +0.03, Right -0.03)
     # Thumb Tip (Z positive)
-    - center: [0.05, 0.0, 0.07] 
+    - center: [0.075, 0.01, 0.05] # [0.05, 0.0, 0.07] 
       radius: 0.025
     # Index Tip
-    - center: [0.12, 0.015, 0.035]
-      radius: 0.025
+    - center: [0.12, 0.03, 0.035]
+      radius: 0.02
     # Middle Tip
-    - center: [0.125, 0.015, 0.0]
-      radius: 0.025
+    - center: [0.125, 0.03, 0.0]
+      radius: 0.02
     # Ring Tip
-    - center: [0.12, 0.015, -0.035]
-      radius: 0.025
+    - center: [0.12, 0.03, -0.035]
+      radius: 0.02
     # Pinky Tip
-    - center: [0.11, 0.015, -0.06]
-      radius: 0.025
+    - center: [0.11, 0.03, -0.06]
+      radius: 0.02

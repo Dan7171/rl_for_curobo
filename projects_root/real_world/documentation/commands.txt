@@ -80,3 +80,18 @@ humanoid@dt-hm10:~/dane/rl_for_curobo$ (mr_storm) python projects_root/experimen
 # Board task, real robot
 humanoid@dt-hm10:~/dane/rl_for_curobo$ (mr_storm) python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_board_g1.yml --real
 
+
+
+# Feb 16
+current setup:
+
+# for simulation only:
+(mr_storm) humanoid@dt-hm10:~/dane/rl_for_curobo$ python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_g1.yml 
+
+# for real robot:
+# terminal 1:
+python3 projects_root/real_world/servers/writer_server.py
+# terminal 2:
+python3 projects_root/real_world/servers/reader_server.py
+# terminal 3:
+(mr_storm) humanoid@dt-hm10:~/dane/rl_for_curobo$ python projects_root/experiments/core_api/dataset_collector_both.py --combo_cfg projects_root/real_world/combo_cfg_g1.yml --real
