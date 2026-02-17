@@ -1038,7 +1038,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             self._is_initialized = False
             self.p_err_threh = p_err_threh
             self.q_err_threh = q_err_threh
-            self.logs_csv_path = f'/home/humanoid/Desktop/real_world_vertical_board_task_seed={self.pose_utils.seed}.csv' 
+            time_string = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.logs_csv_path = f'/home/humanoid/Desktop/board_task_{time_string}_seed_{self.pose_utils.seed}.csv' 
             if os.path.exists(self.logs_csv_path):
                 os.remove(self.logs_csv_path)
             self.csv_log = open(self.logs_csv_path, 'w')
@@ -1051,15 +1052,15 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
             # Fixed Board Goal Poses
             self.board_goal_poses = [
-                ([0.45, 0.15, 1.15], [1,0,0,0]),
-                ([0.45, 0.0, 1.15], [1,0,0,0]),
-                ([0.45, -0.15, 1.15], [1,0,0,0]),
-                ([0.45, 0.15, 1.05], [1,0,0,0]),
-                ([0.45, 0.0, 1.05], [1,0,0,0]),
-                ([0.45, -0.15, 1.05], [1,0,0,0]),
-                ([0.45, 0.15, 0.95], [1,0,0,0]),
-                ([0.45, 0.0, 0.95], [1,0,0,0]),
-                ([0.45, -0.15, 0.95], [1,0,0,0]),
+                ([0.42, 0.15, 1.15], [1,0,0,0]),
+                ([0.42, 0.0, 1.15], [1,0,0,0]),
+                ([0.42, -0.15, 1.15], [1,0,0,0]),
+                ([0.42, 0.15, 1.05], [1,0,0,0]),
+                ([0.42, 0.0, 1.05], [1,0,0,0]),
+                ([0.42, -0.15, 1.05], [1,0,0,0]),
+                ([0.42, 0.15, 0.95], [1,0,0,0]),
+                ([0.42, 0.0, 0.95], [1,0,0,0]),
+                ([0.42, -0.15, 0.95], [1,0,0,0]),
             ]
             
             # Define behind arm goals (pick goals):
@@ -1161,6 +1162,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                 self.csv_writer.writerow([a_idx, time(),goal_id])
                                 self.csv_log.flush()
 
+                                # print in green color
+                                # print(f"\033[92mdebug: arm_idx {arm_idx}, placed {error_cm:.0f} cm\033[0m")
+
                             else: # PICKED from pick point
                                 goal_type = 'board' # Next is board
 
@@ -1195,9 +1199,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
                             _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                             self._link_name_to_goal_type[a_idx][link_name] = goal_type
+                            # print in yellow
+                            # print(f"\033[93mdebug: arm_idx {arm_idx} picked \033[0m")
+
                         else:
                             goal_id = self._link_name_to_cur_boardgoal[a_idx][link_name] + 1
-                            print(f"debug: arm_idx {arm_idx}, goal id {goal_id}")
+                            error_cm = err_p * 100
+                            print(f"debug board task: arm_idx {arm_idx}, goal id: {goal_id}, error(cm) {error_cm:.1f},tol(cm) {self.p_err_threh*100:.0f}")
+
+                            # print in green
+                            # print(f"\033[92mdebug: arm_idx {arm_idx}, placed with error {error_cm:.0f} cm\033[0m")
                         arm_idx += 1
 
             # update the targets in sim
