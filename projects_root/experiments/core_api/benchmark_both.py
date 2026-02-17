@@ -724,7 +724,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     arm_body_center = [arm_base[0], arm_base[1], 0.4] # ~ half of ur5e length. Replace with other arm length if needed!
                     too_far_from_robot = np.linalg.norm(p_target - arm_body_center) > 0.2
                     if too_far_from_robot: # if target is too far from robot, sample a new position near the arm body center
-                        print(f'debug: target {target_name} too far from robot {link_name}')
+                        # print(f'debug: target {target_name} too far from robot {link_name}')
                         
                         
                         # Sample new target start position!
@@ -1051,15 +1051,15 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
             # Fixed Board Goal Poses
             self.board_goal_poses = [
-                ([0.42, 0.15, 1.05], [1,0,0,0]),
-                ([0.42, 0.0, 1.05], [1,0,0,0]),
-                ([0.42, -0.15, 1.05], [1,0,0,0]),
-                ([0.42, 0.15, 0.95], [1,0,0,0]),
-                ([0.42, 0.0, 0.95], [1,0,0,0]),
-                ([0.42, -0.15, 0.95], [1,0,0,0]),
-                ([0.42, 0.15, 0.85], [1,0,0,0]),
-                ([0.42, 0.0, 0.85], [1,0,0,0]),
-                ([0.42, -0.15, 0.85], [1,0,0,0]),
+                ([0.45, 0.15, 1.15], [1,0,0,0]),
+                ([0.45, 0.0, 1.15], [1,0,0,0]),
+                ([0.45, -0.15, 1.15], [1,0,0,0]),
+                ([0.45, 0.15, 1.05], [1,0,0,0]),
+                ([0.45, 0.0, 1.05], [1,0,0,0]),
+                ([0.45, -0.15, 1.05], [1,0,0,0]),
+                ([0.45, 0.15, 0.95], [1,0,0,0]),
+                ([0.45, 0.0, 0.95], [1,0,0,0]),
+                ([0.45, -0.15, 0.95], [1,0,0,0]),
             ]
             
             # Define behind arm goals (pick goals):
@@ -1195,7 +1195,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
 
                             _link_name_to_target_pose_np[a_idx][link_name] = goal_pose
                             self._link_name_to_goal_type[a_idx][link_name] = goal_type
-                        
+                        else:
+                            goal_id = self._link_name_to_cur_boardgoal[a_idx][link_name] + 1
+                            print(f"debug: arm_idx {arm_idx}, goal id {goal_id}")
                         arm_idx += 1
 
             # update the targets in sim
@@ -3846,7 +3848,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     my_world.step(render=True)
                     world_step_end = time()
                     world_step_dt = world_step_end - world_step_start
-                    print(f"World step dt: {world_step_dt}")
+                    # print(f"World step dt: {world_step_dt}")
                     pts_debug = []
 
                     # Updating targets. Updating targets in sim and return new target poses so planners can react
@@ -3889,7 +3891,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                     psw.on()
                                     plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))                        
                                     elapsed = psw.off()
-                                    print(f'debug agent: {a_idx} plan getting time: {elapsed}')
+                                    # print(f'debug agent: {a_idx} plan getting time: {elapsed}')
                                     # psw.off()
                                     if plan is not None: # currently available in mpc only
                                         plans_board[a.idx] = plan
@@ -3961,14 +3963,14 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                     q_err += q_err_link
                                 mean_goal_err[a.idx] = (p_err / a_n_links, q_err / a_n_links)
                                 elapsed = psw.off()
-                                print(f'debug: agent {a_idx}, elapsed {elapsed} at goal upadte from others for prioritization in cost function')
+                                # print(f'debug: agent {a_idx}, elapsed {elapsed} at goal upadte from others for prioritization in cost function')
 
                             # *** sense plans ***
                             if a.plan_pub_sub is not None: # everyone that has plan_pub_sub != None are at least subscribers
                                 psw.on()
                                 a.update_col_pred(plans_board, mean_goal_err) # update horizon/naive plans from others
                                 elapsed = psw.off()
-                                print(f'debug: agent {a_idx}, elapsed: {elapsed} at update plans of others (naive/over horizon) to use in robot-robot-col cost function')
+                                # print(f'debug: agent {a_idx}, elapsed: {elapsed} at update plans of others (naive/over horizon) to use in robot-robot-col cost function')
             
                             # *** sense goals ***
                             goals = link_name_to_target_pose[a.idx]
@@ -3986,12 +3988,12 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                 psw.on()
                                 action = planner.yield_action(goals, cu_js, js.velocities)
                                 elapsed = psw.off()
-                                print(f'debug agent {a_idx} solver step time: {elapsed}')
+                                # print(f'debug agent {a_idx} solver step time: {elapsed}')
                             elif isinstance(planner, MpcPlanner):
                                 psw.on()
                                 action = planner.yield_action(goals)
                                 elapsed = psw.off()
-                                print(f'debug agent {a_idx} solver step time: {elapsed}')
+                                # print(f'debug agent {a_idx} solver step time: {elapsed}')
                                 if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
                                     pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.viz_mpc_ee_rollouts_color})
 
@@ -4076,7 +4078,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                 elif stat_name == 'total_planning_time': # total planning time
                                     val = psw.total
                                     # print(f'debug: total planning time agent i={a_idx}: {val}') 
-                                    print(f'debug TOTAL CONTROL ITER PLANNING TIME AGENT: {a_idx} = {val/t}')
+                                    # print(f'debug TOTAL CONTROL ITER PLANNING TIME AGENT: {a_idx} = {val/t}')
                                 elif stat_name == 'arm_cols': # collisions between arms
                                     viz_spheres_in_col = set()
                                     if not len(sphere_tensor_W):
@@ -4130,8 +4132,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     # update task stats
                     task_stats = sim_task.get_stat_vals(sim_task.stat_man.get_now_update_names(t))
                     sim_task.stat_man.update(task_stats,t)
-                    if t % 10 == 0:
-                        print(f"debug: arm_to_arm_col_count: {arm_to_arm_col_count}, arm_to_env_col_count: {arm_to_env_col_count}")
+                    # if t % 10 == 0:
+                    #     print(f"debug: arm_to_arm_col_count: {arm_to_arm_col_count}, arm_to_env_col_count: {arm_to_env_col_count}")
                     # advance time
                     t += 1                
             
@@ -4148,7 +4150,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     
                     debug_ctrl_freq_steps += 1
                     debug_ctrl_freq = debug_ctrl_freq_steps /  (time() - debug_ctrl_freq_time)
-                    print(f"Debug Ctrl Freq (frequency for controlling two arms, per arm is double): {debug_ctrl_freq}")            
+                    # print(f"Debug Ctrl Freq (frequency for controlling two arms, per arm is double): {debug_ctrl_freq}")            
                     
                     if tsto_reached or sto_reached or pto_reached or stop_event.is_set() or stop_simulation:
                         if should_capture_frames:

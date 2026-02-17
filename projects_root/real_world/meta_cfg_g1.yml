@@ -167,7 +167,7 @@ sim_task:
     manual: {}
     board: 
       # p_err_threh: 0.05
-      p_err_threh: 0.01
+      p_err_threh: 0.05
       q_err_threh: 10000
     follow:
       # update_interval_tphys: 0.2 # physics dt to update target

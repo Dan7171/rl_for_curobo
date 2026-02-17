@@ -3714,7 +3714,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                     q_err += q_err_link
                                 mean_goal_err[a.idx] = (p_err / a_n_links, q_err / a_n_links)
                                 elapsed = psw.off()
-                                print(f'debug: agent {a_idx}, elapsed {elapsed} at goal upadte from others for prioritization in cost function')
+                                # print(f'debug: agent {a_idx}, elapsed {elapsed} at goal upadte from others for prioritization in cost function')
 
                             # sense plans
                             if a.plan_pub_sub is not None: # everyone that has plan_pub_sub != None are at least subscribers
@@ -3818,7 +3818,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str):
                                 elif stat_name == 'total_planning_time': # total planning time
                                     val = psw.total
                                     # print(f'debug: total planning time agent i={a_idx}: {val}') 
-                                    print(f'debug TOTAL CONTROL ITER PLANNING TIME AGENT: {a_idx} = {val/t}')
+                                    # print(f'debug TOTAL CONTROL ITER PLANNING TIME AGENT: {a_idx} = {val/t}')
                                 elif stat_name == 'arm_cols': # collisions between arms
                                     viz_spheres_in_col = set()
                                     if not len(sphere_tensor_W):

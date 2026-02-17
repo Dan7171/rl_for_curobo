@@ -411,7 +411,7 @@ class DynamicObsCollPredictor:
         # INTERPOLATION (OPTIONAL)-
         # IF SPARSE STEPS IS ON, INTERPOLATE
         # Interpolate the sparse costs over the horizon: (Project sparse results to full horizon, to get a valid cost matrix for the whole horizon)
-        print(f'torch.isnan(self.tmp_cost_mat_buf_sparse).any(): {torch.isnan(self.tmp_cost_mat_buf_sparse).any()}')
+        # print(f'torch.isnan(self.tmp_cost_mat_buf_sparse).any(): {torch.isnan(self.tmp_cost_mat_buf_sparse).any()}')
         
         self._project_sparse_to_full_horizon(self.tmp_cost_mat_buf_sparse, self.cost_mat_buf)
 
