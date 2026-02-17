@@ -1039,7 +1039,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             self.p_err_threh = p_err_threh
             self.q_err_threh = q_err_threh
             time_string = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.logs_csv_path = f'/home/humanoid/Desktop/board_task_{time_string}_seed_{self.pose_utils.seed}.csv' 
+            self.logs_csv_path = f'/home/humanoid/Desktop/board_task_logs/{time_string}_seed_{self.pose_utils.seed}.csv' 
             if os.path.exists(self.logs_csv_path):
                 os.remove(self.logs_csv_path)
             self.csv_log = open(self.logs_csv_path, 'w')

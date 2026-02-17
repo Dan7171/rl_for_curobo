@@ -84,7 +84,7 @@ default: # default values to fallback to if not specified in the agent cfg. Note
       # override_particle_file: projects_root/experiments/benchmarks/cfgs/particle_file_arms.yml 
       override_particle_file: projects_root/real_world/particle_mpc.yml
       use_cuda_graph: False 
-      step_dt:  0.03333 #0.025 #0.025  0.06666666666666667 # 0.05 # 0.0333
+      step_dt:  0.03 #0.025 #0.025  0.06666666666666667 # 0.05 # 0.0333
       use_cuda_graph_metrics: True
       self_collision_check: True
       collision_checker_type: MESH
@@ -167,7 +167,7 @@ sim_task:
     manual: {}
     board: 
       # p_err_threh: 0.05
-      p_err_threh: 0.07
+      p_err_threh: 0.06
       q_err_threh: 10000
     follow:
       # update_interval_tphys: 0.2 # physics dt to update target
@@ -256,10 +256,10 @@ sim_env:
         'obj_pos': [-0.15, 0, 0.75] # [-0.05, 0, 0.75],
       }
 
-      - { # torso cuboid
+      - { # legs
         'obj_shape': 'cube',
         'obj_lin_vel': [0.0,0.0,0.0],
-        'obj_size': [0.05,0.3,0.75], # [0.08,0.175,0.75], # [0.1,0.175,0.75],
+        'obj_size': [0.1,0.33,0.75], # [0.08,0.175,0.75], # [0.1,0.175,0.75],
         'obj_pos': [0.0, 0, 0.375] # [-0.05, 0, 0.75],
       }
 
