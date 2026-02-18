@@ -31,7 +31,7 @@ robot_cfg:
       - right_rubber_hand
       - dummy_ee_right_link
       
-    lock_joints: {}
+    lock_joints: {right_wrist_yaw_joint: 0.0,right_wrist_pitch_joint: 0.0}
     
     collision_sphere_buffer: 0.0001
 

@@ -140,17 +140,17 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     from omni.isaac.kit import SimulationApp
 
     # Use simple, stable configuration like working examples
-    # simulation_app = SimulationApp({
-    #     "headless": vis_mode == 'headless',
-    #     "width": "1920", # if vis_mode != 'headless' else "800",
-    #     "height": "1080", # if vis_mode != 'headless' else "600",
-    # })
-    
     simulation_app = SimulationApp({
-        "headless": False, # vis_mode == 'headless',
-        "width": "400", # if vis_mode != 'headless' else "800",
-        "height": "300", # if vis_mode != 'headless' else "600",
+        "headless": vis_mode == 'headless',
+        "width": "1920", # if vis_mode != 'headless' else "800",
+        "height": "1080", # if vis_mode != 'headless' else "600",
     })
+    
+    # simulation_app = SimulationApp({
+    #     "headless": False, # vis_mode == 'headless',
+    #     "width": "400", # if vis_mode != 'headless' else "800",
+    #     "height": "300", # if vis_mode != 'headless' else "600",
+    # })
 
     from projects_root.utils.helper import add_extensions 
 
@@ -453,7 +453,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     target_name = f"target_{a_idx}_{link_name}"
                     target_path = f"/World/{target_name}"
                     l_pose = np.ravel(l_pose.to_list())
-                    target_prim = cuboid.VisualCuboid(target_path, position=np.array(l_pose[:3]), orientation=np.array(l_pose[3:]), color=np.array(l_target_color), size=0.05)
+                    target_prim = cuboid.VisualCuboid(target_path, position=np.array(l_pose[:3]), orientation=np.array(l_pose[3:]), color=np.array(l_target_color), size=0.08)
                     
                     self.link_name_to_path[a_idx][link_name] = l_path
                     self.link_path_to_prim[a_idx][l_path] = l_prim
@@ -3849,9 +3849,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             
             debug_ctrl_freq_steps = 0
             debug_ctrl_freq_time = time()
+            
             if not meta_cfg["async"]: # sync mode
                 
                 while simulation_app.is_running():
+
                     prog_bar_tsys_iter_start = time()
                     prog_bar_tphys_iter_start = my_world.current_time 
 
@@ -4161,7 +4163,8 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     
                     debug_ctrl_freq_steps += 1
                     debug_ctrl_freq = debug_ctrl_freq_steps /  (time() - debug_ctrl_freq_time)
-                    # print(f"Debug Ctrl Freq (frequency for controlling two arms, per arm is double): {debug_ctrl_freq}")            
+                    if t % 100 == 0:
+                        print(f"Debug Ctrl Freq (frequency for controlling two arms, per arm is double): {debug_ctrl_freq}")            
                     
                     if tsto_reached or sto_reached or pto_reached or stop_event.is_set() or stop_simulation:
                         if should_capture_frames:
