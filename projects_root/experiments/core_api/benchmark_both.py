@@ -232,7 +232,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
     from projects_root.projects.dynamic_obs.dynamic_obs_predictor.frame_utils import FrameUtils
     from projects_root.utils.world_model_wrapper import WorldModelWrapper
     from projects_root.utils.usd_pose_helper import get_stage_poses, list_relevant_prims
-    from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres, transform_poses_batched
+    from projects_root.utils.transforms import transform_poses_batched_optimized_for_spheres, transform_poses_batched, transform_robot_positions_to_world
     from projects_root.utils.draw import draw_points
     from projects_root.utils.colors import npColors
     from projects_root.utils.issacsim import  activate_gpu_dynamics
@@ -1731,18 +1731,27 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             # all the poses from next call are in robot frame:
             p_ee, q_ee, _, _, p_links, q_links, prad = crm.forward(js_tensor_2d) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
             
-            q_spheres = torch.empty(prad.shape[:-1] + torch.Size([4]), device=prad.device)
-            q_spheres[...,:] = torch.tensor([1,0,0,0],device=prad.device, dtype=prad.dtype)  # [1,0,0,0] is the identity quaternion
-
-            d = {'ee': {'p': p_ee, 'q': q_ee}, 'links': {'p': p_links, 'q': q_links}, 'spheres': {'p': prad[:,:,:3], 'q': q_spheres, 'r': prad[:,:,3]}}
+            d = {'ee': {'p': p_ee, 'q': q_ee}, 'links': {'p': p_links, 'q': q_links}, 'spheres': {'p': prad[:,:,:3], 'r': prad[:,:,3]}}
             
             # We first convert the poses to world frame
             if frame == 'W':
+                if not hasattr(self, '_cached_base_pose_tensor'):
+                    self._cached_base_pose_tensor = torch.tensor(robot_base_pose, device=prad.device, dtype=prad.dtype)
+                    from projects_root.utils.transforms import create_optimized_collision_checker_buffers
+                    self._cached_rot_mat, self._cached_trans_vec = create_optimized_collision_checker_buffers(1, 1, 1, self._cached_base_pose_tensor, prad.device)
+                    self._cached_rot_mat_T = self._cached_rot_mat.T.contiguous()
+
                 for key in d.keys():
-                    # OPTIMIZED VERSION: Use ultra-fast specialized function
-                    X_world = transform_poses_batched_optimized_for_spheres(torch.cat([d[key]['p'], d[key]['q']], dim=-1), robot_base_pose)
-                    d[key]['p'] = X_world[...,:3]
-                    d[key]['q'] = X_world[...,3:]
+                    if 'q' in d[key]:
+                        # OPTIMIZED VERSION: Use ultra-fast specialized function
+                        X_world = transform_poses_batched_optimized_for_spheres(torch.cat([d[key]['p'], d[key]['q']], dim=-1), self._cached_base_pose_tensor)
+                        d[key]['p'] = X_world[...,:3]
+                        d[key]['q'] = X_world[...,3:]
+                    else:
+                        orig_shape = d[key]['p'].shape
+                        pKey_flat = d[key]['p'].view(-1, 3)
+                        pKey_world_flat = torch.addmm(self._cached_trans_vec, pKey_flat, self._cached_rot_mat_T)
+                        d[key]['p'] = pKey_world_flat.view(orig_shape)
                 
             # elif frame == 'R2':
 
@@ -1820,8 +1829,9 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                 if link_name in goals_R:
                     self.solver_goal_buf_R.links_goal_pose[link_name] = goals_R[link_name]
             self.solver.update_goal(self.solver_goal_buf_R)
-
+            
             mpc_result = self.solver.step(self.current_state, max_attempts=2)
+            
             action = mpc_result.js_action
             self.cmd_state_full = action
             return mpc_result.js_action
@@ -1962,7 +1972,11 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             
             if include_task_space: # get plan in task space (robot spheres)            
                 # compute forward kinematics
+                start_forward_time = time()
                 p_eeplan, q_eeplan, _, _, p_linksplan, q_linksplan, prad_spheresPlan = self.crm.forward(self.solver.tensor_args.to_device(plan['joint_space']['pos'])) # https://curobo.org/_api/curobo.cuda_robot_model.cuda_robot_model.html#curobo.cuda_robot_model.cuda_robot_model.CudaRobotModelConfig
+                forward_time = time() - start_forward_time
+                # print(f'debug: forward kinematics time: {forward_time}')
+                
                 task_space_plan = {'ee': {'p': p_eeplan, 'q': q_eeplan}, 'links': {'p': p_linksplan, 'q': q_linksplan}, 'spheres': {'p': prad_spheresPlan[:,:,:3], 'r': prad_spheresPlan[:,:,3]}}
                 plan['task_space'] = task_space_plan
                 
@@ -1972,26 +1986,35 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     plan['task_space']['spheres']['r'] = plan['task_space']['spheres']['r'][:, :n_col_spheres_valid]
                 
 
+                if not hasattr(self, '_cached_base_pose_tensor'):
+                    p_sample = plan['task_space']['spheres']['p']
+                    wp_tensor = torch.tensor(self.base_pose, device=p_sample.device, dtype=p_sample.dtype)
+                    self._cached_base_pose_tensor = wp_tensor
+                    from projects_root.utils.transforms import create_optimized_collision_checker_buffers
+                    self._cached_rot_mat, self._cached_trans_vec = create_optimized_collision_checker_buffers(1, 1, 1, wp_tensor, p_sample.device)
+                    self._cached_rot_mat_T = self._cached_rot_mat.T.contiguous()
+
                 # express in world frame:
                 for key in plan['task_space'].keys():
                     
-                    
+                    if key != 'spheres':
+                        continue
                     if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys():
                         
-                        self_transform = self.base_pose # [*list(self.p_R), *list(self.q_R)]
                         pKey = plan['task_space'][key]['p']
                         if 'q' in plan['task_space'][key].keys():
                             qKey = plan['task_space'][key]['q']
+                            
+                            # OPTIMIZED VERSION: Use ultra-fast specialized function
+                            X_world = transform_poses_batched_optimized_for_spheres(torch.cat([pKey, qKey], dim=-1), self._cached_base_pose_tensor)
+                            plan['task_space'][key]['p'] = X_world[...,:3]
+                            plan['task_space'][key]['q'] = X_world[...,3:]
                         else:
-                            qKey = torch.empty(pKey.shape[:-1] + torch.Size([4]), device=pKey.device)
-                            qKey[...,:] = torch.tensor([1,0,0,0],device=pKey.device, dtype=pKey.dtype)  # [1,0,0,0] is the identity quaternion
-                        
-                        # OPTIMIZED VERSION: Use ultra-fast specialized function
-                        X_world = transform_poses_batched_optimized_for_spheres(torch.cat([pKey, qKey], dim=-1), self_transform)
-                        pKey = X_world[...,:3]
-                        qKey = X_world[...,3:]
-                        plan['task_space'][key]['p'] = pKey
-                        plan['task_space'][key]['q'] = qKey
+                            # Use pre-calculated matrix and an optimized single operation (addmm) to minimize memory allocations
+                            orig_shape = pKey.shape
+                            pKey_flat = pKey.view(-1, 3)
+                            pKey_world_flat = torch.addmm(self._cached_trans_vec, pKey_flat, self._cached_rot_mat_T)
+                            plan['task_space'][key]['p'] = pKey_world_flat.view(orig_shape)
 
             
                     
@@ -2001,6 +2024,7 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     plan = map_nested_tensors(plan, lambda x: x[:n_steps])
             if naive:
                 plan = map_nested_tensors(plan, _broadcast_first_step_over_horizon)
+            # print(plan)
             return plan 
         
         def get_col_pred_debug(self):
@@ -3852,6 +3876,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
             
             if not meta_cfg["async"]: # sync mode
                 
+                read_subscribed_plans_start_time = 0.0
+                read_subscribed_plans_elapsed_steps = 0
+                
+                pub_plan_elapsed_time = 0.0
+                pub_plan_elapsed_steps = 0
+
+                
+                solver_time_elapsed_time = 0.0
+                solver_time_elapsed_steps = 0
+            
                 while simulation_app.is_running():
 
                     prog_bar_tsys_iter_start = time()
@@ -3902,8 +3936,16 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                     # print(f'planning debug')
                                     share_full_plan = a.is_full_plan_publisher() # naive means broadcase state as plan over horizon
                                     psw.on()
+                                    if a.idx == 0:
+                                        pub_plan_start_time = time()
                                     plan = planner.get_estimated_plan(ctrl_dof_names, a.plan_pub_sub.valid_spheres, js, valid_spheres_only=False, naive=not share_full_plan) # get last step's plan (naive <=> broadcast current pose as plan (not future steps))                        
                                     elapsed = psw.off()
+                                    if a.idx == 0:
+                                        pub_plan_end_time = time()
+                                        pub_plan_elapsed_time += pub_plan_end_time - pub_plan_start_time
+                                        pub_plan_elapsed_steps += 1
+                                        if pub_plan_elapsed_steps % 100 == 0:
+                                            print(f'debug: plan get & publish frequency: {pub_plan_elapsed_steps / pub_plan_elapsed_time} hz')
                                     # print(f'debug agent: {a_idx} plan getting time: {elapsed}')
                                     # psw.off()
                                     if plan is not None: # currently available in mpc only
@@ -3981,7 +4023,15 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                             # *** sense plans ***
                             if a.plan_pub_sub is not None: # everyone that has plan_pub_sub != None are at least subscribers
                                 psw.on()
+                                if a.idx == 0:
+                                    update_col_pred_start_time = time()
                                 a.update_col_pred(plans_board, mean_goal_err) # update horizon/naive plans from others
+                                if a.idx == 0:
+                                    update_col_pred_end_time = time()
+                                    read_subscribed_plans_start_time += update_col_pred_end_time - update_col_pred_start_time
+                                    read_subscribed_plans_elapsed_steps += 1
+                                    if read_subscribed_plans_elapsed_steps % 100 == 0:
+                                        print(f'debug: plans reading frequency: {read_subscribed_plans_elapsed_steps / read_subscribed_plans_start_time} hz')
                                 elapsed = psw.off()
                                 # print(f'debug: agent {a_idx}, elapsed: {elapsed} at update plans of others (naive/over horizon) to use in robot-robot-col cost function')
             
@@ -4004,8 +4054,17 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                                 # print(f'debug agent {a_idx} solver step time: {elapsed}')
                             elif isinstance(planner, MpcPlanner):
                                 psw.on()
+                                if a.idx == 0:
+                                    solver_time_elapsed_start = time()
+                                    # print(f'debug agent {a_idx} solver step time: {elapsed}')
                                 action = planner.yield_action(goals)
                                 elapsed = psw.off()
+                                if a.idx == 0:
+                                    solver_time_elapsed_end = time()
+                                    solver_time_elapsed_time += solver_time_elapsed_end - solver_time_elapsed_start
+                                    solver_time_elapsed_steps += 1
+                                    if solver_time_elapsed_steps % 100 == 0:
+                                        print(f'debug agent {a_idx} solver step frequency: {solver_time_elapsed_steps / solver_time_elapsed_time}')
                                 # print(f'debug agent {a_idx} solver step time: {elapsed}')
                                 if viz_mpc_ee_rollouts and t % viz_mpc_ee_rollouts_dt == 0:
                                     pts_debug.append({'points': planner.get_rollouts_in_world_frame(), 'color': a.sim_robot.viz_mpc_ee_rollouts_color})

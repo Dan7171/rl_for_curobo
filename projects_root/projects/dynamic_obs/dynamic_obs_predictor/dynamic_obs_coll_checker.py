@@ -199,6 +199,8 @@ class DynamicObsCollPredictor:
         self.rotation_matrix = None
         self.world_translation = None
         self.transform_matrix_dirty = True
+        self.wall_clock_time = 0.0
+        self.wall_clock_steps = 0
         
     def _project_sparse_to_full_horizon(self, sparse_matrix: torch.Tensor, full_matrix: torch.Tensor):
         """
@@ -299,7 +301,7 @@ class DynamicObsCollPredictor:
         """Ultra-optimized collision cost computation."""
         
         
-            
+        cost_fn_start_time = time.time()
         # Update transformation matrix if needed
         if self.transform_matrix_dirty or self.rotation_matrix is None:
             self.update_world_pose(self.X)
@@ -433,6 +435,12 @@ class DynamicObsCollPredictor:
         #     # Force synchronize to ensure memory is actually freed
         #     torch.cuda.synchronize()
         
+        end_cost_fn_time = time.time()
+        # print(f'DEBUG: cost_fn time: {end_cost_fn_time - start_cost_fn_time}')
+        self.wall_clock_time += end_cost_fn_time - cost_fn_start_time
+        self.wall_clock_steps += 1
+        if self.wall_clock_steps % 100 == 0:
+            print(f'DEBUG: cost_fn wall clock freq: {self.wall_clock_steps / self.wall_clock_time}')
         return self.cost_mat_buf
 
     

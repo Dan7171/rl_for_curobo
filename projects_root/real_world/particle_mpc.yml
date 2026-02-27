@@ -93,13 +93,13 @@ cost:
 mppi:
   init_cov          : 0.5 # 0.2 # 0.05 #.5 #.5
   gamma             : 0.9999 # 0.98
-  n_iters           : 1
+  n_iters           : 5
   cold_start_n_iters: 5
   step_size_mean    : 0.9
   step_size_cov     : 0.01
   beta              : 0.1 # 1.0 # 0.1
   alpha             : 1
-  num_particles     : 1200 # 80 # REDUCED FROM 400 TO SAVE GPU MEMORY
+  num_particles     : 400 # 80 # REDUCED FROM 400 TO SAVE GPU MEMORY
   update_cov        : False
   cov_type          : "DIAG_A" #
   kappa             : 0.0001
