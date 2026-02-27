@@ -1929,46 +1929,31 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                 return out
         
             pi_mpc_means = self.get_policy_means() # (H x num of joints) accelerations (each action is an acceleration vector)
+            device = pi_mpc_means.device
+
+            _state_filter = self.solver.solver.safety_rollout.dynamics_model.state_filter
+            control_dt_solver = _state_filter.dt 
+
+            n_dofs = pi_mpc_means.shape[1]
+            
+            # translate the plan from joint accelerations only to joint velocities and positions 
+            # Vectorized PyTorch implementation using cumsum for sequential Euler integration:
+            initial_vel = torch.from_numpy(joints_state.velocities[:n_dofs]).to(device, dtype=pi_mpc_means.dtype)
+            initial_pos = torch.from_numpy(joints_state.positions[:n_dofs]).to(device, dtype=pi_mpc_means.dtype)
+            
+            dv = pi_mpc_means * control_dt_solver
+            vel = initial_vel.unsqueeze(0) + torch.cumsum(dv, dim=0)
+            
+            dp = vel * control_dt_solver
+            pos = initial_pos.unsqueeze(0) + torch.cumsum(dp, dim=0)
 
             plan = {'joint_space':
                     {     
-                        'acc': pi_mpc_means, # these are mpc policy means
-                        'vel': torch.zeros(pi_mpc_means.shape), # direct result of acc
-                        'pos': torch.zeros(pi_mpc_means.shape) # direct result of vel
+                        'acc': pi_mpc_means, 
+                        'vel': vel, 
+                        'pos': pos 
                     }
                 }
-            
-            _wrap_mpc = self.solver.solver
-            _arm_reacher = _wrap_mpc.safety_rollout
-            _kinematics_model = _arm_reacher.dynamics_model
-            _state_filter = _kinematics_model.state_filter
-            filter_coefficients_solver = _state_filter.filter_coeff # READ ONLY: the original coefficients from the mpc planner (used only to read from. No risk that will be changed unexpectdely)
-            control_dt_solver = _state_filter.dt # READ ONLY: the delta between steps in the trajectory, as set in solver. This is what the mpc assumes time delta between steps in horizon is.s
-
-            
-            # translate the plan from joint accelerations only to joint velocities and positions 
-            # js_state = self.get_curobo_joint_state() # current joint state (including pos, vel, acc)
-            apply_js_filter = True # True: Reduce the step size from prev state to new state from 1 to something smaller (depends on the filter coefficients)
-            custom_filter = False # True: Use a custom filter coefficients to play with the filter weights
-            if apply_js_filter:
-                if custom_filter:
-                    filter_coeff = FilterCoeff(0.01, 0.01, 0.0, 0.0) # custom one to play with the filter weights
-                else:
-                    filter_coeff = filter_coefficients_solver # the one used by the mpc planner
-            n_dofs = pi_mpc_means.shape[1]
-            # dof_names = self.get_dof_names()
-            js_state = JointState(torch.from_numpy(joints_state.positions[:n_dofs]), torch.from_numpy(joints_state.velocities[:n_dofs]), torch.zeros(n_dofs), dof_names,torch.zeros(n_dofs), self.solver.tensor_args)
-            js_state_prev = None
-            # js_state.jerk = torch.zeros_like(js_state.velocity) # we don't really need this for computations, but it has to be initiated to avoid exceptions in the filtering
-            
-            for h, action in enumerate(pi_mpc_means):
-                if apply_js_filter:
-                    js_state = self._filter_joint_state(js_state_prev, js_state, filter_coeff) 
-                next_js_state = self._integrate_acc(action, js_state, control_dt_solver) # this will be the new joint state after applying the acceleration the mpc policy commands for this step for dt_planning seconds
-                plan['joint_space']['vel'][h] = next_js_state.velocity.squeeze()
-                plan['joint_space']['pos'][h] = next_js_state.position.squeeze()
-                js_state = next_js_state # JointState(next_js_state.position, next_js_state.velocity, next_js_state.acceleration,js_state.joint_names, js_state.jerk)
-                js_state_prev = js_state
             
             if include_task_space: # get plan in task space (robot spheres)            
                 # compute forward kinematics
@@ -1994,27 +1979,13 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
                     self._cached_rot_mat, self._cached_trans_vec = create_optimized_collision_checker_buffers(1, 1, 1, wp_tensor, p_sample.device)
                     self._cached_rot_mat_T = self._cached_rot_mat.T.contiguous()
 
-                # express in world frame:
-                for key in plan['task_space'].keys():
-                    
-                    if key != 'spheres':
-                        continue
-                    if isinstance(plan['task_space'][key], dict) and 'p' in plan['task_space'][key].keys():
-                        
-                        pKey = plan['task_space'][key]['p']
-                        if 'q' in plan['task_space'][key].keys():
-                            qKey = plan['task_space'][key]['q']
-                            
-                            # OPTIMIZED VERSION: Use ultra-fast specialized function
-                            X_world = transform_poses_batched_optimized_for_spheres(torch.cat([pKey, qKey], dim=-1), self._cached_base_pose_tensor)
-                            plan['task_space'][key]['p'] = X_world[...,:3]
-                            plan['task_space'][key]['q'] = X_world[...,3:]
-                        else:
-                            # Use pre-calculated matrix and an optimized single operation (addmm) to minimize memory allocations
-                            orig_shape = pKey.shape
-                            pKey_flat = pKey.view(-1, 3)
-                            pKey_world_flat = torch.addmm(self._cached_trans_vec, pKey_flat, self._cached_rot_mat_T)
-                            plan['task_space'][key]['p'] = pKey_world_flat.view(orig_shape)
+                # express spheres in world frame using pre-calculated matrix and an optimized single operation (addmm)
+                # We skip ee/links intentionally to preserve original semantics
+                pKey = plan['task_space']['spheres']['p']
+                orig_shape = pKey.shape
+                pKey_flat = pKey.view(-1, 3)
+                pKey_world_flat = torch.addmm(self._cached_trans_vec, pKey_flat, self._cached_rot_mat_T)
+                plan['task_space']['spheres']['p'] = pKey_world_flat.view(orig_shape)
 
             
                     
