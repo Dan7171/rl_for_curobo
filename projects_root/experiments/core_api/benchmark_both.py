@@ -2030,10 +2030,10 @@ def root(meta_cfg, out_path,stop_event, vis_mode:str, real_robot:bool=False):
         def get_col_pred_debug(self):
             col_pred = self.get_col_pred()
             debug = col_pred._debug
-            p_obs = debug['p_obs']
-            p_own = debug['p_own']
-            r_obs = debug['r_obs']
-            r_own = debug['r_own']
+            p_obs = debug['p_obs'].detach().cpu().numpy() if isinstance(debug['p_obs'], torch.Tensor) else debug['p_obs']
+            p_own = debug['p_own'].detach().cpu().numpy() if isinstance(debug['p_own'], torch.Tensor) else debug['p_own']
+            r_obs = debug['r_obs'].detach().cpu().numpy() if isinstance(debug['r_obs'], torch.Tensor) else debug['r_obs']
+            r_own = debug['r_own'].detach().cpu().numpy() if isinstance(debug['r_own'], torch.Tensor) else debug['r_own']
             return p_obs, p_own, r_obs, r_own
 
             
